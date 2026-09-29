@@ -230,7 +230,8 @@ function ModuleCard({
   // Kept records are offered only when the module is NOT licensed (a licensed module has them in the menu).
   const records = !mod.licensed ? (RECORDS[mod.id] ?? []).filter((r) => surfaces.includes(r.surface)) : [];
   const requires = (mod.requires ?? []).map((r) => all[r]?.label ?? r);
-  const reasons = (mod.reasons ?? []).filter((r) => r !== "NOT_READY");
+  // Without the licence the switch answers nothing (it shows "—"), so "switched off" is not given as a reason.
+  const reasons = (mod.reasons ?? []).filter((r) => r !== "NOT_READY" && (mod.licensed || r !== "DISABLED_BY_SITE"));
   return (
     <Card className="flex flex-col">
       <CardHeader className="items-start">

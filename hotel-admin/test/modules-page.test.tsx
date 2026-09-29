@@ -22,7 +22,7 @@ import ModulesPage from "@/app/(app)/modules/page";
 
 const mod = (id: string, label: string, extra: Record<string, unknown> = {}) => ({
   id, label, requires: [], deployed: true, authorized: false, licensed: false, switchable: false,
-  enabled: false, ready: true, effective: false, manageable: false, reasons: ["NOT_LICENSED"], ...extra,
+  enabled: false, ready: true, effective: false, manageable: false, reasons: ["NOT_LICENSED", "DISABLED_BY_SITE"], ...extra,
 });
 
 describe("Modules on a café", () => {
@@ -45,6 +45,7 @@ describe("Modules on a café", () => {
     const hotel = screen.getByText("Hotel").closest("div.flex.flex-col, [class*='flex-col']") as HTMLElement;
     // Available is a fact (Yes); switched on and ready answer nothing without the licence.
     expect(within(hotel).getAllByText("—", { selector: "dd" })).toHaveLength(2);
+    expect(screen.queryByText("Switched off at this site.")).toBeNull();
     expect(within(hotel).queryByText("PMS connection")).toBeNull();
     const records = screen.getByTestId("records-hospitality");
     expect(within(records).getByRole("link", { name: "Stays" })).toHaveAttribute("href", "/stays");
