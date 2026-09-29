@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -170,13 +171,92 @@ func (r *rig) run(t *testing.T, s rcScope) Outcome {
 	return Outcome{}
 }
 
+// seedHandoff builds, on the full appliance schema, exactly what a real room charge needs (Phase-0 Amendment
+// A1): a FIAS interface financially ONBOARDED with the RESERVATION posting target through the audited definer,
+// an in-house stay whose reservation number is the G# every PS carries (no folio exists anywhere), a priced
+// Room-charge package with its mapping, a verified Room sign-in and a REQUIRED PMS_POSTING settlement.
+// posting_allowed is not written: the database computes it.
+func seedHandoff(t *testing.T, p *pgxpool.Pool) rcScope {
+	t.Helper()
+	var s rcScope
+	if err := p.QueryRow(context.Background(), `WITH
+	  t  AS (INSERT INTO public.tenants(id,slug,name) SELECT g, g::text, 't' FROM gen_random_uuid() g RETURNING id),
+	  si AS (INSERT INTO public.sites(id,tenant_id,code,name) SELECT g, t.id, g::text, 's' FROM t, gen_random_uuid() g RETURNING id, tenant_id)
+	SELECT tenant_id::text, id::text FROM si`).Scan(&s.tenant, &s.site); err != nil {
+		t.Fatal(err)
+	}
+	op := scan1[string](t, p, `INSERT INTO public.operators (tenant_id, email, status)
+		VALUES ($1, 'fin-'||gen_random_uuid()::text||'@example.test', 'active') RETURNING id::text`, s.tenant)
+	s.iface = scan1[string](t, p, `INSERT INTO iam_v2.pms_interfaces(tenant_id,site_id,connector_kind) VALUES ($1,$2,'protel-fias') RETURNING id::text`, s.tenant, s.site)
+	rev := scan1[string](t, p, `INSERT INTO iam_v2.pms_interface_revisions
+		(tenant_id,site_id,pms_interface_id,revision_no,source_timezone,posting_target_model,config)
+		VALUES ($1,$2,$3,1,'UTC','UNSET','{"heartbeat_timeout_ms":60000,"feed_freshness_ms":300000,"complete_sync_ms":3600000}') RETURNING id::text`,
+		s.tenant, s.site, s.iface)
+	mustExec(t, p, `UPDATE iam_v2.pms_interfaces SET current_revision_id=$2 WHERE id=$1`, s.iface, rev)
+	onboarded := scan1[string](t, p, `SELECT iam_v2.pms_interface_financial_onboard($1,$2,$3,$4,'RESERVATION','USD',2::smallint,
+		'Vendor confirmed: reservation numbers are unique and never reused across stays.','onboarding test',$5)::text`,
+		s.tenant, s.site, s.iface, rev, op)
+	mustExec(t, p, `INSERT INTO iam_v2.pms_interface_runtime
+		(tenant_id,site_id,pms_interface_id,pinned_revision_id,credential_mode,runtime_generation,
+		 transport_status,last_connected_at,last_heartbeat_at,continuity_status,last_valid_event_at,
+		 sync_status,last_complete_sync_at,resync_generation_seq,published_resync_generation)
+		VALUES ($1,$2,$3,$4,'NONE',1,'CONNECTED',now(),now(),'CONTINUOUS',now(),'IN_SYNC',now(),0,0)`,
+		s.tenant, s.site, s.iface, onboarded)
+	plan := scan1[string](t, p, `INSERT INTO iam_v2.service_plans(tenant_id,site_id,code) VALUES ($1,$2,'P-'||substr(gen_random_uuid()::text,1,8)) RETURNING id::text`, s.tenant, s.site)
+	planRev := scan1[string](t, p, `INSERT INTO iam_v2.service_plan_revisions
+		(tenant_id,site_id,service_plan_id,revision_no,name,max_concurrent_devices,time_accounting_mode,data_quota_bytes)
+		VALUES ($1,$2,$3,1,'plan',2,'VALIDITY_WINDOW',1000000) RETURNING id::text`, s.tenant, s.site, plan)
+	pkg := scan1[string](t, p, `INSERT INTO iam_v2.internet_packages(tenant_id,site_id,code,active) VALUES ($1,$2,'K-'||substr(gen_random_uuid()::text,1,8),true) RETURNING id::text`, s.tenant, s.site)
+	pkgRev := scan1[string](t, p, `INSERT INTO iam_v2.internet_package_revisions
+		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent,settlement_methods)
+		VALUES ($1,$2,$3,1,$4,'GENERAL',1000,'USD',2,'{PMS_POSTING}') RETURNING id::text`, s.tenant, s.site, pkg, planRev)
+	mapping := scan1[string](t, p, `INSERT INTO iam_v2.package_settlement_mappings
+		(tenant_id,site_id,package_revision_id,pms_interface_id,mapping_revision,posting_code)
+		VALUES ($1,$2,$3,$4,1,'WIFI') RETURNING id::text`, s.tenant, s.site, pkgRev, s.iface)
+	s.stay = p4Controlled(t, p, "stay", `INSERT INTO iam_v2.stays
+		(tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,normalized_room_number,status)
+		VALUES ($1,$2,$3,'R'||substr(md5(gen_random_uuid()::text),1,10),'S1','1421','IN_HOUSE') RETURNING id::text`,
+		s.tenant, s.site, s.iface)
+	gn := scan1[string](t, p, `INSERT INTO public.guest_networks
+		(id,tenant_id,site_id,name,parent_interface,bridge_name,gateway_cidr,gateway_ip,subnet_cidr)
+		SELECT g,$1,$2,'net','p'||substr(md5(g::text),1,12),'b'||substr(md5(g::text),1,12),
+		       '10.98.0.1/24','10.98.0.1','10.98.0.0/24' FROM gen_random_uuid() g RETURNING id::text`, s.tenant, s.site)
+	dev := scan1[string](t, p, `INSERT INTO iam_v2.devices(tenant_id,site_id,appliance_id,mac)
+		SELECT $1,$2,gen_random_uuid(),
+		       ('02:'||substr(h,1,2)||':'||substr(h,3,2)||':'||substr(h,5,2)||':'||substr(h,7,2)||':'||substr(h,9,2))::macaddr
+		  FROM md5(gen_random_uuid()::text) h RETURNING id::text`, s.tenant, s.site)
+	s.ac = p4Controlled(t, p, "auth_context", `INSERT INTO iam_v2.auth_contexts
+		(tenant_id,site_id,method,stay_id,pms_interface_id,authentication_interface_revision_id,device_id,guest_network_id,expires_at,consumed_at)
+		VALUES ($1,$2,'PMS',$3,$4,$5,$6,$7, now()+interval '10 minutes', now()) RETURNING id::text`,
+		s.tenant, s.site, s.stay, s.iface, onboarded, dev, gn)
+	snap := `{"version":1,"service_plan_revision_id":"` + planRev + `","package_revision_id":"` + pkgRev +
+		`","max_concurrent_devices":2,"time_accounting_mode":"VALIDITY_WINDOW","end_mode":"MANUAL_END","acquisition_method":"PMS_POSTING"}`
+	quote := p4Controlled(t, p, "commerce_intent", `INSERT INTO iam_v2.offer_quotes
+		(tenant_id,site_id,auth_context_id,package_revision_id,pms_interface_id,settlement_mapping_id,price_minor,currency,currency_exponent,grant_snapshot,expires_at,consumed_at)
+		VALUES ($1,$2,$3,$4,$5,$6,1000,'USD',2,$7::jsonb, now()+interval '5 minutes', now()) RETURNING id::text`,
+		s.tenant, s.site, s.ac, pkgRev, s.iface, mapping, snap)
+	s.purchase = p4Controlled(t, p, "commerce_intent", `INSERT INTO iam_v2.purchases
+		(tenant_id,site_id,package_revision_id,offer_quote_id,auth_context_id,pms_interface_id,stay_id,settlement_mapping_id,
+		 authentication_interface_revision_id,trigger,amount_minor,currency,currency_exponent,state)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'GUEST_SELECTION',1000,'USD',2,'AWAITING_SETTLEMENT') RETURNING id::text`,
+		s.tenant, s.site, pkgRev, quote, s.ac, s.iface, s.stay, mapping, onboarded)
+	s.settle = scan1[string](t, p, `INSERT INTO iam_v2.settlements(tenant_id,site_id,purchase_id,method,status)
+		VALUES ($1,$2,$3,'PMS_POSTING','REQUIRED') RETURNING id::text`, s.tenant, s.site, s.purchase)
+	return s
+}
+
+// reservationOf is the stay's reservation number: the G# a PS for it carries (A1).
+func reservationOf(t *testing.T, p *pgxpool.Pool, s rcScope) string {
+	return scan1[string](t, p, `SELECT external_reservation_id FROM iam_v2.stays WHERE id=$1`, s.stay)
+}
+
 func pnOf(t *testing.T, ps string) string {
 	return strconv.FormatInt(postinghandoff.PNumberOf(ps), 10)
 }
 
 func TestHandoff_PAOKOverTheOneLinkSettlesAndGrantsExactlyOnce(t *testing.T) {
 	admin := rcPool(t, "ROOMCHARGE_TEST_DSN")
-	s := seedRoomCharge(t, admin)
+	s := seedHandoff(t, admin)
 	posting := createRoomCharge(t, admin, s)
 	f := &fakePMS{reply: func(ps string) string { return "PA|RN1421|P#" + pnOf(t, ps) + "|ASOK|" }}
 	r := startRig(t, admin, s, f)
@@ -192,6 +272,10 @@ func TestHandoff_PAOKOverTheOneLinkSettlesAndGrantsExactlyOnce(t *testing.T) {
 	stored := scan1[string](t, admin, `SELECT ps_sha256 FROM iam_v2.posting_attempts WHERE internal_posting_id=$1`, posting)
 	if f.count() != 1 || postinghandoff.BodyHash(f.seen[0]) != stored {
 		t.Fatalf("one PS, byte-identical to the authorised command: sent=%d", f.count())
+	}
+	// A1: the PS targets the reservation -- the stay's current room and its reservation number as G#.
+	if !strings.Contains(f.seen[0], "|RN1421|G#"+reservationOf(t, admin, s)+"|") {
+		t.Fatalf("the PS must carry the stay's room and reservation number: %s", f.seen[0])
 	}
 	// Replaying the same command through a fresh relay (no in-memory memory of it) is refused by the database:
 	// the attempt is no longer SENDING. Nothing reaches the PMS.
@@ -209,7 +293,7 @@ func TestHandoff_PAOKOverTheOneLinkSettlesAndGrantsExactlyOnce(t *testing.T) {
 
 func TestHandoff_LinkLostAfterWriteIsUnknownAndNeverResent(t *testing.T) {
 	admin := rcPool(t, "ROOMCHARGE_TEST_DSN")
-	s := seedRoomCharge(t, admin)
+	s := seedHandoff(t, admin)
 	posting := createRoomCharge(t, admin, s)
 	f := &fakePMS{reply: func(string) string { return "CLOSE" }}
 	r := startRig(t, admin, s, f)
@@ -236,14 +320,20 @@ func TestHandoff_LinkLostAfterWriteIsUnknownAndNeverResent(t *testing.T) {
 
 func TestHandoff_TamperedBytesAreNeverCarried(t *testing.T) {
 	admin := rcPool(t, "ROOMCHARGE_TEST_DSN")
-	s := seedRoomCharge(t, admin)
+	s := seedHandoff(t, admin)
 	createRoomCharge(t, admin, s)
+	// The stub's NG answer is a definite "not posted" only when the vendor confirmed NG on this interface (A1);
+	// unconfirmed it would be UNKNOWN. The fixture confirms it, so the pass concludes as it did before A1.
+	mustExec(t, admin, `SELECT iam_v2.pms_answer_confirmation_record($1,$2,$3,'NG','CONFIRM',
+		'Vendor interface specification section 7: this status means the posting was not applied.','fixture',
+		(SELECT id FROM public.operators WHERE tenant_id=$1 LIMIT 1))`, s.tenant, s.site, s.iface)
+	g := reservationOf(t, admin, s)
 	relay := pmsd.NewFinancialRelay(true, authoriserFrom(admin), nil)
 	var verdict postinghandoff.Response
 	// While the real attempt is SENDING, present pmsd a command for the same P# whose amount was changed. It is
 	// self-consistent (its own hash), but not the bytes the financial path authorised.
 	tr := &stubTransport{answer: func(pn int64) (*PA, error) {
-		body := "PS|RN1421|G#5|TA999999|PT|SOOG|CTWIFI|P#" + strconv.FormatInt(pn, 10) + "|WSOG|"
+		body := "PS|RN1421|G#" + g + "|TA999999|PT|SOOG|CTWIFI|P#" + strconv.FormatInt(pn, 10) + "|WSOG|"
 		verdict = relay.Handle(context.Background(), postinghandoff.Request{Version: 1, InterfaceID: s.iface,
 			PNumber: pn, Body: body, BodySHA256: postinghandoff.BodyHash(body), WaitMillis: 500})
 		return &PA{PNumber: pn, AS: "NG"}, nil
@@ -259,7 +349,7 @@ func TestHandoff_TamperedBytesAreNeverCarried(t *testing.T) {
 
 func TestHandoff_AttemptLeftSendingByAStoppedWorkerBecomesUnknown(t *testing.T) {
 	admin := rcPool(t, "ROOMCHARGE_TEST_DSN")
-	s := seedRoomCharge(t, admin)
+	s := seedHandoff(t, admin)
 	posting := createRoomCharge(t, admin, s)
 	// The worker records the attempt and dies before recording any outcome.
 	stopped := make(chan struct{})

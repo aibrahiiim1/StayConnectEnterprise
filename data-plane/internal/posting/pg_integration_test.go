@@ -42,19 +42,28 @@ func pool(t *testing.T) *pgxpool.Pool {
 }
 
 // scope is one completely independent property: its own tenant, site, PMS interface, plans, packages,
-// mappings, stay, folio, purchase and settlement. Every test builds its own, so no test can be affected by
+// mappings, stay, purchase and settlement. Every test builds its own, so no test can be affected by
 // another's append-only rows.
+//
+// FULL APPLIANCE SCHEMA (Phase-0 Amendment A1, migration 0100). A room charge targets the RESERVATION:
+// G# is the pinned stay's external_reservation_id, and there is no folio model at all. The fixture is built
+// the way production builds a room charge -- a verified Room sign-in (auth context), a consumed quote, a
+// purchase AWAITING_SETTLEMENT and a PMS_POSTING settlement -- because the settlement now follows the PMS
+// answer (0097) and a PA=OK grants the entitlement, which needs exactly that purchase.
 type scope struct {
-	tenant, site      string
-	iface, rev        string // financially onboarded revision
-	revNoCurrency     string // folio strategy set, NOT financially onboarded
-	revUnsetFolio     string
-	stay, folio       string
-	purchase, settle  string
-	pkgRev, mapping   string
-	room, folioNumber string
-	currency          string
-	exponent          int16
+	tenant, site    string
+	operator        string // an active operator of this tenant (administrative posting blocks, answer confirmations)
+	iface, rev      string // financially onboarded revision (posting target RESERVATION + currency)
+	revNoCurrency   string // posting target set, NOT financially onboarded (no currency)
+	revUnsetTarget  string // posting target UNSET: fail-closed
+	stay, purchase  string
+	settle          string
+	pkgRev, mapping string
+	planRev, gn     string
+	room            string
+	reservation     string // the stay's reservation number: the G# every charge for this stay carries
+	currency        string
+	exponent        int16
 }
 
 func mustExec(t *testing.T, p *pgxpool.Pool, sql string, args ...any) {
@@ -73,33 +82,70 @@ func scan1[T any](t *testing.T, p *pgxpool.Pool, sql string, args ...any) T {
 	return v
 }
 
+// p4Controlled runs one statement inside an open controlled operation of the given family and returns the
+// single text value it produces (or "" for a statement that returns nothing). The full schema refuses writes
+// to stays, purchases, quotes and auth contexts outside such an operation, even for a superuser; the old
+// scratch fixture let them through only because the test user happened to own every function.
+func p4Controlled(t *testing.T, p *pgxpool.Pool, family, sql string, args ...any) string {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation($1)`, family); err != nil {
+		t.Fatalf("open %s: %v", family, err)
+	}
+	var v string
+	rows, err := tx.Query(ctx, sql, args...)
+	if err != nil {
+		t.Fatalf("%s: %v\nSQL: %s", family, err, strings.TrimSpace(sql))
+	}
+	if rows.Next() {
+		if err := rows.Scan(&v); err != nil {
+			t.Fatalf("%s scan: %v", family, err)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		t.Fatalf("%s: %v\nSQL: %s", family, err, strings.TrimSpace(sql))
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("%s commit: %v", family, err)
+	}
+	return v
+}
+
 // seedProperty builds one financially onboarded property. currency/exponent are the property's own, so a
 // test can build a EUR property and a USD property side by side and prove they never mix.
 func seedProperty(t *testing.T, p *pgxpool.Pool, currency string, exponent int16) scope {
 	t.Helper()
 	ctx := context.Background()
-	s := scope{currency: currency, exponent: exponent, room: "1421", folioNumber: "5"}
+	s := scope{currency: currency, exponent: exponent, room: "1421"}
 
 	if err := p.QueryRow(ctx, `WITH
-	  t  AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
-	  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id)
+	  t  AS (INSERT INTO public.tenants(id,slug,name) SELECT g, g::text, 't' FROM gen_random_uuid() g RETURNING id),
+	  si AS (INSERT INTO public.sites(id,tenant_id,code,name) SELECT g, t.id, g::text, 's' FROM t, gen_random_uuid() g RETURNING id, tenant_id)
 	SELECT tenant_id::text, id::text FROM si`).Scan(&s.tenant, &s.site); err != nil {
 		t.Fatalf("seed tenant/site: %v", err)
 	}
+	s.operator = scan1[string](t, p, `INSERT INTO public.operators (tenant_id, email, status)
+		VALUES ($1, 'fin-'||gen_random_uuid()::text||'@example.test', 'active') RETURNING id::text`, s.tenant)
 	s.iface = scan1[string](t, p, `INSERT INTO iam_v2.pms_interfaces(tenant_id,site_id,connector_kind)
 		VALUES ($1,$2,'protel-fias') RETURNING id::text`, s.tenant, s.site)
 
 	// Three revisions, so a test can pick exactly the onboarding state it wants to prove.
-	s.revUnsetFolio = scan1[string](t, p, `INSERT INTO iam_v2.pms_interface_revisions
-		(tenant_id,site_id,pms_interface_id,revision_no,source_timezone,folio_identity_strategy,config)
+	s.revUnsetTarget = scan1[string](t, p, `INSERT INTO iam_v2.pms_interface_revisions
+		(tenant_id,site_id,pms_interface_id,revision_no,source_timezone,posting_target_model,config)
 		VALUES ($1,$2,$3,1,'UTC','UNSET','{}') RETURNING id::text`, s.tenant, s.site, s.iface)
 	s.revNoCurrency = scan1[string](t, p, `INSERT INTO iam_v2.pms_interface_revisions
-		(tenant_id,site_id,pms_interface_id,revision_no,source_timezone,folio_identity_strategy,config)
-		VALUES ($1,$2,$3,2,'UTC','GLOBALLY_UNIQUE','{}') RETURNING id::text`, s.tenant, s.site, s.iface)
+		(tenant_id,site_id,pms_interface_id,revision_no,source_timezone,posting_target_model,config)
+		VALUES ($1,$2,$3,2,'UTC','RESERVATION','{}') RETURNING id::text`, s.tenant, s.site, s.iface)
 	s.rev = scan1[string](t, p, `INSERT INTO iam_v2.pms_interface_revisions
-		(tenant_id,site_id,pms_interface_id,revision_no,source_timezone,folio_identity_strategy,config,
+		(tenant_id,site_id,pms_interface_id,revision_no,source_timezone,posting_target_model,config,
 		 financial_base_currency,financial_base_currency_exponent)
-		VALUES ($1,$2,$3,3,'UTC','GLOBALLY_UNIQUE',
+		VALUES ($1,$2,$3,3,'UTC','RESERVATION',
 		 '{"heartbeat_timeout_ms":60000,"feed_freshness_ms":300000,"complete_sync_ms":3600000}',$4,$5)
 		RETURNING id::text`, s.tenant, s.site, s.iface, currency, exponent)
 	mustExec(t, p, `UPDATE iam_v2.pms_interfaces SET current_revision_id=$2 WHERE id=$1`, s.iface, s.rev)
@@ -116,38 +162,82 @@ func seedProperty(t *testing.T, p *pgxpool.Pool, currency string, exponent int16
 
 	plan := scan1[string](t, p, `INSERT INTO iam_v2.service_plans(tenant_id,site_id,code)
 		VALUES ($1,$2,'P-'||substr(gen_random_uuid()::text,1,8)) RETURNING id::text`, s.tenant, s.site)
-	planRev := scan1[string](t, p, `INSERT INTO iam_v2.service_plan_revisions
+	s.planRev = scan1[string](t, p, `INSERT INTO iam_v2.service_plan_revisions
 		(tenant_id,site_id,service_plan_id,revision_no,name,max_concurrent_devices,time_accounting_mode,data_quota_bytes)
 		VALUES ($1,$2,$3,1,'plan',2,'VALIDITY_WINDOW',1000000) RETURNING id::text`, s.tenant, s.site, plan)
 
-	pkg := scan1[string](t, p, `INSERT INTO iam_v2.internet_packages(tenant_id,site_id,code)
-		VALUES ($1,$2,'K-'||substr(gen_random_uuid()::text,1,8)) RETURNING id::text`, s.tenant, s.site)
+	pkg := scan1[string](t, p, `INSERT INTO iam_v2.internet_packages(tenant_id,site_id,code,active)
+		VALUES ($1,$2,'K-'||substr(gen_random_uuid()::text,1,8),true) RETURNING id::text`, s.tenant, s.site)
 	s.pkgRev = scan1[string](t, p, `INSERT INTO iam_v2.internet_package_revisions
-		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent)
-		VALUES ($1,$2,$3,1,$4,'GENERAL',1000,$5,$6) RETURNING id::text`,
-		s.tenant, s.site, pkg, planRev, currency, exponent)
+		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,
+		 currency_exponent,settlement_methods)
+		VALUES ($1,$2,$3,1,$4,'GENERAL',1000,$5,$6,'{PMS_POSTING}') RETURNING id::text`,
+		s.tenant, s.site, pkg, s.planRev, currency, exponent)
 	s.mapping = scan1[string](t, p, `INSERT INTO iam_v2.package_settlement_mappings
 		(tenant_id,site_id,package_revision_id,pms_interface_id,mapping_revision,posting_code)
 		VALUES ($1,$2,$3,$4,1,'WIFI') RETURNING id::text`, s.tenant, s.site, s.pkgRev, s.iface)
+	// Collision-free on a database other suites share: bridge_name is globally unique and parent_interface
+	// is unique among enabled untagged networks.
+	s.gn = scan1[string](t, p, `INSERT INTO public.guest_networks
+		(id,tenant_id,site_id,name,parent_interface,bridge_name,gateway_cidr,gateway_ip,subnet_cidr)
+		SELECT g,$1,$2,'net','p'||substr(md5(g::text),1,12),'b'||substr(md5(g::text),1,12),
+		       '10.97.0.1/24','10.97.0.1','10.97.0.0/24' FROM gen_random_uuid() g RETURNING id::text`, s.tenant, s.site)
 
-	s.stay = scan1[string](t, p, `INSERT INTO iam_v2.stays
+	return s.withCharge(t, p)
+}
+
+// withCharge gives the property ANOTHER in-house stay with its own verified Room sign-in, purchase and
+// PMS_POSTING settlement, and returns the scope pointed at it. A stay may carry only ONE unresolved room
+// charge at a time (A1, contract section 9a rule 4), so a test that needs several concurrent charges on one
+// interface needs one stay per charge.
+func (s scope) withCharge(t *testing.T, p *pgxpool.Pool) scope {
+	t.Helper()
+	s.reservation = scan1[string](t, p, `SELECT 'R-'||substr(md5(gen_random_uuid()::text),1,10)`)
+	// posting_allowed is not written: the database computes it (IN_HOUSE, a reservation, no active block).
+	s.stay = p4Controlled(t, p, "stay", `INSERT INTO iam_v2.stays
 		(tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,
-		 normalized_room_number,status,posting_allowed)
-		VALUES ($1,$2,$3,'R-'||substr(gen_random_uuid()::text,1,8),'S1',$4,'IN_HOUSE',true)
-		RETURNING id::text`, s.tenant, s.site, s.iface, s.room)
-	s.folio = scan1[string](t, p, `INSERT INTO iam_v2.folios
-		(tenant_id,site_id,pms_interface_id,external_folio_id)
-		VALUES ($1,$2,$3,$4) RETURNING id::text`, s.tenant, s.site, s.iface, s.folioNumber)
-
-	s.purchase = scan1[string](t, p, `INSERT INTO iam_v2.purchases
-		(tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,settlement_mapping_id,trigger,
-		 amount_minor,currency,currency_exponent,state)
-		VALUES ($1,$2,$3,$4,$5,$6,'VOUCHER_REDEMPTION',1000,$7,$8,'GRANTED') RETURNING id::text`,
-		s.tenant, s.site, s.pkgRev, s.iface, s.stay, s.mapping, currency, exponent)
+		 normalized_room_number,status)
+		VALUES ($1,$2,$3,$4,'S1',$5,'IN_HOUSE') RETURNING id::text`,
+		s.tenant, s.site, s.iface, s.reservation, s.room)
+	dev := scan1[string](t, p, `INSERT INTO iam_v2.devices(tenant_id,site_id,appliance_id,mac)
+		SELECT $1,$2,gen_random_uuid(),
+		       ('02:'||substr(h,1,2)||':'||substr(h,3,2)||':'||substr(h,5,2)||':'||substr(h,7,2)||':'||substr(h,9,2))::macaddr
+		  FROM md5(gen_random_uuid()::text) h RETURNING id::text`, s.tenant, s.site)
+	ac := p4Controlled(t, p, "auth_context", `INSERT INTO iam_v2.auth_contexts
+		(tenant_id,site_id,method,stay_id,pms_interface_id,authentication_interface_revision_id,device_id,
+		 guest_network_id,expires_at,consumed_at)
+		VALUES ($1,$2,'PMS',$3,$4,$5,$6,$7, now()+interval '10 minutes', now()) RETURNING id::text`,
+		s.tenant, s.site, s.stay, s.iface, s.rev, dev, s.gn)
+	snap := `{"version":1,"service_plan_revision_id":"` + s.planRev + `","package_revision_id":"` + s.pkgRev +
+		`","max_concurrent_devices":2,"time_accounting_mode":"VALIDITY_WINDOW","end_mode":"MANUAL_END","acquisition_method":"PMS_POSTING"}`
+	quote := p4Controlled(t, p, "commerce_intent", `INSERT INTO iam_v2.offer_quotes
+		(tenant_id,site_id,auth_context_id,package_revision_id,pms_interface_id,settlement_mapping_id,price_minor,
+		 currency,currency_exponent,grant_snapshot,expires_at,consumed_at)
+		VALUES ($1,$2,$3,$4,$5,$6,1000,$7,$8,$9::jsonb, now()+interval '5 minutes', now()) RETURNING id::text`,
+		s.tenant, s.site, ac, s.pkgRev, s.iface, s.mapping, s.currency, s.exponent, snap)
+	s.purchase = p4Controlled(t, p, "commerce_intent", `INSERT INTO iam_v2.purchases
+		(tenant_id,site_id,package_revision_id,offer_quote_id,auth_context_id,pms_interface_id,stay_id,
+		 settlement_mapping_id,authentication_interface_revision_id,trigger,amount_minor,currency,currency_exponent,state)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'GUEST_SELECTION',1000,$10,$11,'AWAITING_SETTLEMENT') RETURNING id::text`,
+		s.tenant, s.site, s.pkgRev, quote, ac, s.iface, s.stay, s.mapping, s.rev, s.currency, s.exponent)
 	s.settle = scan1[string](t, p, `INSERT INTO iam_v2.settlements
 		(tenant_id,site_id,purchase_id,method,status) VALUES ($1,$2,$3,'PMS_POSTING','REQUIRED')
 		RETURNING id::text`, s.tenant, s.site, s.purchase)
+	// A settlement is IN_PROGRESS once its posting exists: production's p4_create_room_charge_posting moves it
+	// in the same statement that creates the posting. engine.CreatePosting -- the Go gate this matrix drives --
+	// only inserts the posting, so the fixture puts the settlement where production has it, which is where the
+	// settlement-follows-the-PMS step (0097) expects to find it.
+	mustExec(t, p, `UPDATE iam_v2.settlements SET status='IN_PROGRESS' WHERE id=$1`, s.settle)
 	return s
+}
+
+// confirmAnswer records the vendor's confirmation that a PA status means "definitely not posted" on this
+// interface. Since A1 a non-OK answer is REJECTED only for a confirmed code; any other is UNKNOWN.
+func (s scope) confirmAnswer(t *testing.T, p *pgxpool.Pool, as string) {
+	t.Helper()
+	mustExec(t, p, `SELECT iam_v2.pms_answer_confirmation_record($1,$2,$3,$4,'CONFIRM',
+		'Vendor interface specification section 7: this status means the posting was not applied.',
+		'integration fixture',$5)`, s.tenant, s.site, s.iface, as, s.operator)
 }
 
 func (s scope) pinned(idem string) Pinned {
@@ -157,7 +247,7 @@ func (s scope) pinned(idem string) Pinned {
 		PackageRevisionID: s.pkgRev, SettlementMappingID: s.mapping,
 		PurchaseID: s.purchase, SettlementID: s.settle,
 		AmountMinor: 1000, Currency: s.currency, CurrencyExponent: s.exponent,
-		RN: s.room, GNumber: s.folioNumber, PostingCode: "WIFI", IdempotencyKey: idem,
+		RN: s.room, GNumber: s.reservation, PostingCode: "WIFI", IdempotencyKey: idem,
 	}
 }
 
@@ -236,7 +326,7 @@ func TestIntegrationPosting_HappyPathPostsOnce(t *testing.T) {
 	if tr.count() != 1 {
 		t.Fatalf("expected exactly one PS, got %d", tr.count())
 	}
-	if !strings.HasPrefix(tr.bodies[0], "PS|RN"+s.room+"|G#"+s.folioNumber+"|TA1000|PTD|SOWIFI|CTWIFI|P#") {
+	if !strings.HasPrefix(tr.bodies[0], "PS|RN"+s.room+"|G#"+s.reservation+"|TA1000|PTD|SOWIFI|CTWIFI|P#") {
 		t.Fatalf("PS wire is not the contract shape: %q", tr.bodies[0])
 	}
 	st, err := NewRepo(p).ReadState(ctx, id)
@@ -270,27 +360,37 @@ func TestIntegrationPosting_FailClosedConsumesNothing(t *testing.T) {
 		code Code
 	}{
 		// The UNSET revision is also superseded, so two rules would refuse it. The ONBOARDING refusal must
-		// win: "this property has no folio identity strategy" is what an operator can act on, and "that
-		// revision is not current" would send them to the wrong place.
-		{"folio strategy UNSET", func(_ *testing.T, s *scope, pin *Pinned) {
-			pin.PostingInterfaceRevisionID = s.revUnsetFolio
+		// win: "this property has no posting target" is what an operator can act on, and "that revision is
+		// not current" would send them to the wrong place. (A1: the posting target replaced the folio
+		// identity strategy, fail-closed on UNSET exactly as before.)
+		{"posting target UNSET", func(_ *testing.T, s *scope, pin *Pinned) {
+			pin.PostingInterfaceRevisionID = s.revUnsetTarget
 		}, ErrPostingTargetUnset},
 		{"interface not financially onboarded", func(t *testing.T, s *scope, pin *Pinned) {
 			mustExec(t, p, `UPDATE iam_v2.pms_interfaces SET current_revision_id=$2 WHERE id=$1`, s.iface, s.revNoCurrency)
 			pin.PostingInterfaceRevisionID = s.revNoCurrency
 		}, ErrInterfaceNoCurrency},
+		// A1: RN is the reservation's CURRENT room, read from the pinned stay, so an unresolvable or
+		// untransmissible room is the STAY's room, not a caller-supplied value.
 		{"missing RN", func(t *testing.T, s *scope, pin *Pinned) {
-			mustExec(t, p, `UPDATE iam_v2.stays SET normalized_room_number=NULL WHERE id=$1`, s.stay)
+			p4Controlled(t, p, "stay", `UPDATE iam_v2.stays SET normalized_room_number=NULL WHERE id=$1`, s.stay)
 			pin.RN = ""
 		}, ErrRNMissing},
 		{"missing G#", func(_ *testing.T, _ *scope, pin *Pinned) { pin.GNumber = "" }, ErrGNumberMissing},
-		{"RN carries the field delimiter", func(_ *testing.T, _ *scope, pin *Pinned) { pin.RN = "14|21" }, ErrRNNotWireSafe},
+		{"RN carries the field delimiter", func(t *testing.T, s *scope, pin *Pinned) {
+			p4Controlled(t, p, "stay", `UPDATE iam_v2.stays SET normalized_room_number='14|21' WHERE id=$1`, s.stay)
+			pin.RN = "14|21"
+		}, ErrRNNotWireSafe},
 		{"stay checked out", func(t *testing.T, s *scope, _ *Pinned) {
-			mustExec(t, p, `UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now(),
+			// status, boundary and posting permission change together (CHECK posting_only_in_house)
+			p4Controlled(t, p, "stay", `UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now(),
 				posting_allowed=false WHERE id=$1`, s.stay)
 		}, ErrStayNotInHouse},
+		// posting_allowed is computed by the database now; an administrative posting block is how posting
+		// permission is withdrawn from an in-house stay.
 		{"posting not allowed", func(t *testing.T, s *scope, _ *Pinned) {
-			mustExec(t, p, `UPDATE iam_v2.stays SET posting_allowed=false WHERE id=$1`, s.stay)
+			mustExec(t, p, `SELECT iam_v2.p4_admin_posting_block($1,$2,$3,'SET','front office hold',$4)`,
+				s.tenant, s.site, s.stay, s.operator)
 		}, ErrPostingNotAllowed},
 		{"currency mismatch", func(_ *testing.T, _ *scope, pin *Pinned) { pin.Currency = "EUR" }, ErrCurrencyMismatch},
 		{"exponent mismatch", func(_ *testing.T, _ *scope, pin *Pinned) { pin.CurrencyExponent = 3 }, ErrExponentMismatch},
@@ -328,10 +428,12 @@ func TestIntegrationPosting_FailClosedConsumesNothing(t *testing.T) {
 			v := 99
 			pin.ExpectStayLifecycleVersion = &v
 		}, ErrEvidenceStale},
-		{"out-of-scope folio", func(t *testing.T, s *scope, pin *Pinned) {
+		// A1: there is no folio to put out of scope. The reservation equivalent: a G# that is not the pinned
+		// stay's reservation (here, another property's) is refused before anything is written.
+		{"reservation of another stay", func(t *testing.T, s *scope, pin *Pinned) {
 			other := seedProperty(t, p, "USD", 2)
-			pin.StayID = other.stay
-		}, ErrEvidenceOutOfScope},
+			pin.GNumber = other.reservation
+		}, ErrReservationMismatch},
 		{"out-of-scope stay", func(t *testing.T, s *scope, pin *Pinned) {
 			other := seedProperty(t, p, "USD", 2)
 			pin.StayID = other.stay
@@ -677,7 +779,7 @@ func TestIntegrationPosting_TransmittedWithoutAnswerBecomesUnknownAndStaysThere(
 	// even a direct attempt insert is structurally refused by the database
 	_, dbErr := p.Exec(ctx, `INSERT INTO iam_v2.posting_attempts
 		(tenant_id,site_id,internal_posting_id,pms_interface_id,attempt_no,p_number,rn,g_number,sent_at)
-		VALUES ($1,$2,$3,$4,2,'999',$5,$6,now())`, s.tenant, s.site, id, s.iface, s.room, s.folioNumber)
+		VALUES ($1,$2,$3,$4,2,'999',$5,$6,now())`, s.tenant, s.site, id, s.iface, s.room, s.reservation)
 	if dbErr == nil || !strings.Contains(dbErr.Error(), "RETRY_REQUIRES_REVIEW") {
 		t.Fatalf("the database must refuse an unauthorized second attempt, got %v", dbErr)
 	}
@@ -734,7 +836,7 @@ func TestIntegrationPosting_UnknownLeavesOnlyThroughAuditedReview(t *testing.T) 
 	// the authorization was for ONE attempt and is now spent
 	_, dbErr := p.Exec(ctx, `INSERT INTO iam_v2.posting_attempts
 		(tenant_id,site_id,internal_posting_id,pms_interface_id,attempt_no,p_number,rn,g_number,sent_at)
-		VALUES ($1,$2,$3,$4,3,'998',$5,$6,now())`, s.tenant, s.site, id, s.iface, s.room, s.folioNumber)
+		VALUES ($1,$2,$3,$4,3,'998',$5,$6,now())`, s.tenant, s.site, id, s.iface, s.room, s.reservation)
 	if dbErr == nil {
 		t.Fatal("a spent retry authorization must not permit a third attempt")
 	}
@@ -921,15 +1023,24 @@ func TestIntegrationPosting_CheckoutAfterQueueingStopsTheCharge(t *testing.T) {
 
 	// the guest checks out through the approved lifecycle move: status, boundary and posting permission
 	// change together, exactly as the Phase-3 contract requires
-	mustExec(t, p, `UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now(),
+	p4Controlled(t, p, "stay", `UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now(),
 		posting_allowed=false WHERE id=$1`, s.stay)
 
+	// A1 (contract section 9a rule 7, section 16 PENDING -> FAILED_FINAL): a reservation that is no longer
+	// IN_HOUSE before the attempt is built ABORTS the charge as definitely not posted, rather than declining it
+	// back into the queue: the settlement fails, nothing is granted, and the reason is recorded.
 	out, err := e.RunOnce(ctx, s.tenant, s.site, s.iface)
-	if out.Result != "DECLINED" {
-		t.Fatalf("a checked-out stay must stop the queued charge: %+v %v", out, err)
+	if out.Result != "ABORTED" || err != nil {
+		t.Fatalf("a checked-out stay must stop the queued charge before sending: %+v %v", out, err)
 	}
-	if CodeOf(err) != ErrStayNotInHouse {
-		t.Fatalf("expected stay_not_in_house, got %s", CodeOf(err))
+	if out.RefusedFor != ErrStayNotInHouse {
+		t.Fatalf("expected stay_not_in_house, got %s", out.RefusedFor)
+	}
+	if r := scan1[string](t, p, `SELECT reason FROM iam_v2.posting_presend_aborts WHERE posting_id=$1`, id); r != "STAY_NOT_IN_HOUSE" {
+		t.Fatalf("the pre-send abort must record its reason, got %q", r)
+	}
+	if st := scan1[string](t, p, `SELECT status FROM iam_v2.settlements WHERE id=$1`, s.settle); st != "FAILED" {
+		t.Fatalf("an aborted charge is definitely not posted: settlement %s", st)
 	}
 	if tr.count() != 0 {
 		t.Fatalf("a stopped charge produced %d transmissions", tr.count())
@@ -947,6 +1058,9 @@ func TestIntegrationPosting_CheckoutAfterQueueingStopsTheCharge(t *testing.T) {
 func TestIntegrationPosting_RejectedAnswerIsRecordedNotRetried(t *testing.T) {
 	p := pool(t)
 	s := seedProperty(t, p, "USD", 2)
+	// A1: a non-OK answer is a definite "not posted" only for a code the vendor confirmed on this interface;
+	// an unconfirmed NG would be UNKNOWN. This test is about a CONFIRMED rejection, so the fixture records it.
+	s.confirmAnswer(t, p, "NG")
 	ctx := context.Background()
 	tr := &stubTransport{answer: func(pn int64) (*PA, error) { return &PA{PNumber: pn, AS: "NG"}, nil }}
 	e := NewEngine(liveCfg, NewRepo(p), tr)
@@ -1049,8 +1163,10 @@ func TestIntegrationPosting_InterfaceLaneIsSerializedAcrossDifferentPostings(t *
 	eb := NewEngine(liveCfg, NewRepo(p), trB)
 
 	const postings = 6
+	// One stay per posting: a stay carries at most one unresolved room charge (A1 rule 4), and this test is
+	// about many DIFFERENT postings sharing one interface lane.
 	for i := 0; i < postings; i++ {
-		if _, err := ea.CreatePosting(ctx, a.pinned(fmt.Sprintf("%s-a-%d", idem(t), i))); err != nil {
+		if _, err := ea.CreatePosting(ctx, a.withCharge(t, p).pinned(fmt.Sprintf("%s-a-%d", idem(t), i))); err != nil {
 			t.Fatalf("create %d: %v", i, err)
 		}
 	}
@@ -1161,9 +1277,14 @@ func TestIntegrationPosting_InterfaceGoingStaleStopsTheBytes(t *testing.T) {
 	mustExec(t, p, `UPDATE iam_v2.pms_interface_runtime SET continuity_status='GAP_DETECTED', updated_at=now()
 		WHERE pms_interface_id=$1`, s.iface)
 
+	// A1 (contract section 9a rule 7): stale PMS data before the attempt is built ABORTS the charge as
+	// definitely not posted (reason DATA_STALE) instead of declining it back into the queue.
 	out, err := e.RunOnce(ctx, s.tenant, s.site, s.iface)
-	if out.Result != "DECLINED" || CodeOf(err) != ErrInterfaceNotFresh {
+	if out.Result != "ABORTED" || err != nil || out.RefusedFor != ErrInterfaceNotFresh {
 		t.Fatalf("a stale interface must stop the bytes: %+v %v", out, err)
+	}
+	if r := scan1[string](t, p, `SELECT reason FROM iam_v2.posting_presend_aborts WHERE posting_id=$1`, id); r != "DATA_STALE" {
+		t.Fatalf("the pre-send abort must record its reason, got %q", r)
 	}
 	if tr.count() != 0 {
 		t.Fatalf("a stale interface produced %d transmissions", tr.count())
@@ -1327,11 +1448,11 @@ func TestIntegrationPosting_ReversalIsAPassiveLedgerRowThatCanNeverExecute(t *te
 
 	// a reversal cannot be written by anything but the audited action
 	_, direct := p.Exec(ctx, `INSERT INTO iam_v2.pms_postings
-		(tenant_id,site_id,pms_interface_id,settlement_id,purchase_id,stay_id,folio_id,
+		(tenant_id,site_id,pms_interface_id,settlement_id,purchase_id,stay_id,g_number,
 		 posting_interface_revision_id,posting_type,reverses_posting_id,amount_minor,currency,
 		 currency_exponent,idempotency_key)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'REVERSAL',$9,1000,$10,2,$11)`,
-		s.tenant, s.site, s.iface, s.settle, s.purchase, s.stay, s.folio, s.rev, id, s.currency, idem(t)+"-direct")
+		s.tenant, s.site, s.iface, s.settle, s.purchase, s.stay, s.reservation, s.rev, id, s.currency, idem(t)+"-direct")
 	if direct == nil || !strings.Contains(direct.Error(), "REVERSAL_WRITER_ONLY") {
 		t.Fatalf("only the audited CREATE_REVERSAL may write a reversal row, got %v", direct)
 	}
@@ -1366,7 +1487,7 @@ func TestIntegrationPosting_ReversalIsAPassiveLedgerRowThatCanNeverExecute(t *te
 	}
 	_, a := p.Exec(ctx, `INSERT INTO iam_v2.posting_attempts
 		(tenant_id,site_id,internal_posting_id,pms_interface_id,attempt_no,p_number,rn,g_number,sent_at)
-		VALUES ($1,$2,$3,$4,1,'9999',$5,$6,now())`, s.tenant, s.site, revID, s.iface, s.room, s.folioNumber)
+		VALUES ($1,$2,$3,$4,1,'9999',$5,$6,now())`, s.tenant, s.site, revID, s.iface, s.room, s.reservation)
 	if a == nil || !strings.Contains(a.Error(), "REVERSAL_NOT_EXECUTABLE") {
 		t.Fatalf("a reversal must never be attempted, got %v", a)
 	}
@@ -1391,7 +1512,9 @@ func TestIntegrationPosting_ReversalArithmeticAndApplicability(t *testing.T) {
 	repo := NewRepo(p)
 	actor := scan1[string](t, p, `SELECT gen_random_uuid()::text`)
 
-	// a charge the PMS REJECTED: there is nothing to reverse
+	// a charge the PMS REJECTED: there is nothing to reverse. (A1: NG is a rejection only when the vendor
+	// confirmed it for this interface; unconfirmed it would be UNKNOWN, which IS reversible.)
+	s.confirmAnswer(t, p, "NG")
 	rej := &stubTransport{answer: func(pn int64) (*PA, error) { return &PA{PNumber: pn, AS: "NG"}, nil }}
 	er := NewEngine(liveCfg, repo, rej)
 	rejected, _ := er.CreatePosting(ctx, s.pinned(idem(t)+"-rej"))
@@ -1402,10 +1525,12 @@ func TestIntegrationPosting_ReversalArithmeticAndApplicability(t *testing.T) {
 		t.Fatal("a rejected charge has nothing to reverse and must be refused")
 	}
 
-	// a posted charge, reversed in two partial corrections that together exceed it
+	// a posted charge, reversed in two partial corrections that together exceed it. It is for ANOTHER stay of
+	// the property: a confirmed NG marks the first stay's reservation data-suspect, which stops its charging.
 	ok := &stubTransport{}
 	eo := NewEngine(liveCfg, repo, ok)
-	posted, _ := eo.CreatePosting(ctx, s.pinned(idem(t)+"-ok"))
+	s2 := s.withCharge(t, p)
+	posted, _ := eo.CreatePosting(ctx, s2.pinned(idem(t)+"-ok"))
 	if out, err := eo.RunOnce(ctx, s.tenant, s.site, s.iface); err != nil || out.Result != "POSTED" {
 		t.Fatalf("setup: %+v %v", out, err)
 	}
@@ -1455,9 +1580,22 @@ func TestIntegrationPosting_ProductionEngineIsDarkAndTakesNoCallerTransport(t *t
 	if err != nil || tr != nil {
 		t.Fatalf("this build has no financial transport; expected (nil, nil), got (%v, %v)", tr, err)
 	}
-	// and a build that claims to transmit without one refuses to start rather than pretending
+	// Since D45 this build HAS a financial transport: the hand-off to pmsd, which owns the property's single
+	// FIAS connection. With transmission enabled the production factory -- never a caller -- supplies exactly
+	// that transport, and the engine is no longer DARK.
 	env[EnvPhase4Transmit] = "true"
-	if _, err := ProductionEngineWithEnv(repo, func(k string) string { return env[k] }); err == nil {
-		t.Fatal("transmission enabled against a build with no transport must fail closed at construction")
+	e3, err := ProductionEngineWithEnv(repo, func(k string) string { return env[k] })
+	if err != nil {
+		t.Fatalf("transmission enabled must construct the production engine with the pmsd hand-off: %v", err)
+	}
+	if e3.Config().Dark() {
+		t.Fatal("an engine with transmission enabled must not report DARK")
+	}
+	tr3, err := ProductionTransportFor(e3.Config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := tr3.(*handoffTransport); !ok {
+		t.Fatalf("the only transport a production build is handed is the pmsd hand-off, got %T", tr3)
 	}
 }
