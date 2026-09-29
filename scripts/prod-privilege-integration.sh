@@ -72,6 +72,20 @@ else
   echo "  FAIL baseline:"; grep -iE '^ERROR|^psql:' "$OUT/baseline.log" | tail -5; tail -3 "$OUT/baseline.log"; exit 1
 fi
 
+MSYS_NO_PATHCONV=1 docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+  -f /tmp/gatep/gatep-iam-ownership.sql >"$OUT/iam-own-pre.log" 2>&1 \
+  || { echo "  FAIL gatep-iam-ownership.sql (pre):"; tail -3 "$OUT/iam-own-pre.log"; exit 1; }
+
+# EVERY migration published after the baseline snapshot, in order, BEFORE the grant chain: deploy/gatep grants
+# objects those migrations create (0100's iam_v2.p4_stay_room_charge_open, among others), so a grant chain run
+# on the bare baseline refuses to apply. This is the order a factory-clean appliance uses
+# (scripts/lib-fullschema-testdb.sh, scripts/sitedb-dev.sh).
+. "$ROOT/scripts/lib-fullschema-testdb.sh"
+for m in $(fullschema_post_baseline "$ROOT"); do
+  psql_run < "$ROOT/data-plane/migrations/$m.up.sql" >"$OUT/$m.log" 2>&1 || { echo "  FAIL $m:"; tail -3 "$OUT/$m.log"; exit 1; }
+  echo "  applied $m"
+done
+
 for f in gatep-iam-ownership.sql gatep-iam-roles.sql gatep-grants.sql svc-edged-phase345-admin-grants.sql; do
   [ -f "$GATEP/$f" ] || continue
   MSYS_NO_PATHCONV=1 docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
@@ -80,21 +94,9 @@ for f in gatep-iam-ownership.sql gatep-iam-roles.sql gatep-grants.sql svc-edged-
   echo "  applied $f"
 done
 
-# Migrations published after the baseline snapshot. 0057 is the one this harness exists to exercise; the
-# others keep the schema matching a current appliance.
-for m in 0056_materialization_readiness 0057_lock_auth_context_offer \
-         0058_guest_auth_row_locks \
-         0059_speed_allocation \
-         0060_last_good_roster_survives_a_failed_resync \
-         0061_the_entitlement_records_what_it_spent \
-         0062_the_crossing_sample_still_belongs_to_the_entitlement_that_spent_it \
-         0063_scoped_reader_for_current_package_conditions \
-         0064_the_allowance_a_stay_earned_is_frozen_when_it_is_granted; do
-  f="$ROOT/data-plane/migrations/$m.up.sql"
-  [ -f "$f" ] || continue
-  psql_run < "$f" >"$OUT/$m.log" 2>&1 || { echo "  FAIL $m:"; tail -3 "$OUT/$m.log"; exit 1; }
-  echo "  applied $m"
-done
+# 0056-0064 used to be re-applied here, on top of the baseline. The baseline already carries them (it runs
+# through 0099), and re-running them now would roll back every later redefinition of the functions they
+# create -- a schema no appliance has. Everything above the baseline is applied above, in order.
 
 # 0057's own grant is guarded on the role existing. Reassert the Gate-P chain afterwards so the test proves
 # the grant survives a RECONCILE, not merely a fresh migration — the failure mode that has bitten twice.

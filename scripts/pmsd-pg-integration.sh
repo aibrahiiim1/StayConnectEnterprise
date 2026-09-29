@@ -1,302 +1,63 @@
 #!/usr/bin/env bash
-# Build a disposable PostgreSQL 16 with the accepted iam_v2 schema + migration 0010, then run the pmsd
-# PG16 integration tests (build tag `integration`) against it. Self-contained: creates + tears down its own
+# Build a disposable PostgreSQL 16 carrying the FULL appliance schema, then run the pmsd / Phase-3 PG16
+# integration suites (build tag `integration`) against it. Self-contained: creates + tears down its own
 # container. No Production/appliance access.
+#
+# THE SCHEMA IS THE ONE AN APPLIANCE HAS. This harness used to build the iam_v2 scratch fixture plus 0009, 0010
+# and a hand-maintained list of later migrations (0050-0079, 0092, 0093). That list fell behind more than once
+# -- a suite that SELECTs a column the fixture lacks does not fail loudly, it scans an EMPTY result that reads
+# as "this site has none" -- and it can never carry migration 0100, which the product now reads. So the
+# database is now built exactly as a factory-clean appliance builds it (Gate-P roles, the production baseline,
+# Gate-P ownership, every migration above the baseline, Gate-P grants); see scripts/lib-fullschema-testdb.sh.
+# There is no list to fall behind any more.
 #
 # EXIT CODES (the CI retry policy depends on these):
 #   0  every test passed
-#   1  a TEST failed — deterministic. CI must NOT retry: a second run that passes would be hiding a defect.
-#   2  the disposable infrastructure could not be built (container, image, schema bootstrap). That IS
-#      transient under runner load, and is the only condition CI may retry.
+#   1  a TEST failed, or the schema did not apply — deterministic. CI must NOT retry: a second run that passes
+#      would be hiding a defect.
+#   2  the disposable infrastructure could not be built (container, image, readiness). That IS transient under
+#      runner load, and is the only condition CI may retry.
 set -uo pipefail
 export PATH="$PATH:/c/Program Files/Docker/Docker/resources/bin"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 C=iamv2-scratch; DB=iam_scratch; PORT="${PMSD_INTEG_PORT:-55432}"
-UPSHA="$(sha256sum "$ROOT/data-plane/migrations/0010_phase3_stay_resolution.up.sql" | awk '{print $1}')"
+# shellcheck source=lib-fullschema-testdb.sh
+. "$ROOT/scripts/lib-fullschema-testdb.sh"
 
 cleanup(){ docker rm -f "$C" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 cleanup
-echo "== disposable PG16 for pmsd integration (container=$C port=$PORT) =="
-docker run -d --name "$C" -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB="$DB" -p 127.0.0.1:$PORT:5432 postgres:16-alpine >/dev/null
-# robust readiness: a real query must succeed (pg_isready can pass during initdb's transient server, which
-# then restarts -- running psql in that window fails with a socket error).
-ready=0
-for i in $(seq 1 60); do
-  if docker exec "$C" psql -U postgres -d "$DB" -tAqc 'select 1' >/dev/null 2>&1; then ready=1; break; fi
-  sleep 1
-done
-[ "$ready" = 1 ] || { echo "INFRA: postgres did not become ready"; docker logs "$C" 2>&1 | tail -20; exit 2; }
-sleep 1
+echo "== disposable PG16, FULL appliance schema, for pmsd integration (container=$C port=$PORT) =="
+fullschema_build "$C" "$PORT" "$DB"; rc=$?
+[ "$rc" = 0 ] || exit "$rc"
 
-# accepted schema exactly as the migration gate builds it (fixture + mg0 + mg1..mg9)
-runout="$(SCRATCH_CONTAINER="$C" SCRATCH_DB="$DB" SCRATCH_PORT_ALLOW="$PORT" SCRATCH_ACK=I_UNDERSTAND_DISPOSABLE \
-  bash "$ROOT/iam_v2_scratch/run.sh" fresh 2>&1)" || { echo "INFRA: run.sh fresh FAILED:"; echo "$runout" | tail -20; exit 2; }
-# ledger + 0009 baseline + 0010 via the authoritative runner
-docker exec "$C" psql -U postgres -d "$DB" -tAqc "CREATE TABLE IF NOT EXISTS public.schema_migrations(version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());" >/dev/null
-docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$ROOT/data-plane/migrations/0009_phase2_commerce.up.sql" >/dev/null 2>&1
-docker exec "$C" psql -U postgres -d "$DB" -tAqc "INSERT INTO public.schema_migrations(version) VALUES ('0009_phase2_commerce') ON CONFLICT DO NOTHING;" >/dev/null
-export EDGE_PSQL="docker exec -i $C psql -U postgres -d $DB -v ON_ERROR_STOP=1"
-bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --expect-db "$DB" \
-  --target-kind disposable --ack-target I_UNDERSTAND_DISPOSABLE_DATABASE --expect-sha256 "$UPSHA" >/dev/null 2>&1
-
-# 0050 redefines a Phase-3 object this gate owns: issue_or_return_pms_context, plus the shared
-# iam_v2.p3_stay_authorizable predicate the authctx suite exercises directly. The gate builds the schema Phase 3
-# ships, and that now includes this. Applied with ON_ERROR_STOP so a broken migration fails here, loudly,
-# rather than surfacing later as a missing-function mystery in an unrelated test.
-if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
-     < "$ROOT/data-plane/migrations/0050_pms_auth_freshness_follows_feed_health.up.sql" >/dev/null 2>&1; then
-  echo "0050 FAILED TO APPLY -- deterministic, not a flake"
-  exit 1
-fi
-docker exec "$C" psql -U postgres -d "$DB" -tAqc \
-  "INSERT INTO public.schema_migrations(version) VALUES ('0050_pms_auth_freshness_follows_feed_health') ON CONFLICT DO NOTHING;" >/dev/null
-
-# 0051 narrows the same predicate's continuity term to CONTINUOUS only. The authctx suite asserts that UNKNOWN
-# continuity cannot authorise, which is false against 0050 alone.
-if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
-     < "$ROOT/data-plane/migrations/0051_continuity_unknown_is_not_a_healthy_feed.up.sql" >/dev/null 2>&1; then
-  echo "0051 FAILED TO APPLY -- deterministic, not a flake"
-  exit 1
-fi
-docker exec "$C" psql -U postgres -d "$DB" -tAqc \
-  "INSERT INTO public.schema_migrations(version) VALUES ('0051_continuity_unknown_is_not_a_healthy_feed') ON CONFLICT DO NOTHING;" >/dev/null
-
-# 0052 adds iam_v2.p3_lock_grace_config, which the Checkout Converter now calls instead of locking the grace
-# config table directly. The checkout suite exercises that path, including its concurrency behaviour.
-if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
-     < "$ROOT/data-plane/migrations/0052_grace_config_lock_without_update_privilege.up.sql" >/dev/null 2>&1; then
-  echo "0052 FAILED TO APPLY -- deterministic, not a flake"
-  exit 1
-fi
-docker exec "$C" psql -U postgres -d "$DB" -tAqc \
-  "INSERT INTO public.schema_migrations(version) VALUES ('0052_grace_config_lock_without_update_privilege') ON CONFLICT DO NOTHING;" >/dev/null
-# 0053 splits the same predicate's transport term in two: a live feed OR a trusted local mirror. Without it
-# every offline case in the mirror-trust and local-mirror suites fails, because the database still refuses any
-# guest whose PMS socket is down -- which is the exact behaviour those suites exist to prove is gone.
-if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1      < "$ROOT/data-plane/migrations/0053_local_mirror_authorizes_when_transport_is_down.up.sql" >/dev/null 2>&1; then
-  echo "0053 FAILED TO APPLY -- deterministic, not a flake"
-  exit 1
-fi
-docker exec "$C" psql -U postgres -d "$DB" -tAqc   "INSERT INTO public.schema_migrations(version) VALUES ('0053_local_mirror_authorizes_when_transport_is_down') ON CONFLICT DO NOTHING;" >/dev/null
-
-# 0054 adds the operator resync command channel and the durable sync-progress columns. The pmsd suites claim
-# commands and write stages against the real CHECK constraints, so without it they fail on missing columns.
-if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
-     < "$ROOT/data-plane/migrations/0054_operator_resync_command_and_sync_progress.up.sql" >/dev/null 2>&1; then
-  echo "0054 FAILED TO APPLY -- deterministic, not a flake"
-  exit 1
-fi
-docker exec "$C" psql -U postgres -d "$DB" -tAqc \
-  "INSERT INTO public.schema_migrations(version) VALUES ('0054_operator_resync_command_and_sync_progress') ON CONFLICT DO NOTHING;" >/dev/null
-
-# 0055 replaces edged direct write access with a narrow SECURITY DEFINER function. The edged API suite calls
-# the Full Resync endpoint, which fails with permission denied without it.
-if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
-     < "$ROOT/data-plane/migrations/0055_request_full_resync_without_runtime_write.up.sql" >/dev/null 2>&1; then
-  echo "0055 FAILED TO APPLY -- deterministic, not a flake"
-  exit 1
-fi
-docker exec "$C" psql -U postgres -d "$DB" -tAqc \
-  "INSERT INTO public.schema_migrations(version) VALUES ('0055_request_full_resync_without_runtime_write') ON CONFLICT DO NOTHING;" >/dev/null
-
-# 0056 adds the materialization-readiness term and the partial index the authctx suites assert.
-if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
-     < "$ROOT/data-plane/migrations/0056_materialization_readiness.up.sql" >/dev/null 2>&1; then
-  echo "0056 FAILED TO APPLY -- deterministic, not a flake"
-  exit 1
-fi
-docker exec "$C" psql -U postgres -d "$DB" -tAqc \
-  "INSERT INTO public.schema_migrations(version) VALUES ('0056_materialization_readiness') ON CONFLICT DO NOTHING;" >/dev/null
-
-# 0057 adds the scoped offer-lock helper the grant needs; without it the svc_scd grant test fails.
-if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
-     < "$ROOT/data-plane/migrations/0057_lock_auth_context_offer.up.sql" >/dev/null 2>&1; then
-  echo "0057 FAILED TO APPLY -- deterministic, not a flake"
-  exit 1
-fi
-docker exec "$C" psql -U postgres -d "$DB" -tAqc \
-  "INSERT INTO public.schema_migrations(version) VALUES ('0057_lock_auth_context_offer') ON CONFLICT DO NOTHING;" >/dev/null
-# 0058 adds the scoped row-lock helpers. internal/authctx calls them on both the issue and the
-# consume path, so without it every PMS auth test fails with "function does not exist".
-if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
-     < "$ROOT/data-plane/migrations/0058_guest_auth_row_locks.up.sql" >/dev/null 2>&1; then
-  echo "0058 FAILED TO APPLY -- deterministic, not a flake"
-  exit 1
-fi
-docker exec "$C" psql -U postgres -d "$DB" -tAqc \
-  "INSERT INTO public.schema_migrations(version) VALUES ('0058_guest_auth_row_locks') ON CONFLICT DO NOTHING;" >/dev/null
-
-# 0059 adds service_plan_revisions.speed_allocation, which the shaping planner reads directly.
-if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
-     < "$ROOT/data-plane/migrations/0059_speed_allocation.up.sql" >/dev/null 2>&1; then
-  echo "0059 FAILED TO APPLY -- deterministic, not a flake"
-  exit 1
-fi
-docker exec "$C" psql -U postgres -d "$DB" -tAqc \
-  "INSERT INTO public.schema_migrations(version) VALUES ('0059_speed_allocation') ON CONFLICT DO NOTHING;" >/dev/null
-
-# 0060 restates p3_feed_authorizes so a failed resync no longer invalidates the published roster.
-if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
-     < "$ROOT/data-plane/migrations/0060_last_good_roster_survives_a_failed_resync.up.sql" >/dev/null 2>&1; then
-  echo "0060 FAILED TO APPLY -- deterministic, not a flake"
-  exit 1
-fi
-docker exec "$C" psql -U postgres -d "$DB" -tAqc \
-  "INSERT INTO public.schema_migrations(version) VALUES ('0060_last_good_roster_survives_a_failed_resync') ON CONFLICT DO NOTHING;" >/dev/null
-
-# 0061 makes the ingestion operation advance the Entitlement's own consumed_data_bytes. WITHOUT IT the data
-# quota contract suite in ./internal/enforce fails on its first assertion, which is the point: that suite
-# drives iam_v2.ingest_absolute_counters -- the operation acctd actually calls -- rather than inserting
-# accounting rows directly, and before 0061 that operation left the entitlement's usage at zero forever.
-if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
-     < "$ROOT/data-plane/migrations/0061_the_entitlement_records_what_it_spent.up.sql" >/dev/null 2>&1; then
-  echo "0061 FAILED TO APPLY -- deterministic, not a flake"
-  docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
-    < "$ROOT/data-plane/migrations/0061_the_entitlement_records_what_it_spent.up.sql" 2>&1 | tail -10
-  exit 1
-fi
-docker exec "$C" psql -U postgres -d "$DB" -tAqc \
-  "INSERT INTO public.schema_migrations(version) VALUES ('0061_the_entitlement_records_what_it_spent') ON CONFLICT DO NOTHING;" >/dev/null
-
-# 0062 lets a closing binding keep a sample landing on its own closing instant when nothing else covers it, so
-# the crossing sample stays attributed to the Entitlement it exhausted. The data-quota contract suite asserts
-# counter == derived AFTER a DATA termination, which is false without it.
-if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
-     < "$ROOT/data-plane/migrations/0062_the_crossing_sample_still_belongs_to_the_entitlement_that_spent_it.up.sql" >/dev/null 2>&1; then
-  echo "0062 FAILED TO APPLY -- deterministic, not a flake"
-  docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
-    < "$ROOT/data-plane/migrations/0062_the_crossing_sample_still_belongs_to_the_entitlement_that_spent_it.up.sql" 2>&1 | tail -10
-  exit 1
-fi
-docker exec "$C" psql -U postgres -d "$DB" -tAqc \
-  "INSERT INTO public.schema_migrations(version) VALUES ('0062_the_crossing_sample_still_belongs_to_the_entitlement_that_spent_it') ON CONFLICT DO NOTHING;" >/dev/null
-
-# 0063 adds the scoped reader Hotel Admin uses to load a package's eligibility rules and grant tiers without
-# svc_edged holding SELECT on the two protected tables.
-if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
-     < "$ROOT/data-plane/migrations/0063_scoped_reader_for_current_package_conditions.up.sql" >/dev/null 2>&1; then
-  echo "0063 FAILED TO APPLY -- deterministic, not a flake"
-  docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
-    < "$ROOT/data-plane/migrations/0063_scoped_reader_for_current_package_conditions.up.sql" 2>&1 | tail -10
-  exit 1
-fi
-docker exec "$C" psql -U postgres -d "$DB" -tAqc \
-  "INSERT INTO public.schema_migrations(version) VALUES ('0063_scoped_reader_for_current_package_conditions') ON CONFLICT DO NOTHING;" >/dev/null
-
-# 0064 adds entitlements.data_quota_bytes and internet_package_revisions.data_allocation_policy, and makes
-# p6_data_crossing compare usage against COALESCE(entitlement snapshot, pinned plan quota). internal/enforce
-# reads that column directly, so without this the enforcement suites fail with "column e.data_quota_bytes
-# does not exist" rather than on anything they are testing.
-if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
-     < "$ROOT/data-plane/migrations/0064_the_allowance_a_stay_earned_is_frozen_when_it_is_granted.up.sql" >/dev/null 2>&1; then
-  echo "0064 FAILED TO APPLY -- deterministic, not a flake"
-  docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
-    < "$ROOT/data-plane/migrations/0064_the_allowance_a_stay_earned_is_frozen_when_it_is_granted.up.sql" 2>&1 | tail -10
-  exit 1
-fi
-docker exec "$C" psql -U postgres -d "$DB" -tAqc \
-  "INSERT INTO public.schema_migrations(version) VALUES ('0064_the_allowance_a_stay_earned_is_frozen_when_it_is_granted') ON CONFLICT DO NOTHING;" >/dev/null
-
-
-# 0067 creates iam_v2.sign_in_attempts and iam_v2.complete_sign_in_attempt. cmd/scd's guest sign-in attempt
-# suite drives the real handlers and reads the table back, so without it every one of those tests fails on a
-# missing relation rather than on anything it is testing.
-if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
-     < "$ROOT/data-plane/migrations/0067_a_refused_sign_in_leaves_a_record_somebody_can_read.up.sql" >/dev/null 2>&1; then
-  echo "0067 FAILED TO APPLY -- deterministic, not a flake"
-  docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
-    < "$ROOT/data-plane/migrations/0067_a_refused_sign_in_leaves_a_record_somebody_can_read.up.sql" 2>&1 | tail -15
-  exit 1
-fi
-docker exec "$C" psql -U postgres -d "$DB" -tAqc \
-  "INSERT INTO public.schema_migrations(version) VALUES ('0067_a_refused_sign_in_leaves_a_record_somebody_can_read') ON CONFLICT DO NOTHING;" >/dev/null
-
-# 0068 adds the guest sign-in protection policy, its append-only change log, the restriction table and the
-# scoped operations that enforce them. cmd/scd drives those operations through the real handlers and cmd/edged
-# serves the operator surface over the same tables; without it both suites fail on missing functions.
-if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
-     < "$ROOT/data-plane/migrations/0068_the_hotel_decides_how_many_wrong_guesses_are_too_many.up.sql" >/dev/null 2>&1; then
-  echo "0068 FAILED TO APPLY -- deterministic, not a flake"
-  docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
-    < "$ROOT/data-plane/migrations/0068_the_hotel_decides_how_many_wrong_guesses_are_too_many.up.sql" 2>&1 | tail -15
-  exit 1
-fi
-docker exec "$C" psql -U postgres -d "$DB" -tAqc \
-  "INSERT INTO public.schema_migrations(version) VALUES ('0068_the_hotel_decides_how_many_wrong_guesses_are_too_many') ON CONFLICT DO NOTHING;" >/dev/null
-
-# 0069 THROUGH 0079 -- THE RECONCILIATION AND RECOVERY CHAIN.
-#
-# This harness stopped at 0068 while eleven further migrations landed, so the gate's database was a schema
-# nobody runs. That is not a cosmetic gap: a suite that SELECTs a column the fixture lacks does not fail
-# loudly -- in Go it fails at rows.Scan, the row is dropped, and the caller gets an EMPTY RESULT that reads
-# as a confident "this site has none". The same class of drift produced eight of the sixteen failed gate
-# attempts in PRs #108/#109, and it cost this delivery two more: an endpoint coupled to newer objects
-# returned 500 in the gate and 200 everywhere else.
-#
-# Applied as a LIST rather than eleven copied blocks, because the copied block is what let the chain fall
-# behind -- each new migration needed sixteen lines of ceremony, so eventually one did not get them.
-for m in 0069_a_queue_that_gave_up_and_a_departure_nobody_could_place \
-         0070_a_departure_that_went_to_review_is_answered_by_the_pms \
-         0071_central_serves_this_appliance_for_licensing_only \
-         0072_reconcile_the_roster_against_the_mirror_by_reservation \
-         0073_a_sweep_records_what_it_saw_not_what_it_admitted \
-         0074_coverage_by_room_identity_and_a_sweep_that_contradicts_itself \
-         0075_a_building_does_not_shrink_because_the_feed_stopped_mentioning_it \
-         0076_retry_bounds_are_settings_and_a_blocker_is_visible \
-         0077_name_the_historical_exception_for_what_it_is \
-         0078_an_accepted_startup_data_gap_is_a_decision_not_a_repair \
-         0079_recovery_belongs_to_the_connection_not_the_building \
-         0092_a_room_guest_answers_to_the_same_licence \
-         0093_the_appliance_reports_to_nobody; do
-  # 0092 and 0093 are out of numeric sequence on purpose. cmd/scd's room sign-in now records LICENSE_REFUSED
-  # and LICENSE_CAPACITY_REACHED, which the 0067 result CHECK refuses until 0092 widens it; 0093 removes what
-  # 0069 and 0071 created for the cloud telemetry subsystem, which no code here uses any more. Neither depends
-  # on anything after 0071.
-  if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
-       < "$ROOT/data-plane/migrations/$m.up.sql" >/dev/null 2>&1; then
-    echo "$m FAILED TO APPLY -- deterministic, not a flake"
-    docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
-      < "$ROOT/data-plane/migrations/$m.up.sql" 2>&1 | tail -15
-    exit 1
-  fi
-  docker exec "$C" psql -U postgres -d "$DB" -tAqc \
-    "INSERT INTO public.schema_migrations(version) VALUES ('$m') ON CONFLICT DO NOTHING;" >/dev/null
-done
-
-# THE KEY IS THE ASSERTION. 0079 re-keys the recovery bounds onto the interface; a chain that applied but
-# left the old two-column key would let the isolation suite pass against a schema where it cannot hold.
+# THE KEY IS THE ASSERTION. 0079 re-keys the recovery bounds onto the interface; a schema that kept the old
+# two-column key would let the isolation suite pass against a schema where it cannot hold.
 key_cols="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.key_column_usage WHERE table_schema='iam_v2' AND constraint_name='pms_connection_settings_pkey';")"
 if [ "${key_cols:-0}" != "3" ]; then
-  echo "0079 NOT APPLIED (pms_connection_settings primary key has ${key_cols:-0} columns, expected 3)"
+  echo "0079 NOT IN EFFECT (pms_connection_settings primary key has ${key_cols:-0} columns, expected 3)"
   exit 1
 fi
-
-built="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"
-if [ "${built:-0}" -lt 40 ]; then echo "INFRA: SCHEMA BUILD FAILED (iam_v2 tables=$built)"; exit 2; fi
 runtime_cols="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.columns WHERE table_schema='iam_v2' AND table_name='pms_interface_runtime' AND column_name='pinned_secret_generation_id';")"
 if [ "${runtime_cols:-0}" != "1" ]; then
-  # Deterministic: the migration itself did not apply. Exit 1 so CI does NOT retry -- a broken migration
-  # fails the same way twice, and a retry that passed would mean something non-deterministic was hiding.
-  echo "0010 NOT APPLIED (pinned_secret_generation_id missing) -- the migration did not apply; this is a defect, not a flake"
+  # Deterministic: the schema itself is wrong. Exit 1 so CI does NOT retry.
+  echo "0010 NOT IN EFFECT (pinned_secret_generation_id missing) -- this is a defect, not a flake"
   exit 1
 fi
-echo "  iam_v2 tables=$built + 0010 applied"
+built="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"
+echo "  full schema built: iam_v2 tables=$built"
 
 export PHASE3_TEST_DSN="postgres://postgres:postgres@127.0.0.1:$PORT/$DB"
 # ---------------------------------------------------------------------------------------------------------
 # TEST OWNERSHIP GUARD.
 #
-# This gate builds a database that stops at migration 0010, because that is the schema Phase 3 ships. Phase-4
-# integration tests live in the SAME ./cmd/edged package and, while they carried only the `integration` tag,
-# they compiled into this run and failed against a schema in which `financial_base_currency` and
-# `p4_declare_financial_recovery` cannot exist. Seven red tests that said nothing about Phase 3, and would
-# have hidden anything that did.
-#
-# They now carry `//go:build integration && phase4`, so this build simply does not contain them. The check
-# below is the part that keeps it true: it asserts that no file compiled into THIS gate's packages mentions a
-# Phase-4-only object. A future test dropped into cmd/edged without the tag fails here, loudly, instead of
-# failing later as a mystery about a missing column.
+# Phase-4 integration tests live in the SAME ./cmd/edged package as the Phase-3 suites. While they carried only
+# the `integration` tag they compiled into this run -- which, when this gate built a database that stopped at
+# migration 0010, produced seven red tests that said nothing about Phase 3 and would have hidden anything that
+# did. The database is now the full appliance schema, so the objects exist; the guard stays because WHICH
+# suites a gate runs is still a scope decision: the financial matrix belongs to scripts/phase4-pg-integration.sh
+# and carries `//go:build integration && phase4`. A future test dropped into these packages without the tag
+# fails here, loudly, instead of silently widening this gate.
 PKGS="./internal/pmsd/ ./internal/stayengine/ ./internal/authctx/ ./internal/checkout/ ./internal/staygrant/ ./internal/pmsresolve/ ./internal/enforce/ ./internal/writerguard/ ./cmd/edged/ ./cmd/acctd/ ./cmd/scd/"
 echo "== test-ownership guard: no Phase-4-schema test may compile into the Phase-3 gate =="
 leak=0
