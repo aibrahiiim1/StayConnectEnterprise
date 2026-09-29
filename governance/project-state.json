@@ -1256,7 +1256,7 @@
         "D44",
         "D45"
       ],
-      "transition": "T0200",
+      "transition": "T0201",
       "status": "READY_FOR_PRODUCT_OWNER_TESTING -- Product Owner findings of 2026-09-29 and the directly related social redirect defect corrected and deployed to PRE-LIVE (and Central) from the unmerged PR #202; NOT merged, NOT closed",
       "pr": 202,
       "contract": "docs/architecture/ONEGATE_MODULES_AND_ACQUISITION.md",
@@ -1265,14 +1265,15 @@
       "prelive_licence": "v5 licence issued by Central with NO optional module (Site Type CAFE, set by the Product Owner): the portal offers Voucher, Personal account and open package selection only; Hospitality history remains manageable because PMS records exist",
       "prelive_site_type": "CAFE (set by the Product Owner in Central)",
       "card_payment_accounts": 0,
-      "open_inputs": "provider credentials for the credential-dependent live tests (senders, social applications, Stripe/Paymob sandbox); module licensing of the PRE-LIVE site for the modules to be tested; Product Owner acceptance of PR #202; a portal name with a browser-trusted certificate for real social sign-in (certificate decision)",
-      "identity_methods": "Email/SMS/WhatsApp codes and Google/Facebook/Apple/Microsoft deployed (STAYCONNECT_IAMV2_OTP and _SOCIAL on PRE-LIVE); each offered only when licensed, switched on and a provider is ready"
+      "open_inputs": "provider credentials for the credential-dependent live tests (senders, Stripe/Paymob sandbox); module licensing of the PRE-LIVE site for the modules to be tested; Product Owner acceptance of PR #202. Deferred, not blocking: public Client Portal domain and trusted certificate (then real social-provider validation)",
+      "identity_methods": "Email/SMS/WhatsApp codes and Google/Facebook/Apple/Microsoft deployed (STAYCONNECT_IAMV2_OTP and _SOCIAL on PRE-LIVE); each offered only when licensed, switched on and a provider is ready",
+      "social_provider_validation": "PENDING -- real Google/Facebook/Apple/Microsoft validation awaits the Product Owner's future public Client Portal domain and publicly trusted certificate decision (deferred 2026-09-29) and the provider credentials; NOT a blocker for PR #202. Portal hostname, Root CA and certificate architecture unchanged."
     },
     "room_charge_transport": "D45: the existing single FIAS connection owned by pmsd. The scd posting worker (svc_posting) validates and records each attempt with sha256 of the exact PS; pmsd (svc_pmsd, EXECUTE on p4_posting_command_authorised only, no posting-table privilege) carries the verified bytes through its PS-only writer path and returns the matched PA; UNKNOWN is never resent. Transmission needs STAYCONNECT_PHASE4_PMS_TRANSMIT on BOTH scd and pmsd; it is set on neither, so real posting remains impossible on PRE-LIVE and no posting socket exists.",
     "prelive_phase4_flag_posture": "PRE-LIVE 172.21.60.25 since 2026-09-28 (D44/D45 testing): scd runs STAYCONNECT_PHASE4_MASTER, _PAYMENT, _PAYMENT_PROVIDER, _POSTING, _FINANCIAL_REVIEW and _OUTBOX_WORKER; edged runs _MASTER, _POSTING and _FINANCIAL_REVIEW; pmsd runs none. STAYCONNECT_PHASE4_PMS_TRANSMIT and STAYCONNECT_PAYMENT_LIVE_ALLOWED are set nowhere. Payment-provider egress is possible only in TEST mode, and only once a sandbox account exists (none does). Financial traffic ever: none.",
     "phase4_flags_off_scope": "phase4_flags_off records the DELIVERED REPOSITORY configuration (no file in the tree enables a Phase-4 flag; scripts/ci/phase4-dark-check.sh asserts it). It is not a statement about the PRE-LIVE environment, whose posture is recorded in prelive_phase4_flag_posture."
   },
-  "latest_transition_id": "T0200",
+  "latest_transition_id": "T0201",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1775,7 +1776,7 @@
     "base_note": "Master at the merge of PR #201, where delivery/site-modules-acquisition was cut.",
     "head": "d5c3e578",
     "head_note": "The last CONTENT commit of PR #202 before its governance record; the manifest records base..HEAD including the governance, pack and manifest commits.",
-    "transition": "T0200",
+    "transition": "T0201",
     "previous_delivery": "INDUSTRY_NEUTRAL_TERMINOLOGY (docs/manifests/NeutralTerminology-change-manifest.md, T0197 lineage)",
     "pr": 202,
     "pr_state": "OPEN_UNMERGED -- READY FOR PRODUCT OWNER TESTING; merge only on explicit Product Owner acceptance (po-merge-approved)",

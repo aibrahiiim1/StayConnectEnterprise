@@ -350,6 +350,11 @@ Room charge is configurable and reviewable but never offered.
   (edged refuses anything else). Only when a provider has none does the portal derive its own URL; behind the
   appliance's proxy it takes the scheme from `X-Forwarded-Proto`, which it believes from a loopback peer only.
   Real providers also need that portal name to reach the portal with a certificate the guest's browser trusts.
+* **Deferred by the Product Owner (2026-09-29):** the public Client Portal domain and its publicly trusted
+  certificate are a future decision. The portal hostname (`portal.stayconnect.local`), the Root CA and the
+  certificate architecture are unchanged. Real social-provider validation (Google, Facebook, Apple, Microsoft)
+  is **pending that decision and the provider credentials**; the providers are verified by deterministic fixture
+  tests meanwhile. This is not a blocker for PR #202.
 * **Secrets are write-only.** Sender API keys/tokens and social client secrets/keys are never returned by the API,
   never shown in the UI after storage and never logged; logs carry the provider, the HTTP status and at most the
   last four digits of a phone number.
