@@ -180,9 +180,14 @@ package → immutable quote → purchase AWAITING_SETTLEMENT → settlement ONLI
 Available only when `hospitality`, `paid_access` and `room_charge` are licensed, enabled and deployed **and**:
 * the client authenticated by Room sign-in with **verified RN + G#** on the stay;
 * the package has a live **settlement mapping on the pinned PMS Interface** (posting code, tax);
-* the interface is **financially onboarded** (folio identity strategy ≠ `UNSET`, base currency and exponent set,
-  approval recorded) and the **package currency equals the interface currency** (no implicit FX);
-* the stay is `IN_HOUSE` and `posting_allowed`, and every freshness/continuity axis is green;
+* the interface is **financially onboarded** (posting target `RESERVATION` recorded with the vendor's confirmation that
+  reservation numbers are never reused, base currency and exponent set, approval recorded) and the **package
+  currency equals the interface currency** (no implicit FX);
+* the stay is `IN_HOUSE` and `posting_allowed` (it has a reservation number and no posting block), it has no
+  unresolved room charge, and every freshness/continuity axis is green;
+* the charge **targets the reservation**: posting identity `(interface, G#)`, pinned at purchase; the room (RN) is the
+  reservation's current room, refreshed before each attempt. There is no folio model and no folio-window selection
+  ([Phase-0 Amendment A1, D46](StayConnect-IAM-Phase0-Amendment-A1.md));
 * PMS posting transmission is within the deployment ceiling.
 
 ```
@@ -190,7 +195,11 @@ package → quote (pins interface, mapping, stay, currency) → purchase AWAITIN
 → settlement PMS_POSTING/REQUIRED → posting (gate + DB triggers) → outbox → posting worker (scd) → pmsd (transport, §11)
 → PS → PA OK (authoritative ACK) → p4_posting_settlement_outcome → settlement SETTLED → grant → access
 ```
-* No entitlement is granted because a posting was sent. `PA` other than `OK` → `FAILED`.
+* No entitlement is granted because a posting was sent. A `PA` other than `OK` fails the charge only when the
+  vendor has confirmed that code for the interface; an unconfirmed code (and `UR`, always) is UNKNOWN. Confirmed
+  `NP` blocks room charge for the stay until Protel data allows posting again; confirmed `NG`/`NR` mark the stay
+  data suspect, request a resync and block until fresh valid data; `NA`/`RY` place no stay block. None is retried
+  automatically, and no operator can lift a Protel block.
 * **UNKNOWN** → attempt `UNKNOWN`, outbox `HELD_RECOVERY`, settlement `MANUAL_REVIEW`. Never retried
   automatically. The accepted Phase-0 review actions remain: `CONFIRM_POSTED` (settle and grant),
   `CONFIRM_NOT_POSTED_ABANDON` (fail), and **`CONFIRM_NOT_POSTED_RETRY`** — authorised staff who verified from
@@ -237,8 +246,10 @@ Each is enforced in the SQL grant entry point, which is the only path to the ent
   methods (others shown with the reason); room-charge settlement mapping per interface.
 * **Vouchers:** issue against a package that supports Voucher (the picker lists only those); revoke a code, or
   cancel every unused card of a batch (audited, step-up, reason).
-* **Hotel → Room charge:** financial onboarding per FIAS interface — folio identity strategy, base currency and
-  an attestation, approved by a site administrator with step-up — and readiness per interface.
+* **Hotel → Room charge:** financial onboarding per FIAS interface — posting target `RESERVATION` (RN + G#), base
+  currency and the vendor attestation, approved by a site administrator with step-up — the vendor-confirmed answer
+  meanings per interface, and readiness per interface. A stay's posting permission and block history are shown on
+  the stay; only `ADMIN_BLOCK` is operator-controlled.
 * **Client Portal → Sign-in methods:** "Choose a package without signing in" (open package selection).
 * Navigation follows `/capabilities`, which reports module-owned surfaces only while their module is manageable
   and falls back to the core when module state is unreadable.
@@ -267,17 +278,21 @@ financial execution path keeps every financial decision.
 ```
 scd posting worker (svc_posting, internal/posting)          pmsd (svc_pmsd)                      PMS
   claim QUEUED posting on its lane (one IN_FLIGHT per interface)
-  re-verify pinned stay, folio, RN+G#, currency, freshness (gate)
+  lock the stay; re-read it by G#: same reservation, IN_HOUSE, not blocked, current room (A1), currency, freshness
+  (a stay no longer postable ends the charge here: ABORTED, definitely not posted)
   allocate P#, build PS, record attempt SENDING + sha256(PS)
   commit  ──── immutable command ────►  root-only unix socket /run/stayconnect/pmsd-posting.sock
                                           own flags on? (MASTER + OUTBOX_WORKER + PMS_TRANSMIT)
                                           shape: PS only, bounded, wire-safe, P# = command P#, hash
                                           DB: p4_posting_command_authorised(iface, P#, sha256)
+                                          DB: stay still postable, same G#, RN = the stay's current room (A1)
                                           link connected, between resyncs, not busy, P# not carried
+                                          IN the writer, before the first byte: RN = the room this link last
+                                          read for the G#, not departed -- else NOT_TRANSMITTED (NOT_SENT)
                                           single serialized writer ── PS (verbatim) ──────────────►
                                           read loop: PA with the same P# ◄──────────────────────────
   ◄──── ANSWERED (PA verbatim) | NOT_TRANSMITTED | UNKNOWN ────
-  parse PA, verify P#; record ACKED/FAILED/UNKNOWN
+  parse PA, verify P#; record ACKED / NOT_SENT / UNKNOWN (an unconfirmed answer code is UNKNOWN)
   p4_posting_settlement_outcome: PA=OK → SETTLED → grant; other PA → FAILED; UNKNOWN → MANUAL_REVIEW
 ```
 

@@ -756,6 +756,10 @@ immutable.**
   room charging until manual resolution.
 - **A room move** (GC) updates the current room of the existing reservation atomically. It never creates a
   second stay; the same `G#` continues to identify the stay. A `PS` is never sent without `G#`.
+- **What cannot be seen.** A guest record that is still in transit on the link when the `PS` is written cannot
+  be seen by anyone; that attempt is decided by its `PA` (or is UNKNOWN), never by a guess. **"Stale" includes
+  a disconnected link and a resync in progress**: a queued charge found in either state is aborted (definitely not
+  posted, purchase FAILED) rather than held, and the guest can buy again once the link is fresh.
 8. **`PA` status is authoritative for the posting result.** `OK` settles the charge and grants access. A
 **definite non-posted** answer — a status the vendor has confirmed means nothing was posted (the only codes
 that can be confirmed so are `NP`, `NG`, `NR`, `NA` and `RY`; the confirmation is recorded per interface,
