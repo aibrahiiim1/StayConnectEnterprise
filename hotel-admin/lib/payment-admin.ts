@@ -130,6 +130,7 @@ export type AnswerMeaning = {
   confirmed: boolean;
   evidence?: string | null;
   recorded_at?: string | null;
+  recorded_by?: string | null;
 };
 
 export type OnboardingInterface = {

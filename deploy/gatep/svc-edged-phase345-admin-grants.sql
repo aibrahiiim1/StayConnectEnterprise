@@ -64,6 +64,10 @@ GRANT SELECT ON iam_v2.stay_events                     TO svc_edged;
 GRANT SELECT ON iam_v2.stay_posting_blocks             TO svc_edged;
 GRANT SELECT ON iam_v2.posting_presend_aborts          TO svc_edged;
 GRANT EXECUTE ON FUNCTION iam_v2.p4_admin_posting_block(uuid,uuid,uuid,text,text,uuid) TO svc_edged;
+-- Whether the stay has a room charge in progress, and why an attempt was not sent: two narrow definers instead of
+-- reads of the posting and attempt-event ledgers.
+GRANT EXECUTE ON FUNCTION iam_v2.p4_stay_room_charge_open(uuid) TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_attempt_not_sent_reason(uuid) TO svc_edged;
 
 -- Publishing an interface revision moves the interface's current-revision pointer and rotates its secret
 -- generation. These are the ONLY two write targets in the Phase-3 admin source, and the controlled-writer

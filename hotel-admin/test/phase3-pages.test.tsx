@@ -165,6 +165,23 @@ describe("Stays page — room charge on a stay", () => {
     ]);
   });
 
+  it("says when a room charge is already in progress for the stay", async () => {
+    routes({ posting_allowed: true, posting_permission_source: "PMS_FEED", posting_blocks: [], room_charge_open: true }, ["site_admin"]);
+    const section = await openStay();
+    expect(within(section).getByTestId("room-charge-open").textContent).toMatch(/pending, being sent or under review/i);
+  });
+
+  it("will not submit an administrative block reason shorter than the backend accepts", async () => {
+    routes({ posting_allowed: true, posting_permission_source: "PMS_FEED", posting_blocks: [] }, ["site_admin"]);
+    const section = await openStay();
+    await userEvent.click(within(section).getByRole("button", { name: /block room charge/i }));
+    await userEvent.type(await screen.findByLabelText(/^Reason/), "abc");
+    await userEvent.type(screen.getByLabelText(/^Confirm your password/), "pw");
+    const dialogs = screen.getAllByRole("dialog");
+    expect(within(dialogs.at(-1)!).getByRole("button", { name: "Block room charge" })).toBeDisabled();
+    expect(post).not.toHaveBeenCalled();
+  });
+
   it("offers no block action to a role that is not site_admin", async () => {
     routes({ posting_allowed: true, posting_blocks: [] }, ["front_desk"]);
     const section = await openStay();

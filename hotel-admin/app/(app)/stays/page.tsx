@@ -490,6 +490,7 @@ export default function StaysPage() {
           busy={blockBusy}
           error={blockErr}
           requireReason
+          reasonMinLength={4}
           requirePassword
           reasonPlaceholder={blockAction === "SET" ? "e.g. Guest asked to settle in cash" : "e.g. Guest cleared with Front Office"}
           onConfirm={({ reason, password }) => { if (blockAction) return changeAdminBlock(blockAction, reason, password); }}
@@ -510,12 +511,13 @@ function BlockLine({ b }: { b: StayPostingBlock }) {
         {b.pa_as_status && <span className="font-mono text-xs text-muted-foreground">PMS answer {b.pa_as_status}</span>}
       </div>
       <div className="text-xs text-muted-foreground">
-        Placed by {postingSourceWords(b.source).toLowerCase()} · {formatDate(b.created_at)}
+        Placed by {b.created_by ?? postingSourceWords(b.source).toLowerCase()} · {formatDate(b.created_at)}
         {b.cleared_at && (
-          <> · cleared {formatDate(b.cleared_at)}{b.cleared_by_source ? ` by ${postingSourceWords(b.cleared_by_source).toLowerCase()}` : ""}</>
+          <> · cleared {formatDate(b.cleared_at)}{b.cleared_by ? ` by ${b.cleared_by}` : b.cleared_by_source ? ` by ${postingSourceWords(b.cleared_by_source).toLowerCase()}` : ""}</>
         )}
       </div>
       {b.note && <div className="text-xs text-muted-foreground">&ldquo;{b.note}&rdquo;</div>}
+      {b.cleared_reason && <div className="text-xs text-muted-foreground">Cleared because: &ldquo;{b.cleared_reason}&rdquo;</div>}
       {active && POSTING_BLOCK_CLEARED_BY[b.reason] && (
         <div className="text-xs">{POSTING_BLOCK_CLEARED_BY[b.reason]}</div>
       )}
@@ -544,6 +546,15 @@ function RoomChargeSection({
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 space-y-1">
           <h3 className="text-sm font-semibold">Room charge</h3>
+          {stay.room_charge_open && (
+            <p className="text-sm" data-testid="room-charge-open">
+              <Badge tone="info">In progress</Badge>{" "}
+              <span className="text-muted-foreground">
+                A room charge for this stay is pending, being sent or under review. No other is accepted until it
+                concludes.
+              </span>
+            </p>
+          )}
           {stay.posting_allowed ? (
             <p className="text-sm">
               <Badge tone="ok">Allowed</Badge>{" "}

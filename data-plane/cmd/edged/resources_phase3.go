@@ -203,14 +203,20 @@ type stayPostingBlock struct {
 	PAStatus        *string    `json:"pa_as_status,omitempty"`
 	Note            *string    `json:"note,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
+	CreatedBy       *string    `json:"created_by,omitempty"` // operator e-mail, ADMIN_BLOCK only
 	ClearedAt       *time.Time `json:"cleared_at,omitempty"`
 	ClearedBySource *string    `json:"cleared_by_source,omitempty"`
+	ClearedBy       *string    `json:"cleared_by,omitempty"` // operator e-mail, ADMIN_BLOCK only
+	ClearedReason   *string    `json:"cleared_reason,omitempty"`
 }
 
 type stayDetail struct {
 	stayRow
 	Occupants     []stayOccupant     `json:"occupant_list"`
 	PostingBlocks []stayPostingBlock `json:"posting_blocks"`
+	// RoomChargeOpen: a room charge for this stay is pending, being sent or under review. Only one may exist at
+	// a time (Phase-0 Amendment A1), so a new one is not offered until it concludes.
+	RoomChargeOpen bool `json:"room_charge_open"`
 }
 
 func (s *server) getStay(w http.ResponseWriter, r *http.Request) {
@@ -241,18 +247,24 @@ func (s *server) getStay(w http.ResponseWriter, r *http.Request) {
 		rows.Close()
 	}
 	d.PostingBlocks = []stayPostingBlock{}
-	brows, err := s.db.Query(ctx, `SELECT reason, source, pa_as_status, note, created_at, cleared_at, cleared_by_source
-		FROM iam_v2.stay_posting_blocks WHERE stay_id=$1 AND tenant_id=$2
-		ORDER BY (cleared_at IS NULL) DESC, created_at DESC LIMIT 20`, id, s.tenantID)
+	brows, err := s.db.Query(ctx, `SELECT b.reason, b.source, b.pa_as_status, b.note, b.created_at, oc.email,
+		       b.cleared_at, b.cleared_by_source, ox.email, b.cleared_reason
+		  FROM iam_v2.stay_posting_blocks b
+		  LEFT JOIN public.operators oc ON oc.id = b.created_by
+		  LEFT JOIN public.operators ox ON ox.id = b.cleared_by
+		 WHERE b.stay_id=$1 AND b.tenant_id=$2
+		 ORDER BY (b.cleared_at IS NULL) DESC, b.created_at DESC LIMIT 20`, id, s.tenantID)
 	if err == nil {
 		for brows.Next() {
 			var b stayPostingBlock
-			if brows.Scan(&b.Reason, &b.Source, &b.PAStatus, &b.Note, &b.CreatedAt, &b.ClearedAt, &b.ClearedBySource) == nil {
+			if brows.Scan(&b.Reason, &b.Source, &b.PAStatus, &b.Note, &b.CreatedAt, &b.CreatedBy,
+				&b.ClearedAt, &b.ClearedBySource, &b.ClearedBy, &b.ClearedReason) == nil {
 				d.PostingBlocks = append(d.PostingBlocks, b)
 			}
 		}
 		brows.Close()
 	}
+	_ = s.db.QueryRow(ctx, `SELECT iam_v2.p4_stay_room_charge_open($1::uuid)`, id).Scan(&d.RoomChargeOpen)
 	writeJSON(w, http.StatusOK, d)
 }
 

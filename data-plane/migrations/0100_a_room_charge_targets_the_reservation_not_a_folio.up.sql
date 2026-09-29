@@ -357,6 +357,14 @@ CREATE OR REPLACE FUNCTION iam_v2.p4_stay_room_charge_open(p_stay uuid)
                     AND se.status IN ('REQUIRED','IN_PROGRESS','MANUAL_REVIEW'));
 $fn$;
 
+-- Why an attempt was NOT_SENT (pmsd's bounded reason), for the review screen, without a read of the event ledger.
+CREATE OR REPLACE FUNCTION iam_v2.p4_attempt_not_sent_reason(p_attempt uuid)
+  RETURNS text
+  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+  SELECT e.detail->>'reason' FROM iam_v2.posting_attempt_events e
+   WHERE e.posting_attempt_id = p_attempt AND e.event_type = 'NOT_SENT' ORDER BY e.created_at LIMIT 1;
+$fn$;
+
 -- ---------------------------------------------------------------------------------------------------------
 -- 5. Vendor-confirmed answer meanings, per interface. Until a code is confirmed it is UNKNOWN.
 -- ---------------------------------------------------------------------------------------------------------
@@ -964,6 +972,7 @@ REVOKE ALL ON FUNCTION iam_v2.p4_place_stay_posting_block(uuid,text,text,uuid,te
 REVOKE ALL ON FUNCTION iam_v2.p4_clear_posting_unresolved(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION iam_v2.p4_admin_posting_block(uuid,uuid,uuid,text,text,uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION iam_v2.p4_stay_room_charge_open(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION iam_v2.p4_attempt_not_sent_reason(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION iam_v2.pms_answer_confirmation_record(uuid,uuid,uuid,text,text,text,text,uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION iam_v2.p4_answer_effect(uuid,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION iam_v2.pms_interface_financial_onboard(uuid,uuid,uuid,uuid,text,text,smallint,text,text,uuid) FROM PUBLIC;
@@ -989,6 +998,8 @@ BEGIN
     GRANT EXECUTE ON FUNCTION iam_v2.pms_interface_financial_onboard(uuid,uuid,uuid,uuid,text,text,smallint,text,text,uuid) TO svc_edged;
     GRANT EXECUTE ON FUNCTION iam_v2.pms_answer_confirmation_record(uuid,uuid,uuid,text,text,text,text,uuid) TO svc_edged;
     GRANT EXECUTE ON FUNCTION iam_v2.p4_admin_posting_block(uuid,uuid,uuid,text,text,uuid) TO svc_edged;
+    GRANT EXECUTE ON FUNCTION iam_v2.p4_stay_room_charge_open(uuid) TO svc_edged;
+    GRANT EXECUTE ON FUNCTION iam_v2.p4_attempt_not_sent_reason(uuid) TO svc_edged;
     GRANT SELECT ON iam_v2.stay_posting_blocks, iam_v2.pms_answer_confirmations, iam_v2.posting_presend_aborts TO svc_edged;
   END IF;
 END
@@ -1010,6 +1021,7 @@ BEGIN
     EXECUTE 'ALTER FUNCTION iam_v2.p4_clear_posting_unresolved(uuid) OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.p4_admin_posting_block(uuid,uuid,uuid,text,text,uuid) OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.p4_stay_room_charge_open(uuid) OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER FUNCTION iam_v2.p4_attempt_not_sent_reason(uuid) OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.pms_answer_confirmation_record(uuid,uuid,uuid,text,text,text,text,uuid) OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.p4_answer_effect(uuid,text) OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.pms_interface_financial_onboard(uuid,uuid,uuid,uuid,text,text,smallint,text,text,uuid) OWNER TO iam_v2_owner';

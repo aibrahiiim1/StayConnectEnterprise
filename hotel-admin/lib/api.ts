@@ -285,6 +285,8 @@ export type StayDetail = Stay & {
   // Room charge blocks on this stay, active first, then the most recent cleared ones (Phase-0 Amendment A1).
   // There are no folios: a room charge targets the reservation (room number + reservation number).
   posting_blocks?: StayPostingBlock[];
+  // A room charge for this stay is pending, being sent or under review (only one may exist at a time).
+  room_charge_open?: boolean;
 };
 
 /** One reasoned stop on room charging for a stay. Only ADMIN_BLOCK is an operator's to set or clear. */
@@ -294,8 +296,11 @@ export type StayPostingBlock = {
   pa_as_status?: string | null;
   note?: string | null;
   created_at: string;
+  created_by?: string | null; // operator e-mail (administrative blocks)
   cleared_at?: string | null;
   cleared_by_source?: string | null;
+  cleared_by?: string | null; // operator e-mail (administrative blocks)
+  cleared_reason?: string | null;
 };
 
 export type StayEvent = {
@@ -1370,6 +1375,8 @@ export type ReviewAttempt = {
   pa_as_status: string | null;
   sent_at: string;
   response_at: string | null;
+  // Why the appliance wrote nothing, when outcome is NOT_SENT (e.g. ROOM_CHANGED).
+  not_sent_reason?: string | null;
 };
 
 export type ReviewPostingDetail = {

@@ -25,6 +25,7 @@ DROP FUNCTION IF EXISTS iam_v2.p4_clear_posting_unresolved(uuid);
 DROP FUNCTION IF EXISTS iam_v2.p4_stay_feed_confirms(uuid);
 DROP FUNCTION IF EXISTS iam_v2.p4_refresh_stay_posting_permission(uuid);
 DROP FUNCTION IF EXISTS iam_v2.p4_stay_room_charge_open(uuid);
+DROP FUNCTION IF EXISTS iam_v2.p4_attempt_not_sent_reason(uuid);
 DROP FUNCTION IF EXISTS iam_v2.pms_answer_confirmation_record(uuid,uuid,uuid,text,text,text,text,uuid);
 DROP FUNCTION IF EXISTS iam_v2.p4_answer_effect(uuid,text);
 DROP FUNCTION IF EXISTS iam_v2.p4_posting_abort_before_send(uuid,text);

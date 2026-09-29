@@ -226,6 +226,7 @@ export function ConfirmDialog({
   busy = false,
   error,
   requireReason = false,
+  reasonMinLength = 1,
   reasonLabel = "Reason",
   reasonPlaceholder,
   requirePassword = false,
@@ -246,6 +247,8 @@ export function ConfirmDialog({
   busy?: boolean;
   error?: unknown;
   requireReason?: boolean;
+  /** Minimum reason length the backend accepts (default 1: non-empty). */
+  reasonMinLength?: number;
   reasonLabel?: string;
   reasonPlaceholder?: string;
   requirePassword?: boolean;
@@ -283,7 +286,7 @@ export function ConfirmDialog({
   }, [open]);
 
   const ready =
-    (!requireReason || reason.trim() !== "") &&
+    (!requireReason || reason.trim().length >= Math.max(1, reasonMinLength)) &&
     (!requirePassword || password !== "") &&
     (!confirmText || typed === confirmText);
 

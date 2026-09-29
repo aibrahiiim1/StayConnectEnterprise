@@ -335,6 +335,7 @@ type answerMeaning struct {
 	Confirmed  bool       `json:"confirmed"`
 	Evidence   *string    `json:"evidence,omitempty"`
 	RecordedAt *time.Time `json:"recorded_at,omitempty"`
+	RecordedBy *string    `json:"recorded_by,omitempty"` // operator e-mail
 }
 
 // answerEffects is the contract's fixed mapping (section 9a rule 9) for a vendor-confirmed status.
@@ -375,7 +376,11 @@ func (s *server) listFinancialOnboarding(w http.ResponseWriter, r *http.Request)
 	}
 	rows.Close()
 	for k := range out {
-		out[k].AnswerMeanings = s.answerMeanings(ctx, out[k].InterfaceID)
+		// Answer meanings exist only where room charge can post: a FIAS interface.
+		out[k].AnswerMeanings = []answerMeaning{}
+		if out[k].ConnectorKind == "protel-fias" {
+			out[k].AnswerMeanings = s.answerMeanings(ctx, out[k].InterfaceID)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"interfaces":            out,
@@ -387,17 +392,19 @@ func (s *server) listFinancialOnboarding(w http.ResponseWriter, r *http.Request)
 func (s *server) answerMeanings(ctx context.Context, iface string) []answerMeaning {
 	latest := map[string]answerMeaning{}
 	rows, err := s.db.Query(ctx, `
-		SELECT DISTINCT ON (as_status) as_status, action, evidence, recorded_at
-		  FROM iam_v2.pms_answer_confirmations
-		 WHERE tenant_id=$1::uuid AND site_id=$2::uuid AND pms_interface_id=$3::uuid
-		 ORDER BY as_status, recorded_at DESC, id DESC`, s.tenantID, s.siteID, iface)
+		SELECT DISTINCT ON (c.as_status) c.as_status, c.action, c.evidence, c.recorded_at, o.email
+		  FROM iam_v2.pms_answer_confirmations c
+		  LEFT JOIN public.operators o ON o.id = c.recorded_by
+		 WHERE c.tenant_id=$1::uuid AND c.site_id=$2::uuid AND c.pms_interface_id=$3::uuid
+		 ORDER BY c.as_status, c.recorded_at DESC, c.id DESC`, s.tenantID, s.siteID, iface)
 	if err == nil {
 		for rows.Next() {
 			var code, action, evidence string
 			var at time.Time
-			if rows.Scan(&code, &action, &evidence, &at) == nil {
+			var by *string
+			if rows.Scan(&code, &action, &evidence, &at, &by) == nil {
 				ev, t := evidence, at
-				latest[code] = answerMeaning{ASStatus: code, Confirmed: action == "CONFIRM", Evidence: &ev, RecordedAt: &t}
+				latest[code] = answerMeaning{ASStatus: code, Confirmed: action == "CONFIRM", Evidence: &ev, RecordedAt: &t, RecordedBy: by}
 			}
 		}
 		rows.Close()

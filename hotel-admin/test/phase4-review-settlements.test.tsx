@@ -107,7 +107,7 @@ describe("manual review", () => {
       ...DETAIL,
       attempts: [
         { attempt_no: 1, p_number: "41", rn: "101", g_number: "G5000", outcome: "NOT_SENT",
-          pa_as_status: null, sent_at: "2026-08-12T10:00:30Z", response_at: null },
+          pa_as_status: null, sent_at: "2026-08-12T10:00:30Z", response_at: null, not_sent_reason: "ROOM_CHANGED_ON_LINK" },
         { attempt_no: 2, p_number: "42", rn: "205", g_number: "G5000", outcome: "UNKNOWN",
           pa_as_status: null, sent_at: "2026-08-12T10:01:00Z", response_at: null },
       ],
@@ -127,6 +127,7 @@ describe("manual review", () => {
     expect(screen.getByText("101 / G5000")).toBeInTheDocument();
     expect(screen.getByText("205 / G5000")).toBeInTheDocument();
     expect(screen.getByText(/each attempt keeps the room it actually carried/i)).toBeInTheDocument();
+    expect(screen.getByTestId("not-sent-reason").textContent).toMatch(/moved room just before it was sent/i);
   });
 
   it("sends the decision with the version it was looking at, and never an actor", async () => {

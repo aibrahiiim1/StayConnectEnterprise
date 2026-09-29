@@ -457,6 +457,7 @@ function AnswerMeaningsCard({
                     {m.recorded_at && (
                       <div className="mt-1 text-muted-foreground">
                         {m.confirmed ? "Confirmed" : "Withdrawn"} {formatDate(m.recorded_at)}
+                        {m.recorded_by ? ` by ${m.recorded_by}` : ""}
                       </div>
                     )}
                     {m.evidence && <div className="mt-0.5 break-words text-muted-foreground">{m.evidence}</div>}

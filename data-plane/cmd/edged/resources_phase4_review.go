@@ -175,6 +175,8 @@ type reviewAttempt struct {
 	PAStatus   *string `json:"pa_as_status"`
 	SentAt     string  `json:"sent_at"`
 	ResponseAt *string `json:"response_at"`
+	// NotSentReason is pmsd's bounded reason when the attempt was NOT_SENT (e.g. ROOM_CHANGED).
+	NotSentReason *string `json:"not_sent_reason,omitempty"`
 }
 
 type reviewHistoryEntry struct {
@@ -241,7 +243,8 @@ func (s *server) getReviewPosting(w http.ResponseWriter, r *http.Request) {
 
 	attempts := []reviewAttempt{}
 	arows, err := s.db.Query(ctx, `SELECT attempt_no, p_number, rn, g_number, outcome, pa_as_status,
-		sent_at::text, response_at::text FROM iam_v2.posting_attempts
+		sent_at::text, response_at::text,
+		CASE WHEN outcome = 'NOT_SENT' THEN iam_v2.p4_attempt_not_sent_reason(id) END FROM iam_v2.posting_attempts
 		WHERE internal_posting_id=$1 AND tenant_id=$2 AND site_id=$3 ORDER BY attempt_no`,
 		id, s.tenantID, s.siteID)
 	if err == nil {
@@ -249,7 +252,7 @@ func (s *server) getReviewPosting(w http.ResponseWriter, r *http.Request) {
 		for arows.Next() {
 			var a reviewAttempt
 			if err := arows.Scan(&a.AttemptNo, &a.PNumber, &a.RN, &a.GNumber, &a.Outcome, &a.PAStatus,
-				&a.SentAt, &a.ResponseAt); err == nil {
+				&a.SentAt, &a.ResponseAt, &a.NotSentReason); err == nil {
 				attempts = append(attempts, a)
 			}
 		}

@@ -49,6 +49,19 @@ import { humanize, money } from "./format";
 const OUTCOME_TONE = (o: string) =>
   o === "UNKNOWN" ? "err" : o === "NOT_SENT" ? "neutral" : o === "ACKED" ? "ok" : "info";
 
+// Why the appliance wrote nothing (pmsd's reason on a NOT_SENT attempt).
+const NOT_SENT_REASON_WORDS: Record<string, string> = {
+  ROOM_CHANGED: "The guest had moved room before it was sent",
+  ROOM_CHANGED_ON_LINK: "The guest moved room just before it was sent",
+  RESERVATION_DEPARTED_ON_LINK: "The guest checked out just before it was sent",
+  STAY_NOT_POSTABLE: "The stay could no longer be charged",
+  RESERVATION_MISMATCH: "The reservation no longer matched",
+  INTERFACE_NOT_FRESH: "The PMS connection was not up to date",
+  LINK_NOT_CONNECTED: "The PMS connection was down",
+  LINK_RESYNCING: "The PMS connection was resynchronising",
+  LINK_BUSY: "Another charge was being sent",
+};
+
 const OUTCOME_WORDS: Record<string, string> = {
   SENDING: "Sending",
   ACKED: "Answered by the PMS",
@@ -322,6 +335,11 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
                               </TD>
                               <TD>
                                 <Badge tone={OUTCOME_TONE(a.outcome)}>{OUTCOME_WORDS[a.outcome] ?? a.outcome}</Badge>
+                                {a.outcome === "NOT_SENT" && a.not_sent_reason && (
+                                  <div className="mt-0.5 text-2xs text-muted-foreground" data-testid="not-sent-reason">
+                                    {NOT_SENT_REASON_WORDS[a.not_sent_reason] ?? a.not_sent_reason}
+                                  </div>
+                                )}
                               </TD>
                               <TD>{a.pa_as_status ?? "—"}</TD>
                               <TD className="whitespace-nowrap text-muted-foreground">{formatDate(a.sent_at)}</TD>
