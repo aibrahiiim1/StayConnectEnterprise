@@ -64,9 +64,9 @@ const health = {
 
 const revisions = [
   // deliberately newest-first, with the OLDER one published
-  { id: "r2", revision_no: 2, source_timezone: "Europe/Berlin", folio_identity_strategy: "UNIQUE_PER_STAY",
+  { id: "r2", revision_no: 2, source_timezone: "Europe/Berlin", posting_target_model: "UNSET",
     normalization_version: 1, config: { host: "pms.local", password: "[redacted]" }, published: false },
-  { id: "r1", revision_no: 1, source_timezone: "Europe/Berlin", folio_identity_strategy: "UNIQUE_PER_STAY",
+  { id: "r1", revision_no: 1, source_timezone: "Europe/Berlin", posting_target_model: "UNSET",
     normalization_version: 1, config: { host: "pms.local" }, published: true },
 ];
 

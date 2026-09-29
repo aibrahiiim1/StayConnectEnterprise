@@ -138,7 +138,7 @@ const SECTIONS: Section[] = [
       { href: "/guest-signin-attempts", label: "Guest sign-in attempts", icon: UserX, resource: "guest-signin-attempts", keywords: "attempt failed reason room typed credential mismatch why cannot connect client sign-in attempts hotel" },
       { href: "/checkout-grace",       label: "Grace Period",         icon: DoorOpen,  resource: "checkout-grace", keywords: "checkout grace after checkout late departure hotel" },
       { href: "/post-stay",            label: "Post-stay access",     icon: CalendarClock, resource: "post-stay-profiles", keywords: "after departure loyalty guests hotel" },
-      { href: "/room-charge",           label: "Room charge",   icon: BedSingle, resource: "pms-financial-onboarding", keywords: "charge to room folio posting fias onboarding approve currency hotel" },
+      { href: "/room-charge",           label: "Room charge",   icon: BedSingle, resource: "pms-financial-onboarding", keywords: "charge to room reservation folio posting fias onboarding approve currency answer meanings hotel" },
       { href: "/financial-health",      label: "Charge health", icon: HeartPulse, resource: "financial-review", keywords: "charges posting queue outbox money hotel" },
       { href: "/financial-review",      label: "Manual review", icon: ClipboardCheck, resource: "financial-review", keywords: "charges failed posting decide hotel" },
       { href: "/financial-settlements", label: "Settlements",   icon: Receipt, resource: "financial-review", keywords: "charges payment room charge card hotel" },

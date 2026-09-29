@@ -256,8 +256,8 @@ export function AddConnectionWizard({
                         <li>Read-only — OneGate never writes to the PMS.</li>
                         <li>No credential required — the link needs none.</li>
                         <li>
-                          Charging a room through the PMS stays off until the PMS&rsquo;s folio behaviour has
-                          been determined.
+                          Charging a room through the PMS stays off until a site administrator approves the
+                          connection for room charge under Hotel → Room charge.
                         </li>
                       </ul>
                     </Callout>

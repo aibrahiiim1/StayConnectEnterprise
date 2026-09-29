@@ -143,7 +143,7 @@ const graceCfg = {
   config_version: 7,
 };
 
-test("stays list shows the stay and its occupants/folios on demand", async ({ page }) => {
+test("stays list shows the stay and its occupants and room charge state on demand", async ({ page }) => {
   const mutations: Mutations = [];
   await installBackend(page, {
     stays: [stay],
@@ -153,7 +153,8 @@ test("stays list shows the stay and its occupants/folios on demand", async ({ pa
         { display_name: "Byron, Ada", is_primary: true },
         { display_name: "Babbage, Chas", is_primary: false },
       ],
-      folios: [{ external_folio_id: "F900", folio_kind: "GUEST", status: "OPEN", is_default_posting_target: true }],
+      posting_block_reason: "NOT_IN_HOUSE", posting_permission_source: "PMS_FEED",
+      posting_blocks: [],
     },
     mutations,
   });
@@ -164,7 +165,7 @@ test("stays list shows the stay and its occupants/folios on demand", async ({ pa
   await expect(page.getByText("R900")).toBeVisible();
   await page.getByRole("button", { name: "View" }).click();
   await expect(page.getByText("Byron, Ada")).toBeVisible();
-  await expect(page.getByText("F900", { exact: false })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Room charge" }).getByText("The guest is not in house")).toBeVisible();
   // a read-only page issues no mutations at all
   expect(mutations.filter((m) => m.method !== "GET")).toHaveLength(0);
 });

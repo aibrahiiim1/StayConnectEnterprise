@@ -57,11 +57,11 @@ const QUEUE = {
 const DETAIL = {
   posting: QUEUE.queue[0],
   pinned_evidence: {
-    settlement_id: "s1", purchase_id: "pu1", stay_id: "st1", folio_id: "f1",
-    connector_kind: "protel-fias", folio_identity_strategy: "UNIQUE_PER_STAY",
+    settlement_id: "s1", purchase_id: "pu1", stay_id: "st1", g_number: "G5000",
+    connector_kind: "protel-fias", posting_target_model: "RESERVATION",
     interface_lifecycle_state: "ACTIVE", settlement_status: "REQUIRED", purchase_state: "AWAITING_SETTLEMENT",
   },
-  attempts: [{ attempt_no: 1, p_number: "42", rn: "101", g_number: "7", outcome: "UNKNOWN",
+  attempts: [{ attempt_no: 1, p_number: "42", rn: "101", g_number: "G5000", outcome: "UNKNOWN",
     pa_as_status: null, sent_at: "2026-08-12T10:01:00Z", response_at: null }],
   review: { history: [], version: 0, terminal_action: null, escalation_count: 0,
     retry_authorized_attempt_no: null, retry_authorization_consumed: false },
@@ -98,6 +98,35 @@ describe("manual review", () => {
     expect(await screen.findByText(/nobody knows whether the folio was charged/i)).toBeInTheDocument();
     expect(screen.getByText("protel-fias (ACTIVE)")).toBeInTheDocument();
     expect(screen.getByText(/programmatic pms reversal is capability=false/i)).toBeInTheDocument();
+  });
+
+  it("shows the pinned reservation (G#) and posting target, and a NOT_SENT attempt as not sent", async () => {
+    // Phase-0 Amendment A1: attempt 1 was refused by pmsd before any byte was written (the guest had moved to
+    // 205), attempt 2 carried the new room with the same reservation. Each keeps the room it actually carried.
+    const detail = {
+      ...DETAIL,
+      attempts: [
+        { attempt_no: 1, p_number: "41", rn: "101", g_number: "G5000", outcome: "NOT_SENT",
+          pa_as_status: null, sent_at: "2026-08-12T10:00:30Z", response_at: null },
+        { attempt_no: 2, p_number: "42", rn: "205", g_number: "G5000", outcome: "UNKNOWN",
+          pa_as_status: null, sent_at: "2026-08-12T10:01:00Z", response_at: null },
+      ],
+      diagnostics: { ...DETAIL.diagnostics, attempt_count: 2 },
+    };
+    route({ "/financial-review/queue": QUEUE, "/financial-review/actions": ACTIONS,
+      "/financial-review/postings/p1": detail });
+    render(<ManualReviewView />);
+    await userEvent.click(await screen.findByRole("button", { name: /^review$/i }));
+    expect(await screen.findByText("Reservation (G#)")).toBeInTheDocument();
+    expect(screen.getByText("G5000")).toBeInTheDocument();
+    expect(screen.getByText("Posting target")).toBeInTheDocument();
+    expect(screen.getByText("Reservation (room + reservation number)")).toBeInTheDocument();
+    expect(screen.queryByText(/folio identity/i)).not.toBeInTheDocument();
+    expect(screen.getByText("Not sent (nothing reached the PMS)")).toBeInTheDocument();
+    expect(screen.queryByText("FAILED")).not.toBeInTheDocument();
+    expect(screen.getByText("101 / G5000")).toBeInTheDocument();
+    expect(screen.getByText("205 / G5000")).toBeInTheDocument();
+    expect(screen.getByText(/each attempt keeps the room it actually carried/i)).toBeInTheDocument();
   });
 
   it("sends the decision with the version it was looking at, and never an actor", async () => {

@@ -24,13 +24,13 @@ const IFACE = {
 
 const REVISIONS = [
   {
-    id: "r2", revision_no: 2, source_timezone: "Europe/Berlin", folio_identity_strategy: "UNIQUE_PER_STAY",
+    id: "r2", revision_no: 2, source_timezone: "Europe/Berlin", posting_target_model: "UNSET",
     normalization_version: 1, published: false,
     // as edged returns it: already redacted, so a browser test cannot accidentally assert on a real secret
     config: { host: "pms.local", port: 5011, password: "[redacted]" },
   },
   {
-    id: "r1", revision_no: 1, source_timezone: "Europe/Berlin", folio_identity_strategy: "UNIQUE_PER_STAY",
+    id: "r1", revision_no: 1, source_timezone: "Europe/Berlin", posting_target_model: "UNSET",
     normalization_version: 1, published: true, config: { host: "pms.local", port: 5010 },
   },
 ];
