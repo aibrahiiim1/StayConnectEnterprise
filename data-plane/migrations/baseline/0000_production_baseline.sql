@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0099, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0100, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -2846,6 +2846,63 @@ END $$;
 
 
 --
+-- Name: p4_admin_posting_block(uuid, uuid, uuid, text, text, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_admin_posting_block(p_tenant uuid, p_site uuid, p_stay uuid, p_action text, p_reason text, p_operator uuid) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'public', 'pg_temp'
+    AS $$
+DECLARE st record; v_status text; n integer;
+BEGIN
+  IF p_action NOT IN ('SET','CLEAR') THEN
+    RAISE EXCEPTION 'ADMIN_BLOCK_ACTION: SET or CLEAR' USING ERRCODE = 'check_violation';
+  END IF;
+  IF length(btrim(coalesce(p_reason,''))) < 4 THEN
+    RAISE EXCEPTION 'ADMIN_BLOCK_REASON: a reason is required' USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT status INTO v_status FROM public.operators WHERE id = p_operator AND tenant_id = p_tenant;
+  IF v_status IS DISTINCT FROM 'active' THEN
+    RAISE EXCEPTION 'ADMIN_BLOCK_ACTOR: an active operator of this tenant is required' USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT id INTO st FROM iam_v2.stays WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_stay FOR UPDATE;
+  IF st.id IS NULL THEN RAISE EXCEPTION 'ADMIN_BLOCK_STAY: no such stay' USING ERRCODE = 'no_data_found'; END IF;
+  IF p_action = 'SET' THEN
+    PERFORM iam_v2.p4_place_stay_posting_block(p_stay, 'ADMIN_BLOCK', 'OPERATOR', NULL, NULL, p_operator, btrim(p_reason));
+    RETURN 'SET';
+  END IF;
+  UPDATE iam_v2.stay_posting_blocks
+     SET cleared_at = now(), cleared_by_source = 'OPERATOR', cleared_by = p_operator, cleared_reason = btrim(p_reason)
+   WHERE stay_id = p_stay AND reason = 'ADMIN_BLOCK' AND cleared_at IS NULL;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  PERFORM iam_v2.p4_refresh_stay_posting_permission(p_stay);
+  RETURN CASE WHEN n > 0 THEN 'CLEARED' ELSE 'NOT_BLOCKED' END;
+END $$;
+
+
+--
+-- Name: p4_answer_effect(uuid, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_answer_effect(p_iface uuid, p_as text) RETURNS text
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_action text;
+BEGIN
+  IF p_as = 'OK' THEN RETURN 'POSTED'; END IF;
+  IF p_as IS NULL OR p_as NOT IN ('NP','NG','NR','NA','RY') THEN RETURN 'UNPROVEN'; END IF;
+  SELECT action INTO v_action FROM iam_v2.pms_answer_confirmations
+   WHERE pms_interface_id = p_iface AND as_status = p_as ORDER BY recorded_at DESC, id DESC LIMIT 1;
+  IF v_action IS DISTINCT FROM 'CONFIRM' THEN RETURN 'UNPROVEN'; END IF;
+  RETURN CASE p_as WHEN 'NP' THEN 'NOT_POSTED_NO_POST'
+                   WHEN 'NG' THEN 'NOT_POSTED_TARGET_INVALID'
+                   WHEN 'NR' THEN 'NOT_POSTED_TARGET_INVALID'
+                   ELSE 'NOT_POSTED_NO_STAY_EFFECT' END;
+END $$;
+
+
+--
 -- Name: p4_append_only_refuse(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -2988,6 +3045,19 @@ END $$;
 
 
 --
+-- Name: p4_attempt_not_sent_reason(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_attempt_not_sent_reason(p_attempt uuid) RETURNS text
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT e.detail->>'reason' FROM iam_v2.posting_attempt_events e
+   WHERE e.posting_attempt_id = p_attempt AND e.event_type = 'NOT_SENT' ORDER BY e.created_at LIMIT 1;
+$$;
+
+
+--
 -- Name: p4_attempt_retry_gate(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -3031,6 +3101,25 @@ BEGIN
     END IF;
   END IF;
 
+  RETURN NEW;
+END $$;
+
+
+--
+-- Name: p4_attempt_targets_posting_reservation(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_attempt_targets_posting_reservation() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_g text;
+BEGIN
+  SELECT g_number INTO v_g FROM iam_v2.pms_postings WHERE id = NEW.internal_posting_id;
+  IF v_g IS NULL OR NEW.g_number IS DISTINCT FROM v_g THEN
+    RAISE EXCEPTION 'ATTEMPT_RESERVATION_MISMATCH: an attempt carries its posting''s reservation number and no other'
+      USING ERRCODE = 'check_violation';
+  END IF;
   RETURN NEW;
 END $$;
 
@@ -3166,6 +3255,23 @@ END $$;
 
 
 --
+-- Name: p4_clear_posting_unresolved(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_clear_posting_unresolved(p_posting uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_stay uuid;
+BEGIN
+  SELECT stay_id INTO v_stay FROM iam_v2.pms_postings WHERE id = p_posting;
+  UPDATE iam_v2.stay_posting_blocks SET cleared_at = now(), cleared_by_source = 'POSTING_LEDGER'
+   WHERE posting_id = p_posting AND reason = 'POSTING_UNRESOLVED' AND cleared_at IS NULL;
+  IF v_stay IS NOT NULL THEN PERFORM iam_v2.p4_refresh_stay_posting_permission(v_stay); END IF;
+END $$;
+
+
+--
 -- Name: p4_consume_retry_authorization(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -3194,7 +3300,7 @@ CREATE FUNCTION iam_v2.p4_create_room_charge_posting(p_tenant uuid, p_site uuid,
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
-DECLARE se record; pu record; ac record; i record; rdy record; v_folio uuid; v_posting uuid;
+DECLARE se record; pu record; ac record; i record; rdy record; st record; v_posting uuid;
 BEGIN
   SELECT * INTO se FROM iam_v2.settlements WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_settlement FOR UPDATE;
   IF se.id IS NULL OR se.method <> 'PMS_POSTING' OR se.status <> 'REQUIRED' THEN
@@ -3213,16 +3319,15 @@ BEGIN
     RAISE EXCEPTION 'ROOM_CHARGE_NOT_READY: %', rdy.reason USING ERRCODE = 'check_violation';
   END IF;
   SELECT * INTO i FROM iam_v2.pms_interfaces WHERE id = pu.pms_interface_id;
-  SELECT sf.folio_id INTO v_folio FROM iam_v2.stay_folios sf
-   WHERE sf.tenant_id = p_tenant AND sf.site_id = p_site AND sf.pms_interface_id = pu.pms_interface_id
-     AND sf.stay_id = pu.stay_id AND sf.is_default_posting_target;
-  IF v_folio IS NULL THEN
-    RAISE EXCEPTION 'ROOM_CHARGE_NO_FOLIO: the stay has no default posting folio' USING ERRCODE = 'check_violation';
+  SELECT external_reservation_id INTO st FROM iam_v2.stays
+   WHERE tenant_id = p_tenant AND site_id = p_site AND pms_interface_id = pu.pms_interface_id AND id = pu.stay_id;
+  IF st.external_reservation_id IS NULL OR btrim(st.external_reservation_id) = '' THEN
+    RAISE EXCEPTION 'ROOM_CHARGE_NO_RESERVATION: the stay has no reservation number' USING ERRCODE = 'check_violation';
   END IF;
   INSERT INTO iam_v2.pms_postings
-    (tenant_id, site_id, pms_interface_id, settlement_id, purchase_id, stay_id, folio_id,
+    (tenant_id, site_id, pms_interface_id, settlement_id, purchase_id, stay_id, g_number,
      posting_interface_revision_id, posting_type, amount_minor, currency, currency_exponent, idempotency_key)
-  VALUES (p_tenant, p_site, pu.pms_interface_id, se.id, pu.id, pu.stay_id, v_folio,
+  VALUES (p_tenant, p_site, pu.pms_interface_id, se.id, pu.id, pu.stay_id, st.external_reservation_id,
           i.current_revision_id, 'CHARGE', pu.amount_minor, pu.currency, pu.currency_exponent,
           'room-charge:' || se.id::text)
   RETURNING id INTO v_posting;
@@ -3734,6 +3839,19 @@ END $$;
 
 
 --
+-- Name: p4_lock_posting_stay(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_lock_posting_stay(p_posting uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+BEGIN
+  PERFORM 1 FROM iam_v2.stays s JOIN iam_v2.pms_postings p ON p.stay_id = s.id WHERE p.id = p_posting FOR SHARE OF s;
+END $$;
+
+
+--
 -- Name: p4_mark_purchase_granted(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -4000,6 +4118,54 @@ END $$;
 
 
 --
+-- Name: p4_place_stay_posting_block(uuid, text, text, uuid, text, uuid, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_place_stay_posting_block(p_stay uuid, p_reason text, p_source text, p_posting uuid, p_as text, p_actor uuid, p_note text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE st record;
+BEGIN
+  SELECT tenant_id, site_id, pms_interface_id INTO st FROM iam_v2.stays WHERE id = p_stay;
+  IF st.tenant_id IS NULL THEN RETURN; END IF;
+  INSERT INTO iam_v2.stay_posting_blocks
+    (tenant_id, site_id, pms_interface_id, stay_id, reason, source, posting_id, pa_as_status, note, created_by)
+  VALUES (st.tenant_id, st.site_id, st.pms_interface_id, p_stay, p_reason, p_source, p_posting, p_as, p_note, p_actor)
+  ON CONFLICT DO NOTHING;
+  PERFORM iam_v2.p4_refresh_stay_posting_permission(p_stay);
+END $$;
+
+
+--
+-- Name: p4_posting_abort_before_send(uuid, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_posting_abort_before_send(p_posting uuid, p_reason text) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE p record; se record;
+BEGIN
+  SELECT * INTO p FROM iam_v2.pms_postings WHERE id = p_posting AND posting_type = 'CHARGE';
+  IF p.id IS NULL THEN RAISE EXCEPTION 'POSTING_UNKNOWN' USING ERRCODE = 'no_data_found'; END IF;
+  -- Only a charge that has provably never been transmitted: no attempt, or every attempt NOT_SENT.
+  IF EXISTS (SELECT 1 FROM iam_v2.posting_attempts WHERE internal_posting_id = p.id AND outcome <> 'NOT_SENT') THEN
+    RAISE EXCEPTION 'ABORT_AFTER_TRANSMISSION: a charge that may have reached the PMS is never aborted'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT * INTO se FROM iam_v2.settlements WHERE id = p.settlement_id FOR UPDATE;
+  INSERT INTO iam_v2.posting_presend_aborts (tenant_id, site_id, posting_id, reason)
+  VALUES (p.tenant_id, p.site_id, p.id, p_reason) ON CONFLICT (posting_id) DO NOTHING;
+  UPDATE iam_v2.posting_outbox SET state = 'DONE' WHERE posting_id = p.id AND state IN ('QUEUED','IN_FLIGHT');
+  IF se.status = 'IN_PROGRESS' THEN
+    UPDATE iam_v2.settlements SET status = 'FAILED' WHERE id = se.id;
+  END IF;
+  RETURN 'ABORTED';
+END $$;
+
+
+--
 -- Name: p4_posting_command_authorised(uuid, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -4007,7 +4173,7 @@ CREATE FUNCTION iam_v2.p4_posting_command_authorised(p_iface uuid, p_pnum text, 
     LANGUAGE plpgsql STABLE SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $_$
-DECLARE a record; n int; v_outbox text; v_type text; rdy record;
+DECLARE a record; n int; v_outbox text; p record; st record; rdy record; v_block text;
 BEGIN
   IF p_iface IS NULL OR p_pnum IS NULL OR p_pnum !~ '^[0-9]{1,18}$' OR p_sha256 IS NULL OR p_sha256 !~ '^[0-9a-f]{64}$' THEN
     RETURN 'COMMAND_MALFORMED';
@@ -4019,12 +4185,23 @@ BEGIN
   IF a.outcome <> 'SENDING' THEN RETURN 'ATTEMPT_NOT_SENDING'; END IF;
   IF a.ps_sha256 IS NULL OR a.ps_sha256 <> p_sha256 THEN RETURN 'COMMAND_BYTES_NOT_AUTHORISED'; END IF;
   IF a.sent_at < now() - interval '2 minutes' THEN RETURN 'ATTEMPT_TOO_OLD'; END IF;
-  SELECT p.posting_type INTO v_type FROM iam_v2.pms_postings p WHERE p.id = a.internal_posting_id;
-  IF v_type IS DISTINCT FROM 'CHARGE' THEN RETURN 'NOT_A_CHARGE'; END IF;
+  SELECT * INTO p FROM iam_v2.pms_postings WHERE id = a.internal_posting_id;
+  IF p.posting_type IS DISTINCT FROM 'CHARGE' THEN RETURN 'NOT_A_CHARGE'; END IF;
   SELECT o.state INTO v_outbox FROM iam_v2.posting_outbox o WHERE o.posting_id = a.internal_posting_id;
   IF v_outbox IS DISTINCT FROM 'IN_FLIGHT' THEN RETURN 'POSTING_NOT_IN_FLIGHT'; END IF;
   SELECT * INTO rdy FROM iam_v2.pms_interface_financially_ready(a.tenant_id, a.site_id, p_iface);
   IF NOT COALESCE(rdy.ready, false) THEN RETURN 'INTERFACE_NOT_FINANCIALLY_READY'; END IF;
+  -- The reservation the charge targets, as the database knows it NOW (Amendment A1, rule 7).
+  SELECT status, posting_allowed, external_reservation_id, normalized_room_number INTO st
+    FROM iam_v2.stays WHERE id = p.stay_id;
+  IF st.external_reservation_id IS NULL OR st.external_reservation_id IS DISTINCT FROM a.g_number
+     OR p.g_number IS DISTINCT FROM a.g_number THEN
+    RETURN 'RESERVATION_MISMATCH';
+  END IF;
+  IF NOT COALESCE(iam_v2.p4_stay_postable_for(p.stay_id, p.id), false) THEN RETURN 'STAY_NOT_POSTABLE'; END IF;
+  IF st.normalized_room_number IS NULL OR st.normalized_room_number IS DISTINCT FROM a.rn THEN RETURN 'ROOM_CHANGED'; END IF;
+  v_block := iam_v2.p4_interface_freshness_block(a.tenant_id, a.site_id, p_iface, p.posting_interface_revision_id, now());
+  IF v_block IS NOT NULL THEN RETURN 'INTERFACE_NOT_FRESH'; END IF;
   RETURN 'AUTHORISED';
 END $_$;
 
@@ -4163,6 +4340,7 @@ BEGIN
   IF rs.terminal_action IS NULL THEN RETURN 'NO_DECISION'; END IF;
   SELECT * INTO se FROM iam_v2.settlements WHERE id = p.settlement_id FOR UPDATE;
   IF rs.terminal_action = 'CONFIRM_NOT_POSTED_RETRY' THEN
+    -- Still unresolved: the POSTING_UNRESOLVED block stays until the authorised attempt concludes.
     UPDATE iam_v2.posting_outbox SET state = 'QUEUED'
      WHERE posting_id = p.id AND state = 'HELD_RECOVERY' AND rs.retry_authorized_attempt_no IS NOT NULL
        AND rs.retry_authorization_consumed_at IS NULL;
@@ -4174,6 +4352,7 @@ BEGIN
       UPDATE iam_v2.settlements SET status = 'SETTLED' WHERE id = se.id;
     END IF;
     IF (SELECT status FROM iam_v2.settlements WHERE id = se.id) = 'SETTLED' THEN
+      PERFORM iam_v2.p4_clear_posting_unresolved(p.id);
       SELECT entitlement_id INTO v_ent FROM iam_v2.p4_grant_paid_entitlement(p.tenant_id, p.site_id, se.id);
       RETURN 'GRANTED';
     END IF;
@@ -4183,6 +4362,7 @@ BEGIN
     IF se.status IN ('IN_PROGRESS','MANUAL_REVIEW') THEN
       UPDATE iam_v2.settlements SET status = 'FAILED' WHERE id = se.id;
     END IF;
+    PERFORM iam_v2.p4_clear_posting_unresolved(p.id);
     RETURN 'FAILED';
   END IF;
   RETURN 'NO_EFFECT';
@@ -4197,7 +4377,7 @@ CREATE FUNCTION iam_v2.p4_posting_settlement_outcome(p_posting uuid) RETURNS tex
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
-DECLARE p record; se record; a record; v_target text; v_ent uuid;
+DECLARE p record; se record; a record; v_target text; v_effect text; v_ent uuid;
 BEGIN
   SELECT * INTO p FROM iam_v2.pms_postings WHERE id = p_posting AND posting_type = 'CHARGE';
   IF p.id IS NULL THEN RAISE EXCEPTION 'POSTING_UNKNOWN' USING ERRCODE = 'no_data_found'; END IF;
@@ -4205,11 +4385,14 @@ BEGIN
   IF se.method <> 'PMS_POSTING' THEN RETURN 'NOT_A_ROOM_CHARGE'; END IF;
   SELECT * INTO a FROM iam_v2.posting_attempts WHERE internal_posting_id = p.id ORDER BY attempt_no DESC LIMIT 1;
   IF a.id IS NULL THEN RETURN 'NO_ATTEMPT'; END IF;
-  IF a.outcome = 'ACKED' AND a.pa_as_status = 'OK' THEN
+  IF a.outcome = 'ACKED' THEN
+    v_effect := iam_v2.p4_answer_effect(p.pms_interface_id, a.pa_as_status);
+  END IF;
+  IF a.outcome = 'ACKED' AND v_effect = 'POSTED' THEN
     v_target := 'SETTLED';
-  ELSIF a.outcome = 'ACKED' THEN
+  ELSIF a.outcome = 'ACKED' AND v_effect LIKE 'NOT_POSTED_%' THEN
     v_target := 'FAILED';
-  ELSIF a.outcome = 'UNKNOWN' THEN
+  ELSIF a.outcome = 'UNKNOWN' OR (a.outcome = 'ACKED' AND v_effect = 'UNPROVEN') THEN
     v_target := 'MANUAL_REVIEW';
   ELSE
     RETURN 'NOT_CONCLUSIVE';
@@ -4222,6 +4405,18 @@ BEGIN
     END IF;
   ELSE
     RAISE EXCEPTION 'POSTING_SETTLEMENT_STATE: settlement is %', se.status USING ERRCODE = 'check_violation';
+  END IF;
+  -- The stay effect of the answer (contract section 9a rule 9).
+  IF v_target = 'MANUAL_REVIEW' THEN
+    PERFORM iam_v2.p4_place_stay_posting_block(p.stay_id, 'POSTING_UNRESOLVED', 'POSTING_LEDGER', p.id, NULL, NULL, NULL);
+    RETURN v_target;
+  END IF;
+  PERFORM iam_v2.p4_clear_posting_unresolved(p.id);
+  IF v_effect = 'NOT_POSTED_NO_POST' THEN
+    PERFORM iam_v2.p4_place_stay_posting_block(p.stay_id, 'PMS_NO_POST', 'PMS_ANSWER', NULL, a.pa_as_status, NULL, NULL);
+  ELSIF v_effect = 'NOT_POSTED_TARGET_INVALID' THEN
+    PERFORM iam_v2.p4_place_stay_posting_block(p.stay_id, 'PMS_DATA_SUSPECT', 'PMS_ANSWER', NULL, a.pa_as_status, NULL, NULL);
+    PERFORM iam_v2.request_full_resync(p.tenant_id, p.site_id, p.pms_interface_id, 'PMS_ANSWER_TARGET_INVALID');
   END IF;
   IF v_target = 'SETTLED' THEN
     SELECT entitlement_id INTO v_ent FROM iam_v2.p4_grant_paid_entitlement(p.tenant_id, p.site_id, se.id);
@@ -4554,6 +4749,44 @@ BEGIN
       USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
+END $$;
+
+
+--
+-- Name: p4_refresh_stay_posting_permission(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_refresh_stay_posting_permission(p_stay uuid) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE st record; b record; v_allowed boolean; v_reason text; v_source text;
+BEGIN
+  SELECT id, status, external_reservation_id, posting_allowed, posting_block_reason, posting_permission_source
+    INTO st FROM iam_v2.stays WHERE id = p_stay;
+  IF st.id IS NULL THEN RETURN false; END IF;
+  SELECT reason, source INTO b FROM iam_v2.stay_posting_blocks
+   WHERE stay_id = p_stay AND cleared_at IS NULL
+   ORDER BY CASE reason WHEN 'POSTING_UNRESOLVED' THEN 1 WHEN 'PMS_NO_POST' THEN 2
+                        WHEN 'PMS_DATA_SUSPECT' THEN 3 ELSE 4 END, created_at
+   LIMIT 1;
+  IF st.status <> 'IN_HOUSE' THEN
+    v_allowed := false; v_reason := 'NOT_IN_HOUSE'; v_source := 'PMS_FEED';
+  ELSIF st.external_reservation_id IS NULL OR btrim(st.external_reservation_id) = '' THEN
+    v_allowed := false; v_reason := 'NO_RESERVATION'; v_source := 'PMS_FEED';
+  ELSIF b.reason IS NOT NULL THEN
+    v_allowed := false; v_reason := b.reason; v_source := b.source;
+  ELSE
+    v_allowed := true; v_reason := NULL; v_source := 'PMS_FEED';
+  END IF;
+  IF st.posting_allowed IS DISTINCT FROM v_allowed OR st.posting_block_reason IS DISTINCT FROM v_reason
+     OR st.posting_permission_source IS DISTINCT FROM v_source THEN
+    UPDATE iam_v2.stays
+       SET posting_allowed = v_allowed, posting_block_reason = v_reason,
+           posting_permission_source = v_source, posting_checked_at = now()
+     WHERE id = p_stay;
+  END IF;
+  RETURN v_allowed;
 END $$;
 
 
@@ -4983,6 +5216,61 @@ BEGIN
   END IF;
   RETURN NEW;
 END $$;
+
+
+--
+-- Name: p4_stay_feed_confirms(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_stay_feed_confirms(p_stay uuid) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE st record; n integer := 0;
+BEGIN
+  SELECT id, status, normalized_room_number, occupancy_evidence_at, occupancy_clock_suspect
+    INTO st FROM iam_v2.stays WHERE id = p_stay;
+  IF st.id IS NULL THEN RETURN 0; END IF;
+  IF st.status = 'IN_HOUSE' AND st.normalized_room_number IS NOT NULL AND btrim(st.normalized_room_number) <> ''
+     AND st.occupancy_evidence_at IS NOT NULL AND st.occupancy_clock_suspect IS NOT TRUE THEN
+    UPDATE iam_v2.stay_posting_blocks
+       SET cleared_at = now(), cleared_by_source = 'PMS_FEED'
+     WHERE stay_id = p_stay AND reason = 'PMS_DATA_SUSPECT' AND cleared_at IS NULL
+       AND created_at < st.occupancy_evidence_at;
+    GET DIAGNOSTICS n = ROW_COUNT;
+  END IF;
+  RETURN n;
+END $$;
+
+
+--
+-- Name: p4_stay_postable_for(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_stay_postable_for(p_stay uuid, p_posting uuid) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT s.status = 'IN_HOUSE' AND s.external_reservation_id IS NOT NULL AND btrim(s.external_reservation_id) <> ''
+     AND NOT EXISTS (SELECT 1 FROM iam_v2.stay_posting_blocks b
+                      WHERE b.stay_id = s.id AND b.cleared_at IS NULL
+                        AND NOT (b.reason = 'POSTING_UNRESOLVED' AND p_posting IS NOT NULL AND b.posting_id = p_posting))
+    FROM iam_v2.stays s WHERE s.id = p_stay;
+$$;
+
+
+--
+-- Name: p4_stay_room_charge_open(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_stay_room_charge_open(p_stay uuid) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT EXISTS (SELECT 1 FROM iam_v2.pms_postings p JOIN iam_v2.settlements se ON se.id = p.settlement_id
+                  WHERE p.stay_id = p_stay AND p.posting_type = 'CHARGE'
+                    AND se.status IN ('REQUIRED','IN_PROGRESS','MANUAL_REVIEW'));
+$$;
 
 
 --
@@ -6420,6 +6708,44 @@ $$;
 
 
 --
+-- Name: pms_answer_confirmation_record(uuid, uuid, uuid, text, text, text, text, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_answer_confirmation_record(p_tenant uuid, p_site uuid, p_iface uuid, p_as text, p_action text, p_evidence text, p_reason text, p_operator uuid) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'public', 'pg_temp'
+    AS $$
+DECLARE v_status text; v_id uuid;
+BEGIN
+  IF p_as NOT IN ('NP','NG','NR','NA','RY') THEN
+    RAISE EXCEPTION 'ANSWER_CODE: only NP, NG, NR, NA and RY can be confirmed as definitely not posted' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_action NOT IN ('CONFIRM','WITHDRAW') THEN
+    RAISE EXCEPTION 'ANSWER_ACTION: CONFIRM or WITHDRAW' USING ERRCODE = 'check_violation';
+  END IF;
+  IF length(btrim(coalesce(p_evidence,''))) < 20 THEN
+    RAISE EXCEPTION 'ANSWER_EVIDENCE: state the vendor confirmation (who, when, document reference)' USING ERRCODE = 'check_violation';
+  END IF;
+  IF length(btrim(coalesce(p_reason,''))) < 4 THEN
+    RAISE EXCEPTION 'ANSWER_REASON: a reason is required' USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT status INTO v_status FROM public.operators WHERE id = p_operator AND tenant_id = p_tenant;
+  IF v_status IS DISTINCT FROM 'active' THEN
+    RAISE EXCEPTION 'ANSWER_ACTOR: an active operator of this tenant is required' USING ERRCODE = 'check_violation';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM iam_v2.pms_interfaces WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_iface
+                  AND connector_kind = 'protel-fias') THEN
+    RAISE EXCEPTION 'ANSWER_INTERFACE: a FIAS interface of this site is required' USING ERRCODE = 'check_violation';
+  END IF;
+  INSERT INTO iam_v2.pms_answer_confirmations
+    (tenant_id, site_id, pms_interface_id, as_status, action, evidence, reason, recorded_by)
+  VALUES (p_tenant, p_site, p_iface, p_as, p_action, btrim(p_evidence), btrim(p_reason), p_operator)
+  RETURNING id INTO v_id;
+  RETURN v_id;
+END $$;
+
+
+--
 -- Name: pms_case_resolutions_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -6652,20 +6978,20 @@ $$;
 -- Name: pms_interface_financial_onboard(uuid, uuid, uuid, uuid, text, text, smallint, text, text, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
-CREATE FUNCTION iam_v2.pms_interface_financial_onboard(p_tenant uuid, p_site uuid, p_iface uuid, p_expected_revision uuid, p_strategy text, p_currency text, p_exponent smallint, p_attestation text, p_reason text, p_operator uuid) RETURNS uuid
+CREATE FUNCTION iam_v2.pms_interface_financial_onboard(p_tenant uuid, p_site uuid, p_iface uuid, p_expected_revision uuid, p_target_model text, p_currency text, p_exponent smallint, p_attestation text, p_reason text, p_operator uuid) RETURNS uuid
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'iam_v2', 'public', 'pg_temp'
     AS $_$
 DECLARE v_current uuid; v_kind text; v_new uuid; v_status text;
 BEGIN
-  IF p_strategy NOT IN ('GLOBALLY_UNIQUE','UNIQUE_PER_STAY','REUSED_SEQUENTIAL') THEN
-    RAISE EXCEPTION 'ONBOARDING_STRATEGY: a concrete folio identity strategy is required' USING ERRCODE = 'check_violation';
+  IF p_target_model IS DISTINCT FROM 'RESERVATION' THEN
+    RAISE EXCEPTION 'ONBOARDING_TARGET: the posting target must be RESERVATION (RN + G#)' USING ERRCODE = 'check_violation';
   END IF;
   IF p_currency IS NULL OR p_currency !~ '^[A-Z]{3}$' OR p_exponent IS NULL OR p_exponent NOT BETWEEN 0 AND 4 THEN
     RAISE EXCEPTION 'ONBOARDING_CURRENCY: a three-letter currency and an exponent 0..4 are required' USING ERRCODE = 'check_violation';
   END IF;
   IF length(btrim(coalesce(p_attestation,''))) < 20 THEN
-    RAISE EXCEPTION 'ONBOARDING_ATTESTATION: state what was observed about how this PMS identifies folios' USING ERRCODE = 'check_violation';
+    RAISE EXCEPTION 'ONBOARDING_ATTESTATION: state the vendor confirmation that reservation numbers are unique and never reused' USING ERRCODE = 'check_violation';
   END IF;
   IF length(btrim(coalesce(p_reason,''))) < 4 THEN
     RAISE EXCEPTION 'ONBOARDING_REASON: a reason is required' USING ERRCODE = 'check_violation';
@@ -6689,20 +7015,20 @@ BEGIN
     RAISE EXCEPTION 'ONBOARDING_EXPONENT: FIAS transmits amounts with exponent 2' USING ERRCODE = 'check_violation';
   END IF;
   INSERT INTO iam_v2.pms_interface_revisions
-    (tenant_id, site_id, pms_interface_id, revision_no, source_timezone, folio_identity_strategy, config,
+    (tenant_id, site_id, pms_interface_id, revision_no, source_timezone, posting_target_model, config,
      normalization_version, source_fingerprint, financial_base_currency, financial_base_currency_exponent)
   SELECT r.tenant_id, r.site_id, r.pms_interface_id,
          (SELECT COALESCE(MAX(x.revision_no),0)+1 FROM iam_v2.pms_interface_revisions x
            WHERE x.tenant_id = r.tenant_id AND x.site_id = r.site_id AND x.pms_interface_id = r.pms_interface_id),
-         r.source_timezone, p_strategy, r.config, r.normalization_version, r.source_fingerprint, p_currency, p_exponent
+         r.source_timezone, 'RESERVATION', r.config, r.normalization_version, r.source_fingerprint, p_currency, p_exponent
     FROM iam_v2.pms_interface_revisions r WHERE r.id = v_current
   RETURNING id INTO v_new;
   UPDATE iam_v2.pms_interfaces SET current_revision_id = v_new
    WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_iface;
   INSERT INTO iam_v2.pms_financial_onboardings
-    (tenant_id, site_id, pms_interface_id, revision_id, previous_revision_id, folio_identity_strategy, currency,
+    (tenant_id, site_id, pms_interface_id, revision_id, previous_revision_id, posting_target_model, currency,
      currency_exponent, attestation, reason, approved_by)
-  VALUES (p_tenant, p_site, p_iface, v_new, v_current, p_strategy, p_currency, p_exponent, btrim(p_attestation),
+  VALUES (p_tenant, p_site, p_iface, v_new, v_current, 'RESERVATION', p_currency, p_exponent, btrim(p_attestation),
           btrim(p_reason), p_operator);
   RETURN v_new;
 END $_$;
@@ -6724,7 +7050,7 @@ BEGIN
   IF i.lifecycle_state NOT IN ('ACTIVE','AUTH_DISABLED') THEN ready := false; reason := 'INTERFACE_NOT_ACTIVE'; RETURN NEXT; RETURN; END IF;
   SELECT * INTO r FROM iam_v2.pms_interface_revisions WHERE id = i.current_revision_id;
   currency := r.financial_base_currency; currency_exponent := r.financial_base_currency_exponent;
-  IF r.folio_identity_strategy = 'UNSET' OR r.financial_base_currency IS NULL THEN
+  IF r.posting_target_model <> 'RESERVATION' OR r.financial_base_currency IS NULL THEN
     ready := false; reason := 'NOT_ONBOARDED'; RETURN NEXT; RETURN;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM iam_v2.pms_financial_onboardings o WHERE o.revision_id = r.id) THEN
@@ -7502,10 +7828,10 @@ BEGIN
     -- §15: "a new ledger row referencing the original". It pins the SAME evidence the original pinned, so
     -- the correction is attached to the same authorization rather than to a fresh resolution.
     INSERT INTO iam_v2.pms_postings
-      (tenant_id, site_id, pms_interface_id, settlement_id, purchase_id, stay_id, folio_id,
+      (tenant_id, site_id, pms_interface_id, settlement_id, purchase_id, stay_id, g_number,
        posting_interface_revision_id, secret_generation_id, posting_type, reverses_posting_id,
        amount_minor, currency, currency_exponent, idempotency_key)
-    VALUES (o.tenant_id, o.site_id, o.pms_interface_id, o.settlement_id, o.purchase_id, o.stay_id, o.folio_id,
+    VALUES (o.tenant_id, o.site_id, o.pms_interface_id, o.settlement_id, o.purchase_id, o.stay_id, o.g_number,
             o.posting_interface_revision_id, o.secret_generation_id, 'REVERSAL', o.id,
             v_amount, o.currency, o.currency_exponent, o.idempotency_key || ':rev:' || v_action_id::text)
     RETURNING id INTO v_rev;
@@ -7614,7 +7940,8 @@ BEGIN
   -- The reason vocabulary is closed HERE as well as in edged. A bounded set enforced only in the process that
   -- happens to call today is not a bound; it is a convention that survives until the next caller.
   IF p_reason IS NULL OR p_reason NOT IN
-     ('SUSPECTED_STALE_GUEST_LIST','AFTER_PMS_MAINTENANCE','OPERATOR_VERIFICATION','SUPPORT_REQUEST') THEN
+     ('SUSPECTED_STALE_GUEST_LIST','AFTER_PMS_MAINTENANCE','OPERATOR_VERIFICATION','SUPPORT_REQUEST',
+      'PMS_ANSWER_TARGET_INVALID') THEN
     RAISE EXCEPTION 'unbounded resync reason' USING ERRCODE = 'check_violation';
   END IF;
 
@@ -7914,6 +8241,31 @@ END $$;
 
 
 --
+-- Name: stay_posting_blocks_guard(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.stay_posting_blocks_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'stay_posting_blocks is not deletable' USING ERRCODE = 'restrict_violation';
+  END IF;
+  IF ROW(NEW.id, NEW.tenant_id, NEW.site_id, NEW.pms_interface_id, NEW.stay_id, NEW.reason, NEW.source, NEW.posting_id,
+         NEW.pa_as_status, NEW.note, NEW.created_by, NEW.created_at)
+     IS DISTINCT FROM ROW(OLD.id, OLD.tenant_id, OLD.site_id, OLD.pms_interface_id, OLD.stay_id, OLD.reason, OLD.source,
+         OLD.posting_id, OLD.pa_as_status, OLD.note, OLD.created_by, OLD.created_at) THEN
+    RAISE EXCEPTION 'stay_posting_blocks identity is immutable' USING ERRCODE = 'restrict_violation';
+  END IF;
+  IF OLD.cleared_at IS NOT NULL THEN
+    RAISE EXCEPTION 'a cleared posting block stays cleared' USING ERRCODE = 'restrict_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+
+
+--
 -- Name: supersede_entitlement_transition(uuid, text, timestamp with time zone, text); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -8106,23 +8458,36 @@ END; $$;
 --
 
 CREATE FUNCTION iam_v2.trg_posting_charge_gate() RETURNS trigger
-    LANGUAGE plpgsql
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
-DECLARE strat text; st text; pa boolean;
+DECLARE v_model text; st record;
 BEGIN
   IF NEW.posting_type = 'CHARGE' THEN
-    SELECT folio_identity_strategy INTO strat FROM iam_v2.pms_interface_revisions
+    SELECT posting_target_model INTO v_model FROM iam_v2.pms_interface_revisions
       WHERE tenant_id=NEW.tenant_id AND site_id=NEW.site_id AND pms_interface_id=NEW.pms_interface_id AND id=NEW.posting_interface_revision_id;
-    IF strat IS NULL OR strat='UNSET' THEN
-      RAISE EXCEPTION 'FOLIO_STRATEGY_UNSET: financial CHARGE blocked fail-closed (interface %, revision %)', NEW.pms_interface_id, NEW.posting_interface_revision_id
+    IF v_model IS NULL OR v_model = 'UNSET' THEN
+      RAISE EXCEPTION 'POSTING_TARGET_UNSET: financial CHARGE blocked fail-closed (interface %, revision %)', NEW.pms_interface_id, NEW.posting_interface_revision_id
         USING ERRCODE='check_violation';
     END IF;
-    IF NEW.stay_id IS NOT NULL THEN
-      SELECT status, posting_allowed INTO st, pa FROM iam_v2.stays
-        WHERE tenant_id=NEW.tenant_id AND site_id=NEW.site_id AND pms_interface_id=NEW.pms_interface_id AND id=NEW.stay_id;
-      IF st IS DISTINCT FROM 'IN_HOUSE' OR pa IS NOT TRUE THEN
-        RAISE EXCEPTION 'POSTING_NOT_ALLOWED: stay % not IN_HOUSE/posting_allowed', NEW.stay_id USING ERRCODE='check_violation';
-      END IF;
+    IF NEW.stay_id IS NULL THEN
+      RAISE EXCEPTION 'POSTING_NO_STAY: a CHARGE targets a stay''s reservation' USING ERRCODE='check_violation';
+    END IF;
+    -- Locking the stay serialises concurrent charges for it, so the one-unresolved check below cannot race.
+    SELECT status, posting_allowed, external_reservation_id INTO st FROM iam_v2.stays
+      WHERE tenant_id=NEW.tenant_id AND site_id=NEW.site_id AND pms_interface_id=NEW.pms_interface_id AND id=NEW.stay_id
+      FOR UPDATE;
+    IF st.status IS DISTINCT FROM 'IN_HOUSE' OR st.posting_allowed IS NOT TRUE THEN
+      RAISE EXCEPTION 'POSTING_NOT_ALLOWED: stay % not IN_HOUSE/posting_allowed', NEW.stay_id USING ERRCODE='check_violation';
+    END IF;
+    IF NEW.g_number IS DISTINCT FROM st.external_reservation_id THEN
+      RAISE EXCEPTION 'POSTING_RESERVATION_MISMATCH: a CHARGE carries its stay''s reservation number' USING ERRCODE='check_violation';
+    END IF;
+    IF EXISTS (SELECT 1 FROM iam_v2.pms_postings p JOIN iam_v2.settlements se ON se.id = p.settlement_id
+                WHERE p.stay_id = NEW.stay_id AND p.posting_type = 'CHARGE'
+                  AND se.status IN ('REQUIRED','IN_PROGRESS','MANUAL_REVIEW')) THEN
+      RAISE EXCEPTION 'ROOM_CHARGE_UNRESOLVED: stay % already has an unresolved room charge', NEW.stay_id
+        USING ERRCODE='check_violation';
     END IF;
   END IF;
   RETURN NEW;
@@ -8198,6 +8563,21 @@ BEGIN
   THEN RAISE EXCEPTION 'secret generation identity is immutable (only superseded_at may change)'; END IF;
   RETURN NEW;
 END; $$;
+
+
+--
+-- Name: trg_stay_posting_permission(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.trg_stay_posting_permission() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+BEGIN
+  PERFORM iam_v2.p4_stay_feed_confirms(NEW.id);
+  PERFORM iam_v2.p4_refresh_stay_posting_permission(NEW.id);
+  RETURN NULL;
+END $$;
 
 
 --
@@ -9242,24 +9622,6 @@ CREATE TABLE iam_v2.financial_restore_events (
 
 
 --
--- Name: folios; Type: TABLE; Schema: iam_v2; Owner: -
---
-
-CREATE TABLE iam_v2.folios (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    tenant_id uuid NOT NULL,
-    site_id uuid NOT NULL,
-    pms_interface_id uuid NOT NULL,
-    external_folio_id text NOT NULL,
-    identity_epoch integer DEFAULT 1 NOT NULL,
-    folio_kind text DEFAULT 'GUEST'::text NOT NULL,
-    status text DEFAULT 'OPEN'::text NOT NULL,
-    CONSTRAINT folios_folio_kind_check CHECK ((folio_kind = ANY (ARRAY['GUEST'::text, 'COMPANY'::text, 'GROUP_MASTER'::text, 'OTHER'::text]))),
-    CONSTRAINT folios_status_check CHECK ((status = ANY (ARRAY['OPEN'::text, 'CLOSED'::text])))
-);
-
-
---
 -- Name: guest_access_accounts; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -9786,6 +10148,35 @@ COMMENT ON COLUMN iam_v2.payment_transactions.provider_txn_ref IS 'The reference
 
 
 --
+-- Name: pms_answer_confirmations; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.pms_answer_confirmations (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    pms_interface_id uuid NOT NULL,
+    as_status text NOT NULL,
+    action text NOT NULL,
+    evidence text NOT NULL,
+    reason text NOT NULL,
+    recorded_by uuid NOT NULL,
+    recorded_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pms_answer_confirmations_action_check CHECK ((action = ANY (ARRAY['CONFIRM'::text, 'WITHDRAW'::text]))),
+    CONSTRAINT pms_answer_confirmations_as_status_check CHECK ((as_status = ANY (ARRAY['NP'::text, 'NG'::text, 'NR'::text, 'NA'::text, 'RY'::text]))),
+    CONSTRAINT pms_answer_confirmations_evidence_check CHECK (((length(btrim(evidence)) >= 20) AND (length(btrim(evidence)) <= 2000))),
+    CONSTRAINT pms_answer_confirmations_reason_check CHECK (((length(btrim(reason)) >= 4) AND (length(btrim(reason)) <= 500)))
+);
+
+
+--
+-- Name: TABLE pms_answer_confirmations; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.pms_answer_confirmations IS 'Append-only record that the PMS vendor confirmed a PA status means "definitely not posted" on this interface (Amendment A1, contract section 9a rule 8). The latest row per code decides. UR can never be confirmed here.';
+
+
+--
 -- Name: pms_case_resolutions; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -9879,7 +10270,7 @@ CREATE TABLE iam_v2.pms_financial_onboardings (
     pms_interface_id uuid NOT NULL,
     revision_id uuid NOT NULL,
     previous_revision_id uuid,
-    folio_identity_strategy text NOT NULL,
+    posting_target_model text NOT NULL,
     currency character(3) NOT NULL,
     currency_exponent smallint NOT NULL,
     attestation text NOT NULL,
@@ -9889,7 +10280,7 @@ CREATE TABLE iam_v2.pms_financial_onboardings (
     CONSTRAINT pms_financial_onboardings_attestation_check CHECK (((length(btrim(attestation)) >= 20) AND (length(btrim(attestation)) <= 2000))),
     CONSTRAINT pms_financial_onboardings_currency_check CHECK ((currency ~ '^[A-Z]{3}$'::text)),
     CONSTRAINT pms_financial_onboardings_currency_exponent_check CHECK (((currency_exponent >= 0) AND (currency_exponent <= 4))),
-    CONSTRAINT pms_financial_onboardings_folio_identity_strategy_check CHECK ((folio_identity_strategy = ANY (ARRAY['GLOBALLY_UNIQUE'::text, 'UNIQUE_PER_STAY'::text, 'REUSED_SEQUENTIAL'::text]))),
+    CONSTRAINT pms_financial_onboardings_posting_target_model_check CHECK ((posting_target_model = 'RESERVATION'::text)),
     CONSTRAINT pms_financial_onboardings_reason_check CHECK (((length(btrim(reason)) >= 4) AND (length(btrim(reason)) <= 500)))
 );
 
@@ -9917,17 +10308,24 @@ CREATE TABLE iam_v2.pms_interface_revisions (
     pms_interface_id uuid NOT NULL,
     revision_no integer NOT NULL,
     source_timezone text NOT NULL,
-    folio_identity_strategy text DEFAULT 'UNSET'::text NOT NULL,
+    posting_target_model text DEFAULT 'UNSET'::text NOT NULL,
     config jsonb NOT NULL,
     normalization_version integer DEFAULT 1 NOT NULL,
     source_fingerprint text,
     financial_base_currency character(3),
     financial_base_currency_exponent smallint,
-    CONSTRAINT pms_interface_revisions_folio_identity_strategy_check CHECK ((folio_identity_strategy = ANY (ARRAY['UNSET'::text, 'GLOBALLY_UNIQUE'::text, 'UNIQUE_PER_STAY'::text, 'REUSED_SEQUENTIAL'::text]))),
+    CONSTRAINT pms_interface_revisions_posting_target_model_check CHECK ((posting_target_model = ANY (ARRAY['UNSET'::text, 'RESERVATION'::text]))),
     CONSTRAINT pmsrev_financial_currency_exponent_range CHECK (((financial_base_currency_exponent IS NULL) OR ((financial_base_currency_exponent >= 0) AND (financial_base_currency_exponent <= 4)))),
     CONSTRAINT pmsrev_financial_currency_iso CHECK (((financial_base_currency IS NULL) OR (financial_base_currency ~ '^[A-Z]{3}$'::text))),
     CONSTRAINT pmsrev_financial_currency_pair CHECK (((financial_base_currency IS NULL) = (financial_base_currency_exponent IS NULL)))
 );
+
+
+--
+-- Name: COLUMN pms_interface_revisions.posting_target_model; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.pms_interface_revisions.posting_target_model IS 'Fail-closed posting target (Amendment A1, D46). UNSET blocks every financial CHARGE; RESERVATION = a PS targets RN + G#, G# being the vendor-confirmed non-reused reservation number. Recorded by financial onboarding only.';
 
 
 --
@@ -10076,7 +10474,6 @@ CREATE TABLE iam_v2.pms_postings (
     settlement_id uuid NOT NULL,
     purchase_id uuid NOT NULL,
     stay_id uuid,
-    folio_id uuid,
     posting_interface_revision_id uuid NOT NULL,
     secret_generation_id uuid,
     posting_type text NOT NULL,
@@ -10086,9 +10483,18 @@ CREATE TABLE iam_v2.pms_postings (
     currency_exponent smallint,
     idempotency_key text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    g_number text NOT NULL,
     CONSTRAINT pms_postings_posting_type_check CHECK ((posting_type = ANY (ARRAY['CHARGE'::text, 'REVERSAL'::text]))),
+    CONSTRAINT posting_gnumber_wire_safe CHECK (((btrim(g_number) <> ''::text) AND (length(g_number) <= 32) AND (g_number !~ '[\x00-\x1f\x7f|]'::text))),
     CONSTRAINT posting_reversal_link CHECK (((posting_type = 'REVERSAL'::text) = (reverses_posting_id IS NOT NULL)))
 );
+
+
+--
+-- Name: COLUMN pms_postings.g_number; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.pms_postings.g_number IS 'The reservation number (G#) of the pinned stay, snapshotted at creation and immutable. Posting identity is (pms_interface_id, g_number) (Amendment A1).';
 
 
 --
@@ -10655,7 +11061,7 @@ CREATE TABLE iam_v2.posting_attempts (
     CONSTRAINT attempt_ps_sha256_shape CHECK (((ps_sha256 IS NULL) OR (ps_sha256 ~ '^[0-9a-f]{64}$'::text))),
     CONSTRAINT attempt_rn_verified CHECK (((rn IS NOT NULL) AND (btrim(rn) <> ''::text) AND (length(rn) <= 32))),
     CONSTRAINT attempt_rn_wire_safe CHECK ((rn !~ '[\x00-\x1f\x7f|]'::text)),
-    CONSTRAINT posting_attempts_outcome_check CHECK ((outcome = ANY (ARRAY['SENDING'::text, 'ACKED'::text, 'UNKNOWN'::text, 'FAILED'::text]))),
+    CONSTRAINT posting_attempts_outcome_check CHECK ((outcome = ANY (ARRAY['SENDING'::text, 'ACKED'::text, 'UNKNOWN'::text, 'NOT_SENT'::text]))),
     CONSTRAINT posting_attempts_pa_as_status_check CHECK ((pa_as_status = ANY (ARRAY['OK'::text, 'NG'::text, 'NA'::text, 'NP'::text, 'NR'::text, 'RY'::text, 'UR'::text])))
 );
 
@@ -10757,7 +11163,7 @@ CREATE VIEW iam_v2.posting_execution_state AS
             WHEN (la.attempt_no IS NULL) THEN 'NOT_ATTEMPTED'::text
             WHEN (la.outcome = 'SENDING'::text) THEN 'IN_FLIGHT'::text
             WHEN (la.outcome = 'UNKNOWN'::text) THEN 'UNKNOWN'::text
-            WHEN (la.outcome = 'FAILED'::text) THEN 'NOT_SENT'::text
+            WHEN (la.outcome = 'NOT_SENT'::text) THEN 'NOT_SENT'::text
             WHEN ((la.outcome = 'ACKED'::text) AND (la.pa_as_status = 'OK'::text)) THEN 'POSTED'::text
             WHEN (la.outcome = 'ACKED'::text) THEN 'REJECTED'::text
             ELSE NULL::text
@@ -10795,6 +11201,21 @@ CREATE VIEW iam_v2.posting_execution_state AS
           WHERE ((o.posting_id = p.id) AND (o.state = ANY (ARRAY['QUEUED'::text, 'IN_FLIGHT'::text, 'HELD_RECOVERY'::text])))
          LIMIT 1) ob ON (true))
      LEFT JOIN iam_v2.posting_review_state rs ON ((rs.posting_id = p.id)));
+
+
+--
+-- Name: posting_presend_aborts; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.posting_presend_aborts (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    posting_id uuid NOT NULL,
+    reason text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT posting_presend_aborts_reason_check CHECK ((reason = ANY (ARRAY['STAY_NOT_IN_HOUSE'::text, 'RESERVATION_MISMATCH'::text, 'STAY_BLOCKED'::text, 'ROOM_UNRESOLVED'::text, 'DATA_STALE'::text])))
+);
 
 
 --
@@ -11271,20 +11692,6 @@ COMMENT ON COLUMN iam_v2.site_voucher_code_settings.code_length IS 'Number of ch
 
 
 --
--- Name: stay_folios; Type: TABLE; Schema: iam_v2; Owner: -
---
-
-CREATE TABLE iam_v2.stay_folios (
-    tenant_id uuid NOT NULL,
-    site_id uuid NOT NULL,
-    pms_interface_id uuid NOT NULL,
-    stay_id uuid NOT NULL,
-    folio_id uuid NOT NULL,
-    is_default_posting_target boolean DEFAULT false NOT NULL
-);
-
-
---
 -- Name: stay_guests; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -11317,6 +11724,45 @@ CREATE TABLE iam_v2.stay_links (
     reason text NOT NULL,
     CONSTRAINT stay_links_reason_check CHECK ((reason = ANY (ARRAY['CROSS_PMS_TRANSFER'::text, 'POST_STAY'::text])))
 );
+
+
+--
+-- Name: stay_posting_blocks; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.stay_posting_blocks (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    pms_interface_id uuid NOT NULL,
+    stay_id uuid NOT NULL,
+    reason text NOT NULL,
+    source text NOT NULL,
+    posting_id uuid,
+    pa_as_status text,
+    note text,
+    created_by uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    cleared_at timestamp with time zone,
+    cleared_by_source text,
+    cleared_by uuid,
+    cleared_reason text,
+    CONSTRAINT stay_posting_block_clearance_fits CHECK ((((cleared_at IS NULL) AND (cleared_by_source IS NULL)) OR ((cleared_at IS NOT NULL) AND (((reason = ANY (ARRAY['PMS_NO_POST'::text, 'PMS_DATA_SUSPECT'::text])) AND (cleared_by_source = 'PMS_FEED'::text)) OR ((reason = 'POSTING_UNRESOLVED'::text) AND (cleared_by_source = 'POSTING_LEDGER'::text)) OR ((reason = 'ADMIN_BLOCK'::text) AND (cleared_by_source = 'OPERATOR'::text) AND (cleared_by IS NOT NULL) AND (cleared_reason IS NOT NULL)))))),
+    CONSTRAINT stay_posting_block_source_fits CHECK ((((reason = ANY (ARRAY['PMS_NO_POST'::text, 'PMS_DATA_SUSPECT'::text])) AND (source = 'PMS_ANSWER'::text)) OR ((reason = 'POSTING_UNRESOLVED'::text) AND (source = 'POSTING_LEDGER'::text) AND (posting_id IS NOT NULL)) OR ((reason = 'ADMIN_BLOCK'::text) AND (source = 'OPERATOR'::text) AND (created_by IS NOT NULL) AND (note IS NOT NULL)))),
+    CONSTRAINT stay_posting_blocks_cleared_by_source_check CHECK (((cleared_by_source IS NULL) OR (cleared_by_source = ANY (ARRAY['PMS_FEED'::text, 'POSTING_LEDGER'::text, 'OPERATOR'::text])))),
+    CONSTRAINT stay_posting_blocks_cleared_reason_check CHECK (((cleared_reason IS NULL) OR ((length(cleared_reason) >= 4) AND (length(cleared_reason) <= 500)))),
+    CONSTRAINT stay_posting_blocks_note_check CHECK (((note IS NULL) OR ((length(note) >= 4) AND (length(note) <= 500)))),
+    CONSTRAINT stay_posting_blocks_pa_as_status_check CHECK (((pa_as_status IS NULL) OR (pa_as_status = ANY (ARRAY['NG'::text, 'NA'::text, 'NP'::text, 'NR'::text, 'RY'::text, 'UR'::text])))),
+    CONSTRAINT stay_posting_blocks_reason_check CHECK ((reason = ANY (ARRAY['PMS_NO_POST'::text, 'PMS_DATA_SUSPECT'::text, 'POSTING_UNRESOLVED'::text, 'ADMIN_BLOCK'::text]))),
+    CONSTRAINT stay_posting_blocks_source_check CHECK ((source = ANY (ARRAY['PMS_ANSWER'::text, 'POSTING_LEDGER'::text, 'OPERATOR'::text])))
+);
+
+
+--
+-- Name: TABLE stay_posting_blocks; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.stay_posting_blocks IS 'Reasoned stops on room charging for one stay (Amendment A1, contract section 9a rule 9). Written only by the posting functions; a block is never deleted and is cleared exactly once, by the source its reason allows.';
 
 
 --
@@ -12747,30 +13193,6 @@ ALTER TABLE ONLY iam_v2.financial_restore_events
 
 
 --
--- Name: folios folios_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
---
-
-ALTER TABLE ONLY iam_v2.folios
-    ADD CONSTRAINT folios_pkey PRIMARY KEY (id);
-
-
---
--- Name: folios folios_tenant_id_site_id_pms_interface_id_external_folio_id_key; Type: CONSTRAINT; Schema: iam_v2; Owner: -
---
-
-ALTER TABLE ONLY iam_v2.folios
-    ADD CONSTRAINT folios_tenant_id_site_id_pms_interface_id_external_folio_id_key UNIQUE (tenant_id, site_id, pms_interface_id, external_folio_id, identity_epoch);
-
-
---
--- Name: folios folios_tenant_id_site_id_pms_interface_id_id_key; Type: CONSTRAINT; Schema: iam_v2; Owner: -
---
-
-ALTER TABLE ONLY iam_v2.folios
-    ADD CONSTRAINT folios_tenant_id_site_id_pms_interface_id_id_key UNIQUE (tenant_id, site_id, pms_interface_id, id);
-
-
---
 -- Name: guest_access_accounts guest_access_accounts_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -13099,6 +13521,14 @@ ALTER TABLE ONLY iam_v2.payment_transactions
 
 
 --
+-- Name: pms_answer_confirmations pms_answer_confirmations_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.pms_answer_confirmations
+    ADD CONSTRAINT pms_answer_confirmations_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: pms_case_resolutions pms_case_resolutions_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -13403,6 +13833,22 @@ ALTER TABLE ONLY iam_v2.posting_outbox
 
 
 --
+-- Name: posting_presend_aborts posting_presend_aborts_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.posting_presend_aborts
+    ADD CONSTRAINT posting_presend_aborts_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: posting_presend_aborts posting_presend_aborts_posting_id_key; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.posting_presend_aborts
+    ADD CONSTRAINT posting_presend_aborts_posting_id_key UNIQUE (posting_id);
+
+
+--
 -- Name: posting_review_actions posting_review_actions_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -13699,22 +14145,6 @@ ALTER TABLE ONLY iam_v2.stay_events
 
 
 --
--- Name: stay_folios stay_folios_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
---
-
-ALTER TABLE ONLY iam_v2.stay_folios
-    ADD CONSTRAINT stay_folios_pkey PRIMARY KEY (stay_id, folio_id);
-
-
---
--- Name: stay_folios stay_folios_tenant_id_site_id_pms_interface_id_stay_id_foli_key; Type: CONSTRAINT; Schema: iam_v2; Owner: -
---
-
-ALTER TABLE ONLY iam_v2.stay_folios
-    ADD CONSTRAINT stay_folios_tenant_id_site_id_pms_interface_id_stay_id_foli_key UNIQUE (tenant_id, site_id, pms_interface_id, stay_id, folio_id);
-
-
---
 -- Name: stay_guests stay_guests_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -13736,6 +14166,14 @@ ALTER TABLE ONLY iam_v2.stay_links
 
 ALTER TABLE ONLY iam_v2.stay_links
     ADD CONSTRAINT stay_links_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: stay_posting_blocks stay_posting_blocks_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.stay_posting_blocks
+    ADD CONSTRAINT stay_posting_blocks_pkey PRIMARY KEY (id);
 
 
 --
@@ -14284,13 +14722,6 @@ CREATE INDEX fin_restore_events_site ON iam_v2.financial_restore_events USING bt
 
 
 --
--- Name: folio_open_identity; Type: INDEX; Schema: iam_v2; Owner: -
---
-
-CREATE UNIQUE INDEX folio_open_identity ON iam_v2.folios USING btree (tenant_id, site_id, pms_interface_id, external_folio_id) WHERE (status = 'OPEN'::text);
-
-
---
 -- Name: gaa_username; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
@@ -14421,6 +14852,13 @@ CREATE INDEX package_revision_visibility ON iam_v2.internet_package_revisions US
 --
 
 CREATE INDEX payment_checkouts_open ON iam_v2.payment_checkouts USING btree (tenant_id, site_id, last_status_at NULLS FIRST);
+
+
+--
+-- Name: pms_answer_confirmations_iface; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX pms_answer_confirmations_iface ON iam_v2.pms_answer_confirmations USING btree (pms_interface_id, as_status, recorded_at DESC);
 
 
 --
@@ -14648,10 +15086,17 @@ CREATE INDEX site_module_changes_lookup ON iam_v2.site_module_changes USING btre
 
 
 --
--- Name: stay_folio_default; Type: INDEX; Schema: iam_v2; Owner: -
+-- Name: stay_posting_block_one_active; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
-CREATE UNIQUE INDEX stay_folio_default ON iam_v2.stay_folios USING btree (stay_id) WHERE is_default_posting_target;
+CREATE UNIQUE INDEX stay_posting_block_one_active ON iam_v2.stay_posting_blocks USING btree (stay_id, reason, COALESCE(posting_id, '00000000-0000-0000-0000-000000000000'::uuid)) WHERE (cleared_at IS NULL);
+
+
+--
+-- Name: stay_posting_blocks_active; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX stay_posting_blocks_active ON iam_v2.stay_posting_blocks USING btree (stay_id) WHERE (cleared_at IS NULL);
 
 
 --
@@ -15418,6 +15863,13 @@ CREATE TRIGGER p4_attempt_retry_gate BEFORE INSERT ON iam_v2.posting_attempts FO
 
 
 --
+-- Name: posting_attempts p4_attempt_targets_posting_reservation; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER p4_attempt_targets_posting_reservation BEFORE INSERT ON iam_v2.posting_attempts FOR EACH ROW EXECUTE FUNCTION iam_v2.p4_attempt_targets_posting_reservation();
+
+
+--
 -- Name: posting_attempts p4_consume_retry_authorization; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
@@ -15670,6 +16122,13 @@ CREATE TRIGGER payment_checkouts_guard BEFORE DELETE OR UPDATE ON iam_v2.payment
 
 
 --
+-- Name: pms_answer_confirmations pms_answer_confirmations_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER pms_answer_confirmations_append_only BEFORE DELETE OR UPDATE ON iam_v2.pms_answer_confirmations FOR EACH ROW EXECUTE FUNCTION iam_v2.p4_append_only_refuse();
+
+
+--
 -- Name: pms_case_resolutions pms_case_resolutions_no_update; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
@@ -15702,6 +16161,13 @@ CREATE TRIGGER pms_reconciliation_settings_changes_no_update BEFORE DELETE OR UP
 --
 
 CREATE TRIGGER pms_room_inventory_changes_no_update BEFORE DELETE OR UPDATE ON iam_v2.pms_room_inventory_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.pms_room_inventory_append_only();
+
+
+--
+-- Name: posting_presend_aborts posting_presend_aborts_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER posting_presend_aborts_append_only BEFORE DELETE OR UPDATE ON iam_v2.posting_presend_aborts FOR EACH ROW EXECUTE FUNCTION iam_v2.p4_append_only_refuse();
 
 
 --
@@ -15744,6 +16210,20 @@ CREATE TRIGGER site_module_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2
 --
 
 CREATE TRIGGER spdc_append_only BEFORE DELETE OR UPDATE ON iam_v2.site_payment_domain_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.p4_append_only_refuse();
+
+
+--
+-- Name: stay_posting_blocks stay_posting_blocks_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER stay_posting_blocks_guard BEFORE DELETE OR UPDATE ON iam_v2.stay_posting_blocks FOR EACH ROW EXECUTE FUNCTION iam_v2.stay_posting_blocks_guard();
+
+
+--
+-- Name: stays stay_posting_permission; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER stay_posting_permission AFTER INSERT OR UPDATE OF status, external_reservation_id, normalized_room_number, occupancy_evidence_at, occupancy_clock_suspect ON iam_v2.stays FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_stay_posting_permission();
 
 
 --
@@ -16165,14 +16645,6 @@ ALTER TABLE ONLY iam_v2.entitlements
 
 
 --
--- Name: folios folios_tenant_id_site_id_pms_interface_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
---
-
-ALTER TABLE ONLY iam_v2.folios
-    ADD CONSTRAINT folios_tenant_id_site_id_pms_interface_id_fkey FOREIGN KEY (tenant_id, site_id, pms_interface_id) REFERENCES iam_v2.pms_interfaces(tenant_id, site_id, id);
-
-
---
 -- Name: guest_access_accounts guest_access_accounts_tenant_id_site_id_assigned_package_i_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -16333,6 +16805,14 @@ ALTER TABLE ONLY iam_v2.payment_transactions
 
 
 --
+-- Name: pms_answer_confirmations pms_answer_confirmations_tenant_id_site_id_pms_interface_i_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.pms_answer_confirmations
+    ADD CONSTRAINT pms_answer_confirmations_tenant_id_site_id_pms_interface_i_fkey FOREIGN KEY (tenant_id, site_id, pms_interface_id) REFERENCES iam_v2.pms_interfaces(tenant_id, site_id, id);
+
+
+--
 -- Name: pms_case_resolutions pms_case_resolutions_run_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -16434,14 +16914,6 @@ ALTER TABLE ONLY iam_v2.pms_postings
 
 ALTER TABLE ONLY iam_v2.pms_postings
     ADD CONSTRAINT pms_postings_settlement_id_purchase_id_fkey FOREIGN KEY (settlement_id, purchase_id) REFERENCES iam_v2.settlements(id, purchase_id);
-
-
---
--- Name: pms_postings pms_postings_tenant_id_site_id_pms_interface_id_folio_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
---
-
-ALTER TABLE ONLY iam_v2.pms_postings
-    ADD CONSTRAINT pms_postings_tenant_id_site_id_pms_interface_id_folio_id_fkey FOREIGN KEY (tenant_id, site_id, pms_interface_id, folio_id) REFERENCES iam_v2.folios(tenant_id, site_id, pms_interface_id, id);
 
 
 --
@@ -16693,22 +17165,6 @@ ALTER TABLE ONLY iam_v2.stay_events
 
 
 --
--- Name: stay_folios stay_folios_tenant_id_site_id_pms_interface_id_folio_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
---
-
-ALTER TABLE ONLY iam_v2.stay_folios
-    ADD CONSTRAINT stay_folios_tenant_id_site_id_pms_interface_id_folio_id_fkey FOREIGN KEY (tenant_id, site_id, pms_interface_id, folio_id) REFERENCES iam_v2.folios(tenant_id, site_id, pms_interface_id, id);
-
-
---
--- Name: stay_folios stay_folios_tenant_id_site_id_pms_interface_id_stay_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
---
-
-ALTER TABLE ONLY iam_v2.stay_folios
-    ADD CONSTRAINT stay_folios_tenant_id_site_id_pms_interface_id_stay_id_fkey FOREIGN KEY (tenant_id, site_id, pms_interface_id, stay_id) REFERENCES iam_v2.stays(tenant_id, site_id, pms_interface_id, id);
-
-
---
 -- Name: stay_guests stay_guests_tenant_id_site_id_pms_interface_id_stay_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -16730,6 +17186,14 @@ ALTER TABLE ONLY iam_v2.stay_links
 
 ALTER TABLE ONLY iam_v2.stay_links
     ADD CONSTRAINT stay_links_tenant_id_site_id_to_stay_fkey FOREIGN KEY (tenant_id, site_id, to_stay) REFERENCES iam_v2.stays(tenant_id, site_id, id);
+
+
+--
+-- Name: stay_posting_blocks stay_posting_blocks_tenant_id_site_id_pms_interface_id_sta_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.stay_posting_blocks
+    ADD CONSTRAINT stay_posting_blocks_tenant_id_site_id_pms_interface_id_sta_fkey FOREIGN KEY (tenant_id, site_id, pms_interface_id, stay_id) REFERENCES iam_v2.stays(tenant_id, site_id, pms_interface_id, id);
 
 
 --
@@ -17520,6 +17984,22 @@ REVOKE ALL ON FUNCTION iam_v2.p3_stay_lifecycle_guard() FROM PUBLIC;
 
 
 --
+-- Name: FUNCTION p4_admin_posting_block(p_tenant uuid, p_site uuid, p_stay uuid, p_action text, p_reason text, p_operator uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_admin_posting_block(p_tenant uuid, p_site uuid, p_stay uuid, p_action text, p_reason text, p_operator uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p4_admin_posting_block(p_tenant uuid, p_site uuid, p_stay uuid, p_action text, p_reason text, p_operator uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION p4_answer_effect(p_iface uuid, p_as text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_answer_effect(p_iface uuid, p_as text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p4_answer_effect(p_iface uuid, p_as text) TO sc_posting_runtime;
+
+
+--
 -- Name: FUNCTION p4_append_only_refuse(); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -17549,11 +18029,33 @@ REVOKE ALL ON FUNCTION iam_v2.p4_assert_financial_actor(p_tenant uuid, p_actor u
 
 
 --
+-- Name: FUNCTION p4_attempt_not_sent_reason(p_attempt uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_attempt_not_sent_reason(p_attempt uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p4_attempt_not_sent_reason(p_attempt uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION p4_attempt_targets_posting_reservation(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_attempt_targets_posting_reservation() FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION p4_authorize_zero_attempt_retry(p_posting uuid, p_actor uuid, p_reason text, p_evidence jsonb); Type: ACL; Schema: iam_v2; Owner: -
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p4_authorize_zero_attempt_retry(p_posting uuid, p_actor uuid, p_reason text, p_evidence jsonb) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.p4_authorize_zero_attempt_retry(p_posting uuid, p_actor uuid, p_reason text, p_evidence jsonb) TO sc_financial_operator;
+
+
+--
+-- Name: FUNCTION p4_clear_posting_unresolved(p_posting uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_clear_posting_unresolved(p_posting uuid) FROM PUBLIC;
 
 
 --
@@ -17660,6 +18162,14 @@ GRANT ALL ON FUNCTION iam_v2.p4_interface_freshness_block(p_tenant uuid, p_site 
 
 
 --
+-- Name: FUNCTION p4_lock_posting_stay(p_posting uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_lock_posting_stay(p_posting uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p4_lock_posting_stay(p_posting uuid) TO sc_posting_runtime;
+
+
+--
 -- Name: FUNCTION p4_mark_purchase_granted(p_purchase uuid); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -17686,6 +18196,21 @@ REVOKE ALL ON FUNCTION iam_v2.p4_payment_admission_gate() FROM PUBLIC;
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p4_payment_identity_gate() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION p4_place_stay_posting_block(p_stay uuid, p_reason text, p_source text, p_posting uuid, p_as text, p_actor uuid, p_note text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_place_stay_posting_block(p_stay uuid, p_reason text, p_source text, p_posting uuid, p_as text, p_actor uuid, p_note text) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION p4_posting_abort_before_send(p_posting uuid, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_posting_abort_before_send(p_posting uuid, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p4_posting_abort_before_send(p_posting uuid, p_reason text) TO sc_posting_runtime;
 
 
 --
@@ -17772,6 +18297,13 @@ REVOKE ALL ON FUNCTION iam_v2.p4_recovery_gate() FROM PUBLIC;
 
 
 --
+-- Name: FUNCTION p4_refresh_stay_posting_permission(p_stay uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_refresh_stay_posting_permission(p_stay uuid) FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION p4_release_financial_recovery(p_tenant uuid, p_site uuid, p_actor uuid, p_note text); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -17816,6 +18348,30 @@ GRANT ALL ON FUNCTION iam_v2.p4_room_charge_has_records(p_tenant uuid, p_site uu
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p4_settlement_birth() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION p4_stay_feed_confirms(p_stay uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_stay_feed_confirms(p_stay uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION p4_stay_postable_for(p_stay uuid, p_posting uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_stay_postable_for(p_stay uuid, p_posting uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p4_stay_postable_for(p_stay uuid, p_posting uuid) TO sc_posting_runtime;
+
+
+--
+-- Name: FUNCTION p4_stay_room_charge_open(p_stay uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_stay_room_charge_open(p_stay uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p4_stay_room_charge_open(p_stay uuid) TO svc_scd;
+GRANT ALL ON FUNCTION iam_v2.p4_stay_room_charge_open(p_stay uuid) TO svc_edged;
 
 
 --
@@ -18049,6 +18605,14 @@ GRANT ALL ON FUNCTION iam_v2.pms_accept_startup_data_gap(p_tenant uuid, p_site u
 
 
 --
+-- Name: FUNCTION pms_answer_confirmation_record(p_tenant uuid, p_site uuid, p_iface uuid, p_as text, p_action text, p_evidence text, p_reason text, p_operator uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.pms_answer_confirmation_record(p_tenant uuid, p_site uuid, p_iface uuid, p_as text, p_action text, p_evidence text, p_reason text, p_operator uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_answer_confirmation_record(p_tenant uuid, p_site uuid, p_iface uuid, p_as text, p_action text, p_evidence text, p_reason text, p_operator uuid) TO svc_edged;
+
+
+--
 -- Name: FUNCTION pms_connection_settings_get(p_tenant uuid, p_site uuid, p_interface uuid); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -18109,11 +18673,11 @@ GRANT ALL ON FUNCTION iam_v2.pms_integration_blockers(p_tenant uuid, p_site uuid
 
 
 --
--- Name: FUNCTION pms_interface_financial_onboard(p_tenant uuid, p_site uuid, p_iface uuid, p_expected_revision uuid, p_strategy text, p_currency text, p_exponent smallint, p_attestation text, p_reason text, p_operator uuid); Type: ACL; Schema: iam_v2; Owner: -
+-- Name: FUNCTION pms_interface_financial_onboard(p_tenant uuid, p_site uuid, p_iface uuid, p_expected_revision uuid, p_target_model text, p_currency text, p_exponent smallint, p_attestation text, p_reason text, p_operator uuid); Type: ACL; Schema: iam_v2; Owner: -
 --
 
-REVOKE ALL ON FUNCTION iam_v2.pms_interface_financial_onboard(p_tenant uuid, p_site uuid, p_iface uuid, p_expected_revision uuid, p_strategy text, p_currency text, p_exponent smallint, p_attestation text, p_reason text, p_operator uuid) FROM PUBLIC;
-GRANT ALL ON FUNCTION iam_v2.pms_interface_financial_onboard(p_tenant uuid, p_site uuid, p_iface uuid, p_expected_revision uuid, p_strategy text, p_currency text, p_exponent smallint, p_attestation text, p_reason text, p_operator uuid) TO svc_edged;
+REVOKE ALL ON FUNCTION iam_v2.pms_interface_financial_onboard(p_tenant uuid, p_site uuid, p_iface uuid, p_expected_revision uuid, p_target_model text, p_currency text, p_exponent smallint, p_attestation text, p_reason text, p_operator uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_interface_financial_onboard(p_tenant uuid, p_site uuid, p_iface uuid, p_expected_revision uuid, p_target_model text, p_currency text, p_exponent smallint, p_attestation text, p_reason text, p_operator uuid) TO svc_edged;
 
 
 --
@@ -18347,6 +18911,13 @@ GRANT ALL ON FUNCTION iam_v2.site_payment_domains_set(p_tenant uuid, p_site uuid
 
 
 --
+-- Name: FUNCTION stay_posting_blocks_guard(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.stay_posting_blocks_guard() FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION supersede_entitlement_transition(p_target uuid, p_to text, p_at timestamp with time zone, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -18367,6 +18938,20 @@ GRANT ALL ON FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at 
 --
 
 REVOKE ALL ON FUNCTION iam_v2.trg_catalogue_revision_immutable() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION trg_posting_charge_gate(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.trg_posting_charge_gate() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION trg_stay_posting_permission(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.trg_stay_posting_permission() FROM PUBLIC;
 
 
 --
@@ -18667,15 +19252,6 @@ GRANT SELECT ON TABLE iam_v2.financial_restore_events TO sc_financial_operator;
 
 
 --
--- Name: TABLE folios; Type: ACL; Schema: iam_v2; Owner: -
---
-
-GRANT SELECT ON TABLE iam_v2.folios TO sc_posting_runtime;
-GRANT SELECT ON TABLE iam_v2.folios TO svc_edged;
-GRANT SELECT,INSERT ON TABLE iam_v2.folios TO svc_pmsd;
-
-
---
 -- Name: TABLE guest_access_accounts; Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -18872,6 +19448,13 @@ GRANT SELECT ON TABLE iam_v2.payment_transaction_events TO sc_financial_operator
 GRANT SELECT,INSERT ON TABLE iam_v2.payment_transactions TO sc_payment_runtime;
 GRANT SELECT ON TABLE iam_v2.payment_transactions TO sc_financial_operator;
 GRANT SELECT ON TABLE iam_v2.payment_transactions TO sc_payment_outcome;
+
+
+--
+-- Name: TABLE pms_answer_confirmations; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.pms_answer_confirmations TO svc_edged;
 
 
 --
@@ -19102,6 +19685,13 @@ GRANT SELECT ON TABLE iam_v2.posting_execution_state TO svc_edged;
 
 
 --
+-- Name: TABLE posting_presend_aborts; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.posting_presend_aborts TO svc_edged;
+
+
+--
 -- Name: TABLE posting_review_actions; Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -19225,22 +19815,20 @@ GRANT SELECT ON TABLE iam_v2.site_payment_domains TO svc_edged;
 
 
 --
--- Name: TABLE stay_folios; Type: ACL; Schema: iam_v2; Owner: -
---
-
-GRANT SELECT ON TABLE iam_v2.stay_folios TO sc_posting_runtime;
-GRANT SELECT ON TABLE iam_v2.stay_folios TO svc_scd;
-GRANT SELECT ON TABLE iam_v2.stay_folios TO svc_edged;
-GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.stay_folios TO svc_pmsd;
-
-
---
 -- Name: TABLE stay_guests; Type: ACL; Schema: iam_v2; Owner: -
 --
 
 GRANT SELECT ON TABLE iam_v2.stay_guests TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.stay_guests TO svc_edged;
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.stay_guests TO svc_pmsd;
+
+
+--
+-- Name: TABLE stay_posting_blocks; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.stay_posting_blocks TO sc_posting_runtime;
+GRANT SELECT ON TABLE iam_v2.stay_posting_blocks TO svc_edged;
 
 
 --
