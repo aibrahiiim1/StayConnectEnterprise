@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -46,7 +47,7 @@ func (h *handler) socialStart(w http.ResponseWriter, r *http.Request) {
 	// Always over the portal's external host so the browser can reach it
 	// without DNS surgery on the guest network.
 	scheme := "http"
-	if r.TLS != nil {
+	if r.TLS != nil || forwardedHTTPS(r) {
 		scheme = "https"
 	}
 	host := r.Host // includes :port
@@ -249,4 +250,16 @@ func (h *handler) stubAuthorizeConfirm(w http.ResponseWriter, r *http.Request) {
 		"&state=" + url.QueryEscape(state) +
 		"&code=" + url.QueryEscape(code)
 	http.Redirect(w, r, dst, http.StatusFound)
+}
+
+// forwardedHTTPS reports whether the request reached the portal over HTTPS through the appliance's own reverse
+// proxy (Caddy terminates TLS for portal.stayconnect.local and forwards over loopback). The header is believed
+// only from a loopback peer: a guest cannot set it on a direct request.
+func forwardedHTTPS(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback() && strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
 }

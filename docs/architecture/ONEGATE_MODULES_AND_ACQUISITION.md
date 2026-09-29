@@ -345,6 +345,11 @@ Room charge is configurable and reviewable but never offered.
 * Social: Google, Microsoft and Apple are verified OpenID Connect `id_token`s (signature, issuer, audience,
   expiry; Microsoft tenant rules; Apple ES256 client secret minted per exchange from the `.p8` key). Facebook uses
   the Graph API with `appsecret_proof`. Only a verified email signs a client in. Apple returns by `form_post`.
+* **Redirect URI.** The redirect URI saved on a social provider is the one registered with that provider and is
+  used for both the authorize request and the code exchange. It must be `https://<portal name>/auth/social/callback`
+  (edged refuses anything else). Only when a provider has none does the portal derive its own URL; behind the
+  appliance's proxy it takes the scheme from `X-Forwarded-Proto`, which it believes from a loopback peer only.
+  Real providers also need that portal name to reach the portal with a certificate the guest's browser trusts.
 * **Secrets are write-only.** Sender API keys/tokens and social client secrets/keys are never returned by the API,
   never shown in the UI after storage and never logged; logs carry the provider, the HTTP status and at most the
   last four digits of a phone number.

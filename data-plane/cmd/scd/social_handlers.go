@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -70,6 +71,13 @@ func (s *server) socialStart(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httpErr(w, http.StatusBadRequest, "unknown provider")
 		return
+	}
+
+	// THE REDIRECT URI REGISTERED WITH THE PROVIDER WINS. Providers compare it exactly, so the one the
+	// operator configured (and registered) is used for both the authorize request and the code exchange;
+	// the portal's own view of its URL is only the fallback for a provider saved without one.
+	if configured := s.configuredSocialRedirect(r.Context(), req.Provider); configured != "" {
+		req.RedirectURI = configured
 	}
 
 	state, err := newSocialState()
@@ -274,4 +282,18 @@ func newSocialState() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b[:]), nil
+}
+
+// configuredSocialRedirect returns the redirect URI saved on the enabled provider row, or "" when there is
+// none or it cannot be read (the portal-derived URI is then used).
+func (s *server) configuredSocialRedirect(ctx context.Context, provider string) string {
+	if s.db == nil {
+		return ""
+	}
+	var uri string
+	if err := s.db.QueryRow(ctx, `SELECT COALESCE(redirect_uri,'') FROM social_oauth_providers
+	     WHERE tenant_id = $1 AND provider = $2 AND enabled LIMIT 1`, s.tenID, provider).Scan(&uri); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(uri)
 }

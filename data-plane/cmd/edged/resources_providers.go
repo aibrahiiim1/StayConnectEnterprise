@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -479,6 +480,11 @@ func (in *socialWriteReq) extraPatch() string {
 // appliance at the next guest's attempt. The secret itself never appears in
 // the message.
 func validateSocialWrite(provider string, in *socialWriteReq, creating bool) string {
+	if in.RedirectURI != nil && strings.TrimSpace(*in.RedirectURI) != "" {
+		if msg := validateSocialRedirectURI(strings.TrimSpace(*in.RedirectURI)); msg != "" {
+			return msg
+		}
+	}
 	trim := func(p *string) (string, bool) {
 		if p == nil {
 			return "", false
@@ -699,4 +705,28 @@ func (s *server) deleteSocialProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit(r, "social_oauth_provider.deleted", "social_oauth_provider", id, nil)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// socialCallbackPath is the Client Portal's social callback. The redirect URI registered with a provider must
+// point at it, over HTTPS, on a name the guest's browser reaches the portal by.
+const socialCallbackPath = "/auth/social/callback"
+
+// validateSocialRedirectURI refuses a redirect URI that could never bring a guest back to the portal: it must
+// be an absolute https URL whose path is the portal's callback, with no query or fragment (providers compare it
+// exactly, and Apple and Microsoft refuse plain http).
+func validateSocialRedirectURI(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || !u.IsAbs() || u.Host == "" {
+		return "redirect_uri must be an absolute URL such as https://portal.example.com" + socialCallbackPath
+	}
+	if u.Scheme != "https" {
+		return "redirect_uri must use https"
+	}
+	if u.Path != socialCallbackPath {
+		return "redirect_uri must end with " + socialCallbackPath + " (the Client Portal's callback)"
+	}
+	if u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return "redirect_uri must not carry a query, fragment or credentials"
+	}
+	return ""
 }

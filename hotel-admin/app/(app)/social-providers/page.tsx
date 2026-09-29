@@ -186,7 +186,7 @@ export default function SocialProvidersPage() {
               <HelpList
                 items={[
                   <>The <strong>client secret</strong> is stored write-only and is never shown again. When editing, leave it blank to keep the one already stored.</>,
-                  <>The <strong>redirect URI</strong> must match the one registered with the provider exactly.</>,
+                  <>The <strong>redirect URI</strong> is the Client Portal&apos;s callback, <code>https://&lt;portal name&gt;/auth/social/callback</code>, and must match the one registered with the provider exactly. The portal name must be one clients&apos; devices reach the portal by.</>,
                   <><strong>Apple</strong> needs the Services ID, the Team ID, the Key ID and the contents of the .p8 private key; the key is stored write-only.</>,
                   <><strong>Microsoft</strong> accepts a directory (tenant) ID to admit only that organisation, or <code>common</code>, <code>organizations</code> or <code>consumers</code>.</>,
                   <>The provider of an entry cannot be changed; remove it and add it again instead.</>,
@@ -291,12 +291,12 @@ export default function SocialProvidersPage() {
               placeholder={mode === "edit" ? "Unchanged" : ""}
             />
           </Field>
-          <Field label="Redirect URI" required hint="Must match the one registered with the provider exactly.">
+          <Field label="Redirect URI" required hint="The Client Portal's callback over HTTPS, registered with the provider exactly as typed here.">
             <Input
               value={f.redirect_uri}
               onChange={(e) => set("redirect_uri", e.target.value)}
               required
-              placeholder="https://portal.example.com/callback"
+              placeholder="https://portal.stayconnect.local/auth/social/callback"
             />
           </Field>
           <Field label="Scopes" hint="Space separated.">
