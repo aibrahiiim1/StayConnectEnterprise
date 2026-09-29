@@ -145,6 +145,21 @@ describe("Client networks", () => {
     await waitFor(() => expect(post).toHaveBeenCalledWith("/network/guest-networks/net-1/disable"));
   });
 
+  // Found on PRE-LIVE: a disabled network offered Edit and Delete and no way back.
+  it("a disabled network can be enabled again, as a staged change", async () => {
+    route({
+      "/auth/whoami": IT,
+      "/network/guest-networks": list([{ ...NET, enabled: false }]),
+      "/network/guest-networks/net-1/status": { id: "net-1", bridge_name: "br-g20", enabled: false, active_clients: 0 },
+      "/network/revisions": list([]),
+    });
+    post.mockResolvedValue({});
+    render(<GuestNetworksPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Enable Guest WiFi" }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("/network/guest-networks/net-1/enable"));
+    expect(screen.queryByRole("button", { name: "Disable Guest WiFi" })).toBeNull();
+  });
+
   it("a read-only role sees the list but no write action", async () => {
     route({
       "/auth/whoami": VIEWER,
