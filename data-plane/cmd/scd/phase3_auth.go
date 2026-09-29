@@ -656,6 +656,11 @@ func (p *phase3Auth) probeInterface(ctx context.Context, seen *observations, ifa
 		  FROM iam_v2.stays s
 		 WHERE s.tenant_id=$1 AND s.site_id=$2 AND s.pms_interface_id=$3
 		   AND s.normalized_room_number = $4
+		 -- ELIGIBLE STAYS FIRST. The window is bounded and a busy room accumulates departed stays; without an
+		 -- order the window is whatever the scan returns first, and on PRE-LIVE that was 16 departed stays with
+		 -- the in-house guest outside it (refused as STAY_NOT_ELIGIBLE). Departed stays still fill the rest of
+		 -- the window, so "the room exists" keeps its meaning.
+		 ORDER BY (s.status IN ('IN_HOUSE','POST_STAY_ACTIVE')) DESC, s.id
 		 LIMIT 16`, p.srv.tenID, p.srv.siteID, ifaceID, room, last, first, res)
 	if err != nil {
 		// An interface whose state cannot be read is INDETERMINATE, never a determinate "no such guest".

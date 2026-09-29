@@ -225,6 +225,70 @@ func TestIntegration_SignInAttempts_MismatchAbsentRoomAndIneligibleStayAreDistin
 	}
 }
 
+// A ROOM'S HISTORY NEVER HIDES ITS CURRENT GUEST. The room probe reads a bounded window of stays; a busy room
+// accumulates checked-out stays for years, and a window filled by them used to leave the in-house stay outside
+// it, so the guest was refused as not eligible. Found on PRE-LIVE: one in-house stay behind 34 departed ones.
+func TestIntegration_SignInAttempts_RoomHistoryNeverHidesTheInHouseStay(t *testing.T) {
+	f := newAuthFixture(t)
+	defer f.startEnforcementOwner(t)()
+	ctx := context.Background()
+
+	// Compact the (disposable) table first, so rows land in the order they are written rather than in whatever
+	// space earlier tests freed.
+	if _, err := f.pool.Exec(ctx, `VACUUM FULL iam_v2.stays`); err != nil {
+		t.Fatalf("compact stays: %v", err)
+	}
+	// A fresh room: twenty departed stays and then the current one, written in that order by one statement and
+	// with ids and reservation numbers that sort after the history, so the scan meets the history first whichever
+	// plan reads it -- the shape a room has after years of turnover. The current stay carries the fixture's own
+	// occupancy evidence.
+	if _, err := controlledExec(ctx, f.pool, "stay", `
+		INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,
+		                         normalized_room_number,status,posting_allowed,effective_checkout_at,lifecycle_version,
+		                         last_applied_event_version,occupancy_evidence_at,occupancy_ingested_at,occupancy_revision_id,
+		                         occupancy_normalization_version,occupancy_clock_suspect,occupancy_evidence_version)
+		SELECT overlay(gen_random_uuid()::text PLACING CASE WHEN g=21 THEN 'ffffffff' ELSE '00000000' END FROM 1 FOR 8)::uuid,
+		       $1,$2,$3,'RES-777-'||lpad(g::text,2,'0'),'STAY-777-'||lpad(g::text,2,'0'),'777',
+		       CASE WHEN g=21 THEN 'IN_HOUSE' ELSE 'CHECKED_OUT' END, false,
+		       CASE WHEN g=21 THEN NULL ELSE now() END, 1, 0,
+		       CASE WHEN g=21 THEN o.occupancy_evidence_at END, CASE WHEN g=21 THEN o.occupancy_ingested_at END,
+		       CASE WHEN g=21 THEN o.occupancy_revision_id END, CASE WHEN g=21 THEN o.occupancy_normalization_version END,
+		       CASE WHEN g=21 THEN o.occupancy_clock_suspect END, CASE WHEN g=21 THEN o.occupancy_evidence_version ELSE 0 END
+		  FROM generate_series(1,21) g, iam_v2.stays o WHERE o.id=$4::uuid ORDER BY g`,
+		f.tenant, f.site, f.iface, f.stay); err != nil {
+		t.Fatalf("seed the room: %v", err)
+	}
+	if _, err := controlledExec(ctx, f.pool, "stay", `
+		INSERT INTO iam_v2.stay_guests(tenant_id,site_id,pms_interface_id,stay_id,last_name_norm,is_primary)
+		SELECT tenant_id,site_id,pms_interface_id,id,'ADEBAYO',true FROM iam_v2.stays
+		 WHERE tenant_id=$1 AND site_id=$2 AND normalized_room_number='777'`, f.tenant, f.site); err != nil {
+		t.Fatalf("seed the room's guests: %v", err)
+	}
+	// The hazard is real in this database: an unordered window of 16 holds none of the current stay.
+	inWindow := -1
+	if err := f.pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE status='IN_HOUSE') FROM (SELECT status FROM iam_v2.stays
+		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND normalized_room_number='777' LIMIT 16) w`,
+		f.tenant, f.site, f.iface).Scan(&inWindow); err != nil {
+		t.Fatalf("read the unordered window: %v", err)
+	}
+	if inWindow != 0 {
+		t.Fatalf("fixture: could not place the current stay after the history in scan order, so this test would prove nothing")
+	}
+
+	_, res := post(t, f.p3.resolveHandler, f.verifyBody("777", "Adebayo", f.reqID(t, 1)))
+	got := lastAttempt(t, f)
+	if res.Outcome != outcomeVerified {
+		t.Fatalf("the in-house guest was refused (%s, %d eligible counted) behind the room's history", got.Result, deref(got.Eligible))
+	}
+}
+
+func deref(p *int) int {
+	if p == nil {
+		return -1
+	}
+	return *p
+}
+
 // EVERY DELIBERATE SUBMISSION LEAVES EXACTLY ONE ROW, including the ones that fail before a resolver, a stay
 // or even a network exists. Those are precisely the attempts that used to vanish.
 func TestIntegration_SignInAttempts_EverySubmissionLeavesExactlyOneRecord(t *testing.T) {

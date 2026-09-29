@@ -88,7 +88,8 @@ roomsignin(){ ip netns exec $1 curl -s -H 'Content-Type: application/json' \
 lastroom(){ sleep 1; $PSQL "SELECT result FROM iam_v2.sign_in_attempts ORDER BY occurred_at DESC LIMIT 1"; }
 
 curl -sk $R -c $CK -o /dev/null -H 'Content-Type: application/json' -d '{"email":"admin","password":"admin"}' $B/auth/login
-pkgrev(){ $PSQL "SELECT p.current_revision_id FROM iam_v2.internet_packages p JOIN iam_v2.internet_package_revisions r ON r.id=p.current_revision_id JOIN iam_v2.service_plan_revisions s ON s.id=r.service_plan_revision_id WHERE p.active AND NOT p.is_system AND r.price_minor=0 AND s.max_concurrent_devices $1 ORDER BY r.revision_no DESC LIMIT 1"; }
+pkgrev(){ $PSQL "SELECT p.current_revision_id FROM iam_v2.internet_packages p JOIN iam_v2.internet_package_revisions r ON r.id=p.current_revision_id JOIN iam_v2.service_plan_revisions s ON s.id=r.service_plan_revision_id WHERE p.active AND NOT p.is_system AND r.price_minor=0 AND 'NOT_REQUIRED' = ANY(r.settlement_methods)
+  AND s.max_concurrent_devices $1 ORDER BY r.revision_no DESC LIMIT 1"; }
 REV1=$(pkgrev "= 1"); PKG1=$($PSQL "SELECT package_id FROM iam_v2.internet_package_revisions WHERE id='$REV1'")
 REVN=$(pkgrev "> 1"); PKGN=$($PSQL "SELECT package_id FROM iam_v2.internet_package_revisions WHERE id='$REVN'")
 issue(){ local out b; out=$(curl -sk $R -b $CK -H 'Content-Type: application/json' \
@@ -109,6 +110,11 @@ devs_on(){ $PSQL "SELECT count(*) FROM iam_v2.entitlement_device_authorizations 
 HOSP=$(curl -sk $R -b $CK "$B/capabilities" | python3 -c 'import sys,json;m=(json.load(sys.stdin).get("modules") or {}).get("hospitality") or {};print(1 if m.get("licensed") and m.get("deployed") else 0)' 2>/dev/null)
 [ "$HOSP" = 1 ] || HOSP=0
 echo "   (hospitality licensed here: $HOSP)"
+# The room tests need Room sign-in ON. The site's own setting is restored on exit (AM0) whatever it was; the
+# site's provider and mode are kept, only "enabled" is forced for the run.
+PMSON=$(printf '%s' "$AM0" | python3 -c 'import sys,json;p=(json.load(sys.stdin).get("pms") or {});p["enabled"]=True;p.setdefault("mode","room_any");p.setdefault("provider","protel-fias");print(json.dumps({"pms":p}))')
+pmson(){ [ "$HOSP" = 1 ] && methods "$PMSON"; return 0; }
+pmson
 echo "== 0. setup: guest network $GB ($GW); 1-device package ${REV1:0:8}, multi-device package ${REVN:0:8} =="
 issue; [ -n "$CODE" ] && [ -n "$VID" ] && ok "voucher issued through Hotel Admin (${VID:0:8})" || { bad "voucher issue failed"; exit 1; }
 client ga1; CIP1=$CIP; [ -n "$CIP1" ] && ok "device 1 leased $CIP1" || { bad "device 1 got no lease"; exit 1; }
@@ -137,7 +143,7 @@ methods '{"voucher":{"enabled":false}}'
 loc=$(signin ga1 /auth/voucher --data-urlencode "code=$CODE")
 [ -z "$loc" ] && says ga1 "not available" && ok "voucher switched off: a valid voucher is refused ('not available')" || bad "disabled voucher method -> '$loc'"
 [ "$($PSQL "SELECT state FROM iam_v2.vouchers WHERE id='$VID'")" = UNUSED ] && ok "the refused voucher was not touched" || bad "voucher state changed"
-methods "$AM0"
+methods "$AM0"; pmson
 account; U1=$UN; P1=$PW
 methods '{"guest_account":{"enabled":false}}'
 loc=$(signin ga1 /auth/credentials --data-urlencode "username=$U1" --data-urlencode "password=$P1")
@@ -147,7 +153,7 @@ if [ "$HOSP" = 1 ]; then
   pj=$(roomsignin ga1 00000 x)
   printf '%s' "$pj" | grep -q '"ok":false' && [ "$(lastroom)" = SERVICE_UNAVAILABLE ] && ok "room sign-in switched off: refused before any room lookup (recorded SERVICE_UNAVAILABLE)" || bad "disabled PMS method: $(lastroom) $pj"
 fi
-methods "$AM0"; methods '{"guest_account":{"enabled":true}}'   # accounts on for the account tests below
+methods "$AM0"; pmson; methods '{"guest_account":{"enabled":true}}'   # accounts on for the account tests below
 
 echo "== 4. voucher: one step -- sign-in redeems the card's own package, activates, enforces -> internet =="
 # A VOUCHER IS A PACKAGE, PRINTED (docs/architecture/ONEGATE_MODULES_AND_ACQUISITION.md 6.2): the code pins the
@@ -204,6 +210,11 @@ loc=$(signin ga2 /auth/credentials --data-urlencode "username=$U" --data-urlenco
 [ -z "$loc" ] && ok "a wrong account password is refused" || bad "wrong password -> $loc"
 loc=$(signin ga2 /auth/credentials --data-urlencode "username=$U" --data-urlencode "password=$P")
 [ "$loc" = "/packages" ] && ok "account authenticated; package selection (no access held yet)" || bad "account sign-in -> '$loc'"
+# The multi-device steps need a FREE multi-device package open to accounts. A site whose multi-device packages
+# are all Voucher-only has none, and that is its configuration, not a defect: say so rather than fail.
+if [ -z "$REVN" ]; then
+  echo "  SKIP multi-device account steps: no active free multi-device package allows Free acquisition here"
+else
 ip netns exec ga2 curl -s -o /tmp/ga2.pk -b /tmp/ga2.jar "$PORTAL/packages"
 grep -q "value=\"$PKGN\"" /tmp/ga2.pk && ok "the multi-device package is offered to the account" || bad "multi-device package not offered"
 loc=$(acquire ga2 "$PKGN"); ASID=$(sidof "$loc"); AENT=$(ent_of_session "$ASID")
@@ -218,6 +229,7 @@ logout ga2
 loc=$(signin ga2 /auth/credentials --data-urlencode "username=$U" --data-urlencode "password=$P"); RSID=$(sidof "$loc")
 [ -n "$RSID" ] && [ "$(ent_of_session "$RSID")" = "$AENT" ] && [ "$(online ga2)" = 204 ] && ok "account device A reconnects to the same entitlement (204)" || bad "account reconnect -> '$loc'"
 logout ga2; logout ga4
+fi
 # The device limit, on the 1-device package with a fresh account.
 account; U=$UN; P=$PW
 signin ga2 /auth/credentials --data-urlencode "username=$U" --data-urlencode "password=$P" >/dev/null
