@@ -89,8 +89,8 @@ func seedPaidChain(t *testing.T, p *pgxpool.Pool) scope {
 	s := scope{amount: 1000, currency: "USD", exponent: 2}
 
 	if err := p.QueryRow(ctx, `WITH
-	  t  AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
-	  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id)
+	  t  AS (INSERT INTO public.tenants(id,slug,name) SELECT g, g::text, 't' FROM gen_random_uuid() g RETURNING id),
+	  si AS (INSERT INTO public.sites(id,tenant_id,code,name) SELECT g, t.id, g::text, 's' FROM t, gen_random_uuid() g RETURNING id, tenant_id)
 	SELECT tenant_id::text, id::text FROM si`).Scan(&s.tenant, &s.site); err != nil {
 		t.Fatalf("seed tenant/site: %v", err)
 	}
@@ -100,7 +100,10 @@ func seedPaidChain(t *testing.T, p *pgxpool.Pool) scope {
 		(tenant_id,site_id,provider,merchant_account_ref,status,is_default)
 		VALUES ($1,$2,'test-double','acct_'||substr(md5(random()::text),1,12),'ACTIVE',true)
 		RETURNING id::text`, s.tenant, s.site)
-	gn := scan1[string](t, p, `INSERT INTO public.guest_networks(id,tenant_id,site_id) VALUES (gen_random_uuid(),$1,$2)
+	gn := scan1[string](t, p, `INSERT INTO public.guest_networks
+		(id,tenant_id,site_id,name,parent_interface,bridge_name,gateway_cidr,gateway_ip,subnet_cidr)
+		SELECT g,$1,$2,'net','p'||substr(md5(g::text),1,12),'b'||substr(md5(g::text),1,12),
+		       '10.99.0.1/24','10.99.0.1','10.99.0.0/24' FROM gen_random_uuid() g
 		RETURNING id::text`, s.tenant, s.site)
 	dev := scan1[string](t, p, `INSERT INTO iam_v2.devices(tenant_id,site_id,appliance_id,mac)
 		VALUES ($1,$2,gen_random_uuid(),$3) RETURNING id::text`, s.tenant, s.site, fmt.Sprintf("02:00:00:%02x:%02x:%02x", u&0xff, (u>>8)&0xff, (u>>16)&0xff))
@@ -128,24 +131,24 @@ func seedPaidChain(t *testing.T, p *pgxpool.Pool) scope {
 		VALUES ($1,$2,$3,decode(md5(random()::text||clock_timestamp()::text),'hex'),'\x01','\x01',$4,'1234')
 		RETURNING id::text`, s.tenant, s.site, pkgRev, keyGen)
 
-	ac := scan1[string](t, p, `INSERT INTO iam_v2.auth_contexts
+	ac := guarded(t, p, "auth_context", `INSERT INTO iam_v2.auth_contexts
 		(tenant_id,site_id,method,voucher_id,device_id,guest_network_id,expires_at)
 		VALUES ($1,$2,'VOUCHER',$3,$4,$5, now()+interval '10 minutes') RETURNING id::text`,
 		s.tenant, s.site, voucher, dev, gn)
 	snap := `{"version":` + strconv.Itoa(iamv2.GrantSnapshotVersion) + `,"service_plan_revision_id":"` + planRev +
 		`","package_revision_id":"` + pkgRev + `","max_concurrent_devices":2,` +
 		`"time_accounting_mode":"VALIDITY_WINDOW","end_mode":"VALIDITY_WINDOW","validity_seconds":3600}`
-	quote := scan1[string](t, p, `INSERT INTO iam_v2.offer_quotes
+	quote := guarded(t, p, "commerce_intent", `INSERT INTO iam_v2.offer_quotes
 		(tenant_id,site_id,auth_context_id,package_revision_id,price_minor,currency,currency_exponent,grant_snapshot,expires_at)
 		VALUES ($1,$2,$3,$4,1000,'USD',2,$5::jsonb, now()+interval '5 minutes') RETURNING id::text`,
 		s.tenant, s.site, ac, pkgRev, snap)
 
-	s.purchase = scan1[string](t, p, `INSERT INTO iam_v2.purchases
+	s.purchase = guarded(t, p, "commerce_intent", `INSERT INTO iam_v2.purchases
 		(tenant_id,site_id,package_revision_id,offer_quote_id,auth_context_id,trigger,
 		 amount_minor,currency,currency_exponent,state)
 		VALUES ($1,$2,$3,$4,$5,'GUEST_SELECTION',1000,'USD',2,'AWAITING_SETTLEMENT') RETURNING id::text`,
 		s.tenant, s.site, pkgRev, quote, ac)
-	s.settlement = scan1[string](t, p, `INSERT INTO iam_v2.settlements(tenant_id,site_id,purchase_id,method,status)
+	s.settlement = guarded(t, p, "commerce_intent", `INSERT INTO iam_v2.settlements(tenant_id,site_id,purchase_id,method,status)
 		VALUES ($1,$2,$3,'ONLINE_PAYMENT','REQUIRED') RETURNING id::text`, s.tenant, s.site, s.purchase)
 	return s
 }
@@ -184,6 +187,27 @@ func seedOperator(t *testing.T, p *pgxpool.Pool, tenant string) string {
 	return scan1[string](t, p, `INSERT INTO public.operators(tenant_id,email,display_name,status)
 		VALUES ($1,'op-'||substr(md5(random()::text),1,10)||'@test.local','Test Operator','active')
 		RETURNING id::text`, tenant)
+}
+
+// guardedExec runs one statement (no result) inside a controlled-writer scope. Used only to STAGE a state
+// a test needs; on the full schema a raw write to a controlled table is refused outside such a scope.
+func guardedExec(t *testing.T, p *pgxpool.Pool, family, sql string, args ...any) {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation($1)`, family); err != nil {
+		t.Fatalf("open %s: %v", family, err)
+	}
+	if _, err := tx.Exec(ctx, sql, args...); err != nil {
+		t.Fatalf("%s: %v -- %s", family, err, sql)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func idem(t *testing.T, suffix string) string {

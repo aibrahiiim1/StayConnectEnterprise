@@ -102,7 +102,7 @@ func seedGivenName(t *testing.T, f *authFixture, given string) {
 // soleOccupant moves the fixture's SECOND stay off room 412, leaving exactly one eligible stay on it.
 func soleOccupant(t *testing.T, f *authFixture) {
 	t.Helper()
-	if _, err := f.pool.Exec(context.Background(),
+	if _, err := controlledExec(context.Background(), f.pool, "stay",
 		`UPDATE iam_v2.stays SET normalized_room_number='777' WHERE tenant_id=$1 AND site_id=$2 AND id=$3`,
 		f.tenant, f.site, f.otherStay); err != nil {
 		t.Fatalf("move the second stay: %v", err)
@@ -198,8 +198,10 @@ func TestIntegration_SignInAttempts_MismatchAbsentRoomAndIneligibleStayAreDistin
 	}
 
 	// Check the stays out. The room still exists in the mirror; no stay on it may authenticate.
-	if _, err := f.pool.Exec(ctx,
-		`UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now()
+	if _, err := controlledExec(ctx, f.pool, "stay",
+		// posting_allowed=false as internal/checkout writes it: the posting_only_in_house CHECK runs before
+		// the AFTER trigger that recomputes the flag.
+		`UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false, effective_checkout_at=now()
 		  WHERE tenant_id=$1 AND site_id=$2`, f.tenant, f.site); err != nil {
 		t.Fatalf("check the stays out: %v", err)
 	}

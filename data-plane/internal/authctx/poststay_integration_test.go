@@ -59,7 +59,7 @@ func seedPostStay(t *testing.T, p *pgxpool.Pool, f fixture) psFixture {
 		t.Fatalf("open stay: %v", err)
 	}
 	if _, err := tx.Exec(ctx,
-		`UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now() WHERE id=$1`, f.stay); err != nil {
+		`UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false, effective_checkout_at=now() WHERE id=$1`, f.stay); err != nil {
 		t.Fatalf("checkout: %v", err)
 	}
 	if err := tx.Commit(ctx); err != nil {

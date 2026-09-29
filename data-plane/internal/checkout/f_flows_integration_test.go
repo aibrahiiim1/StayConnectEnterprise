@@ -30,7 +30,7 @@ func TestIntegration_F3_OriginAgnosticConversion(t *testing.T) {
 		if origin == "GUEST_SELECTION_FIXTURE" {
 			trigger = "VOUCHER_REDEMPTION" // an ordinary non-admin origin; still zero amount
 		}
-		if _, err := p.Exec(ctx, `UPDATE iam_v2.purchases SET trigger=$2, amount_minor=0
+		if err := guardedExec(p, commerceFamily, `UPDATE iam_v2.purchases SET trigger=$2, amount_minor=0
 			WHERE id=(SELECT purchase_id FROM iam_v2.entitlements WHERE id=$1)`, ent, trigger); err != nil {
 			t.Fatal(err)
 		}

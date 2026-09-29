@@ -150,7 +150,7 @@ func TestIntegrationClosure_ZeroAttemptRetryRefusesEveryUnsafeCase(t *testing.T)
 		if _, err := p.Exec(ctx, `INSERT INTO iam_v2.posting_attempts
 			(tenant_id,site_id,internal_posting_id,pms_interface_id,attempt_no,p_number,rn,g_number,
 			 sent_at,outcome)
-			SELECT $1,$2,$3,pms_interface_id,1,'99','101','7',now(),'UNKNOWN'
+			SELECT $1,$2,$3,pms_interface_id,1,'99','101',g_number,now(),'UNKNOWN'
 			  FROM iam_v2.pms_postings WHERE id=$3`,
 			s.tenant, s.site, postingID); err != nil {
 			t.Fatalf("staging an attempt: %v", err)

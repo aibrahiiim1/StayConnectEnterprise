@@ -26,7 +26,7 @@ func TestIntegration_OrphanWithTenantDataButNoAssignmentIsBlocked(t *testing.T) 
 	}
 	defer p.Close()
 	var tenant string
-	if err := p.QueryRow(ctx, `INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id::text`).
+	if err := p.QueryRow(ctx, `INSERT INTO public.tenants(id,slug,name) SELECT g, g::text, 't' FROM gen_random_uuid() g RETURNING id::text`).
 		Scan(&tenant); err != nil {
 		t.Fatalf("seed a tenant: %v", err)
 	}

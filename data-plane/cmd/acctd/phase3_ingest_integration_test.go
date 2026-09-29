@@ -12,11 +12,44 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/enforce"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
+
+// opTx opens a transaction with the named controlled-operation families already open. On the production
+// schema the test login (postgres) does not own the iam_v2 openers, so a SEED that writes a capability-scoped
+// family (stays -> 'stay', purchases -> 'commerce_intent') declares the operation exactly as the product's own
+// writers do. The caller commits; a deferred Rollback after Commit is a no-op.
+func opTx(t *testing.T, p *pgxpool.Pool, families ...string) pgx.Tx {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fam := range families {
+		if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation($1)`, fam); err != nil {
+			_ = tx.Rollback(ctx)
+			t.Fatalf("open controlled operation %s: %v", fam, err)
+		}
+	}
+	return tx
+}
+
+// opExec runs one SEED statement inside opTx and commits it.
+func opExec(t *testing.T, p *pgxpool.Pool, family, sql string, args ...any) error {
+	t.Helper()
+	ctx := context.Background()
+	tx := opTx(t, p, family)
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, sql, args...); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
 
 type ingestFixture struct {
 	pool                          *pgxpool.Pool
@@ -40,9 +73,11 @@ func newIngest(t *testing.T, quota int64) *ingestFixture {
 	t.Cleanup(p.Close)
 
 	f := &ingestFixture{pool: p}
-	if err := p.QueryRow(ctx, `WITH
-	  t AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
-	  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id),
+	tx := opTx(t, p, "stay")
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := tx.QueryRow(ctx, `WITH
+	  t AS (INSERT INTO public.tenants(id,slug,name) SELECT g, g::text, 't' FROM gen_random_uuid() g RETURNING id),
+	  si AS (INSERT INTO public.sites(id,tenant_id,code,name) SELECT g, t.id, g::text, 's' FROM t, gen_random_uuid() g RETURNING id, tenant_id),
 	  pi AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)
 	         SELECT gen_random_uuid(), si.tenant_id, si.id,'protel-fias','ACTIVE' FROM si RETURNING id,tenant_id,site_id),
 	  st AS (INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version,last_applied_event_version)
@@ -65,6 +100,9 @@ func newIngest(t *testing.T, quota int64) *ingestFixture {
 		Scan(&f.tenant, &f.site, &f.iface, &f.stay, &f.device, &f.device2, &f.svcRev, &f.pkgRev); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
 	f.p3 = &phase3{cfg: iamv2.PMSConfig{MasterEnabled: true, CheckoutGraceEnabled: true},
 		enf: enforce.New(p), tenant: f.tenant, site: f.site}
 	return f
@@ -74,10 +112,7 @@ func newIngest(t *testing.T, quota int64) *ingestFixture {
 func (f *ingestFixture) grantEntitlement(t *testing.T, activatedAt time.Time, window *time.Time) string {
 	t.Helper()
 	ctx := context.Background()
-	tx, err := f.pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tx := opTx(t, f.pool, "commerce_intent")
 	defer func() { _ = tx.Rollback(ctx) }()
 	var pur, ent string
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.purchases

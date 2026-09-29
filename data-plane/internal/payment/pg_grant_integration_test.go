@@ -204,9 +204,8 @@ func TestIntegrationGrant_SubstitutionFailsClosed(t *testing.T) {
 	if st := scan1[string](t, p, `SELECT status FROM iam_v2.settlements WHERE id=$1`, c.settlement); st != "SETTLED" {
 		t.Fatalf("setup: expected SETTLED, got %s", st)
 	}
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.purchases SET state='PENDING' WHERE id=$1`, c.purchase); err != nil {
-		t.Fatal(err)
-	}
+	// staging: a purchase write needs the commerce_intent controlled scope on the full schema
+	guardedExec(t, p, "commerce_intent", `UPDATE iam_v2.purchases SET state='PENDING' WHERE id=$1`, c.purchase)
 	if _, err := g.GrantSettledSettlement(ctx, c.tenant, c.site, c.settlement); err == nil {
 		t.Fatal("a PENDING purchase took the paid grant path")
 	}

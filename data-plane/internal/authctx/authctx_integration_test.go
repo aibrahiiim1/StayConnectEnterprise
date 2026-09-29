@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -30,6 +31,38 @@ func pool(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("ping: %v", err)
 	}
 	return p
+}
+
+// openOps opens the named capability-scoped controlled operations in tx. On the production schema the test
+// login (postgres) no longer owns iam_v2.begin_controlled_operation, so a raw write to a controlled family
+// (stays/stay_events -> 'stay', auth_contexts -> 'auth_context', ...) needs the operation open in the SAME
+// transaction - exactly what the product writers do through writerguard.Open.
+func openOps(ctx context.Context, tx pgx.Tx, families ...string) error {
+	for _, fam := range families {
+		if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation($1)`, fam); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// gexec is p.Exec for a fixture write to a controlled-writer family: one transaction that opens the family's
+// operation, performs the statement and commits. Used only for SEEDING/driving state, never for the code path
+// under test.
+func gexec(ctx context.Context, p *pgxpool.Pool, family, sql string, args ...any) (pgconn.CommandTag, error) {
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		return pgconn.CommandTag{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := openOps(ctx, tx, family); err != nil {
+		return pgconn.CommandTag{}, err
+	}
+	tag, err := tx.Exec(ctx, sql, args...)
+	if err != nil {
+		return tag, err
+	}
+	return tag, tx.Commit(ctx)
 }
 
 type fixture struct{ tenant, site, iface, rev, stay, device, network string }
@@ -59,10 +92,11 @@ func seedAged(t *testing.T, p *pgxpool.Pool, cacheAgeJSON, evidenceAtExpr string
 		suspect = "true"
 	}
 	sql := `WITH
-	  t AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
-	  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id),
-	  gn AS (INSERT INTO public.guest_networks(id,tenant_id,site_id)
-	         SELECT gen_random_uuid(), si.tenant_id, si.id FROM si RETURNING id),
+	  t AS (INSERT INTO public.tenants(id,slug,name) SELECT g, g::text, 't' FROM gen_random_uuid() g RETURNING id),
+	  si AS (INSERT INTO public.sites(id,tenant_id,code,name) SELECT g, t.id, g::text, 's' FROM t, gen_random_uuid() g RETURNING id, tenant_id),
+	  gn AS (INSERT INTO public.guest_networks(id,tenant_id,site_id,name,parent_interface,bridge_name,gateway_cidr,gateway_ip,subnet_cidr)
+	         SELECT g, si.tenant_id, si.id, 'gn', 'p'||substr(md5(g::text),1,12), 'b'||substr(md5(g::text),1,12),
+	                '10.9.0.1/24'::inet, '10.9.0.1'::inet, '10.9.0.0/24'::cidr FROM si, gen_random_uuid() g RETURNING id),
 	  pi AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state,current_revision_id)
 	         SELECT gen_random_uuid(), si.tenant_id, si.id, 'protel-fias','ACTIVE',NULL FROM si RETURNING id,tenant_id,site_id),
 	  pr AS (INSERT INTO iam_v2.pms_interface_revisions(id,tenant_id,site_id,pms_interface_id,revision_no,source_timezone,config)
@@ -76,9 +110,21 @@ func seedAged(t *testing.T, p *pgxpool.Pool, cacheAgeJSON, evidenceAtExpr string
 	SELECT (SELECT tenant_id FROM pi)::text, (SELECT site_id FROM pi)::text, (SELECT id FROM pi)::text,
 	       (SELECT id FROM pr)::text, (SELECT id FROM st)::text, (SELECT id FROM dv)::text, (SELECT id FROM gn)::text`
 	var f fixture
-	if err := p.QueryRow(ctx, sql, cfg).
+	// The Stay is a controlled-writer family: the seed opens the 'stay' operation in the same transaction.
+	stx, err := p.Begin(ctx)
+	if err != nil {
+		t.Fatalf("seed begin: %v", err)
+	}
+	defer func() { _ = stx.Rollback(ctx) }()
+	if err := openOps(ctx, stx, "stay"); err != nil {
+		t.Fatalf("seed open stay operation: %v", err)
+	}
+	if err := stx.QueryRow(ctx, sql, cfg).
 		Scan(&f.tenant, &f.site, &f.iface, &f.rev, &f.stay, &f.device, &f.network); err != nil {
 		t.Fatalf("seed: %v", err)
+	}
+	if err := stx.Commit(ctx); err != nil {
+		t.Fatalf("seed commit: %v", err)
 	}
 	// point the interface at its revision (separate statement — a CTE cannot update a row another CTE inserted)
 	if _, err := p.Exec(ctx, `UPDATE iam_v2.pms_interfaces SET current_revision_id=$1 WHERE id=$2`, f.rev, f.iface); err != nil {
@@ -136,7 +182,7 @@ func TestIntegration_OneTimeConsumeAndReplay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
-	if _, err := p.Exec(context.Background(), `UPDATE iam_v2.auth_contexts SET expires_at = now() - interval '1 minute' WHERE id=$1`, expID); err != nil {
+	if _, err := gexec(context.Background(), p, "auth_context", `UPDATE iam_v2.auth_contexts SET expires_at = now() - interval '1 minute' WHERE id=$1`, expID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Consume(context.Background(), expID, pres(f)); err != ErrContextInvalid {
@@ -171,7 +217,7 @@ func TestIntegration_PinnedPresenterAndOccupancy(t *testing.T) {
 
 	// pinned Stay no longer IN_HOUSE → invalid
 	id2, _ := s.IssuePMS(context.Background(), grant(f, 600))
-	if _, err := p.Exec(context.Background(), `UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now() WHERE id=$1`, f.stay); err != nil {
+	if _, err := gexec(context.Background(), p, "stay", `UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false, effective_checkout_at=now() WHERE id=$1`, f.stay); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Consume(context.Background(), id2, pres(f)); err != ErrContextInvalid {
@@ -220,7 +266,7 @@ func TestIntegration_EvidenceAndInterfacePins(t *testing.T) {
 	// authoritative evidence replacement after issue (material change + exactly-+1 version) → consume rejected
 	f = seed(t, p)
 	id, _ = s.IssuePMS(ctx, grant(f, 600))
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays
+	if _, err := gexec(ctx, p, "stay", `UPDATE iam_v2.stays
 		SET occupancy_evidence_at = now() + interval '1 second', occupancy_evidence_version = occupancy_evidence_version + 1
 		WHERE id=$1`, f.stay); err != nil {
 		t.Fatal(err)
@@ -512,10 +558,10 @@ func TestIntegration_EpisodeAndEvidenceSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	// checkout then reinstate on the same Stay row (the migration trigger enforces the +1 on CHECKED_OUT→IN_HOUSE)
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now() WHERE id=$1`, f.stay); err != nil {
+	if _, err := gexec(ctx, p, "stay", `UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false, effective_checkout_at=now() WHERE id=$1`, f.stay); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET status='IN_HOUSE', lifecycle_version=lifecycle_version+1, effective_checkout_at=NULL WHERE id=$1`, f.stay); err != nil {
+	if _, err := gexec(ctx, p, "stay", `UPDATE iam_v2.stays SET status='IN_HOUSE', lifecycle_version=lifecycle_version+1, effective_checkout_at=NULL WHERE id=$1`, f.stay); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Consume(ctx, oldID, pres(f)); err != ErrContextInvalid {
@@ -538,7 +584,7 @@ func TestIntegration_EpisodeAndEvidenceSnapshot(t *testing.T) {
 	}
 	stale, _ := s.IssuePMS(ctx, grant(f, 600))
 	// material evidence change (evidence_at) + exactly-+1 version bump — the trigger-legal replacement path.
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays
+	if _, err := gexec(ctx, p, "stay", `UPDATE iam_v2.stays
 		SET occupancy_evidence_at = now() + interval '1 second', occupancy_evidence_version = occupancy_evidence_version + 1
 		WHERE id=$1`, f.stay); err != nil {
 		t.Fatal(err)
@@ -560,6 +606,12 @@ func lockStayFirst(t *testing.T, p *pgxpool.Pool, stay string) pgx.Tx {
 		_ = tx.Rollback(context.Background())
 		t.Fatal(err)
 	}
+	// The writer's Stay mutation is a controlled-family write: open the 'stay' operation (after the Stay lock,
+	// so the lock order under test is unchanged).
+	if err := openOps(context.Background(), tx, "stay"); err != nil {
+		_ = tx.Rollback(context.Background())
+		t.Fatal(err)
+	}
 	return tx
 }
 
@@ -575,7 +627,7 @@ func TestIntegration_ConsumeStayFirstLockOrder(t *testing.T) {
 	f := seed(t, p)
 	id, _ := s.IssuePMS(ctx, grant(f, 600))
 	txCk := lockStayFirst(t, p, f.stay)
-	if _, err := txCk.Exec(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now() WHERE id=$1`, f.stay); err != nil {
+	if _, err := txCk.Exec(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false, effective_checkout_at=now() WHERE id=$1`, f.stay); err != nil {
 		t.Fatal(err)
 	}
 	consumeErr := make(chan error, 1)
@@ -696,7 +748,10 @@ func TestIntegration_MixedCheckoutConsumeNoDeadlock(t *testing.T) {
 			return e
 		}
 		if st == "IN_HOUSE" {
-			if _, e := tx.Exec(context.Background(), `UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now() WHERE id=$1`, f.stay); e != nil {
+			if e := openOps(context.Background(), tx, "stay"); e != nil {
+				return e
+			}
+			if _, e := tx.Exec(context.Background(), `UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false, effective_checkout_at=now() WHERE id=$1`, f.stay); e != nil {
 				return e
 			}
 			if _, e := tx.Exec(context.Background(), `UPDATE iam_v2.stays SET status='IN_HOUSE', lifecycle_version=lifecycle_version+1, effective_checkout_at=NULL WHERE id=$1`, f.stay); e != nil {

@@ -100,7 +100,7 @@ func newProdAuthFixture(t *testing.T) *authFixture {
 	          SELECT gen_random_uuid(), pi.tenant_id, pi.site_id,'PREMIUM_PAID',false,true FROM pi RETURNING id,tenant_id,site_id),
 	  pipr AS (INSERT INTO iam_v2.internet_package_revisions(id,tenant_id,site_id,package_id,revision_no,service_plan_revision_id,
 	                                                         package_type,price_minor,settlement_methods,duration_policy)
-	           SELECT gen_random_uuid(), pip.tenant_id, pip.site_id, pip.id,1,spr.id,'GENERAL',1500,ARRAY['PMS_CHARGE']::text[],
+	           SELECT gen_random_uuid(), pip.tenant_id, pip.site_id, pip.id,1,spr.id,'GENERAL',1500,ARRAY['PMS_POSTING']::text[],
 	                  '{"mode":"VALIDITY_WINDOW","seconds":86400}'::jsonb FROM pip, spr RETURNING id)
 	SELECT (SELECT tenant_id FROM pi)::text, (SELECT site_id FROM pi)::text, (SELECT id FROM pi)::text,
 	       (SELECT id FROM pir)::text, (SELECT guest_network_id FROM m)::text,

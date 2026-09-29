@@ -56,7 +56,7 @@ func setFeed(t *testing.T, p *pgxpool.Pool, s fixture, transport, sync, continui
 // timestamp quietly would be rejected by the database, which is the guard doing its job.
 func setEvidenceAge(t *testing.T, p *pgxpool.Pool, s fixture, at time.Time) {
 	t.Helper()
-	if _, err := p.Exec(context.Background(), `UPDATE iam_v2.stays
+	if _, err := gexec(context.Background(), p, "stay", `UPDATE iam_v2.stays
 		SET occupancy_evidence_at=$2, occupancy_evidence_version=occupancy_evidence_version+1
 		WHERE id=$1`, s.stay, at); err != nil {
 		t.Fatalf("age evidence: %v", err)

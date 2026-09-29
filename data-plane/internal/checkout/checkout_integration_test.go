@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/grace"
@@ -32,6 +33,66 @@ func pool(t *testing.T) *pgxpool.Pool {
 	}
 	return p
 }
+
+// guarded runs fn in ONE transaction that first opens the named controlled-operation families. On the full
+// production schema the controlled-writer triggers (stays/stay_events -> 'stay', purchases -> 'commerce_intent',
+// checkout_grace_audit/entitlement_boundary_watermarks -> 'checkout_conversion', ...) no longer let the
+// superuser through merely for owning the objects, so a seed opens the family exactly as the product's own
+// writers do. The error is returned so a test asserting a GENUINE refusal (append-only, provenance, legal
+// edges) still sees it -- for the right reason, not because the writer guard fired first.
+func guarded(p *pgxpool.Pool, families []string, fn func(ctx context.Context, tx pgx.Tx) error) error {
+	ctx := context.Background()
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	for _, f := range families {
+		if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation($1)`, f); err != nil {
+			return err
+		}
+	}
+	if err := fn(ctx, tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// guardedExec is guarded for a single statement.
+func guardedExec(p *pgxpool.Pool, families []string, q string, args ...any) error {
+	return guarded(p, families, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, q, args...)
+		return err
+	})
+}
+
+// asOwnerExec runs ONE seed write as iam_v2_owner (SET LOCAL ROLE). Only for OWNER-guarded tables
+// (site_checkout_grace_config, accounting_records) where the seed needs a shape no operation produces (a
+// NULL/unconfigured grace config, an accounting sample at an explicit sequence and time). It reproduces exactly
+// what the historical fixture did -- the test user WAS the owner there. Never used in a code path under test,
+// and never where the test asserts that such a write is refused.
+func asOwnerExec(p *pgxpool.Pool, q string, args ...any) error {
+	ctx := context.Background()
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SET LOCAL ROLE iam_v2_owner`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, q, args...); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+var (
+	stayFamily     = []string{"stay"}
+	commerceFamily = []string{"commerce_intent"}
+	alertFamily    = []string{"alert"}
+	convFamily     = []string{"checkout_conversion"}
+)
 
 type fixture struct {
 	tenant, site, iface, stay string
@@ -84,9 +145,10 @@ func seedBase(t *testing.T, p *pgxpool.Pool, o seedOpts) fixture {
 	}
 	durPolicy := fmt.Sprintf(`{"end_mode":"GRACE_AFTER_CHECKOUT","grace_duration_seconds":%d,"policy_version":"CHECKOUT_GRACE_V1"}`, dur)
 
-	err := p.QueryRow(ctx, `WITH
-	  t  AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
-	  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id),
+	err := guarded(p, stayFamily, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `WITH
+	  t  AS (INSERT INTO public.tenants(id,slug,name) SELECT g, g::text, 't' FROM gen_random_uuid() g RETURNING id),
+	  si AS (INSERT INTO public.sites(id,tenant_id,code,name) SELECT g, t.id, g::text, 's' FROM t, gen_random_uuid() g RETURNING id, tenant_id),
 	  pi AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)
 	         SELECT gen_random_uuid(), si.tenant_id, si.id, 'protel-fias','ACTIVE' FROM si RETURNING id,tenant_id,site_id),
 	  rt AS (INSERT INTO iam_v2.pms_interface_runtime(tenant_id,site_id,pms_interface_id,published_resync_generation,resync_generation_seq)
@@ -103,8 +165,9 @@ func seedBase(t *testing.T, p *pgxpool.Pool, o seedOpts) fixture {
 	         SELECT gen_random_uuid(), pi.tenant_id, pi.site_id, pi.id, 'R1','R1','IN_HOUSE',1,5 FROM pi RETURNING id)
 	SELECT (SELECT tenant_id FROM pi)::text, (SELECT site_id FROM pi)::text, (SELECT id FROM pi)::text,
 	       (SELECT id FROM st)::text, (SELECT id FROM ipr)::text, (SELECT id FROM spr)::text`,
-		down, up, devLim, devPol, tam, quota, durPolicy).
-		Scan(&f.tenant, &f.site, &f.iface, &f.stay, &f.gracePkgRev, &f.svcRev)
+			down, up, devLim, devPol, tam, quota, durPolicy).
+			Scan(&f.tenant, &f.site, &f.iface, &f.stay, &f.gracePkgRev, &f.svcRev)
+	})
 	if err != nil {
 		t.Fatalf("seed base: %v", err)
 	}
@@ -119,13 +182,14 @@ func seedBase(t *testing.T, p *pgxpool.Pool, o seedOpts) fixture {
 		args = append(args, f.gracePkgRev)
 	}
 	if o.configureTypedPolicy {
-		if _, err := p.Exec(ctx, `INSERT INTO iam_v2.site_checkout_grace_config
+		// owner-guarded table; raw seed as iam_v2_owner (see asOwnerExec)
+		if err := asOwnerExec(p, `INSERT INTO iam_v2.site_checkout_grace_config
 			(tenant_id,site_id,grace_package_revision_id,grace_duration_seconds,grace_down_kbps,grace_up_kbps,grace_data_quota_bytes,grace_device_limit,grace_device_limit_policy)
 			VALUES ($1,$2,`+pkg+`,3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE')`, args...); err != nil {
 			t.Fatalf("seed grace config: %v", err)
 		}
 	} else {
-		if _, err := p.Exec(ctx, `INSERT INTO iam_v2.site_checkout_grace_config (tenant_id,site_id,grace_package_revision_id) VALUES ($1,$2,`+pkg+`)`, args...); err != nil {
+		if err := asOwnerExec(p, `INSERT INTO iam_v2.site_checkout_grace_config (tenant_id,site_id,grace_package_revision_id) VALUES ($1,$2,`+pkg+`)`, args...); err != nil {
 			t.Fatalf("seed grace config: %v", err)
 		}
 	}
@@ -141,16 +205,17 @@ func seedBase(t *testing.T, p *pgxpool.Pool, o seedOpts) fixture {
 // returning its id. ts is the normalized boundary timestamp; suspect/seq/admission are configurable.
 func seedEvent(t *testing.T, p *pgxpool.Pool, f fixture, ts *time.Time, suspect bool, seq int, admission string, resyncGen int, stayForApply string) string {
 	t.Helper()
-	ctx := context.Background()
 	if stayForApply == "" {
 		stayForApply = f.stay
 	}
 	var eid string
-	if err := p.QueryRow(ctx, `INSERT INTO iam_v2.stay_events
+	if err := guarded(p, stayFamily, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `INSERT INTO iam_v2.stay_events
 		(id,tenant_id,site_id,pms_interface_id,stay_id,external_event_identity,event_type,pms_timestamp_raw,pms_timestamp_utc,
 		 source_timezone,sequence_version,normalization_version,clock_suspect,payload,processing_status,admission_kind,resync_generation)
 		VALUES (gen_random_uuid(),$1,$2,$3,NULL,$4,'GO','x',$5,'UTC',$6,1,$7,'{}','PENDING',$8,$9) RETURNING id`,
-		f.tenant, f.site, f.iface, fmt.Sprintf("EV-%d-%s", seq, admission), ts, seq, suspect, admission, resyncGen).Scan(&eid); err != nil {
+			f.tenant, f.site, f.iface, fmt.Sprintf("EV-%d-%s", seq, admission), ts, seq, suspect, admission, resyncGen).Scan(&eid)
+	}); err != nil {
 		t.Fatalf("seed event insert: %v", err)
 	}
 	return eid
@@ -161,11 +226,10 @@ func seedEvent(t *testing.T, p *pgxpool.Pool, f fixture, ts *time.Time, suspect 
 // an event without pinning it would (correctly) be refused as an unverifiable boundary.
 func applyEvent(t *testing.T, p *pgxpool.Pool, eid, stay string) {
 	t.Helper()
-	ctx := context.Background()
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.stay_events SET stay_id=$2, processing_status='APPLIED', processed_at=now() WHERE id=$1`, eid, stay); err != nil {
+	if err := guardedExec(p, stayFamily, `UPDATE iam_v2.stay_events SET stay_id=$2, processing_status='APPLIED', processed_at=now() WHERE id=$1`, eid, stay); err != nil {
 		t.Fatalf("apply event: %v", err)
 	}
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET last_applied_event_id=$1::uuid, last_applied_event_version=last_applied_event_version+1 WHERE id=$2`, eid, stay); err != nil {
+	if err := guardedExec(p, stayFamily, `UPDATE iam_v2.stays SET last_applied_event_id=$1::uuid, last_applied_event_version=last_applied_event_version+1 WHERE id=$2`, eid, stay); err != nil {
 		t.Fatalf("pin lineage: %v", err)
 	}
 }
@@ -195,6 +259,10 @@ func seedEnt(t *testing.T, p *pgxpool.Pool, f fixture, window *time.Time, txns [
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	// purchases are a controlled-writer table ('commerce_intent') on the full schema
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('commerce_intent')`); err != nil {
+		t.Fatal(err)
+	}
 	var purchaseID string
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.purchases
 		(tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,trigger,amount_minor,state)
@@ -236,7 +304,7 @@ func seedDeviceAuth(t *testing.T, p *pgxpool.Pool, f fixture, ent string, idx in
 		VALUES ($1,$2,$3,$4,'AUTHORIZED',$5,$5)`, f.tenant, f.site, ent, dev, authAt); err != nil {
 		t.Fatalf("seed entitlement_device: %v", err)
 	}
-	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.entitlement_device_authorizations
+	if err := guardedExec(p, []string{"device_auth"}, `INSERT INTO iam_v2.entitlement_device_authorizations
 		(tenant_id,site_id,entitlement_id,device_id,seq,authorized_at,deauthorized_at)
 		VALUES ($1,$2,$3,$4,1,$5,$6)`, f.tenant, f.site, ent, dev, authAt, deauthAt); err != nil {
 		t.Fatalf("seed device auth: %v", err)
@@ -269,7 +337,8 @@ func ptr(tm time.Time) *time.Time { return &tm }
 // sample inserts one accounting record for a session at an explicit sample time.
 func sample(t *testing.T, p *pgxpool.Pool, f fixture, sess string, seq int, up, down int64, at time.Time) {
 	t.Helper()
-	if _, err := p.Exec(context.Background(), `INSERT INTO iam_v2.accounting_records
+	// owner-guarded ledger; raw seed sample as iam_v2_owner (see asOwnerExec)
+	if err := asOwnerExec(p, `INSERT INTO iam_v2.accounting_records
 		(tenant_id,site_id,session_id,sample_seq,bytes_up,bytes_down,sampled_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
 		f.tenant, f.site, sess, seq, up, down, at); err != nil {
 		t.Fatalf("sample: %v", err)
@@ -457,7 +526,7 @@ func TestIntegration_QuotaWindowAtBoundary(t *testing.T) {
 	ent := seedEnt(t, p, f, &win, []txn{{"ACTIVE", b.Add(-time.Hour)}})
 	_, sess := seedDeviceAuth(t, p, f, ent, 1, b.Add(-time.Hour), nil, b.Add(-time.Hour), nil)
 	// one accounting sample before the boundary that meets/exceeds the 500MB plan quota
-	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.accounting_records(tenant_id,site_id,session_id,sample_seq,bytes_up,bytes_down,sampled_at)
+	if err := asOwnerExec(p, `INSERT INTO iam_v2.accounting_records(tenant_id,site_id,session_id,sample_seq,bytes_up,bytes_down,sampled_at)
 		VALUES ($1,$2,$3,1,524288000,1,$4)`, f.tenant, f.site, sess, b.Add(-30*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
@@ -492,7 +561,7 @@ func TestIntegration_BoundaryEventVerification(t *testing.T) {
 	applyEvent(t, p, pinned, f.stay)
 	other := seedEvent(t, p, f, &f.boundary, false, 6, "LIVE", 0, "")
 	applyEvent(t, p, other, f.stay)
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET last_applied_event_id=$2::uuid WHERE id=$1`, f.stay, pinned); err != nil {
+	if err := guardedExec(p, stayFamily, `UPDATE iam_v2.stays SET last_applied_event_id=$2::uuid WHERE id=$1`, f.stay, pinned); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := c.ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, f.stay, BoundarySource{StayEventID: other}); err != ErrInvalidBoundaryEvent {
@@ -516,8 +585,10 @@ func TestIntegration_BoundaryEventVerification(t *testing.T) {
 	f = seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true, systemGracePackage: true, bootstrapEmergency: true})
 	activeEnt(t, p, f)
 	var otherStay string
-	if err := p.QueryRow(ctx, `INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version,last_applied_event_version)
-		VALUES (gen_random_uuid(),$1,$2,$3,'R2','R2','IN_HOUSE',1,5) RETURNING id`, f.tenant, f.site, f.iface).Scan(&otherStay); err != nil {
+	if err := guarded(p, stayFamily, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version,last_applied_event_version)
+		VALUES (gen_random_uuid(),$1,$2,$3,'R2','R2','IN_HOUSE',1,5) RETURNING id`, f.tenant, f.site, f.iface).Scan(&otherStay)
+	}); err != nil {
 		t.Fatal(err)
 	}
 	xev := seedEvent(t, p, f, &f.boundary, false, 5, "LIVE", 0, "")
@@ -610,29 +681,29 @@ func TestIntegration_AlertLifecycleAndProvenance(t *testing.T) {
 	}
 	// RESOLVED still requires an actor, and a second OPEN is not a legal edge
 	actor := "11111111-1111-1111-1111-111111111111"
-	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id,site_id,audit_id,seq,action) VALUES ($1,$2,$3,2,'RESOLVED')`, f.tenant, f.site, auditID); err == nil {
+	if err := guardedExec(p, alertFamily, `INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id,site_id,audit_id,seq,action) VALUES ($1,$2,$3,2,'RESOLVED')`, f.tenant, f.site, auditID); err == nil {
 		t.Fatal("RESOLVED needs an actor")
 	}
-	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id,site_id,audit_id,seq,action) VALUES ($1,$2,$3,2,'OPEN')`, f.tenant, f.site, auditID); err == nil {
+	if err := guardedExec(p, alertFamily, `INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id,site_id,audit_id,seq,action) VALUES ($1,$2,$3,2,'OPEN')`, f.tenant, f.site, auditID); err == nil {
 		t.Fatal("OPEN -> OPEN is not a legal edge")
 	}
-	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id,site_id,audit_id,seq,action,actor) VALUES ($1,$2,$3,2,'ACKNOWLEDGED',$4)`, f.tenant, f.site, auditID, actor); err != nil {
+	if err := guardedExec(p, alertFamily, `INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id,site_id,audit_id,seq,action,actor) VALUES ($1,$2,$3,2,'ACKNOWLEDGED',$4)`, f.tenant, f.site, auditID, actor); err != nil {
 		t.Fatal(err)
 	}
 	if count(t, p, `SELECT count(*) FROM iam_v2.active_operational_alerts WHERE audit_id=$1`, auditID) != 1 {
 		t.Fatal("ACKNOWLEDGED alert must stay active")
 	}
-	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id,site_id,audit_id,seq,action,actor,reason_code) VALUES ($1,$2,$3,3,'RESOLVED',$4,'CATALOG_FIXED')`, f.tenant, f.site, auditID, actor); err != nil {
+	if err := guardedExec(p, alertFamily, `INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id,site_id,audit_id,seq,action,actor,reason_code) VALUES ($1,$2,$3,3,'RESOLVED',$4,'CATALOG_FIXED')`, f.tenant, f.site, auditID, actor); err != nil {
 		t.Fatal(err)
 	}
 	if count(t, p, `SELECT count(*) FROM iam_v2.active_operational_alerts WHERE audit_id=$1`, auditID) != 0 {
 		t.Fatal("RESOLVED alert must leave the active view")
 	}
 	// evidence immutable + a resolved alert is terminal
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.checkout_grace_alert_actions SET action='OPEN' WHERE audit_id=$1`, auditID); err == nil {
+	if err := guardedExec(p, alertFamily, `UPDATE iam_v2.checkout_grace_alert_actions SET action='OPEN' WHERE audit_id=$1`, auditID); err == nil {
 		t.Fatal("alert actions are append-only")
 	}
-	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id,site_id,audit_id,seq,action,actor) VALUES ($1,$2,$3,4,'ACKNOWLEDGED',$4)`, f.tenant, f.site, auditID, actor); err == nil {
+	if err := guardedExec(p, alertFamily, `INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id,site_id,audit_id,seq,action,actor) VALUES ($1,$2,$3,4,'ACKNOWLEDGED',$4)`, f.tenant, f.site, auditID, actor); err == nil {
 		t.Fatal("a RESOLVED alert is terminal")
 	}
 
@@ -641,7 +712,8 @@ func TestIntegration_AlertLifecycleAndProvenance(t *testing.T) {
 	wrongEv := seedEvent(t, p, f2, &f2.boundary, false, 5, "LIVE", 0, "")
 	applyEvent(t, p, wrongEv, f2.stay)
 	// craft an audit for f2.stay but citing wrongEv with a MISMATCHED seq → provenance guard rejects
-	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.checkout_grace_audit
+	// the 'checkout_conversion' family is opened so the refusal is the provenance guard, not the writer guard
+	if err := guardedExec(p, convFamily, `INSERT INTO iam_v2.checkout_grace_audit
 		(tenant_id,site_id,pms_interface_id,stay_id,lifecycle_version,trigger,is_emergency,policy_version,reason_code,
 		 boundary_event_id,boundary_event_seq,boundary_normalization_version,boundary_reason_code,config_version,boundary_at)
 		VALUES ($1,$2,$3,$4,1,'NO_GRACE',false,'NONE','X',$5,999,1,'TRUSTED_PMS_CHECKOUT_TS',1,now())`,
@@ -942,7 +1014,8 @@ func TestIntegration_BoundaryWatermarkAndDelayedAccounting(t *testing.T) {
 		t.Fatal("a late sample rewrote the frozen watermark")
 	}
 	// the watermark itself is immutable
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.entitlement_boundary_watermarks SET bytes_up=999 WHERE id=$1`, wmID); err == nil {
+	// the 'checkout_conversion' family is opened so the refusal is the append-only guard, not the writer guard
+	if err := guardedExec(p, convFamily, `UPDATE iam_v2.entitlement_boundary_watermarks SET bytes_up=999 WHERE id=$1`, wmID); err == nil {
 		t.Fatal("watermark must be append-only")
 	}
 	// a sample taken AFTER the boundary on the grace entitlement is ordinary usage, not delayed

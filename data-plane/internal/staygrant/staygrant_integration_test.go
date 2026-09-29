@@ -47,10 +47,22 @@ func seed(t *testing.T, p *pgxpool.Pool, priceMinor int64, settlement, pkgType s
 	ctx := context.Background()
 	cfg := `{"endpoint":"x","max_auth_cache_age_seconds":3600}`
 	var f fixture
-	if err := p.QueryRow(ctx, `WITH
-	  t AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
-	  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id),
-	  gn AS (INSERT INTO public.guest_networks(id,tenant_id,site_id) SELECT gen_random_uuid(), si.tenant_id, si.id FROM si RETURNING id),
+	// Stays are a controlled-writer family on the production schema: the seed opens the 'stay' operation in
+	// the same transaction that writes them (postgres no longer owns the opener, so the owner shortcut is gone).
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		t.Fatalf("seed begin: %v", err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('stay')`); err != nil {
+		t.Fatalf("seed open stay operation: %v", err)
+	}
+	if err := tx.QueryRow(ctx, `WITH
+	  t AS (INSERT INTO public.tenants(id,slug,name) SELECT g, g::text, 't' FROM gen_random_uuid() g RETURNING id),
+	  si AS (INSERT INTO public.sites(id,tenant_id,code,name) SELECT g, t.id, g::text, 's' FROM t, gen_random_uuid() g RETURNING id, tenant_id),
+	  gn AS (INSERT INTO public.guest_networks(id,tenant_id,site_id,name,parent_interface,bridge_name,gateway_cidr,gateway_ip,subnet_cidr)
+	         SELECT g, si.tenant_id, si.id, 'gn', 'p'||substr(md5(g::text),1,12), 'b'||substr(md5(g::text),1,12),
+	                '10.9.0.1/24'::inet, '10.9.0.1'::inet, '10.9.0.0/24'::cidr FROM si, gen_random_uuid() g RETURNING id),
 	  pi AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)
 	         SELECT gen_random_uuid(), si.tenant_id, si.id,'protel-fias','ACTIVE' FROM si RETURNING id,tenant_id,site_id),
 	  pr AS (INSERT INTO iam_v2.pms_interface_revisions(id,tenant_id,site_id,pms_interface_id,revision_no,source_timezone,config)
@@ -75,6 +87,9 @@ func seed(t *testing.T, p *pgxpool.Pool, priceMinor int64, settlement, pkgType s
 		cfg, settlement, priceMinor, pkgType, devices).
 		Scan(&f.tenant, &f.site, &f.iface, &f.rev, &f.stay, &f.device, &f.network, &f.pkgRev); err != nil {
 		t.Fatalf("seed: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("seed commit: %v", err)
 	}
 	if _, err := p.Exec(ctx, `UPDATE iam_v2.internet_packages SET current_revision_id=$1
 		WHERE id=(SELECT package_id FROM iam_v2.internet_package_revisions WHERE id=$1)`, f.pkgRev); err != nil {
@@ -223,8 +238,13 @@ func TestIntegration_PaidPackageFailsClosed(t *testing.T) {
 		price      int64
 		settlement string
 	}{
-		{"priced", 1500, "NOT_REQUIRED"},
-		{"settlement-required", 0, "ROOM_CHARGE"},
+		// The production schema's ipr_acquisition_methods CHECK makes the two historical fixtures unrepresentable
+		// (a priced revision may not carry NOT_REQUIRED, and ROOM_CHARGE is not a settlement method; the
+		// vocabulary is NOT_REQUIRED/PREPAID/ONLINE_PAYMENT/PMS_POSTING). The same two refusal branches are
+		// exercised with the nearest representable revisions: a PRICED one (settled by PMS posting) and a
+		// ZERO-PRICE one that still requires a settlement method beyond NOT_REQUIRED (PREPAID).
+		{"priced", 1500, "PMS_POSTING"},
+		{"settlement-required", 0, "PREPAID"},
 	} {
 		f := seed(t, p, tc.price, tc.settlement, "FREE_STAY", 2)
 		acID := issue(t, p, f)

@@ -130,6 +130,12 @@ func TestIntegration_ActivityDuringGraceDoesNotExtendIt(t *testing.T) {
 		f.tenant, f.site, "02:00:00:00:be:ef").Scan(&dev); err != nil {
 		t.Fatalf("seed a reconnecting device: %v", err)
 	}
+	// On the full schema a live session requires an AUTHORIZED binding (p6_session_requires_authorized_binding),
+	// so the device is authorized on the grace entitlement through the real operation first -- which is also
+	// exactly what a reconnecting guest's device goes through.
+	if _, err := p.Exec(ctx, `SELECT iam_v2.authorize_entitlement_device($1,$2,now())`, res.NewEntitlementID, dev); err != nil {
+		t.Fatalf("authorize the reconnecting device: %v", err)
+	}
 	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.sessions
 		(id,tenant_id,site_id,entitlement_id,device_id,state,started)
 		VALUES (gen_random_uuid(),$1,$2,$3,$4,'active',now())`,

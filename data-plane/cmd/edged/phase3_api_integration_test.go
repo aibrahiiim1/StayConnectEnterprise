@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
@@ -44,6 +45,62 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	return p
 }
 
+// controlled runs fn in ONE transaction that first opens each named controlled-writer family. On the full
+// appliance schema the superuser is not the owner of the iam_v2 guards, so a fixture that seeds a guarded
+// table must open the same controlled operation the product's own writer opens. Seeding only: the code
+// under test opens its own operations.
+func controlled(ctx context.Context, p *pgxpool.Pool, families []string, fn func(tx pgx.Tx) error) error {
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	for _, fam := range families {
+		if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation($1)`, fam); err != nil {
+			return err
+		}
+	}
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// asOwner runs fn in ONE transaction under SET LOCAL ROLE iam_v2_owner. It reproduces exactly what the old
+// scratch fixture did implicitly (the test user WAS the owner of every guard) and is used ONLY to SEED a row
+// in an owner-guarded table that has no product operation a test can call — never on a code path under test.
+func asOwner(ctx context.Context, p *pgxpool.Pool, fn func(tx pgx.Tx) error) error {
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if _, err := tx.Exec(ctx, `SET LOCAL ROLE iam_v2_owner`); err != nil {
+		return err
+	}
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// seedGuestNetwork inserts a production-shaped public.guest_networks row. bridge_name is globally unique and
+// parent_interface is unique among enabled untagged networks, and several packages share ONE database, so
+// both are derived from the row's own uuid. Returns the id and the derived bridge name.
+func seedGuestNetwork(t *testing.T, p *pgxpool.Pool, tenant, site, name, subnet string) (string, string) {
+	t.Helper()
+	var id, bridge string
+	if err := p.QueryRow(context.Background(), `
+		INSERT INTO public.guest_networks(id,tenant_id,site_id,name,enabled,parent_interface,bridge_name,
+		  gateway_cidr,gateway_ip,subnet_cidr)
+		SELECT g,$1,$2,$3,true,'p'||substr(md5(g::text),1,12),'b'||substr(md5(g::text),1,12),
+		       set_masklen($4::cidr::inet + 1, masklen($4::cidr)), host($4::cidr::inet + 1)::inet, $4::cidr
+		FROM gen_random_uuid() g RETURNING id::text, bridge_name`, tenant, site, name, subnet).Scan(&id, &bridge); err != nil {
+		t.Fatalf("seed guest network %q: %v", name, err)
+	}
+	return id, bridge
+}
+
 type apiFixture struct {
 	srv      *httptest.Server
 	pool     *pgxpool.Pool
@@ -69,13 +126,14 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 
 	if tenant == "" {
 		if err := p.QueryRow(ctx, `WITH
-		  t AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
-		  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id)
+		  t AS (INSERT INTO public.tenants(id,slug,name) SELECT g, g::text, 't' FROM gen_random_uuid() g RETURNING id),
+		  si AS (INSERT INTO public.sites(id,tenant_id,code,name) SELECT g, t.id, g::text, 's' FROM t, gen_random_uuid() g RETURNING id, tenant_id)
 		SELECT (SELECT tenant_id FROM si)::text, (SELECT id FROM si)::text`).Scan(&f.tenant, &f.site); err != nil {
 			t.Fatalf("seed tenant/site: %v", err)
 		}
 	} else if err := p.QueryRow(ctx,
-		`INSERT INTO public.sites(id,tenant_id) VALUES (gen_random_uuid(), $1) RETURNING tenant_id::text, id::text`,
+		`INSERT INTO public.sites(id,tenant_id,code,name) SELECT g, $1, g::text, 's' FROM gen_random_uuid() g
+		 RETURNING tenant_id::text, id::text`,
 		tenant).Scan(&f.tenant, &f.site); err != nil {
 		t.Fatalf("seed second site under the same tenant: %v", err)
 	}
@@ -238,28 +296,34 @@ func (f *apiFixture) seedAlert(t *testing.T) string {
 	res := fmt.Sprintf("R%d", time.Now().UnixNano())
 
 	var iface, stay string
-	if err := f.pool.QueryRow(ctx, `WITH
+	// posting_allowed is computed by the database (stay_posting_permission); a CHECKED_OUT stay is not postable.
+	if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `WITH
 	  pi AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)
 	         VALUES (gen_random_uuid(),$1,$2,'protel-fias','ACTIVE') RETURNING id),
 	  st AS (INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,
-	           status,lifecycle_version,last_applied_event_version,effective_checkout_at,posting_allowed)
-	         SELECT gen_random_uuid(),$1,$2,pi.id,$3,$3,'CHECKED_OUT',1,0, now() - interval '1 hour', false FROM pi RETURNING id)
-	SELECT (SELECT id FROM pi)::text, (SELECT id FROM st)::text`, f.tenant, f.site, res).Scan(&iface, &stay); err != nil {
+	           status,lifecycle_version,last_applied_event_version,effective_checkout_at)
+	         SELECT gen_random_uuid(),$1,$2,pi.id,$3,$3,'CHECKED_OUT',1,0, now() - interval '1 hour' FROM pi RETURNING id)
+	SELECT (SELECT id FROM pi)::text, (SELECT id FROM st)::text`, f.tenant, f.site, res).Scan(&iface, &stay)
+	}); err != nil {
 		t.Fatalf("seed stay: %v", err)
 	}
 	// events are admitted PENDING; only the engine moves one to a terminal state, so the fixture applies it in
 	// a separate statement exactly as the engine would (a data-modifying CTE cannot see a sibling's insert).
 	var event string
-	if err := f.pool.QueryRow(ctx, `INSERT INTO iam_v2.stay_events
+	if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.stay_events
 		(tenant_id,site_id,pms_interface_id,external_event_identity,event_type,payload,pms_timestamp_utc,
 		 admission_kind,admission_runtime_generation,resync_generation,received_at)
 		VALUES ($1,$2,$3,$4,'GO','{}'::jsonb, now() - interval '1 hour','LIVE',1,0,now()) RETURNING id::text`,
-		f.tenant, f.site, iface, res).Scan(&event); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
-	if _, err := f.pool.Exec(ctx, `UPDATE iam_v2.stay_events
-		SET processing_status='APPLIED', processed_at=now(), stay_id=$2 WHERE id=$1`, event, stay); err != nil {
-		t.Fatalf("apply event: %v", err)
+			f.tenant, f.site, iface, res).Scan(&event); err != nil {
+			return fmt.Errorf("seed event: %w", err)
+		}
+		_, err := tx.Exec(ctx, `UPDATE iam_v2.stay_events
+		SET processing_status='APPLIED', processed_at=now(), stay_id=$2 WHERE id=$1`, event, stay)
+		return err
+	}); err != nil {
+		t.Fatalf("seed/apply event: %v", err)
 	}
 	// An emergency alert always accompanies a real emergency Grace entitlement (the audit's coherence check
 	// enforces exactly that), so the fixture provisions the canonical Emergency catalog and grants one — the
@@ -278,6 +342,10 @@ func (f *apiFixture) seedAlert(t *testing.T) string {
 	tx, err := f.pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('commerce_intent')`); err != nil {
+		t.Fatalf("open commerce_intent: %v", err)
 	}
 	var purchase, graceEnt string
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.purchases
@@ -301,7 +369,8 @@ func (f *apiFixture) seedAlert(t *testing.T) string {
 	}
 
 	var auditID string
-	if err := f.pool.QueryRow(ctx, `INSERT INTO iam_v2.checkout_grace_audit
+	if err := controlled(ctx, f.pool, []string{"checkout_conversion"}, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `INSERT INTO iam_v2.checkout_grace_audit
 		(tenant_id,site_id,pms_interface_id,stay_id,lifecycle_version,trigger,is_emergency,policy_version,
 		 alert_code,reason_code,boundary_at,boundary_clock_suspect,grace_entitlement_id,
 		 boundary_event_id,boundary_event_seq,boundary_normalization_version,boundary_reason_code,config_version)
@@ -309,7 +378,8 @@ func (f *apiFixture) seedAlert(t *testing.T) string {
 		       e.pms_timestamp_utc, false, $6::uuid, e.id, e.sequence_version, e.normalization_version,
 		       'TRUSTED_PMS_CHECKOUT_TS', 1
 		FROM iam_v2.stay_events e WHERE e.id=$5
-		RETURNING id::text`, f.tenant, f.site, iface, stay, event, graceEnt).Scan(&auditID); err != nil {
+		RETURNING id::text`, f.tenant, f.site, iface, stay, event, graceEnt).Scan(&auditID)
+	}); err != nil {
 		t.Fatalf("seed alert: %v", err)
 	}
 	return auditID

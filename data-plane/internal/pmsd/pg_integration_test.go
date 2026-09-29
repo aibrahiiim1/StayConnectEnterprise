@@ -56,9 +56,9 @@ func seedScope(t *testing.T, pool *pgxpool.Pool) seeded {
 	ctx := context.Background()
 	var s seeded
 	err := pool.QueryRow(ctx, `WITH
-	  t AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
-	  ot AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
-	  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id),
+	  t AS (INSERT INTO public.tenants(id,slug,name) SELECT g, g::text, 't' FROM gen_random_uuid() g RETURNING id),
+	  ot AS (INSERT INTO public.tenants(id,slug,name) SELECT g, g::text, 't' FROM gen_random_uuid() g RETURNING id),
+	  si AS (INSERT INTO public.sites(id,tenant_id,code,name) SELECT g, t.id, g::text, 's' FROM t, gen_random_uuid() g RETURNING id, tenant_id),
 	  pi AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state,current_revision_id)
 	         SELECT gen_random_uuid(), si.tenant_id, si.id, 'protel-fias', 'ACTIVE', NULL FROM si RETURNING id,tenant_id,site_id),
 	  pr AS (INSERT INTO iam_v2.pms_interface_revisions(id,tenant_id,site_id,pms_interface_id,revision_no,source_timezone,config)
@@ -601,20 +601,25 @@ func TestIntegration_RealAdvisoryLockCompetition(t *testing.T) {
 	}
 }
 
-// NO RUNTIME PRIVILEGE ON THE STAY/PMS TABLES WHILE DARK — stated as an allow-list rather than a zero.
+// RUNTIME TABLE PRIVILEGE ON iam_v2 IS EXACTLY GATE-P'S — nothing broader, nothing missing.
 //
-// The original assertion was "zero svc_* grants on iam_v2", and it held until Phase 6, whose least-privilege
-// model grants each runtime role exactly what its own dark-but-mounted surface reads and nothing else. Those
-// grants are deliberate, audited by the Phase-6 privilege gate, and narrower than the role would otherwise
-// have; a zero here would now be a claim that is simply false.
+// History. The original assertion was "zero svc_* grants on iam_v2"; Phase 6 restated it as a hand-kept
+// allow-list of the few SELECT/INSERT grants the dark-but-mounted surfaces needed. Both were measured on the
+// historical scratch fixture, which never applied the per-service Gate-P files, so the posture they describe
+// ("dark") is one no real appliance has: on a factory-clean appliance deploy/gatep/gatep-grants.sql and its
+// `\ir` per-service files ARE applied (svc-pmsd-iamv2-connector-grants.sql gives the PMS connector its
+// stay/PMS tables, svc-acctd-iamv2-accounting-grants.sql gives acctd its accounting tables, and so on).
 //
-// So the rule is restated in the form it was always trying to express: NOTHING beyond the specific
-// Phase-6 grants, and in particular nothing on the stay/PMS runtime tables this package is about. A new
-// grant anywhere else still fails, which is the bite the original had.
+// PRODUCTION TRUTH (converted when the suites moved onto the full Gate-P schema). The rule the test was
+// always trying to express is "no runtime role reaches an iam_v2 table unless Gate-P deliberately granted
+// it". It is now asserted in exactly that form, against the authoritative source rather than a copy: the
+// expected set is DERIVED from deploy/gatep/*.sql (gatepIamV2TableGrants), and the database's table-level
+// svc_* grants on iam_v2 must equal it. A grant that appears in the database without a Gate-P GRANT behind
+// it still fails (the bite the original had), and so does a Gate-P grant that did not land.
 func TestIntegration_ZeroRuntimeGrantsWhileDark(t *testing.T) {
 	pool := integPool(t)
 	defer pool.Close()
-	rows, err := pool.Query(context.Background(), `SELECT grantee, table_name, privilege_type
+	rows, err := pool.Query(context.Background(), `SELECT DISTINCT grantee, table_name, privilege_type
 		  FROM information_schema.role_table_grants
 		 WHERE table_schema='iam_v2' AND grantee LIKE 'svc_%'
 		 ORDER BY grantee, table_name, privilege_type`)
@@ -622,8 +627,9 @@ func TestIntegration_ZeroRuntimeGrantsWhileDark(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rows.Close()
-	// The exact Phase-6 grants, by role and table. EXECUTE on the controlled writers is audited separately
-	// by the Phase-6 privilege gate; this is about table reach.
+	// The historical Phase-6 allow-list, by role and table, retained as a floor (each must still be a Gate-P
+	// grant). EXECUTE on the controlled writers is audited separately by the Phase-6 privilege gate; this is
+	// about table reach.
 	allowed := map[string]bool{
 		"svc_scd|appliance_product_settings|SELECT": true,
 		"svc_scd|devices|SELECT":                    true,
@@ -655,16 +661,31 @@ func TestIntegration_ZeroRuntimeGrantsWhileDark(t *testing.T) {
 		"svc_acctd|entitlement_devices|SELECT":              true,
 		"svc_acctd|entitlement_termination_evidence|SELECT": true,
 	}
+	expected := gatepIamV2TableGrants(t)
+	// The historical Phase-6 allow-list is kept as a floor: every grant it names must still be a Gate-P grant.
+	for k := range allowed {
+		if !expected[k] {
+			t.Errorf("historical Phase-6 grant %s is no longer granted by deploy/gatep", k)
+		}
+	}
+	seen := map[string]bool{}
 	for rows.Next() {
 		var grantee, table, priv string
 		if err := rows.Scan(&grantee, &table, &priv); err != nil {
 			t.Fatal(err)
 		}
-		if !allowed[grantee+"|"+table+"|"+priv] {
-			t.Errorf("unexpected runtime grant while dark: %s holds %s on iam_v2.%s", grantee, priv, table)
+		k := grantee + "|" + table + "|" + priv
+		seen[k] = true
+		if !expected[k] {
+			t.Errorf("runtime grant with no Gate-P GRANT behind it: %s holds %s on iam_v2.%s", grantee, priv, table)
 		}
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
+	}
+	for k := range expected {
+		if !seen[k] {
+			t.Errorf("deploy/gatep grants %s (grantee|table|privilege) but the database does not hold it", k)
+		}
 	}
 }

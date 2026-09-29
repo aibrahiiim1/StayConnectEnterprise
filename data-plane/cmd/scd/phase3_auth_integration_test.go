@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
@@ -120,15 +121,28 @@ func newAuthFixture(t *testing.T) *authFixture {
 
 	claimFreeFixtureOctet(t, p)
 	f := &authFixture{pool: p, net: nextFixtureNet()}
-	if err := p.QueryRow(ctx, `WITH
+	// On the full production schema the stay family is written only inside a controlled operation (the
+	// writerguard no longer lets the superuser through as the owner), so the whole seed runs in one
+	// transaction that opens the 'stay' operation exactly as real code does before touching a Stay.
+	// The parent interface and bridge are derived from the site id: production makes bridge_name globally
+	// unique and parent_interface unique among enabled untagged networks, and several packages share one DB.
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin seed: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('stay')`); err != nil {
+		t.Fatalf("open controlled operation: %v", err)
+	}
+	if err := tx.QueryRow(ctx, `WITH
 	  -- Room sign-in switched ON in the hotel's method settings, as a property using it has it: scd refuses
 	  -- a switched-off method before it looks up any room.
-	  t AS (INSERT INTO public.tenants(id, auth_methods) VALUES (gen_random_uuid(),
-	        '{"voucher":{"enabled":true},"pms":{"enabled":true,"mode":"room_any"}}'::jsonb) RETURNING id),
-	  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id),
+	  t AS (INSERT INTO public.tenants(id, slug, name, auth_methods) SELECT g, g::text, 't',
+	        '{"voucher":{"enabled":true},"pms":{"enabled":true,"mode":"room_any"}}'::jsonb FROM gen_random_uuid() g RETURNING id),
+	  si AS (INSERT INTO public.sites(id,tenant_id,code,name) SELECT g, t.id, g::text, 's' FROM t, gen_random_uuid() g RETURNING id, tenant_id),
 	  gn AS (INSERT INTO public.guest_networks
 	           (id,tenant_id,site_id,name,parent_interface,bridge_name,gateway_cidr,gateway_ip,subnet_cidr,enabled)
-	         SELECT gen_random_uuid(), si.tenant_id, si.id,'p3-guests','ens192','br-p3',
+	         SELECT gen_random_uuid(), si.tenant_id, si.id,'p3-guests','p'||substr(md5(si.id::text),1,12),'b'||substr(md5(si.id::text),1,12),
 	                ($1::text)::inet, ($2::text)::inet, ($3::text)::cidr, true FROM si RETURNING id,tenant_id,site_id),
 	  pi AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)
 	         SELECT gen_random_uuid(), gn.tenant_id, gn.site_id,'protel-fias','ACTIVE' FROM gn RETURNING id,tenant_id,site_id),
@@ -165,7 +179,7 @@ func newAuthFixture(t *testing.T) *authFixture {
 	          SELECT gen_random_uuid(), pi.tenant_id, pi.site_id,'PREMIUM_PAID',false,true FROM pi RETURNING id,tenant_id,site_id),
 	  pipr AS (INSERT INTO iam_v2.internet_package_revisions(id,tenant_id,site_id,package_id,revision_no,service_plan_revision_id,
 	                                                         package_type,price_minor,settlement_methods,duration_policy)
-	           SELECT gen_random_uuid(), pip.tenant_id, pip.site_id, pip.id,1,spr.id,'GENERAL',1500,ARRAY['PMS_CHARGE']::text[],
+	           SELECT gen_random_uuid(), pip.tenant_id, pip.site_id, pip.id,1,spr.id,'GENERAL',1500,ARRAY['PMS_POSTING']::text[],
 	                  '{"mode":"VALIDITY_WINDOW","seconds":86400}'::jsonb FROM pip, spr RETURNING id)
 	SELECT (SELECT tenant_id FROM pi)::text, (SELECT site_id FROM pi)::text, (SELECT id FROM pi)::text,
 	       (SELECT id FROM pir)::text, (SELECT guest_network_id FROM m)::text,
@@ -179,7 +193,7 @@ func newAuthFixture(t *testing.T) *authFixture {
 	// Revision the resolution authenticated against — that is the whole point of the Auth Context, and a
 	// fixture without it would be testing a path no real guest can take. The tuple is all-or-none, so every
 	// column is set together. Separate statement because a data-modifying CTE cannot see a sibling's insert.
-	if _, err := p.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
 		UPDATE iam_v2.stays SET
 		  occupancy_evidence_at = now() - interval '10 seconds',
 		  occupancy_ingested_at = now() - interval '9 seconds',
@@ -195,7 +209,7 @@ func newAuthFixture(t *testing.T) *authFixture {
 	// PUBLISH the interface revision. scd pins the published pointer, never max(revision_no), so a fixture
 	// that creates a revision without publishing it is correctly refused — which is the behaviour a Draft
 	// mid-configuration must get.
-	if _, err := p.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
 		UPDATE iam_v2.pms_interfaces SET current_revision_id=$3
 		 WHERE tenant_id=$1 AND site_id=$2`, f.tenant, f.site, f.revision); err != nil {
 		t.Fatalf("publish the interface revision: %v", err)
@@ -204,7 +218,7 @@ func newAuthFixture(t *testing.T) *authFixture {
 	// as on the Stay: a PMS that is telling us nothing cannot vouch for anybody. These fixtures exercise the
 	// resolve → context → offer path, so the feed is put in the state where that path is the only thing under
 	// test; the feed rule itself is exercised in internal/authctx.
-	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.pms_interface_runtime
+	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.pms_interface_runtime
 		(tenant_id, site_id, pms_interface_id, runtime_generation, credential_mode, published_resync_generation,
 		 pinned_revision_id, transport_status, sync_status, continuity_status, last_connected_at, last_heartbeat_at)
 		SELECT $1,$2,i.id,1,'NONE',0,$3,'CONNECTED','IN_SYNC','CONTINUOUS',now(),now()
@@ -214,11 +228,14 @@ func newAuthFixture(t *testing.T) *authFixture {
 	}
 	// The catalog's current-revision pointer is a separate statement: a data-modifying CTE cannot see a
 	// sibling CTE's insert.
-	if _, err := p.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
 		UPDATE iam_v2.internet_packages ip SET current_revision_id = r.id
 		  FROM iam_v2.internet_package_revisions r
 		 WHERE r.package_id = ip.id AND ip.tenant_id=$1 AND ip.site_id=$2`, f.tenant, f.site); err != nil {
 		t.Fatalf("point packages at their current revision: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit seed: %v", err)
 	}
 	f.appliance = mustUUID(t, p)
 
@@ -228,6 +245,26 @@ func newAuthFixture(t *testing.T) *authFixture {
 		t.Fatal("the Phase-3 auth arm was not constructed with the flags on")
 	}
 	return f
+}
+
+// controlledExec runs one fixture write inside a transaction that has opened the named controlled operation.
+// On the full production schema the controlled-writer triggers no longer let the superuser through as the
+// owner, so a fixture that reshapes a Stay (moves it, checks it out) or ages an Auth Context does so the way
+// real code must: in a transaction that has called iam_v2.begin_controlled_operation(family).
+func controlledExec(ctx context.Context, p *pgxpool.Pool, family, sql string, args ...any) (pgconn.CommandTag, error) {
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		return pgconn.CommandTag{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation($1)`, family); err != nil {
+		return pgconn.CommandTag{}, err
+	}
+	tag, err := tx.Exec(ctx, sql, args...)
+	if err != nil {
+		return tag, err
+	}
+	return tag, tx.Commit(ctx)
 }
 
 func mustUUID(t *testing.T, p *pgxpool.Pool) string {
@@ -615,7 +652,7 @@ func TestIntegration_Phase3Auth_ExpiredContextGrantsNothing(t *testing.T) {
 	if res.Outcome != outcomeVerified {
 		t.Fatal("setup: the stay did not verify")
 	}
-	if _, err := f.pool.Exec(ctx,
+	if _, err := controlledExec(ctx, f.pool, "auth_context",
 		`UPDATE iam_v2.auth_contexts SET expires_at = now() - interval '1 second' WHERE id=$1`, res.AuthContextID); err != nil {
 		t.Fatalf("age the context: %v", err)
 	}

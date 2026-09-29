@@ -219,7 +219,7 @@ func TestIntegration_AnUnpublishedGenerationNeitherBlocksNorAuthorises(t *testin
 	setEvidenceAge(t, p, s, now.Add(-2*time.Hour))
 
 	// An event of the generation currently arriving: above the published one, therefore unclaimable.
-	if _, err := p.Exec(context.Background(), `INSERT INTO iam_v2.stay_events
+	if _, err := gexec(context.Background(), p, "stay", `INSERT INTO iam_v2.stay_events
 		(id,tenant_id,site_id,pms_interface_id,external_event_identity,event_type,payload,
 		 processing_status,admission_kind,resync_generation,sequence_version,received_at)
 		SELECT gen_random_uuid(),$1,$2,$3,'partial-1','GO','{}'::jsonb,'PENDING','RESYNC',
@@ -235,7 +235,7 @@ func TestIntegration_AnUnpublishedGenerationNeitherBlocksNorAuthorises(t *testin
 
 	// ...whereas a CLAIMABLE pending event — one the applier could consume and has not — still blocks, because
 	// then the published roster genuinely is behind.
-	if _, err := p.Exec(context.Background(), `INSERT INTO iam_v2.stay_events
+	if _, err := gexec(context.Background(), p, "stay", `INSERT INTO iam_v2.stay_events
 		(id,tenant_id,site_id,pms_interface_id,external_event_identity,event_type,payload,
 		 processing_status,admission_kind,resync_generation,sequence_version,received_at)
 		VALUES (gen_random_uuid(),$1,$2,$3,'claimable-1','GO','{}'::jsonb,'PENDING','LIVE',0,1,now())`,

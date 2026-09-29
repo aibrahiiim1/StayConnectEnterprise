@@ -49,7 +49,7 @@ func meter(t *testing.T, p *pgxpool.Pool, f fixture, sess string, seq int, up, d
 	t.Helper()
 	// sample_seq is part of the record's identity: the series is ordered, and a sample with no place in it
 	// could not be reconciled against a checkpoint.
-	if _, err := p.Exec(context.Background(), `INSERT INTO iam_v2.accounting_records
+	if err := ownerExec(t, p, `INSERT INTO iam_v2.accounting_records
 		(tenant_id,site_id,session_id,sample_seq,bytes_up,bytes_down,sampled_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7)`, f.tenant, f.site, sess, seq, up, down, at); err != nil {
 		t.Fatalf("meter %s: %v", sess, err)

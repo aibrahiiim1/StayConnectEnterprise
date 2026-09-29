@@ -48,7 +48,8 @@ func currentStay(t *testing.T, p *pgxpool.Pool, stayID string) (status string, l
 // which is not a sequence production can reach.
 func redeliver(t *testing.T, p *pgxpool.Pool, s scope, identity, eventType, payloadJSON string) bool {
 	t.Helper()
-	_, err := p.Exec(context.Background(), `INSERT INTO iam_v2.stay_events
+	// the 'stay' family is opened so a refusal is the genuine se_live_identity uniqueness, not the writer guard
+	err := guardedExec(p, stayFamily, `INSERT INTO iam_v2.stay_events
 		(id,tenant_id,site_id,pms_interface_id,external_event_identity,event_type,pms_timestamp_raw,
 		 pms_timestamp_utc,source_timezone,sequence_version,normalization_version,clock_suspect,payload,
 		 processing_status,admission_kind,resync_generation)

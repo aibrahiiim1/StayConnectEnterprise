@@ -13,6 +13,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // Real HTTP + real PostgreSQL contract tests for the Phase-4 financial OPERATIONS surface.
@@ -177,16 +179,22 @@ func TestIntegrationFinOpsAPI_AnotherSiteOfTheSameTenantIsInvisible(t *testing.T
 	q(&pkgID, `INSERT INTO iam_v2.internet_packages(tenant_id,site_id,code)
 		VALUES ($1,$2,'finops-'||substr(md5(random()::text),1,8)) RETURNING id::text`, b.tenant, b.site)
 	q(&pkgRev, `INSERT INTO iam_v2.internet_package_revisions
-		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent)
-		VALUES ($1,$2,$3,1,$4,'GENERAL',100,'USD',2) RETURNING id::text`, b.tenant, b.site, pkgID, planRev)
-	q(&purchaseID, `INSERT INTO iam_v2.purchases
+		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent,
+		 settlement_methods)
+		VALUES ($1,$2,$3,1,$4,'GENERAL',100,'USD',2,'{ONLINE_PAYMENT}') RETURNING id::text`, b.tenant, b.site, pkgID, planRev)
+	// purchases and settlements are commerce_intent-guarded on the full appliance schema.
+	if err := controlled(ctx, b.pool, []string{"commerce_intent"}, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.purchases
 		(tenant_id,site_id,package_revision_id,trigger,amount_minor,currency,currency_exponent,state)
 		VALUES ($1,$2,$3,'ADMIN_GRANT',100,'USD',2,'AWAITING_SETTLEMENT') RETURNING id::text`,
-		b.tenant, b.site, pkgRev)
-	if err := b.pool.QueryRow(ctx, `INSERT INTO iam_v2.settlements(tenant_id,site_id,purchase_id,method,status)
+			b.tenant, b.site, pkgRev).Scan(&purchaseID); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `INSERT INTO iam_v2.settlements(tenant_id,site_id,purchase_id,method,status)
 		VALUES ($1,$2,$3,'ONLINE_PAYMENT','REQUIRED') RETURNING id::text`,
-		b.tenant, b.site, purchaseID).Scan(&settlementID); err != nil {
-		t.Fatal(err)
+			b.tenant, b.site, purchaseID).Scan(&settlementID)
+	}); err != nil {
+		t.Fatalf("seed site B: %v", err)
 	}
 
 	// Site A's operator asking for it must get the same answer, BYTE FOR BYTE, as for one that does not

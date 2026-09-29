@@ -33,10 +33,12 @@ func seedOutboxPosting(t *testing.T, p *pgxpool.Pool, s scope) (postingID, outbo
 	var revID string
 	q(&ifaceID, `INSERT INTO iam_v2.pms_interfaces(tenant_id,site_id,connector_kind)
 		VALUES ($1,$2,'protel-fias') RETURNING id::text`, s.tenant, s.site)
+	// Migration 0100 (Amendment A1): a CHARGE targets the stay's reservation (RN + G#), so the revision
+	// carries posting_target_model='RESERVATION' where it used to carry a folio identity strategy.
 	q(&revID, `INSERT INTO iam_v2.pms_interface_revisions
-		(tenant_id,site_id,pms_interface_id,revision_no,source_timezone,folio_identity_strategy,config,
+		(tenant_id,site_id,pms_interface_id,revision_no,source_timezone,posting_target_model,config,
 		 financial_base_currency,financial_base_currency_exponent)
-		VALUES ($1,$2,$3,1,'UTC','GLOBALLY_UNIQUE','{}','USD',2) RETURNING id::text`,
+		VALUES ($1,$2,$3,1,'UTC','RESERVATION','{}','USD',2) RETURNING id::text`,
 		s.tenant, s.site, ifaceID)
 	if _, err := p.Exec(ctx, `UPDATE iam_v2.pms_interfaces SET current_revision_id=$2 WHERE id=$1`,
 		ifaceID, revID); err != nil {
@@ -53,32 +55,30 @@ func seedOutboxPosting(t *testing.T, p *pgxpool.Pool, s scope) (postingID, outbo
 		s.tenant, s.site, ifaceID, revID); err != nil {
 		t.Fatal(err)
 	}
-	var stayID, folioID string
-	q(&stayID, `INSERT INTO iam_v2.stays
-		(tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,posting_allowed)
+	// posting_allowed is computed by the database (IN_HOUSE + a reservation number + no active block).
+	stayID := guarded(t, p, "stay", `INSERT INTO iam_v2.stays
+		(tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status)
 		VALUES ($1,$2,$3,'R'||substr(md5(random()::text),1,8),'S'||substr(md5(random()::text),1,8),
-		        'IN_HOUSE',true) RETURNING id::text`, s.tenant, s.site, ifaceID)
-	q(&folioID, `INSERT INTO iam_v2.folios(tenant_id,site_id,pms_interface_id,external_folio_id)
-		VALUES ($1,$2,$3,'F'||substr(md5(random()::text),1,8)) RETURNING id::text`,
-		s.tenant, s.site, ifaceID)
+		        'IN_HOUSE') RETURNING id::text`, s.tenant, s.site, ifaceID)
 	// A posting's purchase must carry the SAME pms_interface_id (a composite foreign key), which the paid
 	// chain's guest purchase does not. So the posting rail gets its own purchase and settlement -- which is
-	// also more faithful: a PMS posting settles by folio, not by card.
-	var postPurchase, postSettlement string
-	q(&postPurchase, `INSERT INTO iam_v2.purchases
+	// also more faithful: a PMS posting settles against the reservation, not by card.
+	postPurchase := guarded(t, p, "commerce_intent", `INSERT INTO iam_v2.purchases
 		(tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,trigger,
 		 amount_minor,currency,currency_exponent,state)
 		SELECT $1,$2,pu.package_revision_id,$3,$4,'ADMIN_GRANT',100,'USD',2,'AWAITING_SETTLEMENT'
 		  FROM iam_v2.purchases pu WHERE pu.id=$5 RETURNING id::text`,
 		s.tenant, s.site, ifaceID, stayID, s.purchase)
-	q(&postSettlement, `INSERT INTO iam_v2.settlements(tenant_id,site_id,purchase_id,method,status)
+	postSettlement := guarded(t, p, "commerce_intent", `INSERT INTO iam_v2.settlements(tenant_id,site_id,purchase_id,method,status)
 		VALUES ($1,$2,$3,'PMS_POSTING','REQUIRED') RETURNING id::text`, s.tenant, s.site, postPurchase)
+	// 0100: the posting carries the stay's reservation number (g_number) instead of a folio.
 	q(&postingID, `INSERT INTO iam_v2.pms_postings
-		(tenant_id,site_id,pms_interface_id,settlement_id,purchase_id,stay_id,folio_id,
+		(tenant_id,site_id,pms_interface_id,settlement_id,purchase_id,stay_id,g_number,
 		 posting_interface_revision_id,posting_type,amount_minor,currency,currency_exponent,idempotency_key)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'CHARGE',100,'USD',2,'idem-'||substr(md5(random()::text),1,12))
+		SELECT $1,$2,$3,$4,$5,st.id,st.external_reservation_id,$7,'CHARGE',100,'USD',2,'idem-'||substr(md5(random()::text),1,12)
+		  FROM iam_v2.stays st WHERE st.id=$6
 		RETURNING id::text`,
-		s.tenant, s.site, ifaceID, postSettlement, postPurchase, stayID, folioID, revID)
+		s.tenant, s.site, ifaceID, postSettlement, postPurchase, stayID, revID)
 	q(&outboxID, `INSERT INTO iam_v2.posting_outbox(tenant_id,site_id,pms_interface_id,posting_id,state)
 		VALUES ($1,$2,$3,$4,'QUEUED') RETURNING id::text`, s.tenant, s.site, ifaceID, postingID)
 	return postingID, outboxID, ifaceID

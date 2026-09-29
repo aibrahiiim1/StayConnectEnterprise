@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 // mountPostStay adds the Phase-5 operator surface to a fixture's router. The fixture's own router is built
@@ -59,13 +60,16 @@ func newPostStayAPI(t *testing.T, roles ...string) *apiFixture {
 func seedProfile(t *testing.T, f *apiFixture) (stay, profile string) {
 	t.Helper()
 	ctx := context.Background()
-	if err := f.pool.QueryRow(ctx, `WITH
+	// stays are stay-family-guarded on the full appliance schema.
+	if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `WITH
 	  pi AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)
 	         VALUES (gen_random_uuid(),$1,$2,'protel-fias','ACTIVE') RETURNING id),
 	  st AS (INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,
 	           external_stay_identity,status,lifecycle_version,effective_checkout_at,normalized_room_number)
 	         SELECT gen_random_uuid(),$1,$2,pi.id,'RES-PS','PS','CHECKED_OUT',1, now(),'412' FROM pi RETURNING id)
-	SELECT id::text FROM st`, f.tenant, f.site).Scan(&stay); err != nil {
+	SELECT id::text FROM st`, f.tenant, f.site).Scan(&stay)
+	}); err != nil {
 		t.Fatalf("seed stay: %v", err)
 	}
 	tx, err := f.pool.Begin(ctx)
@@ -227,7 +231,7 @@ func TestIntegration_PostStayAPI_ResetRotates(t *testing.T) {
 	// The audit records the rotation and NEVER the secret.
 	var action, payload string
 	if err := f.pool.QueryRow(context.Background(),
-		`SELECT action, payload::text FROM public.audit_log WHERE target_id=$1 ORDER BY id DESC LIMIT 1`,
+		`SELECT action, payload::text FROM public.audit_log WHERE target_id=$1 ORDER BY ts DESC LIMIT 1`,
 		profile).Scan(&action, &payload); err != nil {
 		t.Fatalf("audit: %v", err)
 	}

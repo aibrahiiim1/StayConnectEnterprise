@@ -77,7 +77,9 @@ func TestIntegrationHealth_NoSecretGuestOrIdentifierDataInAnyOutput(t *testing.T
 	const guest = "Mr Wolfgang Amadeus Guestname"
 	if _, err := p.Exec(ctx, `UPDATE iam_v2.payment_provider_accounts
 		SET display_name = $2, merchant_account_ref = $3 WHERE id = $1`,
-		s.merchant, guest, "acct_"+secret); err != nil {
+		// The merchant reference is globally unique across the (shared, re-used) database, so it carries the
+		// run nonce; the secret itself is still the substring every forbidden-output check looks for.
+		s.merchant, guest, "acct_"+secret+"_"+runNonce+"_"+s.site[:8]); err != nil {
 		t.Fatal(err)
 	}
 	e := NewEngine(liveCfg, p, NewScriptedProvider(Result{Outcome: OutcomeCaptured}), &fakeGranter{})

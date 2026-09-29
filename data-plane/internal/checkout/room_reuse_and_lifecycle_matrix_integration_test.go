@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -33,12 +34,14 @@ import (
 func secondStayInSameRoom(t *testing.T, p *pgxpool.Pool, f fixture, room, reservation string) string {
 	t.Helper()
 	var stay string
-	if err := p.QueryRow(context.Background(), `
+	if err := guarded(p, stayFamily, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
 		INSERT INTO iam_v2.stays
 		  (id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,
 		   status,lifecycle_version,last_applied_event_version,normalized_room_number)
 		VALUES (gen_random_uuid(),$1,$2,$3,$4,$4,'IN_HOUSE',1,5,$5)
-		RETURNING id::text`, f.tenant, f.site, f.iface, reservation, room).Scan(&stay); err != nil {
+		RETURNING id::text`, f.tenant, f.site, f.iface, reservation, room).Scan(&stay)
+	}); err != nil {
 		t.Fatalf("seed the arriving guest's stay: %v", err)
 	}
 	return stay
@@ -49,16 +52,17 @@ func secondStayInSameRoom(t *testing.T, p *pgxpool.Pool, f fixture, room, reserv
 // non-checkout event is refused as one.
 func seedEventTyped(t *testing.T, p *pgxpool.Pool, f fixture, eventType string) string {
 	t.Helper()
-	ctx := context.Background()
 	ts := f.boundary
 	var eid string
-	if err := p.QueryRow(ctx, `INSERT INTO iam_v2.stay_events
+	if err := guarded(p, stayFamily, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `INSERT INTO iam_v2.stay_events
 		(id,tenant_id,site_id,pms_interface_id,stay_id,external_event_identity,event_type,pms_timestamp_raw,
 		 pms_timestamp_utc,source_timezone,sequence_version,normalization_version,clock_suspect,payload,
 		 processing_status,admission_kind,resync_generation)
 		VALUES (gen_random_uuid(),$1,$2,$3,NULL,$4,$5,'x',$6,'UTC',7,1,false,'{}','PENDING','LIVE',0)
 		RETURNING id`,
-		f.tenant, f.site, f.iface, "EV-TYPED-"+eventType, eventType, ts).Scan(&eid); err != nil {
+			f.tenant, f.site, f.iface, "EV-TYPED-"+eventType, eventType, ts).Scan(&eid)
+	}); err != nil {
 		t.Fatalf("seed a %s event: %v", eventType, err)
 	}
 	applyEvent(t, p, eid, f.stay)
@@ -96,7 +100,7 @@ func TestIntegration_RoomReuse_ArrivingGuestDoesNotDisturbTheDepartingGuestsGrac
 	f := seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true, systemGracePackage: true, bootstrapEmergency: true})
 
 	// Put the departing guest in room 412 so the two stays genuinely collide on the room.
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET normalized_room_number='412' WHERE id=$1`, f.stay); err != nil {
+	if err := guardedExec(p, stayFamily, `UPDATE iam_v2.stays SET normalized_room_number='412' WHERE id=$1`, f.stay); err != nil {
 		t.Fatal(err)
 	}
 	activeEnt(t, p, f)
@@ -197,7 +201,7 @@ func TestIntegration_RoomReuse_SecondGuestsCheckoutDoesNotTouchTheFirstsGrace(t 
 	ctx := context.Background()
 	c := NewConverter(p)
 	f := seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true, systemGracePackage: true, bootstrapEmergency: true})
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET normalized_room_number='412' WHERE id=$1`, f.stay); err != nil {
+	if err := guardedExec(p, stayFamily, `UPDATE iam_v2.stays SET normalized_room_number='412' WHERE id=$1`, f.stay); err != nil {
 		t.Fatal(err)
 	}
 	activeEnt(t, p, f)
@@ -305,7 +309,7 @@ func TestIntegration_CrossStayCheckoutEventIsRefused(t *testing.T) {
 	defer p.Close()
 	ctx := context.Background()
 	f := seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true, systemGracePackage: true, bootstrapEmergency: true})
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET normalized_room_number='412' WHERE id=$1`, f.stay); err != nil {
+	if err := guardedExec(p, stayFamily, `UPDATE iam_v2.stays SET normalized_room_number='412' WHERE id=$1`, f.stay); err != nil {
 		t.Fatal(err)
 	}
 	activeEnt(t, p, f)
