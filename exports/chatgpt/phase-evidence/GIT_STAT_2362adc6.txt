@@ -1,0 +1,4 @@
+commit 2362adc66e46076739a0f26c99bbe448874e8fba
+Date:   Tue Sep 29 08:35:28 2026 +0300
+
+    Governance: T0201, the public Client Portal domain and trusted certificate deferred by the Product Owner; real social-provider validation pending, not blocking
