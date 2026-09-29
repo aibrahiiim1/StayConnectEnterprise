@@ -5,7 +5,7 @@
 // access, or a Purchase with no Entitlement, or an Entitlement whose history does not back its status.
 //
 // SCOPE (deliberate, fail-closed): this phase grants INCLUDED (zero-price) package revisions only. Any
-// revision carrying a price, or requiring a settlement method other than NOT_REQUIRED, is refused with
+// revision carrying a price, or not acquirable for free (NOT_REQUIRED absent from its methods), is refused with
 // ErrSettlementRequired — paid access and financial posting are out of scope and must never be silently
 // approximated by granting the package for free.
 package staygrant
@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -31,8 +32,8 @@ var (
 	// ErrPackageNotGrantable — the package revision is not a grantable guest package in this scope (wrong
 	// tenant/site, a system/grace package, or not currently visible).
 	ErrPackageNotGrantable = errors.New("staygrant: package revision is not grantable in this scope")
-	// ErrSettlementRequired — the package is not INCLUDED (non-zero price or a settlement method beyond
-	// NOT_REQUIRED). Paid access is out of scope for this phase; the grant fails closed.
+	// ErrSettlementRequired — the package is not INCLUDED (non-zero price, or not acquirable for free). Paid
+	// access is out of scope for this phase; the grant fails closed.
 	ErrSettlementRequired = errors.New("staygrant: package requires settlement (paid access is out of scope)")
 	// ErrAlreadyEntitled — the Stay already holds a live (PENDING/ACTIVE/SUSPENDED) entitlement. The Stay
 	// lifecycle allows exactly one, so a second grant is refused rather than racing the unique index.
@@ -165,8 +166,10 @@ func (s *Store) GrantTx(ctx context.Context, tx pgx.Tx, tenant, site string, r R
 	if pkgType == "CHECKOUT_GRACE" {
 		return res, ErrPackageNotGrantable
 	}
-	// INCLUDED-only, fail closed: a priced package or any settlement method beyond NOT_REQUIRED is refused.
-	if priceMinor != 0 || len(settlement) != 1 || settlement[0] != "NOT_REQUIRED" {
+	// INCLUDED-only, fail closed: a priced package, or one that cannot be taken for free, is refused. A free
+	// package may ALSO accept vouchers (D44: price 0 allows {NOT_REQUIRED, PREPAID}); that does not make it paid,
+	// and this grant takes the free method.
+	if priceMinor != 0 || !slices.Contains(settlement, "NOT_REQUIRED") {
 		return res, ErrSettlementRequired
 	}
 

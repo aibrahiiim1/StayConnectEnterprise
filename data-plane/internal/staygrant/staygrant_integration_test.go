@@ -79,7 +79,7 @@ func seed(t *testing.T, p *pgxpool.Pool, priceMinor int64, settlement, pkgType s
 	  ip AS (INSERT INTO iam_v2.internet_packages(id,tenant_id,site_id,code,is_system)
 	         SELECT gen_random_uuid(), pi.tenant_id, pi.site_id,'guest-pkg',false FROM pi RETURNING id,tenant_id,site_id),
 	  ipr AS (INSERT INTO iam_v2.internet_package_revisions(id,tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,settlement_methods,duration_policy)
-	          SELECT gen_random_uuid(), ip.tenant_id, ip.site_id, ip.id,1,spr.id,$4::text,$3::bigint,ARRAY[$2::text],
+	          SELECT gen_random_uuid(), ip.tenant_id, ip.site_id, ip.id,1,spr.id,$4::text,$3::bigint,string_to_array($2::text, ','),
 	                 '{"end_mode":"VALIDITY_WINDOW","duration_seconds":86400}'::jsonb FROM ip, spr RETURNING id)
 	SELECT (SELECT tenant_id FROM pi)::text, (SELECT site_id FROM pi)::text, (SELECT id FROM pi)::text,
 	       (SELECT id FROM pr)::text, (SELECT id FROM st)::text, (SELECT id FROM dv)::text,
@@ -258,6 +258,23 @@ func TestIntegration_PaidPackageFailsClosed(t *testing.T) {
 		if n := count(t, p, `SELECT count(*) FROM iam_v2.auth_contexts WHERE id=$1 AND consumed_at IS NOT NULL`, acID); n != 0 {
 			t.Fatalf("%s: a refused paid grant consumed the context", tc.name)
 		}
+	}
+}
+
+// TestIntegration_FreePackageThatAlsoTakesVouchersIsGranted: a zero-price package whose acquisition methods are
+// Free AND Voucher is free for a verified stay. Accepting a voucher too does not make it paid; the room sign-in
+// offer set includes it, so refusing it at the grant left the guest with an offer they could not take.
+func TestIntegration_FreePackageThatAlsoTakesVouchersIsGranted(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	f := seed(t, p, 0, "NOT_REQUIRED,PREPAID", "FREE_STAY", 2)
+	acID := issue(t, p, f)
+	res, err := New(p).Grant(context.Background(), f.tenant, f.site, Request{AuthContextID: acID, Presenter: presenter(f), PackageRevID: f.pkgRev})
+	if err != nil {
+		t.Fatalf("a free package that also takes vouchers was refused: %v", err)
+	}
+	if res.EntitlementID == "" {
+		t.Fatal("no entitlement")
 	}
 }
 
