@@ -543,6 +543,7 @@ END $$;
 
 ALTER FUNCTION iam_v2.trg_posting_charge_gate() SECURITY INVOKER;
 ALTER FUNCTION iam_v2.trg_posting_charge_gate() RESET search_path;
+GRANT EXECUTE ON FUNCTION iam_v2.trg_posting_charge_gate() TO PUBLIC;
 
 CREATE OR REPLACE VIEW iam_v2.posting_execution_state AS
  SELECT p.id AS posting_id,

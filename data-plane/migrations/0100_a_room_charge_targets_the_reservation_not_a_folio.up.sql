@@ -964,6 +964,8 @@ END $$;
 -- ---------------------------------------------------------------------------------------------------------
 ALTER FUNCTION iam_v2.trg_posting_charge_gate() SECURITY DEFINER;
 ALTER FUNCTION iam_v2.trg_posting_charge_gate() SET search_path = iam_v2, pg_temp;
+-- Now a definer: nobody calls a trigger function directly.
+REVOKE ALL ON FUNCTION iam_v2.trg_posting_charge_gate() FROM PUBLIC;
 
 REVOKE ALL ON FUNCTION iam_v2.p4_refresh_stay_posting_permission(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION iam_v2.p4_stay_feed_confirms(uuid) FROM PUBLIC;
