@@ -29,6 +29,7 @@ DROP FUNCTION IF EXISTS iam_v2.pms_answer_confirmation_record(uuid,uuid,uuid,tex
 DROP FUNCTION IF EXISTS iam_v2.p4_answer_effect(uuid,text);
 DROP FUNCTION IF EXISTS iam_v2.p4_posting_abort_before_send(uuid,text);
 DROP FUNCTION IF EXISTS iam_v2.p4_lock_posting_stay(uuid);
+DROP FUNCTION IF EXISTS iam_v2.p4_stay_postable_for(uuid,uuid);
 DROP TABLE IF EXISTS iam_v2.stay_posting_blocks;
 DROP TABLE IF EXISTS iam_v2.pms_answer_confirmations;
 DROP TABLE IF EXISTS iam_v2.posting_presend_aborts;

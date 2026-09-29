@@ -153,7 +153,7 @@ func seedProperty(t *testing.T, p *pgxpool.Pool, currency string, exponent int16
 func (s scope) pinned(idem string) Pinned {
 	return Pinned{
 		TenantID: s.tenant, SiteID: s.site, PMSInterfaceID: s.iface,
-		PostingInterfaceRevisionID: s.rev, StayID: s.stay, FolioID: s.folio,
+		PostingInterfaceRevisionID: s.rev, StayID: s.stay,
 		PackageRevisionID: s.pkgRev, SettlementMappingID: s.mapping,
 		PurchaseID: s.purchase, SettlementID: s.settle,
 		AmountMinor: 1000, Currency: s.currency, CurrencyExponent: s.exponent,
@@ -274,7 +274,7 @@ func TestIntegrationPosting_FailClosedConsumesNothing(t *testing.T) {
 		// revision is not current" would send them to the wrong place.
 		{"folio strategy UNSET", func(_ *testing.T, s *scope, pin *Pinned) {
 			pin.PostingInterfaceRevisionID = s.revUnsetFolio
-		}, ErrFolioStrategyUnset},
+		}, ErrPostingTargetUnset},
 		{"interface not financially onboarded", func(t *testing.T, s *scope, pin *Pinned) {
 			mustExec(t, p, `UPDATE iam_v2.pms_interfaces SET current_revision_id=$2 WHERE id=$1`, s.iface, s.revNoCurrency)
 			pin.PostingInterfaceRevisionID = s.revNoCurrency
@@ -330,7 +330,7 @@ func TestIntegrationPosting_FailClosedConsumesNothing(t *testing.T) {
 		}, ErrEvidenceStale},
 		{"out-of-scope folio", func(t *testing.T, s *scope, pin *Pinned) {
 			other := seedProperty(t, p, "USD", 2)
-			pin.FolioID = other.folio
+			pin.StayID = other.stay
 		}, ErrEvidenceOutOfScope},
 		{"out-of-scope stay", func(t *testing.T, s *scope, pin *Pinned) {
 			other := seedProperty(t, p, "USD", 2)

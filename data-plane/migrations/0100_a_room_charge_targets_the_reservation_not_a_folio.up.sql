@@ -240,6 +240,19 @@ BEGIN
   RETURN v_allowed;
 END $fn$;
 
+-- Posting permission FOR ONE CHARGE: the stay's permission, except that the charge's OWN unresolved block
+-- does not stop it. Without this, a reviewed CONFIRM_NOT_POSTED_RETRY would be refused by the very
+-- POSTING_UNRESOLVED block its UNKNOWN placed; every other block (including another charge's) still applies.
+CREATE OR REPLACE FUNCTION iam_v2.p4_stay_postable_for(p_stay uuid, p_posting uuid)
+  RETURNS boolean
+  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+  SELECT s.status = 'IN_HOUSE' AND s.external_reservation_id IS NOT NULL AND btrim(s.external_reservation_id) <> ''
+     AND NOT EXISTS (SELECT 1 FROM iam_v2.stay_posting_blocks b
+                      WHERE b.stay_id = s.id AND b.cleared_at IS NULL
+                        AND NOT (b.reason = 'POSTING_UNRESOLVED' AND p_posting IS NOT NULL AND b.posting_id = p_posting))
+    FROM iam_v2.stays s WHERE s.id = p_stay;
+$fn$;
+
 -- Fresh, valid PMS data clears a data-suspect block: the same reservation, IN_HOUSE, a resolvable room, and
 -- occupancy evidence (an applied guest record or resync record) that arrived AFTER the block was placed and
 -- whose clock is not suspect. PMS_NO_POST is not cleared here: the guest feed carries no explicit "posting
@@ -651,7 +664,7 @@ BEGIN
      OR p.g_number IS DISTINCT FROM a.g_number THEN
     RETURN 'RESERVATION_MISMATCH';
   END IF;
-  IF st.status IS DISTINCT FROM 'IN_HOUSE' OR st.posting_allowed IS NOT TRUE THEN RETURN 'STAY_NOT_POSTABLE'; END IF;
+  IF NOT COALESCE(iam_v2.p4_stay_postable_for(p.stay_id, p.id), false) THEN RETURN 'STAY_NOT_POSTABLE'; END IF;
   IF st.normalized_room_number IS NULL OR st.normalized_room_number IS DISTINCT FROM a.rn THEN RETURN 'ROOM_CHANGED'; END IF;
   v_block := iam_v2.p4_interface_freshness_block(a.tenant_id, a.site_id, p_iface, p.posting_interface_revision_id, now());
   IF v_block IS NOT NULL THEN RETURN 'INTERFACE_NOT_FRESH'; END IF;
@@ -960,6 +973,8 @@ REVOKE ALL ON FUNCTION iam_v2.stay_posting_blocks_guard() FROM PUBLIC;
 REVOKE ALL ON iam_v2.stay_posting_blocks, iam_v2.pms_answer_confirmations, iam_v2.posting_presend_aborts FROM PUBLIC;
 
 REVOKE ALL ON FUNCTION iam_v2.p4_lock_posting_stay(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION iam_v2.p4_stay_postable_for(uuid,uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_stay_postable_for(uuid,uuid) TO sc_posting_runtime;
 GRANT EXECUTE ON FUNCTION iam_v2.p4_lock_posting_stay(uuid) TO sc_posting_runtime;
 GRANT EXECUTE ON FUNCTION iam_v2.p4_answer_effect(uuid,text) TO sc_posting_runtime;
 GRANT EXECUTE ON FUNCTION iam_v2.p4_posting_abort_before_send(uuid,text) TO sc_posting_runtime;
@@ -1006,6 +1021,7 @@ BEGIN
     EXECUTE 'ALTER FUNCTION iam_v2.p4_posting_review_apply(uuid,uuid,uuid) OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.p4_posting_abort_before_send(uuid,text) OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.p4_lock_posting_stay(uuid) OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER FUNCTION iam_v2.p4_stay_postable_for(uuid,uuid) OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.request_full_resync(uuid,uuid,uuid,text) OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.record_posting_review_action(uuid,text,uuid,text,jsonb,integer,bigint) OWNER TO iam_v2_owner';
   END IF;

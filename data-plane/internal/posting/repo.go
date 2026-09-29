@@ -103,6 +103,7 @@ RETURNING o.id::text, p.id::text, p.settlement_id::text, p.purchase_id::text, p.
 		return nil, classify(err)
 	}
 	c.Pinned.TenantID, c.Pinned.SiteID, c.Pinned.PMSInterfaceID = tenantID, siteID, interfaceID
+	c.Pinned.PostingID = c.PostingID
 
 	// The remaining pinned fields are read from the objects the posting already points at. This is reading
 	// the pin, not re-resolving it: package revision and settlement mapping are the ones this purchase was

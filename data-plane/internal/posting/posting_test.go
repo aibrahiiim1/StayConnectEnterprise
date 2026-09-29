@@ -409,7 +409,7 @@ func TestPresendAbortReasons(t *testing.T) {
 	for code, want := range map[Code]string{
 		ErrStayNotInHouse: "STAY_NOT_IN_HOUSE", ErrPostingNotAllowed: "STAY_BLOCKED",
 		ErrReservationMismatch: "RESERVATION_MISMATCH", ErrRNMissing: "ROOM_UNRESOLVED",
-		ErrInterfaceNotFresh: "DATA_STALE",
+		ErrInterfaceNotFresh:  "DATA_STALE",
 		ErrPostingTargetUnset: "", ErrInterfaceInactive: "", ErrCurrencyMismatch: "", ErrEvidenceStale: "",
 	} {
 		if got := presendAbortReason(fail(code, "x")); got != want {

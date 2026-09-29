@@ -54,6 +54,11 @@ type Pinned struct {
 
 	IdempotencyKey string
 
+	// PostingID is set once the posting exists (execution). Posting permission is then evaluated FOR THIS
+	// CHARGE: its own POSTING_UNRESOLVED block (from an UNKNOWN a reviewer has since authorised to retry)
+	// does not stop it; every other block does.
+	PostingID string
+
 	// Expectations the caller read when it decided to charge. If the database disagrees at creation time,
 	// the evidence is stale and the posting is refused rather than silently created against newer facts.
 	ExpectStayLifecycleVersion *int
@@ -125,7 +130,7 @@ SELECT i.lifecycle_state,
        r.financial_base_currency_exponent,
        coalesce(pu.currency, ''), pu.currency_exponent, pu.state,
        coalesce(pk.currency, ''), pk.currency_exponent,
-       st.status, st.posting_allowed, st.lifecycle_version,
+       st.status, coalesce(iam_v2.p4_stay_postable_for(st.id, NULLIF($10,'')::uuid), false), st.lifecycle_version,
        coalesce(st.normalized_room_number, ''), st.external_reservation_id,
        (sm.retired_at IS NOT NULL)
   FROM iam_v2.pms_interfaces i
@@ -150,7 +155,7 @@ SELECT i.lifecycle_state,
  WHERE i.tenant_id = $1 AND i.site_id = $2 AND i.id = $3`
 	err := q.QueryRow(ctx, sql,
 		p.TenantID, p.SiteID, p.PMSInterfaceID, p.PostingInterfaceRevisionID,
-		p.PurchaseID, p.PackageRevisionID, p.StayID, p.SettlementMappingID, p.SettlementID,
+		p.PurchaseID, p.PackageRevisionID, p.StayID, p.SettlementMappingID, p.SettlementID, p.PostingID,
 	).Scan(
 		&s.InterfaceLifecycleState, &s.InterfaceCurrentRevision, &s.ConnectorKind, &s.FreshnessBlock,
 		&s.PostingTargetModel, &s.InterfaceCurrency, &s.InterfaceExponent,
