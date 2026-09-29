@@ -1,5 +1,5 @@
-# cited committed source, not packaged. Verify at SOURCE_COMMIT 48948911.
-30b920c979238369ff8f8d65a77248fe4f18bf4a929d88377d63444b4feab1fa  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
+# cited committed source, not packaged. Verify at SOURCE_COMMIT 474f408d.
+21a7a5c5667f1b3aa40407a21a4e38d94e5baa06b45136ae7f60951eb3d67c25  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
 d7ffc726816e4ed6a677d35cf0b645b79278ea2a48ed4eb561008fcebb640e3d  docs/architecture/Phase1B-Privilege-Matrix.md
 bb6281470a81df07fc8060b559eb55cf1e9265c536e6fe43d8258f78072a93d0  data-plane/internal/pmsguard/guard.go
 568953632f510a6a17ef5fca45ffdf5407e25747fba3590da329b034bea71a9c  data-plane/cmd/scd/main.go
@@ -12,7 +12,7 @@ MISSING  data-plane/internal/voucher/voucher.go
 3b40443df98a1daf833d2380f5cf60a2e420d26049e4e203712c573ec2873e91  data-plane/internal/otp/otp.go
 e7ed71ae4820f902f37863654565bdb53c3f45f5ad4ceef0918857cafefba5e1  data-plane/cmd/scd/credentials_handlers.go
 80f1bb951a819a9ba0b92eca8758998dbdbfc321e02e7cf62f259b1a30dbdeb0  data-plane/cmd/scd/otp_handlers.go
-14224e2aace65655e4382c953d05055afb8ed4659b5f6842df01df5a1ac9cfc0  data-plane/cmd/scd/social_handlers.go
+28026303aecbc896f3405d82de0e8ebd59bb67e703e11f52d1af7bdb23c45fe9  data-plane/cmd/scd/social_handlers.go
 MISSING  data-plane/cmd/scd/pms_handlers.go
 3420c8c0a824a7fa054b16af8381e61256bc4ff3764785a88235c3cf995a8237  iam_v2_scratch/roles.sql
 a3a0e72be03017b92de567588d0e6f58e1ae787fcddb1a55dc342fa660004033  iam_v2_scratch/migrations/mg1_pms_interface_core.sql
