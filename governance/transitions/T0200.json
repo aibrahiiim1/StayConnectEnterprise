@@ -1,0 +1,45 @@
+{
+  "transition_id": "T0200",
+  "seq": 200,
+  "timestamp": "2026-09-29T07:25:00+03:00",
+  "timestamp_derivation": "Written after the PRE-LIVE and Central deployments of the PR #202 corrections were read back and verified, and before the commit that introduces this receipt.",
+  "record_type": "SOCIAL_SIGN_IN_REDIRECT_CORRECTED_READY_FOR_PRODUCT_OWNER_TESTING",
+  "authorisation": "Product-Owner instruction of 2026-09-29: continue the PR #202 mission end to end, resolve directly related findings, test, synchronize governance/docs and deploy completed runtime changes to PRE-LIVE; merge only after Product Owner acceptance.",
+  "decision": "D45",
+  "decisions_recorded": [],
+  "delivered": [
+    "Social sign-in uses the redirect URI the operator saved (the one registered with the provider) for both the authorize request and the code exchange; before this it was stored and ignored, and portald derived an http:// URL behind the appliance's TLS-terminating proxy, which real providers refuse.",
+    "edged accepts a social redirect URI only as https://<portal name>/auth/social/callback; portald believes X-Forwarded-Proto from a loopback peer only.",
+    "Admin Console: the Social login form explains the callback URI to register."
+  ],
+  "verification": "Go: edged (new redirect validation test), portald (new forwarded-scheme test), scd. Admin Console vitest 54 files / 626 tests and tsc. Live on PRE-LIVE: scripts/guest-access-e2e-test.sh 43/43 on the current licence; Central and appliance report activated and connected; hotel-admin-cert-manager check OK; no scd error.",
+  "deployment_provenance": "PRE-LIVE 172.21.60.25: scd, edged, portald and the Admin Console d5c3e578; pmsd db05d7ba; netd, acctd and keybootstrap 99ba9f10; site migrations through 0099 (none new). Central unchanged at 8e4bed4e (no Central source changed). Every value read back from the installed artifacts.",
+  "financial_traffic": "NONE. pms_postings, posting_outbox and payment_transactions unchanged (0/0/0). STAYCONNECT_PHASE4_PMS_TRANSMIT and STAYCONNECT_PAYMENT_LIVE_ALLOWED are set nowhere.",
+  "open_inputs": [
+    "Provider credentials for the credential-dependent live tests: an email/SMS/WhatsApp sender (Meta or Twilio with an approved authentication template) and Google/Facebook/Apple/Microsoft applications; Stripe and/or Paymob sandbox keys.",
+    "Real social sign-in additionally needs the portal to be reached by a name whose certificate guests' browsers trust (today portal.stayconnect.local is served with the appliance's internal CA); choosing that name and certificate is a certificate/PKI decision for the Product Owner.",
+    "Central operator (Product Owner): licence the modules to be tested on the PRE-LIVE site (it is currently Site Type CAFE with no optional module licensed).",
+    "Product Owner acceptance of PR #202 before any merge."
+  ],
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0199."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. The PR #202 corrections are delivered to PRE-LIVE for Product Owner testing on the unmerged PR. PRE-LIVE remains PRE-LIVE."
+  },
+  "state_note": "No phase, activity or acceptance state changes. The delivery is READY FOR PRODUCT OWNER TESTING, not merged and not closed.",
+  "base": "42823d9dfecd4339ac540d1b5d19ee0bf5df40f4",
+  "base_note": "Master at the time the branch was cut (the merge of PR #201).",
+  "head": "d5c3e578",
+  "head_note": "PR #202's last content commit before this governance record.",
+  "previous_delivery": "T0199",
+  "go_live": "NOT authorised. Real PMS posting and LIVE provider transactions remain prohibited."
+}
