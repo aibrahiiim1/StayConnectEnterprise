@@ -256,13 +256,14 @@ export function Nav({
 
   const visibleSections = useMemo(() => {
     const q = query.trim().toLowerCase();
-    // A site whose licence no longer covers Hospitality keeps its hotel HISTORY (edged still serves stays, PMS
-    // activity, sign-in history and reconciliation where records exist) but is not a hotel: the section says
-    // what it now holds.
-    const hotelTitle = moduleLicensed(caps, "hospitality") ? "Hotel" : "Hotel records";
+    // A SITE WITHOUT HOSPITALITY IS NOT A HOTEL, so its menu has no Hotel section at all. Records it kept from
+    // before (stays, PMS activity, sign-in history, charge review) stay reachable from the Hotel card on the
+    // Modules page, not from day-to-day navigation.
+    const hotel = moduleLicensed(caps, "hospitality");
     return SECTIONS.map((sec) => ({
-      title: sec.title === "Hotel" ? hotelTitle : sec.title,
+      title: sec.title,
       items: sec.items.filter((it) => {
+        if (sec.title === "Hotel" && !hotel) return false;
         if (!canRead(it.resource, roles)) return false;
         if (!surfaceAvailable(caps, it.capability ?? it.resource)) return false;
         if (it.modules && !it.modules.some((m) => moduleLicensed(caps, m))) return false;

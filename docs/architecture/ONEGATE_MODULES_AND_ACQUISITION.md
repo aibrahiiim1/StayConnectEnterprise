@@ -319,8 +319,12 @@ Room charge is configurable and reviewable but never offered.
 
 * Without `hospitality` the day-to-day Admin Console shows no hotel concept: no PMS card or Room sign-in tile on
   the Overview, no Room sign-in method or sign-in protection, no Hotel conditions or per-night allowance in the
-  package editor, no room wording or Room preview in Portal Settings, no Room charge. The Hotel history surfaces
-  (stays, PMS activity, sign-in attempts, reconciliation, financial review) stay reachable while records exist.
+  package editor, no room wording or Room preview in Portal Settings, no Room charge, and **no Hotel section in the
+  navigation**. The Hotel history surfaces (stays, PMS activity, sign-in checks and attempts, charge review and
+  recovery) stay served while records exist and are reached from the module's card on System → Modules
+  ("Records kept here"), not from day-to-day navigation.
+* System → Modules lists every module the appliance reports (including `whatsapp_otp` and any it does not know
+  yet). For an unlicensed module, "switched on" and "ready" show "—" and no configuration link is offered.
 * Without `card_payment` nothing suggests the site accepts cards; without `paid_access` there is no price field.
 * Without an identity module its sign-in method, its provider screen entries and its portal preview are absent.
 * A page does not call a module-owned API for a module the site does not have, so "not licensed" is never shown

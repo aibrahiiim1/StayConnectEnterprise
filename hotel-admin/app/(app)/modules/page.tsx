@@ -34,6 +34,7 @@ import { Skeleton } from "@/components/ui/misc";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
+import { useCapabilities } from "@/lib/capabilities";
 import { MODULE_REASON_WORDS, READINESS_WORDS, SITE_TYPE_LABELS, type ModuleReport, type ModuleState } from "@/lib/modules";
 
 // Where each module is configured, so "not ready" always comes with the place to fix it.
@@ -44,6 +45,7 @@ const CONFIGURE: Record<string, { href: string; label: string }> = {
   room_charge: { href: "/room-charge", label: "Room charge" },
   sms_otp: { href: "/notifications", label: "Email & SMS" },
   email_otp: { href: "/notifications", label: "Email & SMS" },
+  whatsapp_otp: { href: "/notifications", label: "Email & SMS" },
   social_login: { href: "/social-providers", label: "Social login" },
 };
 
@@ -53,11 +55,28 @@ const LICENCE_STATE_WORDS: Record<string, string> = {
   Suspended: "Suspended", Revoked: "Revoked", unlicensed: "Not licensed",
 };
 
-const ORDER = ["hospitality", "paid_access", "card_payment", "room_charge", "sms_otp", "email_otp", "social_login", "white_label", "ha"];
+const ORDER = ["hospitality", "paid_access", "card_payment", "room_charge", "sms_otp", "email_otp", "whatsapp_otp", "social_login", "white_label", "ha"];
+
+// RECORDS A MODULE KEEPS AFTER ITS LICENCE ENDS. They are not in the menu of a site without the module (it is
+// not a hotel any more), so this is where they are reached: history, review and recovery, while they exist.
+const RECORDS: Record<string, { href: string; label: string; surface: string }[]> = {
+  hospitality: [
+    { href: "/stays", label: "Stays", surface: "pms-stays" },
+    { href: "/stay-events", label: "PMS activity", surface: "pms-events" },
+    { href: "/pms-resolutions", label: "Guest sign-in checks", surface: "pms-resolutions" },
+    { href: "/guest-signin-attempts", label: "Guest sign-in attempts", surface: "guest-signin-attempts" },
+  ],
+  room_charge: [
+    { href: "/financial-review", label: "Manual review", surface: "financial-review" },
+    { href: "/financial-settlements", label: "Settlements", surface: "financial-review" },
+    { href: "/financial-recovery", label: "Recovery", surface: "financial-review" },
+  ],
+};
 
 export default function ModulesPage() {
   const toast = useToast();
   const [roles, setRoles] = useState<string[] | null>(null);
+  const caps = useCapabilities();
   useEffect(() => {
     api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
   }, []);
@@ -144,7 +163,9 @@ export default function ModulesPage() {
     );
   }
 
-  const mods = ORDER.map((id) => report.modules[id]).filter(Boolean) as ModuleState[];
+  // Known modules in their order, then any module this Admin Console does not know yet (never dropped).
+  const ids = [...ORDER, ...Object.keys(report.modules).filter((id) => !ORDER.includes(id))];
+  const mods = ids.map((id) => report.modules[id]).filter(Boolean) as ModuleState[];
   const siteType = report.site_type ? SITE_TYPE_LABELS[report.site_type] ?? `Other (${report.site_type})` : "Not set";
 
   return (
@@ -174,6 +195,7 @@ export default function ModulesPage() {
             key={m.id}
             mod={m}
             all={report.modules}
+            surfaces={caps?.surfaces ?? []}
             mayToggle={mayToggle}
             onToggle={(enable) => { setDialogErr(null); setPending({ mod: m, enable }); }}
           />
@@ -200,11 +222,13 @@ export default function ModulesPage() {
 }
 
 function ModuleCard({
-  mod, all, mayToggle, onToggle,
+  mod, all, surfaces, mayToggle, onToggle,
 }: {
-  mod: ModuleState; all: Record<string, ModuleState>; mayToggle: boolean; onToggle: (enable: boolean) => void;
+  mod: ModuleState; all: Record<string, ModuleState>; surfaces: string[]; mayToggle: boolean; onToggle: (enable: boolean) => void;
 }) {
   const conf = CONFIGURE[mod.id];
+  // Kept records are offered only when the module is NOT licensed (a licensed module has them in the menu).
+  const records = !mod.licensed ? (RECORDS[mod.id] ?? []).filter((r) => surfaces.includes(r.surface)) : [];
   const requires = (mod.requires ?? []).map((r) => all[r]?.label ?? r);
   const reasons = (mod.reasons ?? []).filter((r) => r !== "NOT_READY");
   return (
@@ -224,8 +248,9 @@ function ModuleCard({
         <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
           <Gate label="Available" on={mod.deployed} />
           <Gate label="Licensed" on={mod.licensed} />
-          <Gate label="Switched on" on={mod.switchable ? mod.enabled : mod.licensed} note={mod.switchable ? undefined : "No local switch"} />
-          <Gate label="Ready" on={mod.ready} />
+          {/* Without the licence, "switched on" and "ready" answer nothing a client could use: shown as a dash. */}
+          <Gate label="Switched on" on={mod.licensed ? (mod.switchable ? mod.enabled : true) : null} note={mod.licensed && !mod.switchable ? "No local switch" : undefined} />
+          <Gate label="Ready" on={mod.licensed ? mod.ready : null} />
         </dl>
         {reasons.length > 0 && (
           <ul className="list-disc space-y-0.5 ps-5 text-xs text-muted-foreground">
@@ -243,22 +268,33 @@ function ModuleCard({
               {mod.enabled ? "Switch off" : "Switch on"}
             </Button>
           )}
-          {conf && mod.manageable && (
+          {conf && mod.licensed && mod.manageable && (
             <Link href={conf.href} className="inline-flex items-center gap-0.5 text-xs text-primary underline-offset-4 hover:underline">
               {conf.label} <ArrowUpRight className="size-3.5" aria-hidden />
             </Link>
           )}
         </div>
+        {records.length > 0 && (
+          <div className="border-t border-border pt-2 text-xs" data-testid={`records-${mod.id}`}>
+            <span className="text-muted-foreground">Records kept here: </span>
+            {records.map((r, i) => (
+              <span key={r.href}>
+                {i > 0 && <span className="text-muted-foreground"> · </span>}
+                <Link href={r.href} className="text-primary underline-offset-4 hover:underline">{r.label}</Link>
+              </span>
+            ))}
+          </div>
+        )}
       </CardBody>
     </Card>
   );
 }
 
-function Gate({ label, on, note }: { label: string; on: boolean; note?: string }) {
+function Gate({ label, on, note }: { label: string; on: boolean | null; note?: string }) {
   return (
     <div>
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className={on ? "font-medium" : "text-muted-foreground"}>{on ? "Yes" : "No"}{note ? <span className="block text-xs text-muted-foreground">{note}</span> : null}</dd>
+      <dd className={on ? "font-medium" : "text-muted-foreground"}>{on === null ? "—" : on ? "Yes" : "No"}{note ? <span className="block text-xs text-muted-foreground">{note}</span> : null}</dd>
     </div>
   );
 }
