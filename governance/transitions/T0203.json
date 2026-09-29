@@ -1,0 +1,49 @@
+{
+  "transition_id": "T0203",
+  "seq": 203,
+  "timestamp": "2026-09-30T00:22:10+03:00",
+  "timestamp_derivation": "Written after the PRE-LIVE deployment of 2f9e9710 was read back and verified, and before the commit that introduces this receipt.",
+  "record_type": "ROOM_CHARGE_TARGETS_THE_RESERVATION_A1_READY_FOR_PRODUCT_OWNER_TESTING",
+  "authorisation": "Product-Owner mission of 2026-09-29: finalise Amendment A1, apply it to the FINAL Phase-0 contract, record D46, implement on PR #202, test, deploy the PR #202 build to PRE-LIVE and verify there; NOT the merge, and NOT a supervised real charge. Real PMS posting stays disabled.",
+  "decision": "D46",
+  "decisions_recorded": [
+    "D46"
+  ],
+  "delivered": [
+    "Phase-0 Amendment A1 FINAL and applied to the Phase-0 contract (D46): posting identity (interface, G#); RN refreshed before each attempt and revalidated by pmsd inside its single writer before the first byte; no folio model; unconfirmed answers are UNKNOWN; per-answer stay blocks; one unresolved room charge per stay.",
+    "Site migration 0100: posting_target_model replaces folio_identity_strategy; pms_postings.g_number replaces folio_id; folios and stay_folios dropped; posting attempts gain NOT_SENT; stay_posting_blocks, pms_answer_confirmations and posting_presend_aborts; the posting-permission trigger; the charge gate is a definer with PUBLIC execute revoked.",
+    "Posting engine: stay lock, RN refresh, abort-before-send (definitely not posted) or HELD_RECOVERY once anything may have been sent; NOT_SENT with pmsd's reason; answer effects per vendor confirmation.",
+    "pmsd: the writer's guard (ROOM_CHANGED_ON_LINK / RESERVATION_DEPARTED_ON_LINK) from the link's own guest-record view; the room-move race cases tested on the real adapter.",
+    "Admin Console: posting target and vendor attestation, answer-meaning confirmation, stay posting permission and block history, administrative block, NOT_SENT reasons in review.",
+    "Two PRE-LIVE findings fixed on the way: the room probe's unordered 16-row window could hide a room's in-house stay behind its departed ones (eligible first now); the stay grant refused a free package that also accepts vouchers (price 0 with NOT_REQUIRED among the methods is granted).",
+    "PG integration harnesses rebased onto the full appliance schema; production baseline regenerated through 0100 (FACTORY_CLEAN_BASELINE PASS)."
+  ],
+  "verification": "Go unit tests (data-plane); posting integration incl. the A1 suite as superuser and as svc_posting/svc_pmsd; scd integration incl. the room-history regression (fails without the fix); staygrant and poststay integration; phase4, pmsd, phase5 and prod-privilege PG harnesses PASS; phase4-dark-check PASS; migration grant durability PASS; FACTORY_CLEAN_BASELINE PASS through 0100; Admin Console vitest 640/640 and tsc. PRE-LIVE: migration 0100 applied via edge-migrate.sh as iam_v2_owner (pre-migration dump taken), Gate-P reconciled; scripts/guest-access-e2e-test.sh 45/45 (one configuration skip: no free multi-device package open to accounts); room-charge configuration, stay and review screens checked in Chrome.",
+  "deployment_provenance": "PRE-LIVE 172.21.60.25: scd, edged, pmsd and the Admin Console 2f9e9710 (release 20260929-192536); portald d5c3e578; netd and acctd 99ba9f10; site migrations through 0100. Central unchanged. Every value read back from the installed artifacts; DEPLOYED_BINARIES.{sha256,txt} rewritten from them (sha256sum -c 6/6 OK).",
+  "financial_traffic": "NONE. pms_postings, posting_attempts, pms_answer_confirmations, posting_presend_aborts and payment_transactions are all 0 on PRE-LIVE. STAYCONNECT_PHASE4_PMS_TRANSMIT and STAYCONNECT_PAYMENT_LIVE_ALLOWED are set nowhere; pmsd carries no Phase-4 flag and no posting socket exists. No supervised real charge was made.",
+  "open_inputs": [
+    "Vendor (Protel) confirmations recorded per interface before any answer code other than OK is treated as definite (NP, NG, NR, NA, RY; UR is always UNKNOWN), and the attestation that reservation numbers are never reused.",
+    "Product Owner acceptance of PR #202 before any merge."
+  ],
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0202."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; D46 is delivered to PRE-LIVE for Product Owner testing on the unmerged PR #202. PRE-LIVE remains PRE-LIVE."
+  },
+  "state_note": "No phase, activity or acceptance state changes. The delivery is READY FOR PRODUCT OWNER TESTING, not merged and not closed.",
+  "base": "42823d9dfecd4339ac540d1b5d19ee0bf5df40f4",
+  "base_note": "Master at the time the branch was cut (the merge of PR #201).",
+  "head": "cfdbb481",
+  "head_note": "PR #202's last content commit before this governance record; PRE-LIVE runs 2f9e9710, and cfdbb481 changes only the guest-access harness script.",
+  "previous_delivery": "T0202",
+  "go_live": "NOT authorised. Real PMS posting and LIVE provider transactions remain prohibited."
+}

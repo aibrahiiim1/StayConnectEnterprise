@@ -756,7 +756,7 @@
         "Phase-0 invariant 9's evaluation of posting permission from open folios and credit policy, replaced by IN_HOUSE ∧ reservation number ∧ no active posting block, with the PMS answer authoritative at posting time."
       ],
       "does_not_authorize": "Real PMS financial posting (STAYCONNECT_PHASE4_PMS_TRANSMIT stays off on scd and pmsd); a supervised live charge; recording vendor-confirmed answer meanings or onboarding an interface to RESERVATION without the vendor confirmations; Go-Live; any property-side PMS change.",
-      "implementation": "PR #202 (unmerged): Phase-0 Amendment A1 applied to docs/architecture/StayConnect-IAM-Phase0-Contract.md; implementation recorded with its transition."
+      "implementation": "PR #202 (unmerged): Phase-0 Amendment A1 applied to the FINAL Phase-0 contract; site migration 0100; posting engine, pmsd pre-write guard and Admin Console; deployed to PRE-LIVE at 2f9e9710 and verified (T0203). Real posting remains disabled; merge awaits Product Owner acceptance."
     }
   ]
 }
