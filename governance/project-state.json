@@ -856,16 +856,16 @@
     "dhcp_ownership_evidence_monitored_deployed_note": "DEPLOYED AND VERIFIED LIVE 2026-09-01 (T0109). netd health carries an ownership_evidence block filled by a fresh lease read on every request; the operational checker returns OK on the real socket and refuses when the socket is absent; the enforcement-plane gate consults it. Kea's hourly lease-file cleanup, which had failed every hour since 2026-08-28, has run cleanly since the repair with zero PID failures.",
     "hotel_admin_runtime_identity": {
       "_note": "THE UI IS NOT THE BINARIES. deployed_head_on_appliance names the commit whose build produced the nine SERVICE binaries; it says nothing about the Hotel Admin bundle, which is built and shipped separately and is routinely left untouched by a backend deployment. Recording one head for both is how a UI five days older than the backend was reported as current. These fields are read from the bundle's own hotel-admin-release.json on the appliance, never inferred.",
-      "source_commit": "d5c3e57856c86762b597db8e492319c2c7767c5f",
-      "build_id": "mEV6Bddt72J6tJWKLdp3b",
-      "release": "20260929-041811",
-      "previous_release": "20260928-234420 (588616a4)",
-      "artifact_sha256": "3a5baf336a737d18878ca323f993e817d35abe95a8b26e3e46ce66432c19c49e",
+      "source_commit": "8650643a40fb6fe72fad4f9d1da8139ec76ebe1a",
+      "build_id": "f0OrRHZyZidTYUR88AVll",
+      "release": "20260929-081525",
+      "previous_release": "20260929-080958 (a878de52)",
+      "artifact_sha256": "10c4ba684d3432e8fd92857f02cc8650a60ddae8378a3283b3afffbe4d80e78c",
       "build_flags": "none -- the release manifest records build_flags {}; the capability contract carries no build flags",
       "contract_version": "1",
-      "deployed_at": "2026-09-29 ~04:18Z UTC by deploy-hotel-admin.sh package (clean clone of d5c3e578) / install: Social login redirect URI guidance on top of the module-visibility release.",
-      "verified_at": "2026-09-29, read back from the installed release manifest (source_state clean); served on :3100; authenticated /central/status reports activated and connected.",
-      "rollback": "PRESENT: /opt/stayconnect/hotel-admin.previous -> /opt/stayconnect/releases/hotel-admin/20260928-234420 (588616a4)."
+      "deployed_at": "2026-09-29 ~08:15Z UTC by deploy-hotel-admin.sh package (clean clone of 8650643a) / install: no Hotel navigation without Hospitality; Modules lists WhatsApp and every reported module, kept hotel records from the Hotel card.",
+      "verified_at": "2026-09-29, read back from the installed release manifest (source_state clean) and checked in Chrome on PRE-LIVE (menu without Hotel; Modules page).",
+      "rollback": "PRESENT: /opt/stayconnect/hotel-admin.previous -> /opt/stayconnect/releases/hotel-admin/20260929-080958 (a878de52)."
     },
     "hotel_admin_deployment_contract": "PERMANENT RULE for every Hotel Admin release. (1) Exactly ONE servable release: /opt/stayconnect/hotel-admin is a symlink to a verified release under the managed releases directory - never a plain directory, which is what an install-by-copying leaves behind and what removes all provenance. (2) Every bundle carries hotel-admin-release.json recording source commit, BUILD_ID, release timestamp, the capability flags and their values, and the artifact checksum; packaging FAILS if the source commit cannot be identified or the contract is not satisfied. (3) Installation verifies the candidate - checksum, manifest, required routes, and that the flags were really inlined - BEFORE switching, and smoke-tests the live endpoint AFTER, proving the served BUILD_ID and that every required operator surface answers; a failure restores the previous verified release. (4) A rollback target must satisfy the same contract: an obsolete UI that would remove PMS, Service Plan or Package management is archive evidence, never an executable rollback, and the previous pointer is CLEARED rather than left aimed at one. (5) Release selection is explicit and provenance-verified - never by mtime, filename or 'latest-looking' directory. (6) Historical releases are retained under the archive directory, unreachable by Caddy, systemd or either pointer.",
     "hotel_admin_operator_endpoint_verified": true,
@@ -1256,8 +1256,8 @@
         "D44",
         "D45"
       ],
-      "transition": "T0201",
-      "status": "READY_FOR_PRODUCT_OWNER_TESTING -- Product Owner findings of 2026-09-29 and the directly related social redirect defect corrected and deployed to PRE-LIVE (and Central) from the unmerged PR #202; NOT merged, NOT closed",
+      "transition": "T0202",
+      "status": "READY_FOR_PRODUCT_OWNER_TESTING -- Product Owner findings of 2026-09-29 (incl. the café navigation) corrected and deployed to PRE-LIVE (and Central) from the unmerged PR #202; NOT merged, NOT closed",
       "pr": 202,
       "contract": "docs/architecture/ONEGATE_MODULES_AND_ACQUISITION.md",
       "site_migrations": "0094-0099 applied on PRE-LIVE",
@@ -1273,7 +1273,7 @@
     "prelive_phase4_flag_posture": "PRE-LIVE 172.21.60.25 since 2026-09-28 (D44/D45 testing): scd runs STAYCONNECT_PHASE4_MASTER, _PAYMENT, _PAYMENT_PROVIDER, _POSTING, _FINANCIAL_REVIEW and _OUTBOX_WORKER; edged runs _MASTER, _POSTING and _FINANCIAL_REVIEW; pmsd runs none. STAYCONNECT_PHASE4_PMS_TRANSMIT and STAYCONNECT_PAYMENT_LIVE_ALLOWED are set nowhere. Payment-provider egress is possible only in TEST mode, and only once a sandbox account exists (none does). Financial traffic ever: none.",
     "phase4_flags_off_scope": "phase4_flags_off records the DELIVERED REPOSITORY configuration (no file in the tree enables a Phase-4 flag; scripts/ci/phase4-dark-check.sh asserts it). It is not a statement about the PRE-LIVE environment, whose posture is recorded in prelive_phase4_flag_posture."
   },
-  "latest_transition_id": "T0201",
+  "latest_transition_id": "T0202",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1774,9 +1774,9 @@
     "manifest": "docs/manifests/SiteModulesAcquisition-change-manifest.md",
     "base": "42823d9dfecd4339ac540d1b5d19ee0bf5df40f4",
     "base_note": "Master at the merge of PR #201, where delivery/site-modules-acquisition was cut.",
-    "head": "d5c3e578",
+    "head": "8650643a",
     "head_note": "The last CONTENT commit of PR #202 before its governance record; the manifest records base..HEAD including the governance, pack and manifest commits.",
-    "transition": "T0201",
+    "transition": "T0202",
     "previous_delivery": "INDUSTRY_NEUTRAL_TERMINOLOGY (docs/manifests/NeutralTerminology-change-manifest.md, T0197 lineage)",
     "pr": 202,
     "pr_state": "OPEN_UNMERGED -- READY FOR PRODUCT OWNER TESTING; merge only on explicit Product Owner acceptance (po-merge-approved)",
