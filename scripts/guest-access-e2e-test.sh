@@ -290,6 +290,7 @@ if [ -n "$STAY" ]; then
   inset "$CIP2" && [ "$(online ga2)" = 204 ] && ok "room device enforced and online (204)" || bad "room device probe $(online ga2)"
   PMAX=$($PSQL "SELECT sp.max_concurrent_devices FROM iam_v2.entitlements e JOIN iam_v2.service_plan_revisions sp ON sp.id=e.service_plan_revision_id WHERE e.id='$PMS_ENT'")
   LEFT=$(caplimit)
+  [ -n "${CIP4:-}" ] || { client ga4; CIP4=$CIP; }   # created by section 7 unless its multi-device steps were skipped
   j=$(pmschoose ga4 "$(pms ga4 "$RES")")
   if [ "$LEFT" = 0 ]; then
     # The second device of the room is verified, but joining opens a new session and the licence is full.
