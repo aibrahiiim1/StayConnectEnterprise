@@ -298,12 +298,12 @@ func (s *server) getPMSInterface(w http.ResponseWriter, r *http.Request) {
 // ---------- revisions ----------
 
 type pmsRevisionRow struct {
-	ID                    string `json:"id"`
-	RevisionNo            int    `json:"revision_no"`
-	SourceTimezone        string `json:"source_timezone"`
-	FolioIdentityStrategy string `json:"folio_identity_strategy"`
-	NormalizationVersion  int    `json:"normalization_version"`
-	SourceFingerprint     string `json:"source_fingerprint,omitempty"`
+	ID                   string `json:"id"`
+	RevisionNo           int    `json:"revision_no"`
+	SourceTimezone       string `json:"source_timezone"`
+	PostingTargetModel   string `json:"posting_target_model"`
+	NormalizationVersion int    `json:"normalization_version"`
+	SourceFingerprint    string `json:"source_fingerprint,omitempty"`
 	// Config is the Revision's declarative configuration, REDACTED before it leaves the process — see
 	// redactRevisionConfig. A Revision's config is operator-authored and can acquire anything over time.
 	Config json.RawMessage `json:"config"`
@@ -401,7 +401,7 @@ func (s *server) listPMSInterfaceRevisions(w http.ResponseWriter, r *http.Reques
 	// present in every schema this endpoint must serve. Joining it here made the whole read fail where the
 	// audit tables are absent, taking the configuration down with it. It is fetched separately below.
 	rows, err := s.db.Query(ctx, `
-		SELECT rev.id::text, rev.revision_no, rev.source_timezone, rev.folio_identity_strategy,
+		SELECT rev.id::text, rev.revision_no, rev.source_timezone, rev.posting_target_model,
 		       rev.normalization_version, COALESCE(rev.source_fingerprint,''), rev.config,
 		       (rev.id = i.current_revision_id) AS published
 		  FROM iam_v2.pms_interface_revisions rev
@@ -418,7 +418,7 @@ func (s *server) listPMSInterfaceRevisions(w http.ResponseWriter, r *http.Reques
 		var e pmsRevisionRow
 		var cfg []byte
 		var published *bool
-		if err := rows.Scan(&e.ID, &e.RevisionNo, &e.SourceTimezone, &e.FolioIdentityStrategy,
+		if err := rows.Scan(&e.ID, &e.RevisionNo, &e.SourceTimezone, &e.PostingTargetModel,
 			&e.NormalizationVersion, &e.SourceFingerprint, &cfg, &published); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 			return

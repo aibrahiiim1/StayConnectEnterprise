@@ -7,7 +7,9 @@ package main
 //
 //	Room charge   room_charge effective; the package maps a posting code on the stay's interface; that interface
 //	              is financially onboarded; package currency == interface currency (no FX); the stay is
-//	              IN_HOUSE and posting_allowed; it has a default posting folio; every freshness axis is green.
+//	              IN_HOUSE and posting_allowed (it has a reservation number and no posting block); it has no
+//	              unresolved room charge; every freshness axis is green. The charge targets the reservation
+//	              (RN + G#), never a folio (Phase-0 Amendment A1).
 //	Card payment  card_payment effective (provider ready).
 //
 // Choosing one consumes the verified auth context and writes quote, purchase (AWAITING_SETTLEMENT) and a
@@ -77,8 +79,7 @@ func (p *phase3Auth) roomChargeApplicable(ctx context.Context, stayID, ifaceID s
 		   AND EXISTS (SELECT 1 FROM iam_v2.stays st
 		                WHERE st.tenant_id=$1 AND st.site_id=$2 AND st.id=$4 AND st.pms_interface_id=$3
 		                  AND st.status='IN_HOUSE' AND st.posting_allowed)
-		   AND EXISTS (SELECT 1 FROM iam_v2.stay_folios sf
-		                WHERE sf.stay_id=$4 AND sf.pms_interface_id=$3 AND sf.is_default_posting_target)
+		   AND NOT iam_v2.p4_stay_room_charge_open($4::uuid)
 		   AND COALESCE((SELECT iam_v2.p4_interface_freshness_block($1,$2,$3,i.current_revision_id,now())
 		                   FROM iam_v2.pms_interfaces i WHERE i.id=$3), 'X') = ''`,
 		p.srv.tenID, p.srv.siteID, ifaceID, stayID, d.Currency, d.CurrencyExponent, d.PackageRevisionID).Scan(&ok)

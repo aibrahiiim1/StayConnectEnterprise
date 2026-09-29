@@ -40,25 +40,26 @@ func TestPMSAllowedKinds_OnlyTheConnectorPMSDCanRun(t *testing.T) {
 	}
 }
 
-// A new revision is authored UNSET and cannot be talked into a financial folio strategy from a form.
+// A new revision is authored UNSET and cannot be talked into a posting target from a form: RESERVATION is
+// recorded only by financial onboarding (Phase-0 Amendment A1), and a legacy folio strategy is no value at all.
 func TestValidateRevisionConfig_ForcesUnsetFolioIdentity(t *testing.T) {
-	for _, strategy := range []string{"GLOBALLY_UNIQUE", "UNIQUE_PER_STAY", "REUSED_SEQUENTIAL"} {
+	for _, strategy := range []string{"RESERVATION", "GLOBALLY_UNIQUE", "UNIQUE_PER_STAY", "REUSED_SEQUENTIAL"} {
 		in := validRevisionReq()
-		in.FolioIdentityStrategy = strategy
+		in.PostingTargetModel = strategy
 		if _, err := validateRevisionConfig(in); err == nil {
-			t.Fatalf("%s was accepted; a folio strategy is a financial determination, not a form choice", strategy)
+			t.Fatalf("%s was accepted; a posting target is recorded by financial onboarding, not a form", strategy)
 		} else if !strings.Contains(err.Error(), "UNSET") {
 			t.Fatalf("the refusal must name the required value, got %v", err)
 		}
 	}
 	// Omitted entirely is the normal case from the form, and must default rather than fail.
 	in := validRevisionReq()
-	in.FolioIdentityStrategy = ""
+	in.PostingTargetModel = ""
 	if _, err := validateRevisionConfig(in); err != nil {
-		t.Fatalf("an omitted folio strategy must default to UNSET, got %v", err)
+		t.Fatalf("an omitted posting target must default to UNSET, got %v", err)
 	}
-	if in.FolioIdentityStrategy != folioStrategyUnset {
-		t.Fatalf("expected UNSET to be stamped, got %q", in.FolioIdentityStrategy)
+	if in.PostingTargetModel != postingTargetUnset {
+		t.Fatalf("expected UNSET to be stamped, got %q", in.PostingTargetModel)
 	}
 }
 

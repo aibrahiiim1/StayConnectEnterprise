@@ -197,23 +197,23 @@ func (s *server) getReviewPosting(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	var (
-		q                                     reviewQueueRow
-		hasUnknown, retryConsumed             bool
-		unknownCount, attemptCount            int64
-		freshness, retryAuthNo, reversalID    *string
-		settlementID, purchaseID, stayID      string
-		folioID, revisionID, idempotencyKey   string
-		interfaceKind, folioStrategy, ifState string
-		settlementStatus, purchaseState       string
-		escalations                           int
+		q                                   reviewQueueRow
+		hasUnknown, retryConsumed           bool
+		unknownCount, attemptCount          int64
+		freshness, retryAuthNo, reversalID  *string
+		settlementID, purchaseID, stayID    string
+		gNumber, revisionID, idempotencyKey string
+		interfaceKind, targetModel, ifState string
+		settlementStatus, purchaseState     string
+		escalations                         int
 	)
 	err := s.db.QueryRow(ctx, `SELECT `+reviewQueueCols+`,
 		coalesce(p.has_unknown_history,false), coalesce(p.retry_authorization_consumed,false),
 		coalesce(p.unknown_attempt_count,0), coalesce(p.attempt_count,0), p.freshness_block,
 		p.retry_authorized_attempt_no::text, rs.reversal_posting_id::text, coalesce(p.escalation_count,0),
 		o.settlement_id::text, o.purchase_id::text, coalesce(o.stay_id::text,''),
-		coalesce(o.folio_id::text,''), o.posting_interface_revision_id::text, o.idempotency_key,
-		i.connector_kind, rev.folio_identity_strategy, i.lifecycle_state,
+		o.g_number, o.posting_interface_revision_id::text, o.idempotency_key,
+		i.connector_kind, rev.posting_target_model, i.lifecycle_state,
 		se.status, pu.state
 		FROM iam_v2.posting_execution_state p
 		JOIN iam_v2.pms_postings o ON o.id = p.posting_id
@@ -228,8 +228,8 @@ func (s *server) getReviewPosting(w http.ResponseWriter, r *http.Request) {
 			&q.TerminalAction, &q.AwaitingReview, &q.CreatedAt,
 			&hasUnknown, &retryConsumed, &unknownCount, &attemptCount, &freshness,
 			&retryAuthNo, &reversalID, &escalations,
-			&settlementID, &purchaseID, &stayID, &folioID, &revisionID, &idempotencyKey,
-			&interfaceKind, &folioStrategy, &ifState, &settlementStatus, &purchaseState)
+			&settlementID, &purchaseID, &stayID, &gNumber, &revisionID, &idempotencyKey,
+			&interfaceKind, &targetModel, &ifState, &settlementStatus, &purchaseState)
 	if errors.Is(err, pgx.ErrNoRows) {
 		jsonErr(w, http.StatusNotFound, "not_found", "no such posting in this site")
 		return
@@ -275,9 +275,9 @@ func (s *server) getReviewPosting(w http.ResponseWriter, r *http.Request) {
 		// whether money moved needs to see what it was attached to, not the current state of the world.
 		"pinned_evidence": map[string]any{
 			"settlement_id": settlementID, "purchase_id": purchaseID, "stay_id": stayID,
-			"folio_id": folioID, "posting_interface_revision_id": revisionID,
+			"g_number": gNumber, "posting_interface_revision_id": revisionID,
 			"idempotency_key": idempotencyKey, "connector_kind": interfaceKind,
-			"folio_identity_strategy": folioStrategy, "interface_lifecycle_state": ifState,
+			"posting_target_model": targetModel, "interface_lifecycle_state": ifState,
 			"settlement_status": settlementStatus, "purchase_state": purchaseState,
 		},
 		"attempts": attempts,

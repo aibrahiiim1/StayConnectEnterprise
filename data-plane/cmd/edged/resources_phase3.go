@@ -195,17 +195,22 @@ type stayOccupant struct {
 	IsPrimary bool    `json:"is_primary"`
 }
 
-type stayFolio struct {
-	ExternalID string `json:"external_folio_id"`
-	Kind       string `json:"folio_kind"`
-	Status     string `json:"status"`
-	IsDefault  bool   `json:"is_default_posting_target"`
+// stayPostingBlock is one reasoned stop on room charging for the stay (Phase-0 Amendment A1), active or
+// cleared. There are no folios: a room charge targets the reservation.
+type stayPostingBlock struct {
+	Reason          string     `json:"reason"`
+	Source          string     `json:"source"`
+	PAStatus        *string    `json:"pa_as_status,omitempty"`
+	Note            *string    `json:"note,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	ClearedAt       *time.Time `json:"cleared_at,omitempty"`
+	ClearedBySource *string    `json:"cleared_by_source,omitempty"`
 }
 
 type stayDetail struct {
 	stayRow
-	Occupants []stayOccupant `json:"occupant_list"`
-	Folios    []stayFolio    `json:"folios"`
+	Occupants     []stayOccupant     `json:"occupant_list"`
+	PostingBlocks []stayPostingBlock `json:"posting_blocks"`
 }
 
 func (s *server) getStay(w http.ResponseWriter, r *http.Request) {
@@ -235,18 +240,18 @@ func (s *server) getStay(w http.ResponseWriter, r *http.Request) {
 		}
 		rows.Close()
 	}
-	d.Folios = []stayFolio{}
-	frows, err := s.db.Query(ctx, `SELECT f.external_folio_id, f.folio_kind, f.status, sf.is_default_posting_target
-		FROM iam_v2.stay_folios sf JOIN iam_v2.folios f ON f.id=sf.folio_id
-		WHERE sf.stay_id=$1 ORDER BY sf.is_default_posting_target DESC, f.external_folio_id`, id)
+	d.PostingBlocks = []stayPostingBlock{}
+	brows, err := s.db.Query(ctx, `SELECT reason, source, pa_as_status, note, created_at, cleared_at, cleared_by_source
+		FROM iam_v2.stay_posting_blocks WHERE stay_id=$1 AND tenant_id=$2
+		ORDER BY (cleared_at IS NULL) DESC, created_at DESC LIMIT 20`, id, s.tenantID)
 	if err == nil {
-		for frows.Next() {
-			var f stayFolio
-			if frows.Scan(&f.ExternalID, &f.Kind, &f.Status, &f.IsDefault) == nil {
-				d.Folios = append(d.Folios, f)
+		for brows.Next() {
+			var b stayPostingBlock
+			if brows.Scan(&b.Reason, &b.Source, &b.PAStatus, &b.Note, &b.CreatedAt, &b.ClearedAt, &b.ClearedBySource) == nil {
+				d.PostingBlocks = append(d.PostingBlocks, b)
 			}
 		}
-		frows.Close()
+		brows.Close()
 	}
 	writeJSON(w, http.StatusOK, d)
 }

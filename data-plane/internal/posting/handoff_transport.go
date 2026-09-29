@@ -46,7 +46,8 @@ func (h *handoffTransport) SendPS(ctx context.Context, interfaceID string, pNumb
 	}
 	switch resp.Result {
 	case postinghandoff.NotTransmitted:
-		return nil, &handoffError{code: ErrTransportUnavailable, msg: "pmsd wrote nothing: " + boundedCode(resp.Code), notSent: true}
+		return nil, &handoffError{code: ErrTransportUnavailable, msg: "pmsd wrote nothing: " + boundedCode(resp.Code), notSent: true,
+			reason: boundedCode(resp.Code)}
 	case postinghandoff.Answered:
 		pa, perr := ParsePA(resp.PABody)
 		if perr != nil {
@@ -85,9 +86,13 @@ type handoffError struct {
 	code    Code
 	msg     string
 	notSent bool
+	reason  string // pmsd's bounded reason when it proved nothing was written (e.g. ROOM_CHANGED)
 }
 
 func (e *handoffError) Error() string { return e.msg }
+
+// NotSentReason reports pmsd's reason for writing nothing, recorded on the NOT_SENT attempt.
+func (e *handoffError) NotSentReason() string { return e.reason }
 func (e *handoffError) Unwrap() []error {
 	if e.notSent {
 		return []error{&Error{Code: e.code, Msg: e.msg}, ErrNotTransmitted}

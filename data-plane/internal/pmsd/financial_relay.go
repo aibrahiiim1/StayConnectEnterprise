@@ -14,6 +14,11 @@ package pmsd
 //     still financially ready). pmsd holds EXECUTE on that check and no privilege on any posting table;
 //  4. carries it only on a connected link that is between resyncs, one command at a time per link, and never
 //     the same P# twice;
+//  4a. revalidates, INSIDE the link's single writer and immediately before the first byte, that the command's
+//     room is still its reservation's current room as the link has seen it (Phase-0 Amendment A1, rule 7): a
+//     guest record already read on this link that moved the reservation, or announced its departure, means the
+//     stale command is never written and is answered NOT_TRANSMITTED (ROOM_CHANGED_ON_LINK /
+//     RESERVATION_DEPARTED_ON_LINK), so a fresh attempt can be built with the new room and the same G#;
 //  5. writes the bytes verbatim through the link's single serialized writer, and returns the PA whose P#
 //     matches -- verbatim -- or UNKNOWN when none arrives in time or the link ends.
 //
@@ -40,6 +45,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/stayconnect/enterprise/data-plane/internal/namenorm"
 	"github.com/stayconnect/enterprise/data-plane/internal/postinghandoff"
 )
 
@@ -76,19 +82,34 @@ type FinancialRelay struct {
 	mu      sync.Mutex
 	ports   map[string]*relayPort
 	carried map[string]map[int64]struct{} // interface -> P#s this process has handed to a writer
+	// seen is what each live link has told us about reservations since it connected: interface -> G# -> the
+	// latest normalized room, or departed. It is fed by the link's read loop as it parses guest records -- BEFORE
+	// the database has applied them -- so the pre-write guard sees a room move the moment it is on the link.
+	seen map[string]map[string]linkReservation
 }
+
+// linkReservation is the latest state of one reservation as read on the live link.
+type linkReservation struct {
+	room     string
+	departed bool
+}
+
+// maxSeenPerLink bounds the per-link reservation view. A property's in-house roster is far smaller; on
+// overflow the view is reset, which only removes the extra, earlier guard (the database check still applies).
+const maxSeenPerLink = 50000
 
 // NewFinancialRelay builds the relay. enabled=false answers every command NOT_TRANSMITTED; a nil authoriser
 // likewise refuses everything.
 func NewFinancialRelay(enabled bool, authorise Authoriser, log *slog.Logger) *FinancialRelay {
 	return &FinancialRelay{enabled: enabled, authorise: authorise, log: log,
-		ports: map[string]*relayPort{}, carried: map[string]map[int64]struct{}{}}
+		ports: map[string]*relayPort{}, carried: map[string]map[int64]struct{}{},
+		seen: map[string]map[string]linkReservation{}}
 }
 
 // relayPort is one live FIAS link offered to the relay.
 type relayPort struct {
 	iface  string
-	submit func(ctx context.Context, body string) (bool, error)
+	submit func(ctx context.Context, body string, guard func() string) (bool, error)
 	steady atomic.Bool
 	lost   chan struct{} // closed when the link's ownership cycle ends
 
@@ -116,18 +137,85 @@ func (p *relayPort) onPA(body string) bool {
 	return true
 }
 
-func (r *FinancialRelay) attach(iface string, submit func(ctx context.Context, body string) (bool, error)) *relayPort {
+func (r *FinancialRelay) attach(iface string, submit func(ctx context.Context, body string, guard func() string) (bool, error)) *relayPort {
 	p := &relayPort{iface: iface, submit: submit, lost: make(chan struct{})}
 	r.mu.Lock()
 	r.ports[iface] = p
+	r.seen[iface] = map[string]linkReservation{} // a new link starts with no view of its own
 	r.mu.Unlock()
 	return p
+}
+
+// ObserveGuestRecord records what one guest record read on the live link says about its reservation: GI and GC
+// carry the reservation's current room; GO announces its departure. Called by the link's read loop, before the
+// record is admitted to the database. Nothing about the guest is retained beyond the reservation number and the
+// normalized room, and nothing is logged.
+func (r *FinancialRelay) ObserveGuestRecord(iface string, recordType RecordType, reservation, room string) {
+	if r == nil || reservation == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	m := r.seen[iface]
+	if m == nil {
+		return // no live port for this interface
+	}
+	if len(m) >= maxSeenPerLink {
+		m = map[string]linkReservation{}
+		r.seen[iface] = m
+	}
+	if recordType == RecGO {
+		m[reservation] = linkReservation{departed: true}
+		return
+	}
+	if nr := namenorm.Room(room); nr != "" {
+		m[reservation] = linkReservation{room: nr}
+	}
+}
+
+// linkGuard returns the pre-write check for one command: refuse when the link has already seen the command's
+// reservation move to another room or depart. A reservation the link has not mentioned is left to the database
+// check, which already passed.
+func (r *FinancialRelay) linkGuard(iface, body string, port *relayPort) func() string {
+	rn, g := psField(body, "RN"), psField(body, "G#")
+	return func() string {
+		if !port.steady.Load() {
+			return "LINK_RESYNCING"
+		}
+		if g == "" || rn == "" {
+			return "COMMAND_MALFORMED"
+		}
+		r.mu.Lock()
+		lr, ok := r.seen[iface][g]
+		r.mu.Unlock()
+		if !ok {
+			return ""
+		}
+		if lr.departed {
+			return "RESERVATION_DEPARTED_ON_LINK"
+		}
+		if lr.room != "" && lr.room != namenorm.Room(rn) {
+			return "ROOM_CHANGED_ON_LINK"
+		}
+		return ""
+	}
+}
+
+// psField returns the value of one field of a PS body (fields are "|XXvalue"), or "".
+func psField(body, code string) string {
+	for _, f := range strings.Split(body, "|") {
+		if len(f) > len(code) && strings.HasPrefix(f, code) {
+			return f[len(code):]
+		}
+	}
+	return ""
 }
 
 func (r *FinancialRelay) detach(p *relayPort) {
 	r.mu.Lock()
 	if r.ports[p.iface] == p {
 		delete(r.ports, p.iface)
+		delete(r.seen, p.iface)
 	}
 	r.mu.Unlock()
 	p.setSteady(false)
@@ -236,7 +324,17 @@ func (r *FinancialRelay) Handle(ctx context.Context, req postinghandoff.Request)
 		release()
 		return unknown("DUPLICATE_COMMAND")
 	}
-	enqueued, werr := port.submit(ctx, req.Body) // the exact bytes, unmodified
+	enqueued, werr := port.submit(ctx, req.Body, r.linkGuard(req.InterfaceID, req.Body, port)) // the exact bytes, unmodified
+	var refused *GuardRefusedError
+	if errors.As(werr, &refused) {
+		// The writer refused BEFORE the first byte: provably nothing was written. Forget the P# so the record
+		// is exact, and say why, so the financial path records NOT_SENT and builds a fresh attempt.
+		release()
+		r.mu.Lock()
+		delete(r.carried[req.InterfaceID], req.PNumber)
+		r.mu.Unlock()
+		return notSent(boundedRelayCode(refused.Code))
+	}
 	if !enqueued {
 		// The writer never took it: provably nothing was written. Forget the P# so the record is exact.
 		release()

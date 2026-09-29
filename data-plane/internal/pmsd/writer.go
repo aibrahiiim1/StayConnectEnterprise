@@ -18,6 +18,10 @@ type writeReq struct {
 	// financial marks a PS submitted by the financial relay. Only SubmitFinancial sets it, and the writer
 	// routes it to guardedConn.writeFinancialFrame, which accepts a PS and nothing else.
 	financial bool
+	// guard, for a financial request only, is evaluated by the writer goroutine IMMEDIATELY BEFORE the first
+	// byte is written. A non-empty code means "do not write": the request is answered with a GuardRefusedError
+	// and nothing reaches the socket. It must be fast and must not block (it reads in-memory state only).
+	guard func() string
 }
 
 // serialWriter is the SOLE owner of the outbound socket. EXACTLY ONE goroutine (run) ever calls
@@ -67,6 +71,16 @@ func (w *serialWriter) run(ctx context.Context) {
 			return
 		case req := <-w.reqCh:
 			resetIdle() // any activity resets the keepalive timer
+			if req.financial && req.guard != nil {
+				// THE FIRST-BYTE BOUNDARY (Phase-0 Amendment A1, rule 7). This is the last point at which the
+				// command is provably unwritten; after the next line, it may be with the PMS.
+				if code := req.guard(); code != "" {
+					if req.ack != nil {
+						req.ack <- &GuardRefusedError{Code: code}
+					}
+					continue
+				}
+			}
 			if req.body == "" {
 				if req.ack != nil {
 					req.ack <- nil
@@ -142,14 +156,24 @@ func (w *serialWriter) SubmitSync(ctx context.Context, body string) error {
 	}
 }
 
+// GuardRefusedError is the writer's answer when a financial request's pre-write guard refused it. It PROVES
+// that no byte of the request was written: the guard runs before writeFinancialFrame, in the only goroutine
+// that writes.
+type GuardRefusedError struct{ Code string }
+
+func (e *GuardRefusedError) Error() string { return "pre-write guard refused: " + e.Code }
+
 // SubmitFinancial writes one PS through the single writer and reports whether the writer ever TOOK it.
 //
 // enqueued=false means provably nothing was written: the request never reached the writer. Once it is taken,
 // the write may be partial or complete whatever error follows, so the caller must treat any err as UNKNOWN.
-func (w *serialWriter) SubmitFinancial(ctx context.Context, body string) (enqueued bool, err error) {
+//
+// guard (may be nil) is evaluated by the writer immediately before the write; a refusal is returned as
+// (true, *GuardRefusedError), which the caller must treat as provably NOT written.
+func (w *serialWriter) SubmitFinancial(ctx context.Context, body string, guard func() string) (enqueued bool, err error) {
 	ack := make(chan error, 1)
 	select {
-	case w.reqCh <- writeReq{body: body, ack: ack, financial: true}:
+	case w.reqCh <- writeReq{body: body, ack: ack, financial: true, guard: guard}:
 	case <-ctx.Done():
 		return false, coded(CodeContextCanceled, ctx.Err())
 	case <-w.done:

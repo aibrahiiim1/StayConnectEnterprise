@@ -39,11 +39,19 @@ type fakeLink struct {
 	after   func(body string) // runs after a successful write (e.g. the PMS answering)
 }
 
-func (f *fakeLink) submit(_ context.Context, body string) (bool, error) {
+// submit mirrors the real single writer: the guard is evaluated immediately before the first byte, and a
+// refusal writes nothing.
+func (f *fakeLink) submit(_ context.Context, body string, guard func() string) (bool, error) {
 	f.mu.Lock()
 	if !f.enqueue {
 		f.mu.Unlock()
 		return false, errors.New("writer stopped")
+	}
+	if guard != nil {
+		if code := guard(); code != "" {
+			f.mu.Unlock()
+			return true, &GuardRefusedError{Code: code}
+		}
 	}
 	f.written = append(f.written, body)
 	f.mu.Unlock()
@@ -317,4 +325,184 @@ func TestAdapter_CarriesAnAuthorisedPSOnItsOwnLinkAndReturnsThePA(t *testing.T) 
 	if len(sink.events) != 1 || sink.continuityFlt != 0 {
 		t.Fatalf("the feed keeps flowing and a PA is not a fault: events=%d faults=%d", len(sink.events), sink.continuityFlt)
 	}
+}
+
+// ---- ROOM MOVES AT THE FIRST-BYTE BOUNDARY (Phase-0 Amendment A1, rule 7; acceptance E18) -----------------
+
+// psFor builds a PS for one reservation and room, as the posting engine would.
+func psFor(rn, g, pn string) string {
+	return "PS|RN" + rn + "|G#" + g + "|TA1500|PTD|SOWIFI|CTWIFI|P#" + pn + "|WSSTAYCONNECT|"
+}
+
+// E18 case 3, at pmsd: the attempt was built for RN101/G#5000, then the link read a GC moving G#5000 to
+// RN205. The prepared RN101 command is never written; the answer is NOT_TRANSMITTED with the reason, and the P#
+// is not recorded as carried, so the financial path records NOT_SENT and may build RN205/G#5000.
+func TestRelay_RoomMovedOnTheLinkBeforeTheWriteIsNeverWritten(t *testing.T) {
+	link := &fakeLink{enqueue: true}
+	r, _ := newRelayWithLink(t, authorised, link)
+	r.ObserveGuestRecord(relayIface, RecGI, "5000", "101")
+	r.ObserveGuestRecord(relayIface, RecGC, "5000", "205") // the room move, read before the command arrives
+	resp := r.Handle(context.Background(), cmd(21, psFor("101", "5000", "21")))
+	if resp.Result != postinghandoff.NotTransmitted || resp.Code != "ROOM_CHANGED_ON_LINK" {
+		t.Fatalf("a stale room must be refused before the first byte, got %+v", resp)
+	}
+	if link.count() != 0 {
+		t.Fatalf("the RN101 PS must never be written: %q", link.written)
+	}
+	if r.wasCarried(relayIface, 21) {
+		t.Fatal("a command refused before its first byte is not recorded as carried")
+	}
+	// The fresh attempt, with the new room and the same reservation, is carried.
+	link.after = func(string) {}
+	resp = r.Handle(context.Background(), cmd(22, psFor("205", "5000", "22")))
+	if link.count() != 1 || !strings.HasPrefix(link.written[0], "PS|RN205|G#5000|") {
+		t.Fatalf("the fresh attempt carries RN205/G#5000: %q (%+v)", link.written, resp)
+	}
+}
+
+func TestRelay_DepartureOnTheLinkRefusesTheCommand(t *testing.T) {
+	link := &fakeLink{enqueue: true}
+	r, _ := newRelayWithLink(t, authorised, link)
+	r.ObserveGuestRecord(relayIface, RecGO, "5000", "")
+	resp := r.Handle(context.Background(), cmd(23, psFor("101", "5000", "23")))
+	if resp.Result != postinghandoff.NotTransmitted || resp.Code != "RESERVATION_DEPARTED_ON_LINK" || link.count() != 0 {
+		t.Fatalf("a reservation that departed on the link is never charged: %+v written=%d", resp, link.count())
+	}
+}
+
+func TestRelay_SameRoomOrUnseenReservationIsCarried(t *testing.T) {
+	for name, observe := range map[string]func(r *FinancialRelay){
+		"same room, other spelling": func(r *FinancialRelay) { r.ObserveGuestRecord(relayIface, RecGC, "5000", " 101 ") },
+		"reservation not seen":      func(r *FinancialRelay) { r.ObserveGuestRecord(relayIface, RecGI, "7777", "300") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			link := &fakeLink{enqueue: true}
+			r, _ := newRelayWithLink(t, authorised, link)
+			observe(r)
+			_ = r.Handle(context.Background(), cmd(24, psFor("101", "5000", "24")))
+			if link.count() != 1 {
+				t.Fatalf("a command whose room still stands is written once, wrote %d", link.count())
+			}
+		})
+	}
+}
+
+// E18 case 4: the room moves WHILE the PS is being written. The guard already passed and the write began, so
+// the attempt is immutable: its outcome is whatever the PMS answers (here, nothing: UNKNOWN), and no second PS
+// is ever written for the new room.
+func TestRelay_RoomMoveDuringTheWriteDoesNotRebuildOrResend(t *testing.T) {
+	link := &fakeLink{enqueue: true}
+	r, _ := newRelayWithLink(t, authorised, link)
+	link.after = func(string) { r.ObserveGuestRecord(relayIface, RecGC, "5000", "205") }
+	resp := r.Handle(context.Background(), cmd(25, psFor("101", "5000", "25")))
+	if resp.Result != postinghandoff.Unknown || resp.Code != "ANSWER_TIMEOUT" {
+		t.Fatalf("a written command without an answer is UNKNOWN, got %+v", resp)
+	}
+	again := r.Handle(context.Background(), cmd(25, psFor("101", "5000", "25")))
+	if again.Result != postinghandoff.Unknown || link.count() != 1 {
+		t.Fatalf("the transmitted attempt is never written again: %+v written=%d", again, link.count())
+	}
+}
+
+// E18 cases 3 and 5 on the REAL link: the real FIAS adapter, its single writer and read loop, and a scripted
+// PMS. Case 3: the PMS moves G#5000 to RN205 BEFORE the command arrives; the RN101 PS never reaches the PMS.
+// Case 5: the PS for RN205 is written, then the PMS moves the guest again and never answers; the command is
+// UNKNOWN and no further PS is written.
+func TestAdapter_RoomMoveRacesOnTheRealLink(t *testing.T) {
+	client, server := net.Pipe()
+	relay := NewFinancialRelay(true, authorised, nil)
+	dial := NewFIASDialWithRelay(func(context.Context, string, string) (net.Conn, error) { return client, nil },
+		testKeys(), time.Now, nil, relay)
+	conn, err := dial(context.Background(), DialParams{Iface: iface("i1"), Rev: testRev()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ifaceID := iface("i1").ID
+
+	var mu sync.Mutex
+	var sawPS []string
+	peer := make(chan struct{})
+	moved := make(chan struct{})
+	go func() {
+		defer close(peer)
+		br := bufio.NewReader(server)
+		for i := 0; i < 6; i++ { // LS, LD, LR x3, DR
+			if _, err := pms.ReadFramedRecord(br); err != nil {
+				return
+			}
+		}
+		// The room move is live (after DE) and arrives before any PS. LA goes last: the adapter acknowledges it
+		// synchronously, and this unbuffered pipe would otherwise deadlock the scripted PMS against that ack.
+		for _, rec := range []string{"DS|", "GI|RN101|G#5000|GNDoe|GA260101|GD260105|", "DE|",
+			"GC|RN205|G#5000|GNDoe|GA260101|GD260105|", "LA|"} {
+			_ = pms.WriteFramedRecord(server, rec)
+		}
+		close(moved)
+		for {
+			got, err := pms.ReadFramedRecord(br)
+			if err != nil {
+				return
+			}
+			if pms.RecordID(got) == "PS" {
+				mu.Lock()
+				sawPS = append(sawPS, got)
+				mu.Unlock()
+				// Case 5: after the write, the guest moves again and the PMS never answers.
+				_ = pms.WriteFramedRecord(server, "GC|RN310|G#5000|GNDoe|GA260101|GD260105|")
+			}
+		}
+	}()
+	sink := &recordingSink{q: NewBoundedQueue(16, time.Second)}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	served := make(chan struct{})
+	go func() { _ = conn.(*fiasAdapter).Serve(ctx, sink); close(served) }()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if p := relay.portFor(ifaceID); p != nil && p.steady.Load() {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the link never became steady")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	<-moved
+	// wait until the read loop has read the GC: the relay's view of G#5000 is now RN205
+	for deadline = time.Now().Add(3 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		relay.mu.Lock()
+		lr := relay.seen[ifaceID]["5000"]
+		relay.mu.Unlock()
+		if lr.room == "205" {
+			break
+		}
+		if time.Now().After(deadline) {
+			relay.mu.Lock()
+			sink.mu.Lock()
+			t.Fatalf("the room move was never read: seen=%+v ports=%v events=%d faults=%d resyncDone=%d", relay.seen, len(relay.ports), len(sink.events), sink.continuityFlt, sink.resyncComplete)
+		}
+	}
+	mk := func(body string, pn int64) postinghandoff.Request {
+		return postinghandoff.Request{Version: 1, InterfaceID: ifaceID, PNumber: pn, Body: body,
+			BodySHA256: postinghandoff.BodyHash(body), WaitMillis: 400}
+	}
+	stale := relay.Handle(ctx, mk(psFor("101", "5000", "81"), 81))
+	if stale.Result != postinghandoff.NotTransmitted || stale.Code != "ROOM_CHANGED_ON_LINK" {
+		t.Fatalf("case 3: the RN101 command must be refused unwritten, got %+v", stale)
+	}
+	fresh := relay.Handle(ctx, mk(psFor("205", "5000", "82"), 82))
+	if fresh.Result != postinghandoff.Unknown {
+		t.Fatalf("case 5: a written command without an answer is UNKNOWN, got %+v", fresh)
+	}
+	time.Sleep(100 * time.Millisecond)
+	mu.Lock()
+	got := append([]string(nil), sawPS...)
+	mu.Unlock()
+	if len(got) != 1 || got[0] != psFor("205", "5000", "82") {
+		t.Fatalf("exactly one PS (RN205/G#5000) may reach the PMS, and RN310 is never sent automatically: %q", got)
+	}
+	_ = server.Close()
+	<-peer
+	<-served
 }

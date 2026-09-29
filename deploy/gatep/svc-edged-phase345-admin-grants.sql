@@ -59,8 +59,11 @@ GRANT SELECT ON iam_v2.auth_resolutions                TO svc_edged;
 GRANT SELECT ON iam_v2.stays                           TO svc_edged;
 GRANT SELECT ON iam_v2.stay_guests                     TO svc_edged;
 GRANT SELECT ON iam_v2.stay_events                     TO svc_edged;
-GRANT SELECT ON iam_v2.stay_folios                     TO svc_edged;
-GRANT SELECT ON iam_v2.folios                          TO svc_edged;
+-- Posting permission (Amendment A1, migration 0100): the stay's blocks and the pre-send aborts are readable;
+-- the only block an operator writes is ADMIN_BLOCK, through its definer.
+GRANT SELECT ON iam_v2.stay_posting_blocks             TO svc_edged;
+GRANT SELECT ON iam_v2.posting_presend_aborts          TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_admin_posting_block(uuid,uuid,uuid,text,text,uuid) TO svc_edged;
 
 -- Publishing an interface revision moves the interface's current-revision pointer and rotates its secret
 -- generation. These are the ONLY two write targets in the Phase-3 admin source, and the controlled-writer
@@ -395,3 +398,6 @@ GRANT SELECT, INSERT ON iam_v2.package_settlement_mappings TO svc_edged;
 GRANT EXECUTE ON FUNCTION iam_v2.pms_interface_financial_onboard(uuid,uuid,uuid,uuid,text,text,smallint,text,text,uuid) TO svc_edged;
 GRANT EXECUTE ON FUNCTION iam_v2.pms_interface_financially_ready(uuid,uuid,uuid) TO svc_edged;
 GRANT EXECUTE ON FUNCTION iam_v2.p4_posting_review_apply(uuid,uuid,uuid) TO svc_edged;
+-- Vendor-confirmed PA meanings per interface (migration 0100): append-only, one audited definer.
+GRANT SELECT ON iam_v2.pms_answer_confirmations TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_answer_confirmation_record(uuid,uuid,uuid,text,text,text,text,uuid) TO svc_edged;

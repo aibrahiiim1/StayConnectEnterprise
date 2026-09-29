@@ -389,6 +389,11 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			if perr == nil {
 				perr = ev.Validate()
 			}
+			if perr == nil && a.relay != nil {
+				// The financial relay's view of this reservation, updated the moment the record is read and
+				// BEFORE it is admitted: a room move on the link stops a stale posting command at the writer.
+				a.relay.ObserveGuestRecord(a.iface.ID, pr.RecordType, ev.ReservationRef, ev.RoomNumber)
+			}
 			// A well-formed record with no Stay identity is SKIPPED, not faulted. It cannot be admitted — there
 			// is nothing to key a Stay on — but it is normal content of a real in-house roster (house-use and
 			// out-of-order rooms), and treating it as evidence of a broken feed makes every resync request the

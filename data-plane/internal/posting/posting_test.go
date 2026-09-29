@@ -305,18 +305,18 @@ func exp(v int16) *int16 { return &v }
 func goodPair() (Pinned, Snapshot) {
 	p := Pinned{
 		TenantID: "t", SiteID: "s", PMSInterfaceID: "i",
-		PostingInterfaceRevisionID: "rev", StayID: "stay", FolioID: "folio",
+		PostingInterfaceRevisionID: "rev", StayID: "stay",
 		PurchaseID: "pur", SettlementID: "set", PackageRevisionID: "pkg", SettlementMappingID: "map",
 		AmountMinor: 100, Currency: "USD", CurrencyExponent: 2,
 		RN: "101", GNumber: "5", PostingCode: "WIFI", IdempotencyKey: "k1",
 	}
 	s := Snapshot{
 		InterfaceLifecycleState: "ACTIVE", InterfaceCurrentRevision: "rev",
-		FolioIdentityStrategy: "GLOBALLY_UNIQUE", InterfaceCurrency: "USD", InterfaceExponent: exp(2),
+		PostingTargetModel: "RESERVATION", InterfaceCurrency: "USD", InterfaceExponent: exp(2),
 		PurchaseCurrency: "USD", PurchaseExponent: exp(2), PurchaseState: "GRANTED",
 		PackageCurrency: "USD", PackageExponent: exp(2),
 		StayStatus: "IN_HOUSE", StayPostingAllowed: true, StayLifecycleVersion: 1,
-		StayRoomNumber: "101", FolioExternalID: "5",
+		StayRoomNumber: "101", StayReservation: "5",
 		ConnectorKind: "protel-fias", FreshnessBlock: "",
 	}
 	return p, s
@@ -335,16 +335,16 @@ func TestGate_FailClosedMatrix(t *testing.T) {
 		mut  func(*Pinned, *Snapshot)
 		code Code
 	}{
-		{"folio strategy UNSET", func(_ *Pinned, s *Snapshot) { s.FolioIdentityStrategy = "UNSET" }, ErrFolioStrategyUnset},
-		{"folio strategy absent", func(_ *Pinned, s *Snapshot) { s.FolioIdentityStrategy = "" }, ErrFolioStrategyUnset},
+		{"posting target UNSET", func(_ *Pinned, s *Snapshot) { s.PostingTargetModel = "UNSET" }, ErrPostingTargetUnset},
+		{"posting target absent", func(_ *Pinned, s *Snapshot) { s.PostingTargetModel = "" }, ErrPostingTargetUnset},
+		{"a legacy folio strategy is not a posting target", func(_ *Pinned, s *Snapshot) { s.PostingTargetModel = "GLOBALLY_UNIQUE" }, ErrPostingTargetUnset},
 		{"interface not financially onboarded", func(_ *Pinned, s *Snapshot) { s.InterfaceCurrency = ""; s.InterfaceExponent = nil }, ErrInterfaceNoCurrency},
-		{"missing RN", func(p *Pinned, s *Snapshot) { p.RN = ""; s.StayRoomNumber = "" }, ErrRNMissing},
-		{"blank RN", func(p *Pinned, s *Snapshot) { p.RN = "   "; s.StayRoomNumber = "   " }, ErrRNMissing},
-		{"missing G#", func(p *Pinned, s *Snapshot) { p.GNumber = ""; s.FolioExternalID = "" }, ErrGNumberMissing},
-		{"RN not wire safe", func(p *Pinned, s *Snapshot) { p.RN = "1|1"; s.StayRoomNumber = "1|1" }, ErrRNNotWireSafe},
-		{"G# not wire safe", func(p *Pinned, s *Snapshot) { p.GNumber = "a\x01"; s.FolioExternalID = "a\x01" }, ErrGNumberNotWireSafe},
-		{"RN disagrees with the pinned stay", func(p *Pinned, _ *Snapshot) { p.RN = "999" }, ErrEvidenceStale},
-		{"G# disagrees with the pinned folio", func(p *Pinned, _ *Snapshot) { p.GNumber = "999" }, ErrEvidenceStale},
+		{"the reservation's room cannot be resolved", func(p *Pinned, s *Snapshot) { p.RN = ""; s.StayRoomNumber = "" }, ErrRNMissing},
+		{"blank room", func(p *Pinned, s *Snapshot) { p.RN = "   "; s.StayRoomNumber = "   " }, ErrRNMissing},
+		{"missing G# (a room-only posting)", func(p *Pinned, s *Snapshot) { p.GNumber = ""; s.StayReservation = "" }, ErrGNumberMissing},
+		{"room not wire safe", func(p *Pinned, s *Snapshot) { p.RN = "1|1"; s.StayRoomNumber = "1|1" }, ErrRNNotWireSafe},
+		{"G# not wire safe", func(p *Pinned, s *Snapshot) { p.GNumber = "a\x01"; s.StayReservation = "a\x01" }, ErrGNumberNotWireSafe},
+		{"G# is not the pinned stay's reservation", func(p *Pinned, _ *Snapshot) { p.GNumber = "999" }, ErrReservationMismatch},
 		{"stay not IN_HOUSE", func(_ *Pinned, s *Snapshot) { s.StayStatus = "CHECKED_OUT"; s.StayPostingAllowed = false }, ErrStayNotInHouse},
 		{"posting not allowed", func(_ *Pinned, s *Snapshot) { s.StayPostingAllowed = false }, ErrPostingNotAllowed},
 		{"stale stay lifecycle", func(p *Pinned, _ *Snapshot) { v := 9; p.ExpectStayLifecycleVersion = &v }, ErrEvidenceStale},
@@ -382,6 +382,39 @@ func TestGate_FailClosedMatrix(t *testing.T) {
 				t.Fatalf("expected %s, got %s (%v)", tc.code, CodeOf(err), err)
 			}
 		})
+	}
+}
+
+// G# IS STABLE, RN IS MUTABLE (Phase-0 Amendment A1). At creation the room need only resolve; the reservation
+// is the identity. At execution the attempt's room must be exactly the reservation's current room.
+func TestGate_RoomIsRefreshedNotPinned(t *testing.T) {
+	p, s := goodPair()
+	p.RN = "" // a creation request does not pin the room
+	if err := (Gate{}).CheckFor(PurposeCreate, p, s); err != nil {
+		t.Fatalf("creation pins the reservation, not the room: %v", err)
+	}
+	p.RN = "101"
+	s.StayRoomNumber = "205" // the guest moved after the attempt's room was read
+	if err := (Gate{}).CheckFor(PurposeExecute, p, s); CodeOf(err) != ErrEvidenceStale {
+		t.Fatalf("an attempt carrying a room that is no longer the reservation's must be refused: %v", err)
+	}
+	p.RN = "205"
+	if err := (Gate{}).CheckFor(PurposeExecute, p, s); err != nil {
+		t.Fatalf("the current room and the same reservation pass: %v", err)
+	}
+}
+
+// The pre-send failures that END a charge as definitely not posted, and the ones that only decline.
+func TestPresendAbortReasons(t *testing.T) {
+	for code, want := range map[Code]string{
+		ErrStayNotInHouse: "STAY_NOT_IN_HOUSE", ErrPostingNotAllowed: "STAY_BLOCKED",
+		ErrReservationMismatch: "RESERVATION_MISMATCH", ErrRNMissing: "ROOM_UNRESOLVED",
+		ErrInterfaceNotFresh: "DATA_STALE",
+		ErrPostingTargetUnset: "", ErrInterfaceInactive: "", ErrCurrencyMismatch: "", ErrEvidenceStale: "",
+	} {
+		if got := presendAbortReason(fail(code, "x")); got != want {
+			t.Fatalf("%s: want %q, got %q", code, want, got)
+		}
 	}
 }
 

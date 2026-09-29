@@ -15,7 +15,10 @@ const (
 	ErrRepo   Code = "repository"
 
 	// ---- fail-closed creation gate (all of these happen BEFORE any side effect) ----
-	ErrFolioStrategyUnset  Code = "folio_strategy_unset"
+	// ErrPostingTargetUnset: the pinned interface revision's posting_target_model is UNSET (Amendment A1).
+	ErrPostingTargetUnset  Code = "posting_target_unset"
+	ErrReservationMismatch Code = "reservation_mismatch"
+	ErrStayChargeOpen      Code = "stay_room_charge_unresolved"
 	ErrRNMissing           Code = "rn_missing"
 	ErrGNumberMissing      Code = "g_number_missing"
 	ErrRNNotWireSafe       Code = "rn_not_wire_safe"

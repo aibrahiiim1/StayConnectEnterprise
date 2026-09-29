@@ -8,11 +8,12 @@ package main
 // list reports which keys are set, never their values. Every write needs password step-up, names the
 // operator, and is audited without the credential values.
 //
-// pms-financial-onboarding: approving a FIAS interface for room charge (folio identity strategy, base
+// pms-financial-onboarding: approving a FIAS interface for room charge (posting target RN + G#, base
 // currency and an attestation of what was observed). Site_admin only; the approval is a new immutable
 // interface revision plus an append-only onboarding record, written by iam_v2.pms_interface_financial_onboard.
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"sort"
@@ -278,6 +279,12 @@ func (s *server) pmsFinancialOnboardingRoutes() http.Handler {
 	r.Get("/", s.listFinancialOnboarding)
 	// Approving an interface for room charge is a site_admin decision whatever the role matrix grants.
 	r.With(s.requireRole("pms-financial-onboarding", permWrite), requireSiteAdmin).Post("/{id}", s.approveFinancialOnboarding)
+	// Vendor-confirmed PA meanings, per interface (Phase-0 Amendment A1): until a code is confirmed here it is
+	// UNKNOWN. Append-only; a site administrator records a CONFIRM or a WITHDRAW with the vendor evidence.
+	r.With(s.requireRole("pms-financial-onboarding", permWrite), requireSiteAdmin).Post("/{id}/answer-confirmations", s.recordAnswerConfirmation)
+	// A stay's ADMIN_BLOCK: the only posting block an operator may set or clear. PMS_NO_POST and
+	// PMS_DATA_SUSPECT are cleared by PMS data only, and POSTING_UNRESOLVED by its charge's review.
+	r.With(s.requireRole("pms-financial-onboarding", permWrite), requireSiteAdmin).Post("/stays/{stay}/admin-block", s.stayAdminBlock)
 	return r
 }
 
@@ -308,7 +315,7 @@ type financialOnboardingRow struct {
 	ConnectorKind     string     `json:"connector_kind"`
 	LifecycleState    string     `json:"lifecycle_state"`
 	CurrentRevisionID string     `json:"current_revision_id"`
-	FolioStrategy     string     `json:"folio_identity_strategy"`
+	PostingTarget     string     `json:"posting_target_model"`
 	Currency          *string    `json:"financial_base_currency"`
 	CurrencyExponent  *int       `json:"financial_base_currency_exponent"`
 	Ready             bool       `json:"ready"`
@@ -316,6 +323,24 @@ type financialOnboardingRow struct {
 	ApprovedAt        *time.Time `json:"approved_at,omitempty"`
 	ApprovedBy        *string    `json:"approved_by,omitempty"`
 	Attestation       *string    `json:"attestation,omitempty"`
+	// AnswerMeanings lists, per PA status that can be confirmed, whether the vendor has confirmed it means
+	// "definitely not posted" on this interface, and its fixed stay effect. An unconfirmed status is UNKNOWN.
+	AnswerMeanings []answerMeaning `json:"answer_meanings"`
+}
+
+// answerMeaning is one PA status's confirmation state on one interface.
+type answerMeaning struct {
+	ASStatus   string     `json:"as_status"`
+	Effect     string     `json:"effect"`
+	Confirmed  bool       `json:"confirmed"`
+	Evidence   *string    `json:"evidence,omitempty"`
+	RecordedAt *time.Time `json:"recorded_at,omitempty"`
+}
+
+// answerEffects is the contract's fixed mapping (section 9a rule 9) for a vendor-confirmed status.
+var answerEffects = []struct{ code, effect string }{
+	{"NP", "NO_POST_BLOCK"}, {"NG", "DATA_SUSPECT_BLOCK"}, {"NR", "DATA_SUSPECT_BLOCK"},
+	{"NA", "NO_STAY_BLOCK"}, {"RY", "NO_STAY_BLOCK"},
 }
 
 func (s *server) listFinancialOnboarding(w http.ResponseWriter, r *http.Request) {
@@ -323,7 +348,7 @@ func (s *server) listFinancialOnboarding(w http.ResponseWriter, r *http.Request)
 	defer cancel()
 	rows, err := s.db.Query(ctx, `
 		SELECT i.id::text, i.display_label, i.connector_kind, i.lifecycle_state, COALESCE(i.current_revision_id::text,''),
-		       COALESCE(rv.folio_identity_strategy,'UNSET'), rv.financial_base_currency::text,
+		       COALESCE(rv.posting_target_model,'UNSET'), rv.financial_base_currency::text,
 		       rv.financial_base_currency_exponent::int, rd.ready, rd.reason,
 		       o.approved_at, o.approved_by::text, o.attestation
 		  FROM iam_v2.pms_interfaces i
@@ -341,24 +366,129 @@ func (s *server) listFinancialOnboarding(w http.ResponseWriter, r *http.Request)
 	for rows.Next() {
 		var e financialOnboardingRow
 		if err := rows.Scan(&e.InterfaceID, &e.DisplayLabel, &e.ConnectorKind, &e.LifecycleState, &e.CurrentRevisionID,
-			&e.FolioStrategy, &e.Currency, &e.CurrencyExponent, &e.Ready, &e.Reason,
+			&e.PostingTarget, &e.Currency, &e.CurrencyExponent, &e.Ready, &e.Reason,
 			&e.ApprovedAt, &e.ApprovedBy, &e.Attestation); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "onboarding_unreadable", "financial onboarding could not be read")
 			return
 		}
 		out = append(out, e)
 	}
+	rows.Close()
+	for k := range out {
+		out[k].AnswerMeanings = s.answerMeanings(ctx, out[k].InterfaceID)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"interfaces": out,
-		"strategies": []string{"GLOBALLY_UNIQUE", "UNIQUE_PER_STAY", "REUSED_SEQUENTIAL"},
+		"interfaces":            out,
+		"posting_target_models": []string{"RESERVATION"},
 	})
+}
+
+// answerMeanings reads the latest confirmation per status for one interface.
+func (s *server) answerMeanings(ctx context.Context, iface string) []answerMeaning {
+	latest := map[string]answerMeaning{}
+	rows, err := s.db.Query(ctx, `
+		SELECT DISTINCT ON (as_status) as_status, action, evidence, recorded_at
+		  FROM iam_v2.pms_answer_confirmations
+		 WHERE tenant_id=$1::uuid AND site_id=$2::uuid AND pms_interface_id=$3::uuid
+		 ORDER BY as_status, recorded_at DESC, id DESC`, s.tenantID, s.siteID, iface)
+	if err == nil {
+		for rows.Next() {
+			var code, action, evidence string
+			var at time.Time
+			if rows.Scan(&code, &action, &evidence, &at) == nil {
+				ev, t := evidence, at
+				latest[code] = answerMeaning{ASStatus: code, Confirmed: action == "CONFIRM", Evidence: &ev, RecordedAt: &t}
+			}
+		}
+		rows.Close()
+	}
+	out := make([]answerMeaning, 0, len(answerEffects))
+	for _, a := range answerEffects {
+		m := latest[a.code]
+		m.ASStatus, m.Effect = a.code, a.effect
+		out = append(out, m)
+	}
+	return out
+}
+
+func (s *server) recordAnswerConfirmation(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var in struct {
+		ASStatus string `json:"as_status"`
+		Action   string `json:"action"`
+		Evidence string `json:"evidence"`
+		Reason   string `json:"reason"`
+		Password string `json:"password"`
+	}
+	if err := decodeJSON(r, &in); err != nil || !uuidRe.MatchString(id) {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "interface, status, action, evidence and reason are required")
+		return
+	}
+	if !s.reauth(r, in.Password) {
+		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		return
+	}
+	sess := sessFrom(r.Context())
+	if sess == nil || !uuidRe.MatchString(sess.OperatorID) {
+		jsonErr(w, http.StatusForbidden, "forbidden", "the confirmation could not be attributed to an operator")
+		return
+	}
+	code, action := strings.ToUpper(strings.TrimSpace(in.ASStatus)), strings.ToUpper(strings.TrimSpace(in.Action))
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	var rid string
+	if err := s.db.QueryRow(ctx, `SELECT iam_v2.pms_answer_confirmation_record($1::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7,$8::uuid)::text`,
+		s.tenantID, s.siteID, id, code, action, strings.TrimSpace(in.Evidence), strings.TrimSpace(in.Reason),
+		sess.OperatorID).Scan(&rid); err != nil {
+		jsonErr(w, http.StatusBadRequest, "not_recorded", dbMessage(err))
+		return
+	}
+	s.audit(r, "pms_interface.answer_confirmation", "pms_interface", id, map[string]any{
+		"as_status": code, "action": action, "reason": strings.TrimSpace(in.Reason),
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"id": rid, "answer_meanings": s.answerMeanings(ctx, id)})
+}
+
+func (s *server) stayAdminBlock(w http.ResponseWriter, r *http.Request) {
+	stay := chi.URLParam(r, "stay")
+	var in struct {
+		Action   string `json:"action"`
+		Reason   string `json:"reason"`
+		Password string `json:"password"`
+	}
+	if err := decodeJSON(r, &in); err != nil || !uuidRe.MatchString(stay) {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "stay, action and reason are required")
+		return
+	}
+	if !s.reauth(r, in.Password) {
+		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		return
+	}
+	sess := sessFrom(r.Context())
+	if sess == nil || !uuidRe.MatchString(sess.OperatorID) {
+		jsonErr(w, http.StatusForbidden, "forbidden", "the change could not be attributed to an operator")
+		return
+	}
+	action := strings.ToUpper(strings.TrimSpace(in.Action))
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	var res string
+	if err := s.db.QueryRow(ctx, `SELECT iam_v2.p4_admin_posting_block($1::uuid,$2::uuid,$3::uuid,$4,$5,$6::uuid)`,
+		s.tenantID, s.siteID, stay, action, strings.TrimSpace(in.Reason), sess.OperatorID).Scan(&res); err != nil {
+		jsonErr(w, http.StatusBadRequest, "not_changed", dbMessage(err))
+		return
+	}
+	s.audit(r, "stay.room_charge_admin_block", "stay", stay, map[string]any{
+		"action": action, "result": res, "reason": strings.TrimSpace(in.Reason),
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"result": res})
 }
 
 func (s *server) approveFinancialOnboarding(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var in struct {
 		ExpectedRevisionID string `json:"expected_revision_id"`
-		FolioStrategy      string `json:"folio_identity_strategy"`
+		PostingTarget      string `json:"posting_target_model"`
 		Currency           string `json:"currency"`
 		Attestation        string `json:"attestation"`
 		Reason             string `json:"reason"`
@@ -382,7 +512,7 @@ func (s *server) approveFinancialOnboarding(w http.ResponseWriter, r *http.Reque
 	defer cancel()
 	var rev string
 	err := s.db.QueryRow(ctx, `SELECT iam_v2.pms_interface_financial_onboard($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6,2::smallint,$7,$8,$9::uuid)::text`,
-		s.tenantID, s.siteID, id, in.ExpectedRevisionID, strings.TrimSpace(in.FolioStrategy), cur,
+		s.tenantID, s.siteID, id, in.ExpectedRevisionID, strings.TrimSpace(in.PostingTarget), cur,
 		strings.TrimSpace(in.Attestation), strings.TrimSpace(in.Reason), sess.OperatorID).Scan(&rev)
 	if err != nil {
 		var pe *pgconn.PgError
@@ -395,7 +525,7 @@ func (s *server) approveFinancialOnboarding(w http.ResponseWriter, r *http.Reque
 	}
 	s.audit(r, "pms_interface.financial_onboard", "pms_interface", id, map[string]any{
 		"new_revision_id": rev, "previous_revision_id": in.ExpectedRevisionID,
-		"folio_identity_strategy": strings.TrimSpace(in.FolioStrategy), "currency": cur,
+		"posting_target_model": strings.TrimSpace(in.PostingTarget), "currency": cur,
 		"reason": strings.TrimSpace(in.Reason),
 	})
 	s.invalidateModules()
