@@ -105,7 +105,7 @@ func (s *server) postingLoop(ctx context.Context, w *postingWorker) {
 			out, err := w.engine.RunOnce(ctx, s.tenID, s.siteID, iface)
 			if out.Claimed {
 				slog.Info("posting worker: attempt concluded", "posting", out.PostingID, "attempt", out.AttemptNo,
-					"result", out.Result, "as", out.ASStatus, "code", string(out.RefusedFor))
+					"result", out.Result, "as", out.ASStatus, "code", string(out.RefusedFor), "not_sent_reason", out.NotSentReason)
 			}
 			if err != nil && out.Result != "UNKNOWN" && out.Result != "DECLINED" {
 				slog.Warn("posting worker: lane pass failed", "interface", iface, "err", err)
