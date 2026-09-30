@@ -73,6 +73,9 @@ fullschema_service_password "$C" "$DB" svc_pmsd    pmsdpw    || { echo "INFRA: s
 export ROOMCHARGE_TEST_DSN="$PHASE4_TEST_DSN"
 export ROOMCHARGE_WORKER_DSN="postgres://svc_posting:postingpw@127.0.0.1:$PORT/$DB"
 export ROOMCHARGE_PMSD_DSN="postgres://svc_pmsd:pmsdpw@127.0.0.1:$PORT/$DB"
+# Charge health and Recovery read and act through edged's own login. The finops step proves it as svc_edged.
+fullschema_service_password "$C" "$DB" svc_edged   edgedpw   || { echo "INFRA: svc_edged"; exit 2; }
+export EDGED_ROLE_TEST_DSN="postgres://svc_edged:edgedpw@127.0.0.1:$PORT/$DB"
 # ---------------------------------------------------------------- the suite
 #
 # Every step goes through run_step, for two reasons that a chain of copy-pasted `if [ "$rc" = 0 ]` blocks

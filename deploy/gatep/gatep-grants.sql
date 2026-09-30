@@ -182,7 +182,7 @@ GRANT SELECT,INSERT        ON public.network_health_checks    TO svc_netd;
 -- Measured on the PRE-LIVE appliance before this grant existed: last_seen_at frozen at 2026-08-22 across
 -- every later netd restart, holding a bridge that no longer exists and missing every bridge that does.
 GRANT SELECT,INSERT,UPDATE ON public.network_interfaces       TO svc_netd;
-GRANT INSERT               ON public.system_network_audit     TO svc_netd; -- append-only
+GRANT SELECT, INSERT       ON public.system_network_audit     TO svc_netd; -- append-only; SELECT for the history screen
 GRANT SELECT               ON public.guest_networks           TO svc_netd; -- read for apply
 GRANT SELECT               ON public.dhcp_pools               TO svc_netd;
 GRANT SELECT               ON public.dhcp_reservations        TO svc_netd;

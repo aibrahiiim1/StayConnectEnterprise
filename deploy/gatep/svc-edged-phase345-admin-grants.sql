@@ -413,3 +413,13 @@ GRANT SELECT ON iam_v2.posting_outbox, iam_v2.payment_transactions, iam_v2.v_fin
                 iam_v2.financial_recovery_holds TO svc_edged;
 GRANT EXECUTE ON FUNCTION iam_v2.p4_financial_recovery_active(uuid,uuid) TO svc_edged;
 GRANT EXECUTE ON FUNCTION iam_v2.p4_current_restore_generation(uuid,uuid) TO svc_edged;
+-- Recovery ACTIONS (Financial operations). Resolving a hold, releasing recovery and authorising a zero-attempt
+-- retry are definer functions that validate the decision, require a reason and write the author (taken by edged
+-- from the step-up-authenticated session, never the request body) into an append-only record. EXECUTE on exactly
+-- these three is the least authority the Recovery screen needs; edged is not made a financial operator.
+GRANT EXECUTE ON FUNCTION iam_v2.p4_resolve_recovery_hold(uuid,text,uuid,text) TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_release_financial_recovery(uuid,uuid,uuid,text) TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_authorize_zero_attempt_retry(uuid,uuid,text,jsonb) TO svc_edged;
+-- Reads that screens already make and that were silently denied: the emergency-grace history on Checkout grace,
+-- and the active-client count that guards deleting a client network.
+GRANT SELECT ON iam_v2.checkout_grace_audit, iam_v2.device_network_appearances TO svc_edged;
