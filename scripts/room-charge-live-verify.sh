@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ONE CONTROLLED REAL ROOM CHARGE, END TO END, ON THE APPLIANCE (run as root on PRE-LIVE).
 #
-#   bash room-charge-live-verify.sh --room <ROOM> --package-code <CODE> --i-authorise-a-real-charge
+#   bash room-charge-live-verify.sh --room <ROOM> --account-name <NAME> --package-code <CODE> --i-authorise-a-real-charge
 #
 # THIS POSTS A REAL CHARGE TO THE PMS. It exists so that verifying the room-charge path is one reviewed,
 # repeatable procedure instead of a hand-typed one. Use it only with the Product Owner's authorisation for that
@@ -17,16 +17,17 @@
 # left for Manual review, exactly as the product does.
 set -uo pipefail
 
-ROOM=""; PKG=""; OK_REAL=0
+ROOM=""; ACCT=""; PKG=""; OK_REAL=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --room) ROOM="$2"; shift 2;;
+    --account-name) ACCT="$2"; shift 2;;
     --package-code) PKG="$2"; shift 2;;
     --i-authorise-a-real-charge) OK_REAL=1; shift;;
     *) echo "unknown argument: $1" >&2; exit 2;;
   esac
 done
-[ -n "$ROOM" ] && [ -n "$PKG" ] || { echo "usage: --room ROOM --package-code CODE --i-authorise-a-real-charge" >&2; exit 2; }
+[ -n "$ROOM" ] && [ -n "$ACCT" ] && [ -n "$PKG" ] || { echo "usage: --room ROOM --account-name NAME --package-code CODE --i-authorise-a-real-charge" >&2; exit 2; }
 [ "$OK_REAL" = 1 ] || { echo "REFUSED: this posts a real charge; pass --i-authorise-a-real-charge" >&2; exit 2; }
 
 R='--resolve hotel.stayconnect.local:443:127.0.0.1'
@@ -50,8 +51,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-STAY=$($PSQL "SELECT id FROM iam_v2.stays WHERE status='IN_HOUSE' AND posting_allowed AND normalized_room_number='$ROOM' LIMIT 2")
-[ "$(printf '%s\n' "$STAY" | grep -c .)" = 1 ] || { echo "REFUSED: room $ROOM does not hold exactly one in-house, postable stay"; exit 1; }
+# A ROOM CODE IS NOT AN ACCOUNT. A house room code such as PASS also carries real walk-in customers' reservations,
+# so the stay must ALSO be held by the named house account alone, and be the only such stay.
+STAY=$($PSQL "SELECT s.id FROM iam_v2.stays s WHERE s.status='IN_HOUSE' AND s.posting_allowed AND s.normalized_room_number='$ROOM' AND EXISTS (SELECT 1 FROM iam_v2.stay_guests g WHERE g.stay_id=s.id AND g.last_name_norm=upper('$ACCT')) AND NOT EXISTS (SELECT 1 FROM iam_v2.stay_guests g WHERE g.stay_id=s.id AND g.last_name_norm<>upper('$ACCT')) LIMIT 2")
+[ "$(printf '%s\n' "$STAY" | grep -c .)" = 1 ] || { echo "REFUSED: room $ROOM does not hold exactly one in-house, postable stay of account $ACCT"; exit 1; }
 RES=$($PSQL "SELECT external_reservation_id FROM iam_v2.stays WHERE id='$STAY'")
 REV=$($PSQL "SELECT p.current_revision_id FROM iam_v2.internet_packages p JOIN iam_v2.internet_package_revisions r ON r.id=p.current_revision_id WHERE p.active AND p.code='$PKG' AND 'PMS_POSTING'=ANY(r.settlement_methods)")
 [ -n "$REV" ] || { echo "REFUSED: package $PKG is not an active room-charge package"; exit 1; }
