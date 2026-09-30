@@ -78,8 +78,26 @@ func TestIntegrationFinOpsAPI_RecoveryWorksUnderEdgedsOwnLogin(t *testing.T) {
 		t.Fatalf("zero-attempt retry as svc_edged: %v", err)
 	}
 
+	// The financial mirror maximum age (D48): read it, and change it through the audited definer.
+	var age int
+	if err := ep.QueryRow(ctx, `SELECT iam_v2.p4_financial_mirror_max_age_seconds($1::uuid,$2::uuid,gen_random_uuid())`,
+		f.tenant, f.site).Scan(&age); err != nil || age != 14400 {
+		t.Fatalf("mirror age as svc_edged: %d %v", age, err)
+	}
+	var iface string
+	if err := f.pool.QueryRow(ctx, `INSERT INTO iam_v2.pms_interfaces(tenant_id,site_id,connector_kind,display_label)
+		VALUES ($1,$2,'protel-fias','Protel') RETURNING id::text`, f.tenant, f.site).Scan(&iface); err != nil {
+		t.Fatal(err)
+	}
+	if err := ep.QueryRow(ctx, `SELECT iam_v2.p4_set_financial_mirror_max_age($1::uuid,$2::uuid,$3::uuid,7200,'privilege proof',$4::uuid)`,
+		f.tenant, f.site, iface, f.operator).Scan(&age); err != nil {
+		t.Fatalf("set mirror age as svc_edged: %v", err)
+	}
+
 	// Reads other screens make: Checkout grace history and the client-network active count.
 	for _, q := range []string{
+		`SELECT count(*) FROM iam_v2.pms_interface_financial_settings WHERE tenant_id=$1`,
+		`SELECT count(*) FROM iam_v2.pms_interface_financial_setting_changes WHERE tenant_id=$1`,
 		`SELECT count(*) FROM iam_v2.checkout_grace_audit WHERE tenant_id=$1`,
 		`SELECT count(*) FROM iam_v2.device_network_appearances WHERE tenant_id=$1`,
 	} {

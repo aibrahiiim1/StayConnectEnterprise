@@ -77,6 +77,7 @@ export default function RoomChargePage() {
   const [err, setErr] = useState<unknown>(null);
   const [approving, setApproving] = useState<OnboardingInterface | null>(null);
   const [answerChange, setAnswerChange] = useState<AnswerChange | null>(null);
+  const [mirrorChange, setMirrorChange] = useState<OnboardingInterface | null>(null);
   // WHO APPROVED, IN WORDS. The approval records the operator by id; the operator directory (the same source the
   // activity trail uses) turns it into their e-mail, or their display name. A role that cannot read the directory
   // gets "A site administrator" -- true by construction, since only a site administrator can approve -- never the id.
@@ -262,6 +263,22 @@ export default function RoomChargePage() {
           )}
         </TableWrap>
       </Card>
+
+      {interfaces.filter((i) => i.connector_kind === FIAS && i.financial_mirror).map((i) => (
+        <GuestListProofCard key={`proof-${i.pms_interface_id}`} iface={i} canChange={isSiteAdmin} onChange={() => setMirrorChange(i)} />
+      ))}
+
+      {isSiteAdmin && (
+        <MirrorAgeDialog
+          iface={mirrorChange}
+          onClose={() => setMirrorChange(null)}
+          onSaved={async () => {
+            setMirrorChange(null);
+            toast.success("Guest list maximum age changed");
+            await load();
+          }}
+        />
+      )}
 
       {interfaces.filter((i) => i.connector_kind === FIAS).map((i) => (
         <AnswerMeaningsCard
@@ -658,6 +675,122 @@ function AnswerDialog({
         />
       </Field>
       <Field label="Reason" required hint={`Recorded in the activity log. ${reason.length}/${REASON_MAX}`}>
+        <Input value={reason} maxLength={REASON_MAX} onChange={(e) => setReason(e.target.value)} />
+      </Field>
+      <Field label="Confirm your password" required>
+        <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+      </Field>
+    </DialogForm>
+  );
+}
+
+// GUEST LIST PROOF (D48). Room charge trusts the local guest list only for a limited time after Protel last sent
+// it COMPLETE (a full resync). A quiet hotel is not a problem -- OneGate asks Protel for a fresh full list by itself
+// at half the limit -- but if no complete list arrives in time, room charge pauses until one does.
+function ago(iso: string | null | undefined): string {
+  if (!iso) return "never";
+  const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (s < 90) return "just now";
+  const m = Math.round(s / 60);
+  if (m < 90) return `${m} min ago`;
+  const h = Math.floor(m / 60);
+  return `${h} h ${m % 60} min ago`;
+}
+
+function hoursWords(seconds: number): string {
+  const h = seconds / 3600;
+  return Number.isInteger(h) ? `${h} ${h === 1 ? "hour" : "hours"}` : `${Math.round(seconds / 60)} minutes`;
+}
+
+function GuestListProofCard({ iface, canChange, onChange }: { iface: OnboardingInterface; canChange: boolean; onChange: () => void }) {
+  const m = iface.financial_mirror!;
+  const last = m.last_complete_sync_at;
+  const ageS = last ? (Date.now() - new Date(last).getTime()) / 1000 : Infinity;
+  const withinLimit = ageS <= m.max_age_seconds;
+  return (
+    <Card data-testid="guest-list-proof">
+      <CardHeader className="items-start">
+        <div className="min-w-0 space-y-1">
+          <CardTitle>Guest list proof for room charge — {iface.display_label || "Protel"}</CardTitle>
+          <CardDescription>
+            Room charge uses the guest list only while Protel has recently sent it complete. A quiet hotel is fine:
+            OneGate asks Protel for a fresh complete list by itself after {hoursWords(m.max_age_seconds / 2)}. If no
+            complete list arrives within the limit, room charge pauses until one does.
+          </CardDescription>
+        </div>
+        {canChange && (
+          <Button size="xs" variant="secondary" onClick={onChange} aria-label={`Change the guest list maximum age for ${iface.display_label || "this interface"}`}>
+            Change limit
+          </Button>
+        )}
+      </CardHeader>
+      <div className="grid gap-3 px-5 pb-5 sm:grid-cols-2">
+        <div>
+          <div className="text-xs text-muted-foreground">Last complete guest list from Protel</div>
+          <div className="text-sm font-medium">
+            {ago(last)} {last && <span className="text-xs font-normal text-muted-foreground">({formatDate(last)})</span>}
+          </div>
+          <div className="mt-1">
+            {withinLimit ? <Badge tone="ok" dot>Within the limit</Badge> : <Badge tone="warn">Older than the limit — room charge paused</Badge>}
+          </div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">Maximum age</div>
+          <div className="text-sm font-medium">
+            {hoursWords(m.max_age_seconds)} {m.is_default && <span className="text-xs font-normal text-muted-foreground">(default)</span>}
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function MirrorAgeDialog({ iface, onClose, onSaved }: { iface: OnboardingInterface | null; onClose: () => void; onSaved: () => Promise<void> }) {
+  const open = iface !== null;
+  const [hours, setHours] = useState(4);
+  const [reason, setReason] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setHours(Math.round((iface?.financial_mirror?.max_age_seconds ?? 14400) / 3600));
+    setReason("");
+    setPassword("");
+    setError(null);
+  }, [iface]);
+  const ready = hours >= 1 && hours <= 24 && reason.trim().length >= REASON_MIN && password !== "";
+  async function submit() {
+    if (!iface || !ready) return;
+    setBusy(true); setError(null);
+    try {
+      await api.post(`/pms-financial-onboarding/${encodeURIComponent(iface.pms_interface_id)}/financial-mirror-max-age`,
+        { max_age_seconds: hours * 3600, reason: reason.trim(), password });
+      await onSaved();
+    } catch (e) {
+      setError(saveErrorMessage(e));
+      setPassword("");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <DialogForm
+      open={open}
+      onOpenChange={(v) => { if (!v) onClose(); }}
+      title={`Guest list maximum age — ${iface?.display_label || "Protel"}`}
+      description="How long room charge may rely on the guest list after Protel last sent it complete. OneGate asks for a fresh complete list at half this time."
+      size="md"
+      submitLabel="Save"
+      busyLabel="Saving…"
+      busy={busy}
+      error={error}
+      disabled={!ready}
+      onSubmit={submit}
+    >
+      <Field label="Maximum age (hours)" required hint="Between 1 and 24 hours. 4 hours is the default.">
+        <Input type="number" min={1} max={24} step={1} value={hours} onChange={(e) => setHours(Number(e.target.value))} aria-label="Maximum age in hours" />
+      </Field>
+      <Field label="Reason" required hint="Recorded in the activity log.">
         <Input value={reason} maxLength={REASON_MAX} onChange={(e) => setReason(e.target.value)} />
       </Field>
       <Field label="Confirm your password" required>

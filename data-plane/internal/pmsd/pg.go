@@ -317,6 +317,14 @@ func (r *pgRepo) AdmitLiveEvent(ctx context.Context, row InboxRow) (string, erro
 	return r.insertInboxRow(ctx, row)
 }
 
+// FinancialResyncDue is the database's answer to "should the financial mirror be proven again now".
+func (r *pgRepo) FinancialResyncDue(ctx context.Context, scope ResyncScope) (bool, error) {
+	var due bool
+	err := r.pool.QueryRow(ctx, `SELECT iam_v2.p4_financial_resync_due($1::uuid,$2::uuid,$3::uuid)`,
+		scope.TenantID, scope.SiteID, scope.PMSInterfaceID).Scan(&due)
+	return due, err
+}
+
 func (r *pgRepo) StageResyncEvent(ctx context.Context, row InboxRow) (string, error) {
 	row.AdmissionKind = "RESYNC"
 	return r.insertInboxRow(ctx, row)

@@ -171,7 +171,8 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 	// plugged the socket back in sees a connected interface sitting on REQUESTING_FULL_SYNC indefinitely.
 	sink.OnFullSyncRequested()
 
-	resyncing := true // a DR is outstanding; we are awaiting DS…DE (gates duplicate DR requests only)
+	resyncing := true          // a DR is outstanding; we are awaiting DS…DE (gates duplicate DR requests only)
+	var fin finResyncScheduler // the financial mirror's own resync cadence (financial_resync.go)
 	// Per-sweep observation, reset at every DS. Two SETS rather than one set and two counters, because the
 	// question "did this sweep contradict itself?" cannot be asked of a tally. A room the PMS reports as both
 	// occupied and empty in the same sweep is not a building this system can reason about, and it must not be
@@ -263,6 +264,30 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 				resyncing = true
 			}
 		}
+		// THE FINANCIAL MIRROR'S OWN RESYNC (D48), from the same single place, under the same gate.
+		if asker, ok := sink.(FinancialResyncAsker); ok {
+			now := a.now()
+			if fin.unanswered(now) && resyncing {
+				// Our DR was never begun. Release the gate so an operator's resync and posting are not held by
+				// it; the mirror age keeps running and room charge fails closed at the bound.
+				resyncing = false
+				if a.log != nil {
+					a.log.Warn("pmsd: the PMS did not begin the financial mirror resync; releasing and backing off",
+						"interface", a.iface.ID)
+				}
+			}
+			if fin.shouldRequest(now, resyncing, asker.FinancialResyncDue) {
+				if werr := w.SubmitSync(ctx, pms.BuildDR()); werr != nil {
+					return werr
+				}
+				sink.OnFullSyncRequested()
+				resyncing = true
+				fin.requested(now)
+				if a.log != nil {
+					a.log.Info("pmsd: financial mirror resync requested", "interface", a.iface.ID)
+				}
+			}
+		}
 		switch pr.RecordType {
 		case RecLS, RecLA:
 			// Record the heartbeat evidence we OBSERVED first (receiving a valid LS/LA is the evidence), then
@@ -286,6 +311,7 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			}
 		case RecDS:
 			resyncing = true
+			fin.started()
 			// WHAT THIS SWEEP SEES, which is not the same as what it admits. The vacant rooms below are
 			// deliberately never admitted as departures -- that defect is closed -- but they are still the
 			// PMS describing the building, and that description is the only thing that can prove a roster
@@ -339,6 +365,7 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 				sink.RecordSkipped(int64(skippedNoIdentity))
 			}
 			resyncing = false
+			fin.completed()
 			if err := sink.OnResyncComplete(a.now(), ""); err != nil { // never use the record id "DE" as a cursor
 				return err
 			}

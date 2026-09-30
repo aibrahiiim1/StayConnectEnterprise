@@ -285,6 +285,8 @@ func (s *server) pmsFinancialOnboardingRoutes() http.Handler {
 	// A stay's ADMIN_BLOCK: the only posting block an operator may set or clear. PMS_NO_POST and
 	// PMS_DATA_SUSPECT are cleared by PMS data only, and POSTING_UNRESOLVED by its charge's review.
 	r.With(s.requireRole("pms-financial-onboarding", permWrite), requireSiteAdmin).Post("/stays/{stay}/admin-block", s.stayAdminBlock)
+	// The financial mirror maximum age (D48): an operational setting per interface, site_admin with step-up.
+	r.With(s.requireRole("pms-financial-onboarding", permWrite), requireSiteAdmin).Post("/{id}/financial-mirror-max-age", s.setFinancialMirrorMaxAge)
 	return r
 }
 
@@ -326,6 +328,15 @@ type financialOnboardingRow struct {
 	// AnswerMeanings lists, per PA status that can be confirmed, whether the vendor has confirmed it means
 	// "definitely not posted" on this interface, and its fixed stay effect. An unconfirmed status is UNKNOWN.
 	AnswerMeanings []answerMeaning `json:"answer_meanings"`
+	// FinancialMirror: how long the mirror stays good enough for room charge after a successful complete resync
+	// (D48), whether that is the default, and when the mirror was last proven.
+	FinancialMirror financialMirror `json:"financial_mirror"`
+}
+
+type financialMirror struct {
+	MaxAgeSeconds      int        `json:"max_age_seconds"`
+	IsDefault          bool       `json:"is_default"`
+	LastCompleteSyncAt *time.Time `json:"last_complete_sync_at"`
 }
 
 // answerMeaning is one PA status's confirmation state on one interface.
@@ -351,8 +362,12 @@ func (s *server) listFinancialOnboarding(w http.ResponseWriter, r *http.Request)
 		SELECT i.id::text, i.display_label, i.connector_kind, i.lifecycle_state, COALESCE(i.current_revision_id::text,''),
 		       COALESCE(rv.posting_target_model,'UNSET'), rv.financial_base_currency::text,
 		       rv.financial_base_currency_exponent::int, rd.ready, rd.reason,
-		       o.approved_at, o.approved_by::text, o.attestation
+		       o.approved_at, o.approved_by::text, o.attestation,
+		       iam_v2.p4_financial_mirror_max_age_seconds(i.tenant_id, i.site_id, i.id),
+		       NOT EXISTS (SELECT 1 FROM iam_v2.pms_interface_financial_settings fs WHERE fs.pms_interface_id = i.id),
+		       rt.last_complete_sync_at
 		  FROM iam_v2.pms_interfaces i
+		  LEFT JOIN iam_v2.pms_interface_runtime rt ON rt.pms_interface_id = i.id
 		  LEFT JOIN iam_v2.pms_interface_revisions rv ON rv.id = i.current_revision_id
 		  LEFT JOIN iam_v2.pms_financial_onboardings o ON o.revision_id = i.current_revision_id
 		  CROSS JOIN LATERAL iam_v2.pms_interface_financially_ready(i.tenant_id, i.site_id, i.id) rd
@@ -368,7 +383,8 @@ func (s *server) listFinancialOnboarding(w http.ResponseWriter, r *http.Request)
 		var e financialOnboardingRow
 		if err := rows.Scan(&e.InterfaceID, &e.DisplayLabel, &e.ConnectorKind, &e.LifecycleState, &e.CurrentRevisionID,
 			&e.PostingTarget, &e.Currency, &e.CurrencyExponent, &e.Ready, &e.Reason,
-			&e.ApprovedAt, &e.ApprovedBy, &e.Attestation); err != nil {
+			&e.ApprovedAt, &e.ApprovedBy, &e.Attestation,
+			&e.FinancialMirror.MaxAgeSeconds, &e.FinancialMirror.IsDefault, &e.FinancialMirror.LastCompleteSyncAt); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "onboarding_unreadable", "financial onboarding could not be read")
 			return
 		}
@@ -489,6 +505,44 @@ func (s *server) stayAdminBlock(w http.ResponseWriter, r *http.Request) {
 		"action": action, "result": res, "reason": strings.TrimSpace(in.Reason),
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"result": res})
+}
+
+// setFinancialMirrorMaxAge changes how long room charge trusts the mirror after a successful complete resync.
+func (s *server) setFinancialMirrorMaxAge(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var in struct {
+		MaxAgeSeconds int    `json:"max_age_seconds"`
+		Reason        string `json:"reason"`
+		Password      string `json:"password"`
+	}
+	if err := decodeJSON(r, &in); err != nil || !uuidRe.MatchString(id) {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "interface, maximum age and reason are required")
+		return
+	}
+	if !s.reauth(r, in.Password) {
+		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		return
+	}
+	sess := sessFrom(r.Context())
+	if sess == nil || !uuidRe.MatchString(sess.OperatorID) {
+		jsonErr(w, http.StatusForbidden, "forbidden", "the change could not be attributed to an operator")
+		return
+	}
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	var old int
+	_ = s.db.QueryRow(ctx, `SELECT iam_v2.p4_financial_mirror_max_age_seconds($1::uuid,$2::uuid,$3::uuid)`,
+		s.tenantID, s.siteID, id).Scan(&old)
+	var got int
+	if err := s.db.QueryRow(ctx, `SELECT iam_v2.p4_set_financial_mirror_max_age($1::uuid,$2::uuid,$3::uuid,$4,$5,$6::uuid)`,
+		s.tenantID, s.siteID, id, in.MaxAgeSeconds, strings.TrimSpace(in.Reason), sess.OperatorID).Scan(&got); err != nil {
+		jsonErr(w, http.StatusBadRequest, "not_changed", dbMessage(err))
+		return
+	}
+	s.audit(r, "pms_interface.financial_mirror_max_age", "pms_interface", id, map[string]any{
+		"old_seconds": old, "new_seconds": got, "reason": strings.TrimSpace(in.Reason),
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"max_age_seconds": got})
 }
 
 func (s *server) approveFinancialOnboarding(w http.ResponseWriter, r *http.Request) {

@@ -148,6 +148,8 @@ export type OnboardingInterface = {
   approved_by?: string | null;
   attestation?: string | null;
   answer_meanings?: AnswerMeaning[];
+  // How long room charge trusts the guest list after a successful complete resync (D48), and when it last had one.
+  financial_mirror?: { max_age_seconds: number; is_default: boolean; last_complete_sync_at: string | null };
 };
 
 export type OnboardingResp = { interfaces: OnboardingInterface[]; posting_target_models: string[] };

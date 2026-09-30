@@ -78,7 +78,7 @@ func seedRoomCharge(t *testing.T, p *pgxpool.Pool) rcScope {
 	s.iface = scan1[string](t, p, `INSERT INTO iam_v2.pms_interfaces(tenant_id,site_id,connector_kind) VALUES ($1,$2,'protel-fias') RETURNING id::text`, s.tenant, s.site)
 	rev := scan1[string](t, p, `INSERT INTO iam_v2.pms_interface_revisions
 		(tenant_id,site_id,pms_interface_id,revision_no,source_timezone,posting_target_model,config)
-		VALUES ($1,$2,$3,1,'UTC','UNSET','{"heartbeat_timeout_ms":60000,"feed_freshness_ms":300000,"complete_sync_ms":3600000}') RETURNING id::text`,
+		VALUES ($1,$2,$3,1,'UTC','UNSET','{"heartbeat_timeout_ms":300000,"feed_freshness_ms":900000,"complete_sync_ms":86400000}') RETURNING id::text`,
 		s.tenant, s.site, s.iface)
 	mustExec(t, p, `UPDATE iam_v2.pms_interfaces SET current_revision_id=$2 WHERE id=$1`, s.iface, rev)
 	// ONBOARDING, through the audited definer.

@@ -206,6 +206,7 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 			mountResource(r, s, "pms-events", s.pmsEventsRoutes)
 			mountResource(r, s, "pms-resolutions", s.pmsResolutionsRoutes)
 			mountResource(r, s, "pms-interfaces", s.pmsInterfacesRoutes)
+			mountResource(r, s, "pms-financial-onboarding", s.pmsFinancialOnboardingRoutes)
 			mountResource(r, s, "pms-routing", s.pmsRoutingRoutes)
 			mountResource(r, s, "pms-source-conflicts", s.pmsSourceConflictsRoutes)
 			// Guest sign-in attempts, both halves. Mounted here so the list, the detail and the credential

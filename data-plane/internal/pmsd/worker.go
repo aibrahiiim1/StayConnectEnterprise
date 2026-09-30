@@ -477,6 +477,19 @@ func (d *Deps) rnd(n int64) int64 {
 	return time.Now().UnixNano()
 }
 
+// FinancialResyncDue asks the database whether the financial mirror should be proven again now
+// (p4_financial_resync_due). Any failure is "no": a status read that fails must not start a resync.
+func (s *workerSink) FinancialResyncDue() bool {
+	q, ok := s.w.repo.(interface {
+		FinancialResyncDue(ctx context.Context, scope ResyncScope) (bool, error)
+	})
+	if !ok {
+		return false
+	}
+	due, err := q.FinancialResyncDue(s.ctx, ResyncScope{s.ax()})
+	return err == nil && due
+}
+
 // ClaimOperatorResync asks for an operator command, if one is pending for THIS owner.
 //
 // A claim failure is treated as "no command": the alternative is closing a healthy transport because a status

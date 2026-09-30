@@ -68,6 +68,11 @@ GRANT EXECUTE ON FUNCTION iam_v2.p4_admin_posting_block(uuid,uuid,uuid,text,text
 -- reads of the posting and attempt-event ledgers.
 GRANT EXECUTE ON FUNCTION iam_v2.p4_stay_room_charge_open(uuid) TO svc_edged;
 GRANT EXECUTE ON FUNCTION iam_v2.p4_attempt_not_sent_reason(uuid) TO svc_edged;
+-- The financial mirror maximum age (migration 0103, D48): read it and its change log; change it only through the
+-- audited definer.
+GRANT SELECT ON iam_v2.pms_interface_financial_settings, iam_v2.pms_interface_financial_setting_changes TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_financial_mirror_max_age_seconds(uuid,uuid,uuid) TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_set_financial_mirror_max_age(uuid,uuid,uuid,integer,text,uuid) TO svc_edged;
 
 -- Publishing an interface revision moves the interface's current-revision pointer and rotates its secret
 -- generation. These are the ONLY two write targets in the Phase-3 admin source, and the controlled-writer

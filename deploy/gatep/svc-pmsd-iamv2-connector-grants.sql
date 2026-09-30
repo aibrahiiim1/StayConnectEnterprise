@@ -280,3 +280,6 @@ GRANT SELECT ON iam_v2.pms_room_inventory  TO svc_pmsd;
 -- this read-only definer confirms a SENDING attempt with the same interface, P# and SHA-256. pmsd holds no
 -- privilege on any posting table: it can ask whether a command is authorised and record nothing.
 GRANT EXECUTE ON FUNCTION iam_v2.p4_posting_command_authorised(uuid, text, text) TO svc_pmsd;
+-- Whether the financial mirror must be proven again by a read-only resync (migration 0103, D48). One boolean;
+-- pmsd adds its own serialization and backoff.
+GRANT EXECUTE ON FUNCTION iam_v2.p4_financial_resync_due(uuid,uuid,uuid) TO svc_pmsd;

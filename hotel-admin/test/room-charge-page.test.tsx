@@ -274,3 +274,43 @@ describe("Hotel → Room charge", () => {
     expect(g).not.toHaveBeenCalledWith("/pms-financial-onboarding");
   });
 });
+
+describe("Hotel → Room charge: guest list proof (D48)", () => {
+  const WITH_MIRROR = { ...FIAS, approved_at: "2026-09-30T06:07:40Z", approved_by: "op-1", posting_target_model: "RESERVATION",
+    ready: true, reason: null,
+    financial_mirror: { max_age_seconds: 14400, is_default: true, last_complete_sync_at: new Date(Date.now() - 40 * 60 * 1000).toISOString() } };
+  function mirrorRoutes() {
+    g.mockImplementation((path: string) => {
+      switch (path) {
+        case "/auth/whoami": return Promise.resolve({ roles: ["site_admin"] });
+        case "/pms-financial-onboarding": return Promise.resolve({ interfaces: [WITH_MIRROR], posting_target_models: ["RESERVATION"] });
+        case "/modules": return Promise.resolve({ site_type: "hotel", modules: { room_charge: { id: "room_charge", readiness: [] } } });
+      }
+      return Promise.reject(new Error(`unexpected GET ${path}`));
+    });
+  }
+  it("shows when Protel last sent the complete guest list, the limit and that a quiet hotel refreshes itself", async () => {
+    mirrorRoutes();
+    render(<RoomChargePage />);
+    const card = await screen.findByTestId("guest-list-proof");
+    expect(within(card).getByText("40 min ago")).toBeInTheDocument();
+    expect(within(card).getByText("Within the limit")).toBeInTheDocument();
+    expect(within(card).getByText(/4 hours/)).toBeInTheDocument();
+    expect(within(card).getByText("(default)")).toBeInTheDocument();
+    expect(within(card).getByText(/asks Protel for a fresh complete list by itself after 2 hours/)).toBeInTheDocument();
+  });
+  it("changes the limit in seconds, with a reason and the password", async () => {
+    mirrorRoutes();
+    post.mockResolvedValue({ max_age_seconds: 7200 });
+    render(<RoomChargePage />);
+    fireEvent.click(await screen.findByRole("button", { name: /change the guest list maximum age/i }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/maximum age in hours/i), { target: { value: "2" } });
+    fireEvent.change(within(dialog).getByLabelText(/^Reason/), { target: { value: "measured quiet periods" } });
+    fireEvent.change(within(dialog).getByLabelText(/confirm your password/i), { target: { value: "pw" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith(
+      "/pms-financial-onboarding/if-fias/financial-mirror-max-age",
+      { max_age_seconds: 7200, reason: "measured quiet periods", password: "pw" }));
+  });
+});
