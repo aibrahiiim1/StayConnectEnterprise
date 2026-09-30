@@ -337,7 +337,7 @@ function SetupChecklist({ interfaces }: { interfaces: OnboardingInterface[] }) {
       <ol className="space-y-3 px-5 pb-5">
         {steps.map((st, n) => (
           <li key={st.title} className="flex gap-3">
-            <span className="mt-0.5 shrink-0">
+            <span className="mt-0.5 w-28 shrink-0">
               {st.done ? (
                 <Badge tone="ok" dot>Done</Badge>
               ) : st.optional ? (
