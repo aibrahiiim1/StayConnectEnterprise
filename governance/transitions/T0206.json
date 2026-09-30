@@ -1,0 +1,45 @@
+{
+  "transition_id": "T0206",
+  "seq": 206,
+  "timestamp": "2026-09-30T23:05:49+03:00",
+  "timestamp_derivation": "Written after the Product Owner's acceptance, the review corrections and their PRE-LIVE deployment, and before the commit that introduces this receipt.",
+  "record_type": "SITE_MODULES_ACQUISITION_ACCEPTED_BY_THE_PRODUCT_OWNER_MERGE_AUTHORISED",
+  "authorisation": "Product-Owner instruction of 2026-09-30: 'I have completed my PRE-LIVE review and I accept the current behaviour and the Front Office reversal of the USD 1.00 verification charge has also been completed. So close this delivery completely and merge.'",
+  "decision": "D48",
+  "decisions_recorded": [],
+  "acceptance": {
+    "accepted_by": "Product Owner",
+    "accepted_on": "2026-09-30",
+    "scope": "PR #202 (D44-D48) as deployed on PRE-LIVE: site modules and licence v4, acquisition (Free, Voucher, open selection, Card payment, Room charge), Amendment A1 (RN + G#), PRE-LIVE fully functional (D47), room-charge financial freshness (D48).",
+    "front_office_reversal": "COMPLETED -- the USD 1.00 verification posting (P# 1, T0204) was reversed in Protel by Front Office, as reported by the Product Owner."
+  },
+  "delivered": [
+    "Three automated-review findings on card payment (open threads that blocked the protected merge) fixed before merge: readiness requires provider-accepted credentials (background, cached authenticated TestConnection per account and credential fingerprint); the account save commits with its sealed credentials in one transaction; wildcard extra payment domains are refused at save and a stored one no longer opens the apex (the garden opens the addresses a name resolves to, so a wildcard names no host).",
+    "The phase-4 harness now runs the card checkout suite."
+  ],
+  "verification": "Card verifier and wildcard refusal unit tests; the atomic account save integration test in the phase-4 harness (card checkout step); phase-4, pmsd, phase-5 and prod-privilege harnesses PASS; Go unit tests; Admin Console 647/647 and tsc. PRE-LIVE: scd and the Admin Console 442f6e61 deployed, guest-access harness 47/47, postings unchanged at 1.",
+  "deployment_provenance": "PRE-LIVE 172.21.60.25: scd and the Admin Console 442f6e61 (release 20260930-200329); edged and pmsd d4a48a5f; portald d5c3e578; netd and acctd 99ba9f10; site migrations through 0103. DEPLOYED_BINARIES.{sha256,txt} rewritten from the installed bytes (6/6 OK).",
+  "real_pms_posting": "None in this round. The single verification posting (P# 1) has been reversed by Front Office.",
+  "merge": "Follows this receipt through the protected path (po-merge-approved label, po-merge-authorization, merge commit); recorded by the closure receipt.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0205."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. PRE-LIVE remains PRE-LIVE; Go-Live is not authorised."
+  },
+  "state_note": "No phase, activity or acceptance state changes. The delivery is ACCEPTED by the Product Owner; the merge follows.",
+  "base": "42823d9dfecd4339ac540d1b5d19ee0bf5df40f4",
+  "base_note": "Master at the time the branch was cut (the merge of PR #201).",
+  "head": "442f6e61",
+  "head_note": "PR #202's last content commit before this governance record.",
+  "previous_delivery": "T0205",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

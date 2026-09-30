@@ -462,7 +462,7 @@
     "rollback_rehearsal_occurred": true,
     "corrected_software_deployed": true,
     "deployed_head_on_appliance": "MIXED -- see deployed_runtime_services; there is no single deployed head",
-    "deployed_head_note": "PRE-LIVE 172.21.60.25, re-read live after the D48 deployment (2026-09-30 ~15:12Z UTC). THE APPLIANCE RUNS BINARIES FROM FIVE COMMITS OF THE UNMERGED PR #202 and this field names none: edged and pmsd d4a48a5f, scd 80b44c0e, portald d5c3e578, netd and acctd 99ba9f10; all read out of the INSTALLED bytes with vcs.modified=false and -tags=stayconnect_production, and /opt/stayconnect/DEPLOYED_BINARIES.{sha256,txt} were rewritten from them (sha256sum -c 6/6 OK). PRE-LIVE is AHEAD of master, as D42 intends. Site migration 0103 was applied through scripts/edge-migrate.sh as iam_v2_owner after a pg_dump backup; Gate-P was reconciled. WHY THE MIXED STATE IS KEPT: rebuilding unchanged services from a newer head to make this record uniform would ship unrelated changes onto PRE-LIVE.",
+    "deployed_head_note": "PRE-LIVE 172.21.60.25, re-read live after the D48 deployment (2026-09-30 ~15:12Z UTC). THE APPLIANCE RUNS BINARIES FROM FIVE COMMITS OF THE UNMERGED PR #202 and this field names none: scd 442f6e61, edged and pmsd d4a48a5f, portald d5c3e578, netd and acctd 99ba9f10; all read out of the INSTALLED bytes with vcs.modified=false and -tags=stayconnect_production, and /opt/stayconnect/DEPLOYED_BINARIES.{sha256,txt} were rewritten from them (sha256sum -c 6/6 OK). PRE-LIVE is AHEAD of master, as D42 intends. Site migration 0103 was applied through scripts/edge-migrate.sh as iam_v2_owner after a pg_dump backup; Gate-P was reconciled. WHY THE MIXED STATE IS KEPT: rebuilding unchanged services from a newer head to make this record uniform would ship unrelated changes onto PRE-LIVE.",
     "live_increment9_revalidated": true,
     "live_increment9_revalidated_on": "2026-08-11",
     "live_increment9_revalidation_verdicts": {
@@ -856,14 +856,14 @@
     "dhcp_ownership_evidence_monitored_deployed_note": "DEPLOYED AND VERIFIED LIVE 2026-09-01 (T0109). netd health carries an ownership_evidence block filled by a fresh lease read on every request; the operational checker returns OK on the real socket and refuses when the socket is absent; the enforcement-plane gate consults it. Kea's hourly lease-file cleanup, which had failed every hour since 2026-08-28, has run cleanly since the repair with zero PID failures.",
     "hotel_admin_runtime_identity": {
       "_note": "THE UI IS NOT THE BINARIES. deployed_head_on_appliance names the commit whose build produced the nine SERVICE binaries; it says nothing about the Hotel Admin bundle, which is built and shipped separately and is routinely left untouched by a backend deployment. Recording one head for both is how a UI five days older than the backend was reported as current. These fields are read from the bundle's own hotel-admin-release.json on the appliance, never inferred.",
-      "source_commit": "d4a48a5ff9d3dd560d1dc568659685b9e2ffde64",
-      "build_id": "Tp6rOVjf4mpnl89hKBbH0",
-      "release": "20260930-151201",
-      "previous_release": "20260930-100548 (39c429b2)",
-      "artifact_sha256": "7e0523dc8384f54fa1de66308cc135911ac105b8d3a7ca78c448f97c441fed22",
+      "source_commit": "442f6e614501be7d448b904724c38541bc4141ae",
+      "build_id": "w4DikROhjCcXA75cwjjum",
+      "release": "20260930-200329",
+      "previous_release": "20260930-151201 (d4a48a5f)",
+      "artifact_sha256": "a1a08f1beac02059a205e93be2a70b097aa45afdd7ee29c5ca07194ce05ce449",
       "build_flags": "none -- the release manifest records build_flags {}; the capability contract carries no build flags",
       "contract_version": "1",
-      "deployed_at": "2026-09-30 ~15:12Z UTC by deploy-hotel-admin.sh package (clean clone of d4a48a5f) / install: Room charge 'Guest list proof' card and the financial mirror maximum age setting.",
+      "deployed_at": "2026-09-30 ~20:03Z UTC by deploy-hotel-admin.sh package (clean clone of 442f6e61) / install: payment domain validation refuses wildcards.",
       "verified_at": "2026-09-30, read back from the installed release manifest (source_state clean).",
       "rollback": "PRESENT: /opt/stayconnect/hotel-admin.previous -> /opt/stayconnect/releases/hotel-admin/20260929-080958 (a878de52)."
     },
@@ -927,7 +927,7 @@
     "deployed_runtime_services": {
       "_note": "Per service: sha256 of the installed binary, the commit its own bytes name, and the build tag. Read back from /opt/stayconnect/bin on the appliance on 2026-09-30 (UTC) after the D47 deployment of PR #202 (unmerged). The appliance carries no Go toolchain, so the Go build stamp was read directly out of the artifact with grep -ao on vcs.revision, -tags and vcs.modified.",
       "netd": "8dd6f4ca63d9375a6db5554aad5fa0e009eed9636fee1f6fa58493e5246636f2  (99ba9f10e005, tags=stayconnect_production, vcs.modified=false)",
-      "scd": "6d86eb4fbd7a4d614967882ad4c7da4ab327ed66db2a3d6510bf2d3e4cd53de0  (80b44c0e2bd9, tags=stayconnect_production, vcs.modified=false)",
+      "scd": "7a134d4581f7aa28cfdb06a1df949ba6b7ddbc10b5cf46926cfc94ffe4c0df54  (442f6e614501, tags=stayconnect_production, vcs.modified=false)",
       "edged": "6184927a50e9235c2b1feb6dfaa1d4c47027a1e738d822b23eb8e2bb08dc8212  (d4a48a5ff9d3, tags=stayconnect_production, vcs.modified=false)",
       "pmsd": "7c4ded8745f8fe64a3d3a067aa1d679b3a499d272a8e2f3ab56f53726a12638e  (d4a48a5ff9d3, tags=stayconnect_production, vcs.modified=false)",
       "portald": "0b6c0718e8f70aeee1ae3d903d86ca5f24f288d6600b4942a8e631627b2656f1  (d5c3e57856c8, tags=stayconnect_production, vcs.modified=false)",
@@ -1259,8 +1259,8 @@
         "D47",
         "D48"
       ],
-      "transition": "T0205",
-      "status": "READY_FOR_PRODUCT_OWNER_TESTING -- PRE-LIVE is the fully functional acceptance environment (D47) and one real room charge was verified there, from the unmerged PR #202; NOT merged, NOT closed",
+      "transition": "T0206",
+      "status": "ACCEPTED by the Product Owner on 2026-09-30 (T0206) from the unmerged PR #202; the protected merge follows; the USD 1.00 verification posting has been reversed by Front Office",
       "pr": 202,
       "contract": "docs/architecture/ONEGATE_MODULES_AND_ACQUISITION.md",
       "site_migrations": "0094-0103 applied on PRE-LIVE",
@@ -1276,7 +1276,7 @@
     "prelive_phase4_flag_posture": "PRE-LIVE 172.21.60.25 since 2026-09-30 (D47): scd runs STAYCONNECT_PHASE4_MASTER, _PAYMENT, _PAYMENT_PROVIDER, _POSTING, _FINANCIAL_REVIEW, _OUTBOX_WORKER and _PMS_TRANSMIT; pmsd runs _MASTER, _OUTBOX_WORKER and _PMS_TRANSMIT; edged runs _MASTER, _POSTING and _FINANCIAL_REVIEW. STAYCONNECT_PAYMENT_LIVE_ALLOWED is set nowhere. Real PMS postings ever: one (T0204, USD 1.00, PA OK). Payment-provider traffic ever: none.",
     "phase4_flags_off_scope": "phase4_flags_off records the DELIVERED REPOSITORY configuration (no file in the tree enables a Phase-4 flag; scripts/ci/phase4-dark-check.sh asserts it). It is not a statement about the PRE-LIVE environment, whose posture is recorded in prelive_phase4_flag_posture."
   },
-  "latest_transition_id": "T0205",
+  "latest_transition_id": "T0206",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1777,9 +1777,9 @@
     "manifest": "docs/manifests/SiteModulesAcquisition-change-manifest.md",
     "base": "42823d9dfecd4339ac540d1b5d19ee0bf5df40f4",
     "base_note": "Master at the merge of PR #201, where delivery/site-modules-acquisition was cut.",
-    "head": "63d5f974",
+    "head": "442f6e61",
     "head_note": "The last CONTENT commit of PR #202 before its governance record; the manifest records base..HEAD including the governance, pack and manifest commits.",
-    "transition": "T0205",
+    "transition": "T0206",
     "previous_delivery": "INDUSTRY_NEUTRAL_TERMINOLOGY (docs/manifests/NeutralTerminology-change-manifest.md, T0197 lineage)",
     "pr": 202,
     "pr_state": "OPEN_UNMERGED -- READY FOR PRODUCT OWNER TESTING; merge only on explicit Product Owner acceptance (po-merge-approved)",
