@@ -1,0 +1,49 @@
+{
+  "transition_id": "T0207",
+  "seq": 207,
+  "timestamp": "2026-09-30T23:12:07+03:00",
+  "timestamp_derivation": "Written after GitHub merged PR #202 (75997775, committer date 2026-09-30T23:10:47+03:00) and before the commit that introduces this receipt, so it neither pre-dates the merge it records nor post-dates its own commit.",
+  "record_type": "SITE_MODULES_ACQUISITION_MERGED_TO_MASTER_AND_CLOSED",
+  "authorisation": "Product-Owner instruction of 2026-09-30 after the PRE-LIVE review: accept the current behaviour, the Front Office reversal of the USD 1.00 verification charge completed, 'close this delivery completely and merge'. It did NOT authorise Go-Live, a further real posting, or any new product, architecture, security, networking or trust decision.",
+  "merge": {
+    "pull_request": 202,
+    "merge_commit": "75997775f1d22b2b66c7c6353a7f5b74f608fbfa",
+    "merged_at": "2026-09-30T20:10:47Z",
+    "parents": [
+      "42823d9dfecd4339ac540d1b5d19ee0bf5df40f4",
+      "255a0e2648da892a2ddbcdaa806d4b95f093e32c"
+    ],
+    "tested_head": "255a0e2648da892a2ddbcdaa806d4b95f093e32c",
+    "merge_introduced_no_content": "The tree of master at 75997775 (92c22d61) is identical to the tree of the tested head 255a0e26.",
+    "how": "D42 protected path: the three automated review threads were answered and resolved after their fixes (442f6e61); the po-merge-approved label was applied to the exact head 255a0e26 on the Product Owner's instruction; po-merge-authorization passed on that head; mergeable_state was clean; merged with a merge commit through the REST API with the head SHA pinned."
+  },
+  "delivery_chain": {
+    "decisions": "D44 (Site Type, licence v4 modules, acquisition), D45 (room charge on the single FIAS link), D46 (reservation targeting, Amendment A1), D47 (PRE-LIVE fully functional), D48 (room-charge financial freshness).",
+    "receipts": "T0198-T0206.",
+    "final_master": "75997775f1d22b2b66c7c6353a7f5b74f608fbfa"
+  },
+  "acceptance": "ACCEPTED by the Product Owner on 2026-09-30 after PRE-LIVE review (T0206). The single USD 1.00 verification posting (P# 1, T0204) has been reversed by Front Office, as reported by the Product Owner.",
+  "deployment_provenance": "Unchanged by this closure. PRE-LIVE 172.21.60.25 runs scd and the Admin Console 442f6e61, edged and pmsd d4a48a5f, portald d5c3e578, netd and acctd 99ba9f10, site migrations through 0103; every one of those commits is now contained in master (verified with git merge-base --is-ancestor). Central runs the Central half of this delivery (migration 0049).",
+  "cleanup": "The merged branch delivery/site-modules-acquisition (tip 255a0e26) is contained in master and is deleted on GitHub and locally after this closure merges, together with this closure branch.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0206."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. THIS transition records a merge to master and closes a delivery; it changed no phase, applied no migration, deployed nothing and performed no cutover. PRE-LIVE remains PRE-LIVE."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "75997775f1d22b2b66c7c6353a7f5b74f608fbfa",
+  "base_note": "Master after the merge of PR #202; this closure lineage is built on it.",
+  "head": "75997775",
+  "head_note": "No content commit: this lineage is governance only. The closed delivery's last content commit is 442f6e61 (T0206).",
+  "previous_delivery": "T0206",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

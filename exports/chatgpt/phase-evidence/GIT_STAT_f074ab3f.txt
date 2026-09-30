@@ -1,0 +1,4 @@
+commit f074ab3f21c0fbf494109636d5061a611ea54bd8
+Date:   Wed Sep 30 23:12:38 2026 +0300
+
+    Governance: the deployed-head note names no merge SHA as a running head
