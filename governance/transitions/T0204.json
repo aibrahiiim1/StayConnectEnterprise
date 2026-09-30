@@ -1,0 +1,54 @@
+{
+  "transition_id": "T0204",
+  "seq": 204,
+  "timestamp": "2026-09-30T14:16:35+03:00",
+  "timestamp_derivation": "Written after the PRE-LIVE deployment and the controlled real posting were read back and verified, and before the commit that introduces this receipt.",
+  "record_type": "PRE_LIVE_FULLY_FUNCTIONAL_ACCEPTANCE_ENVIRONMENT_REAL_ROOM_CHARGE_VERIFIED",
+  "authorisation": "Product-Owner mission of 2026-09-30 (D47): make PRE-LIVE the fully functional acceptance environment, including real PMS room-charge posting on PRE-LIVE, least-privilege Recovery actions, and controlled verification of the real paths; and the Product Owner's explicit authorisation of the same day for ONE real USD 1.00 Protel posting on a verified in-house room reservation. NOT the merge of PR #202 and NOT Go-Live.",
+  "decision": "D47",
+  "decisions_recorded": [
+    "D47"
+  ],
+  "delivered": [
+    "Real room-charge posting enabled on PRE-LIVE: STAYCONNECT_PHASE4_PMS_TRANSMIT (with master and outbox) on scd and pmsd; pmsd's posting relay listens on /run/stayconnect-pmsd/pmsd-posting.sock (the former default under /run/stayconnect could never be created by the shipped pmsd unit).",
+    "Room charge is offered to eligible verified room guests: the offer asks interface freshness through p4_room_charge_interface_fresh (migrations 0101/0102) instead of reading pms_interface_runtime as svc_scd, and reads 'no block' as fresh.",
+    "A paid room charge's session activates: room sign-in records the device's network appearance, as voucher and account sign-in do.",
+    "Financial Recovery actions execute under least privilege: EXECUTE for svc_edged on exactly the resolve, release and zero-attempt-retry definers; step-up and session-derived author unchanged; refusals answered in words (400), not 500.",
+    "Silently denied reads fixed: Charge health, Recovery, Checkout grace history, the client-network active-client guard, and netd's network change history.",
+    "Settlements redesigned as Package payments; Room charge setup checklist; approver shown by e-mail.",
+    "scripts/room-charge-live-verify.sh: one controlled real room charge as a reviewed procedure; the guest-access harness never chooses a priced package and asserts that Room charge is offered."
+  ],
+  "verification": "phase-4, pmsd, phase-5 and prod-privilege PG harnesses PASS (the finops step now proves Recovery reads and actions as svc_edged; prod-privilege proves the freshness reader and the device appearance as svc_scd); room-charge suites incl. the offer-freshness test as superuser and as svc_posting/svc_pmsd; scd, staygrant and poststay integration; Go unit tests; phase4-dark-check and migration grant durability PASS; FACTORY_CLEAN_BASELINE PASS through 0102; Admin Console vitest 645/645 and tsc. PRE-LIVE: migrations 0101 and 0102 via edge-migrate.sh as iam_v2_owner after pg_dump backups; Gate-P reconciled; scripts/guest-access-e2e-test.sh 47/47 with Room charge offered to a verified room guest; a browser sweep of all 37 Admin Console pages found no page error and no 5xx; Recovery release/resolve executed with step-up and refused in words.",
+  "real_pms_posting": "ONE controlled USD 1.00 posting, authorised by the Product Owner on a verified in-house room reservation (identified in the report to the Product Owner, not in this record): P# 1, attempt #1, sent 2026-09-30T10:59:09Z, PA OK (answered 10:59:10Z), RN and G# equal to the stay's, settlement PMS_POSTING SETTLED, purchase GRANTED, entitlement granted (superseding the stay's free package). No retry. The test device's session did not activate (DEVICE_IDENTITY_MISMATCH: no device-network appearance), fixed in 80b44c0e and verified live on the sign-in step without a second charge. The test access was ended afterwards; Front Office reverses the charge in Protel (no programmatic reversal).",
+  "deployment_provenance": "PRE-LIVE 172.21.60.25: scd 80b44c0e, edged c95e8222, pmsd 94270af3, Admin Console 39c429b2 (release 20260930-100548), portald d5c3e578, netd and acctd 99ba9f10; site migrations through 0102. Central unchanged. Every value read back from the installed artifacts; DEPLOYED_BINARIES.{sha256,txt} rewritten from them (sha256sum -c 6/6 OK).",
+  "payment_provider_state": "Card payment is not licensed for the PRE-LIVE site and no provider account exists (0); STAYCONNECT_PAYMENT_LIVE_ALLOWED is not set. No provider traffic.",
+  "open_inputs": [
+    "Central licence: card_payment and the identity modules (email/SMS/WhatsApp codes, social sign-in), white_label and ha are not licensed for the PRE-LIVE site.",
+    "Card payment: Stripe or Paymob sandbox credentials.",
+    "Protel answer-code confirmations (§A9) and the reservation-number reuse attestation.",
+    "Product-Owner decision on feed freshness for room charge: with feed_freshness_ms 900000, Room charge is offered only within 15 minutes of the last live Protel guest event.",
+    "Front Office reversal of the USD 1.00 verification charge (P# 1).",
+    "Product Owner acceptance of PR #202 before any merge."
+  ],
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0203."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. PRE-LIVE is the fully functional acceptance environment (D47) and remains PRE-LIVE; Go-Live is not authorised."
+  },
+  "state_note": "No phase, activity or acceptance state changes. The delivery is READY FOR PRODUCT OWNER TESTING, not merged and not closed.",
+  "base": "42823d9dfecd4339ac540d1b5d19ee0bf5df40f4",
+  "base_note": "Master at the time the branch was cut (the merge of PR #201).",
+  "head": "80b44c0e",
+  "head_note": "PR #202's last content commit before this governance record; PRE-LIVE runs the commits named in deployment_provenance.",
+  "previous_delivery": "T0203",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE. LIVE provider transactions remain unauthorised."
+}
