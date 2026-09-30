@@ -1,4 +1,0 @@
-commit 941b5a9bec9ae608073dbc6fa617f1e16141dc78
-Date:   Wed Sep 30 19:09:09 2026 +0300
-
-    Governance: T0205, D48 room-charge financial freshness redesigned and verified on PRE-LIVE
