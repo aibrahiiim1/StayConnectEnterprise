@@ -261,3 +261,13 @@ describe("package payments", () => {
     }
   });
 });
+
+describe("recovery refusals in words", () => {
+  it("turns the database's refusal codes into sentences", async () => {
+    const { recoveryWords } = await import("@/components/phase4/financial-recovery-view");
+    expect(recoveryWords({ message: "payment: untrusted_input: RECOVERY_NOT_ACTIVE" }, "x")).toMatch(/not in financial recovery/);
+    expect(recoveryWords({ message: "payment: untrusted_input: RECOVERY_HOLD_UNKNOWN" }, "x")).toMatch(/no longer exists/);
+    expect(recoveryWords({ message: "something else" }, "fallback")).toBe("something else");
+    expect(recoveryWords({}, "fallback")).toBe("fallback");
+  });
+});
