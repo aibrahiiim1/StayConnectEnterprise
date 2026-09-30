@@ -281,6 +281,18 @@ func (p *phase3Auth) device(ctx context.Context, d wireDevice) (deviceIdentity, 
 	if err != nil {
 		return out, fmt.Errorf("%w: %v", errDeviceStore, err)
 	}
+	// ...AND WHERE IT WAS SEEN. Session activation admits a device only on a guest network it has appeared on
+	// (iamv2_session_activate.go). Voucher and account sign-in record the appearance at sign-in; room sign-in
+	// relied on the free grant opening the session, so a PAID room charge -- whose session is activated later,
+	// by the portal's status page once the PMS has answered -- was refused as DEVICE_IDENTITY_MISMATCH after the
+	// charge had posted (found on PRE-LIVE). Recorded here, for every room sign-in, exactly as the others do.
+	if _, err := p.srv.db.Exec(ctx, `
+		INSERT INTO iam_v2.device_network_appearances (tenant_id, site_id, device_id, guest_network_id, first_seen, last_seen)
+		VALUES ($1,$2,$3,$4,now(),now())
+		ON CONFLICT (device_id, guest_network_id) DO UPDATE SET last_seen = now()`,
+		p.srv.tenID, p.srv.siteID, id, nc.NetworkID); err != nil {
+		return out, fmt.Errorf("%w: %v", errDeviceStore, err)
+	}
 	return deviceIdentity{Tenant: p.srv.tenID, Site: p.srv.siteID, DeviceID: id,
 		GuestNetwork: nc.NetworkID, GuestNetworkName: nc.Name, IP: ip, MAC: mac}, nil
 }

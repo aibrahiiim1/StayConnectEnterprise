@@ -278,3 +278,27 @@ func TestIntegration_Phase3Grant_RoomChargeApplicabilityRunsAsServiceRole(t *tes
 		t.Fatalf("the room-charge applicability statement fails as svc_scd: %v", err)
 	}
 }
+
+// A ROOM SIGN-IN RECORDS WHERE THE DEVICE WAS SEEN, as svc_scd. Activation admits a device only on a network it
+// has appeared on; a paid room charge activates its session later, from the portal's status page, and on
+// PRE-LIVE the device was refused as DEVICE_IDENTITY_MISMATCH after the charge had posted because nothing had
+// recorded the appearance.
+func TestIntegration_Phase3Grant_RoomSignInRecordsTheDeviceAppearance(t *testing.T) {
+	f := newProdAuthFixture(t)
+	requireServiceRole(t, f, "svc_scd")
+	p3 := f.serviceRolePhase3(t)
+	_, res := post(t, p3.resolveHandler,
+		f.resolveBody("412", "Okonkwo", "", "00000065-0000-4000-8000-000000000000"))
+	if res.Outcome != outcomeVerified {
+		t.Fatalf("resolve: %+v", res)
+	}
+	var n int
+	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM iam_v2.device_network_appearances a
+		JOIN iam_v2.devices d ON d.id = a.device_id
+		WHERE d.mac = $1::macaddr AND a.guest_network_id = $2::uuid`, f.net.mac, f.network).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("the signed-in device has %d appearance(s) on its guest network, want 1", n)
+	}
+}
