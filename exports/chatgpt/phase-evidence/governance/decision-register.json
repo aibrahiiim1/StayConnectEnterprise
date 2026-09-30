@@ -757,6 +757,19 @@
       ],
       "does_not_authorize": "Real PMS financial posting (STAYCONNECT_PHASE4_PMS_TRANSMIT stays off on scd and pmsd); a supervised live charge; recording vendor-confirmed answer meanings or onboarding an interface to RESERVATION without the vendor confirmations; Go-Live; any property-side PMS change.",
       "implementation": "PR #202 (unmerged): Phase-0 Amendment A1 applied to the FINAL Phase-0 contract; site migration 0100; posting engine, pmsd pre-write guard and Admin Console; deployed to PRE-LIVE at 2f9e9710 and verified (T0203). Real posting remains disabled; merge awaits Product Owner acceptance."
+    },
+    {
+      "id": "D47",
+      "title": "PRE-LIVE IS THE FULLY FUNCTIONAL ACCEPTANCE ENVIRONMENT (2026-09-30). The difference between PRE-LIVE and Go-Live is lifecycle and operational status only, not missing or intentionally disabled capability. On the PRE-LIVE appliance 172.21.60.25: real PMS room-charge posting is enabled (STAYCONNECT_PHASE4_PMS_TRANSMIT with master and outbox on scd and pmsd), before the Amendment-A1 §A9 vendor confirmations, which therefore continue to make every non-OK answer UNKNOWN; Financial Recovery actions execute under least-privilege database authority with step-up and audit; every implemented, licensed module usable with the available prerequisites is enabled; card payment is enabled to the extent credentials exist. PRE-LIVE remains PRE-LIVE.",
+      "decided_on": "2026-09-30",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-09-30",
+      "authorization_evidence": "Product-Owner mission of 2026-09-30 ('Make PRE-LIVE the fully functional acceptance environment for OneGate'), authorising end to end on PRE-LIVE 172.21.60.25: enabling real PMS room-charge posting, least-privilege Recovery actions, UI/backend wiring of non-functional controls, card payment to the extent credentials allow, directly related defect fixes, tests, deployment, controlled verification of the real paths, and governance synchronization.",
+      "supersedes": "For the PRE-LIVE appliance only: the Amendment-A1 statement that real PMS posting stays disabled until the §A9 vendor confirmations are complete, and the ONEGATE_MODULES_AND_ACQUISITION §10/§11 statement that PMS_TRANSMIT is off on PRE-LIVE.",
+      "does_not_authorize": "Go-Live or cutover; real posting on any appliance other than PRE-LIVE; LIVE-mode card transactions without credentials and their own decision; treating an unconfirmed PMS answer as definite; merging PR #202 before the PRE-LIVE result is complete and verified; Root-CA, trust or topology changes.",
+      "implementation": "PR #202 (unmerged), recorded by T0204: recovery and read grants for svc_edged/svc_netd; pmsd's posting socket in its own runtime directory; migrations 0101/0102 (the room-charge offer asks interface freshness through a narrow definer); room sign-in records the device's network appearance; PRE-LIVE scd/pmsd transmit flags on; one controlled real USD 1.00 posting verified (P# 1, PA OK)."
     }
   ]
 }

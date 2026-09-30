@@ -1,4 +1,0 @@
-commit 844a7dadc5fc3c9878afae45cf526a646f79325a
-Date:   Wed Sep 30 00:36:04 2026 +0300
-
-    Governance: T0203, Amendment A1 (D46) implemented and deployed to PRE-LIVE

@@ -1,0 +1,4 @@
+commit 63586c0fb4901a9ea7f54d6b3e839edb04a15d25
+Date:   Wed Sep 30 14:17:29 2026 +0300
+
+    Governance: T0204, PRE-LIVE fully functional (D47); one real room charge verified
