@@ -68,10 +68,10 @@ func containsString(ss []string, v string) bool {
 	return false
 }
 
-// roomChargeApplicable asks the database every room-charge precondition in one statement. Any error is "no".
-func (p *phase3Auth) roomChargeApplicable(ctx context.Context, stayID, ifaceID string, d offerDecision) bool {
-	var ok bool
-	err := p.srv.db.QueryRow(ctx, `
+// roomChargeApplicableSQL is every room-charge precondition in one statement, run as svc_scd. Everything it
+// reads is either a table svc_scd may read or a narrow definer (financial readiness, the open-charge check and
+// the interface freshness reader): svc_scd must not read pms_interface_runtime itself.
+const roomChargeApplicableSQL = `
 		SELECT COALESCE((SELECT r.ready AND r.currency = $5 AND r.currency_exponent = $6
 		                   FROM iam_v2.pms_interface_financially_ready($1,$2,$3) r), false)
 		   AND EXISTS (SELECT 1 FROM iam_v2.package_settlement_mappings m
@@ -80,8 +80,12 @@ func (p *phase3Auth) roomChargeApplicable(ctx context.Context, stayID, ifaceID s
 		                WHERE st.tenant_id=$1 AND st.site_id=$2 AND st.id=$4 AND st.pms_interface_id=$3
 		                  AND st.status='IN_HOUSE' AND st.posting_allowed)
 		   AND NOT iam_v2.p4_stay_room_charge_open($4::uuid)
-		   AND COALESCE((SELECT iam_v2.p4_interface_freshness_block($1,$2,$3,i.current_revision_id,now())
-		                   FROM iam_v2.pms_interfaces i WHERE i.id=$3), 'X') = ''`,
+		   AND iam_v2.p4_room_charge_interface_fresh($1,$2,$3)`
+
+// roomChargeApplicable asks the database every room-charge precondition in one statement. Any error is "no".
+func (p *phase3Auth) roomChargeApplicable(ctx context.Context, stayID, ifaceID string, d offerDecision) bool {
+	var ok bool
+	err := p.srv.db.QueryRow(ctx, roomChargeApplicableSQL,
 		p.srv.tenID, p.srv.siteID, ifaceID, stayID, d.Currency, d.CurrencyExponent, d.PackageRevisionID).Scan(&ok)
 	if err != nil {
 		slog.Info("room charge: applicability not established", "err", err)

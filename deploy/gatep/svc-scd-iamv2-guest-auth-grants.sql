@@ -316,3 +316,6 @@ GRANT EXECUTE ON FUNCTION iam_v2.p4_room_charge_has_records(uuid,uuid)          
 -- unresolved room charge (Amendment A1: one per stay); it holds no read of the posting ledger.
 GRANT SELECT ON iam_v2.package_settlement_mappings TO svc_scd;
 GRANT EXECUTE ON FUNCTION iam_v2.p4_stay_room_charge_open(uuid) TO svc_scd;
+-- Whether the interface is fresh enough to offer Room charge (migration 0101): one boolean through a definer, and
+-- NOT SELECT on iam_v2.pms_interface_runtime, for the reason given above p3_guest_network_mirror_state.
+GRANT EXECUTE ON FUNCTION iam_v2.p4_room_charge_interface_fresh(uuid,uuid,uuid) TO svc_scd;

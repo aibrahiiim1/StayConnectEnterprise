@@ -256,7 +256,11 @@ pms(){ roomsignin $1 "$ROOM" "$2"; }
 pmschoose(){ local n=$1 j=$2 acx prv
   if printf '%s' "$j" | grep -q '"needs_choice":true'; then
     acx=$(printf '%s' "$j" | python3 -c 'import sys,json;print(json.load(sys.stdin)["auth_context_id"])')
-    prv=$(printf '%s' "$j" | python3 -c 'import sys,json;c=json.load(sys.stdin)["choices"];print(c[-1]["package_revision_id"])')
+    # ONLY EVER A FREE CHOICE. Room charge is live on an appliance that posts to the real PMS: picking a priced
+    # choice here would charge a real guest's reservation. No free choice means this step cannot run -- it fails
+    # rather than falling back to one that costs money.
+    prv=$(printf '%s' "$j" | python3 -c 'import sys,json;c=[x for x in json.load(sys.stdin)["choices"] if x.get("method")=="NOT_REQUIRED"];print(c[-1]["package_revision_id"] if c else "")')
+    [ -n "$prv" ] || { echo "  (no free choice offered to this stay; refusing to choose a priced one)" >&2; printf '%s' '{"ok":false}'; return 0; }
     j=$(ip netns exec $n curl -s -H 'Content-Type: application/json' -d "{\"auth_context_id\":\"$acx\",\"package_revision_id\":\"$prv\"}" "$PORTAL/auth/pms/phase3")
   fi
   printf '%s' "$j"; }
@@ -283,7 +287,15 @@ fi
 if [ -n "$STAY" ]; then
   ok "test stay selected (${STAY:0:8}): in house, alone in its room, no access held"
   j=$(pms ga2 "wrong-$RES"); ! printf '%s' "$j" | grep -q '"ok":true' && [ "$(lastroom)" = CREDENTIAL_MISMATCH ] && ok "the right room with the wrong verification is refused (CREDENTIAL_MISMATCH)" || bad "wrong verification: $(lastroom)"
-  j=$(pmschoose ga2 "$(pms ga2 "$RES")")
+  j0=$(pms ga2 "$RES")
+  # ROOM CHARGE IS OFFERED where it is effective and a package takes it: the verified stay's choices include a
+  # Room charge one. It is only looked at, never chosen (pmschoose picks a free choice).
+  RC=$(curl -sk $R -b $CK "$B/modules" | python3 -c 'import sys,json;d=json.load(sys.stdin);d=d.get("data",d);m=d.get("modules") or {};m=m if isinstance(m,dict) else {x.get("id"):x for x in m};print(1 if (m.get("room_charge") or {}).get("effective") else 0)' 2>/dev/null)
+  RCPKG=$($PSQL "SELECT count(*) FROM iam_v2.internet_packages p JOIN iam_v2.internet_package_revisions r ON r.id=p.current_revision_id WHERE p.active AND 'PMS_POSTING' = ANY(r.settlement_methods)")
+  if [ "$RC" = 1 ] && [ "${RCPKG:-0}" -gt 0 ]; then
+    printf '%s' "$j0" | grep -q '"method":"PMS_POSTING"' && ok "room charge is offered to the verified stay (looked at, not chosen)" || bad "room charge not offered: $(printf '%s' "$j0" | head -c 300)"
+  fi
+  j=$(pmschoose ga2 "$j0")
   PSID=$(printf '%s' "$j" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("session_id",""))' 2>/dev/null)
   PMS_ENT=$(ent_of_session "$PSID")
   [ -n "$PSID" ] && [ "$($PSQL "SELECT stay_id FROM iam_v2.entitlements WHERE id='$PMS_ENT'")" = "$STAY" ] && ok "room sign-in granted the stay's entitlement and a session" || bad "PMS grant: $(printf '%s' "$j" | head -c 200)"
