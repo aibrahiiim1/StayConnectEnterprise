@@ -77,6 +77,10 @@ export default function RoomChargePage() {
   const [err, setErr] = useState<unknown>(null);
   const [approving, setApproving] = useState<OnboardingInterface | null>(null);
   const [answerChange, setAnswerChange] = useState<AnswerChange | null>(null);
+  // WHO APPROVED, IN WORDS. The approval records the operator by id; the operator directory (the same source the
+  // activity trail uses) turns it into their e-mail, or their display name. A role that cannot read the directory
+  // gets "A site administrator" -- true by construction, since only a site administrator can approve -- never the id.
+  const [approvers, setApprovers] = useState<Map<string, string> | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -86,6 +90,10 @@ export default function RoomChargePage() {
       setErr(e);
       setData({ interfaces: [], posting_target_models: [] });
     }
+    try {
+      const o = await api.get<{ data: { id: string; email?: string; display_name?: string }[] }>("/operators");
+      setApprovers(new Map((o?.data ?? []).map((x) => [x.id, x.email || x.display_name || ""])));
+    } catch { setApprovers(new Map()); }
     // Module readiness is advisory on this page: the table is still correct without it.
     try {
       const m = await api.get<SiteModules>("/modules");
@@ -223,7 +231,11 @@ export default function RoomChargePage() {
                       {i.approved_at ? (
                         <>
                           <div className="whitespace-nowrap">{formatDate(i.approved_at)}</div>
-                          {i.approved_by && <div className="break-all text-muted-foreground">{i.approved_by}</div>}
+                          {i.approved_by && (
+                            <div className="break-all text-muted-foreground" data-testid="approved-by">
+                              {approvers?.get(i.approved_by) || "A site administrator"}
+                            </div>
+                          )}
                         </>
                       ) : "—"}
                     </TD>

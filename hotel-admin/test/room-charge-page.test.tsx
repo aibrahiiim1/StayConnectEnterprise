@@ -76,6 +76,37 @@ async function openApproval() {
 
 beforeEach(() => { vi.clearAllMocks(); });
 
+describe("Hotel → Room charge: who approved", () => {
+  const APPROVED = { ...FIAS, approved_at: "2026-09-30T06:07:40Z", approved_by: "2d1fb78c-99c3-45a6-ba9b-e36175c11190",
+    posting_target_model: "RESERVATION", ready: true, reason: null };
+  function approvedRoutes(operators: "ok" | "denied") {
+    g.mockImplementation((path: string) => {
+      switch (path) {
+        case "/auth/whoami": return Promise.resolve({ roles: ["site_admin"] });
+        case "/pms-financial-onboarding": return Promise.resolve({ interfaces: [APPROVED], posting_target_models: ["RESERVATION"] });
+        case "/modules": return Promise.resolve({ site_type: "hotel", modules: { room_charge: { id: "room_charge", readiness: [] } } });
+        case "/operators":
+          return operators === "ok"
+            ? Promise.resolve({ data: [{ id: APPROVED.approved_by, email: "fo.manager@hotel.test", display_name: "FO Manager" }] })
+            : Promise.reject(new Error("forbidden"));
+      }
+      return Promise.reject(new Error(`unexpected GET ${path}`));
+    });
+  }
+  it("shows the approving operator's e-mail, never the operator id", async () => {
+    approvedRoutes("ok");
+    render(<RoomChargePage />);
+    expect(await screen.findByText("fo.manager@hotel.test")).toBeInTheDocument();
+    expect(screen.queryByText(APPROVED.approved_by)).not.toBeInTheDocument();
+  });
+  it("says a site administrator approved when the operator directory cannot be read, never the id", async () => {
+    approvedRoutes("denied");
+    render(<RoomChargePage />);
+    expect(await screen.findByText("A site administrator")).toBeInTheDocument();
+    expect(screen.queryByText(APPROVED.approved_by)).not.toBeInTheDocument();
+  });
+});
+
 describe("Hotel → Room charge", () => {
   it("reads each interface's readiness in words and offers approval only for FIAS", async () => {
     routes(["site_admin"]);
