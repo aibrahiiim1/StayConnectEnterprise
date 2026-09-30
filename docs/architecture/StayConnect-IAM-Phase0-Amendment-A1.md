@@ -12,7 +12,9 @@ fail-closed amendment of the same date.
 **Does not change:** commerce, quotes and purchases, entitlements, checkout grace, STRICT multi-PMS resolution,
 payment, the single FIAS connection owned by pmsd (D45), programmatic reversal (still `capability=false`), or
 the rule that real PMS posting stays disabled (`STAYCONNECT_PHASE4_PMS_TRANSMIT` set nowhere) until the vendor
-confirmations in §A9 are complete.
+confirmations in §A9 are complete. *Superseded for PRE-LIVE by D47 (2026-09-30): the Product Owner enabled real
+room-charge posting on the PRE-LIVE appliance before the §A9 confirmations. Until they are recorded, every non-OK
+answer is handled as UNKNOWN (rule 8), which is the safe reading; Go-Live remains unauthorised.*
 
 ---
 
@@ -423,7 +425,7 @@ Unchanged: E1, E2, E3, E7, E8, E9, E10, E11.
   vendor-confirmed as definitely not posted, is UNKNOWN — never success or failure — and blocks further room
   charging on the stay until manual review resolves it.*
 
-## A9. Vendor confirmations still required (before real posting is enabled)
+## A9. Vendor confirmations still required (before a non-OK answer is treated as definite; D47 enabled posting on PRE-LIVE without them)
 
 1. Reservation numbers (`G#`) are unique and never reused on this interface, including across hotels that share
    a Protel database.

@@ -265,8 +265,9 @@ Each is enforced in the SQL grant entry point, which is the only path to the ent
 
 ## 10. What stays inactive until separately authorised
 
-LIVE-mode provider transactions (`STAYCONNECT_PAYMENT_LIVE_ALLOWED`), real PMS posting
-(`STAYCONNECT_PHASE4_PMS_TRANSMIT`), Go-Live, and real guest-production cutover.
+LIVE-mode provider transactions (`STAYCONNECT_PAYMENT_LIVE_ALLOWED`), Go-Live, and real guest-production cutover.
+Real PMS posting (`STAYCONNECT_PHASE4_PMS_TRANSMIT`) is enabled on the PRE-LIVE appliance by D47 (2026-09-30); on
+any other appliance it stays off until separately authorised.
 
 ## 11. Room charge on the one FIAS connection (decision D45)
 
@@ -324,9 +325,11 @@ a `PS` and nothing else and is reachable only from the relay.
   PA=OK before SETTLED, audited manual review including `CONFIRM_NOT_POSTED_RETRY` under the existing
   single-use authorisation, and no programmatic reversal.
 
-Real PMS financial posting remains prohibited until the Product Owner separately authorises it: on PRE-LIVE
-`STAYCONNECT_PHASE4_PMS_TRANSMIT` is off on both processes, readiness reports `PMS_POSTING_NOT_AUTHORISED`, and
-Room charge is configurable and reviewable but never offered.
+Real PMS financial posting needs a Product-Owner authorisation per appliance. D47 (2026-09-30) authorised it on
+PRE-LIVE: `STAYCONNECT_PHASE4_PMS_TRANSMIT` (with master and outbox) is on for scd and pmsd there, the relay
+listens on `/run/stayconnect-pmsd/pmsd-posting.sock`, and Room charge is offered to eligible verified room
+guests. Without that authorisation readiness reports `PMS_POSTING_NOT_AUTHORISED` and Room charge is configurable
+and reviewable but never offered.
 
 ## 12. Module visibility and the optional sign-in methods (PR #202 corrections, 2026-09-29)
 

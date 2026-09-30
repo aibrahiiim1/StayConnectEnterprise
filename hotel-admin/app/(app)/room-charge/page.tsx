@@ -496,7 +496,7 @@ function AnswerMeaningsCard({
             Protel answers every room charge with a status. A status below counts as &ldquo;nothing was posted&rdquo; only
             once the vendor has confirmed it for this interface. An unconfirmed status, and UR always, is treated as
             unknown: the charge is held for Manual review, never counted as posted or failed. Recording these does not
-            switch posting on — real posting to the PMS stays disabled on this appliance.
+            switch posting on or off.
           </CardDescription>
         </div>
       </CardHeader>
