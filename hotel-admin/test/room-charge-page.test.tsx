@@ -229,8 +229,10 @@ describe("Hotel → Room charge", () => {
   it("says room charge is not offered when posting is not authorised on this appliance", async () => {
     routes(["site_admin"], ["PMS_POSTING_NOT_AUTHORISED", "NO_ONBOARDED_INTERFACE"]);
     render(<RoomChargePage />);
-    expect(await screen.findByText(/room charge is not offered on this appliance/i)).toBeInTheDocument();
-    expect(screen.getByText(/nothing is posted to the PMS/i)).toBeInTheDocument();
+    expect(await screen.findByText("Room charge is not offered to clients yet")).toBeInTheDocument();
+    expect(screen.getByText(/your configuration is saved/i)).toBeInTheDocument();
+    expect(screen.getByText(/switch on sending charges to the PMS on this appliance/i)).toBeInTheDocument();
+    expect(screen.getByText(/safety switch set when the appliance is installed/i)).toBeInTheDocument();
     expect(screen.getByText("No PMS interface is approved for room charge")).toBeInTheDocument();
   });
 

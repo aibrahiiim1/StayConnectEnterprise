@@ -48,7 +48,7 @@ export const READINESS_WORDS: Record<string, string> = {
   PROVIDER_NOT_SUPPORTED: "The account's provider or region is not supported.",
   PROVIDER_CREDENTIALS_INCOMPLETE: "The provider account is missing a required credential.",
   PROVIDER_UNREACHABLE: "The payment provider cannot be reached.",
-  PMS_POSTING_NOT_AUTHORISED: "Room charge posting is not authorised on this appliance. It can be configured, but clients are not offered it and nothing is posted to the PMS.",
+  PMS_POSTING_NOT_AUTHORISED: "Sending charges to the PMS is switched off on this appliance (a safety switch set at installation). Room charge can be configured, but clients are not offered it and nothing is posted to the PMS.",
   NO_DATABASE: "The database is not available.",
   READINESS_UNREADABLE: "Readiness could not be read.",
   NO_ONBOARDED_INTERFACE: "No PMS interface is approved for room charge.",

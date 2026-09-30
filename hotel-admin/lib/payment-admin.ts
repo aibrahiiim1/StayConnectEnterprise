@@ -249,7 +249,7 @@ const CODE_WORDS: Record<string, string> = {
   PROVIDER_CREDENTIALS_INCOMPLETE: "Some required provider credentials are not set",
   PROVIDER_UNREACHABLE: "The payment provider cannot be reached",
   // Room charge readiness.
-  PMS_POSTING_NOT_AUTHORISED: "Room charge posting is not authorised on this appliance",
+  PMS_POSTING_NOT_AUTHORISED: "Sending charges to the PMS is switched off on this appliance",
   NO_DATABASE: "The appliance database is not available",
   READINESS_UNREADABLE: "Readiness could not be read",
   NO_ONBOARDED_INTERFACE: "No PMS interface is approved for room charge",

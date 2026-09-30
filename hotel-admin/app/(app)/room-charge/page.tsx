@@ -23,8 +23,9 @@
 //
 // POSTING MAY STILL BE WITHHELD. An appliance whose room-charge posting is not authorised (readiness
 // PMS_POSTING_NOT_AUTHORISED on the room_charge module) can be configured here in full, but room charge is not
-// offered to clients and nothing is posted to the PMS. The page says so at the top, because an operator who has
-// just approved an interface will otherwise go looking for the charge.
+// offered to clients and nothing is posted to the PMS. The page shows a checklist at the top -- what is done, what
+// is recommended and what is still needed -- because an operator who has just approved an interface will
+// otherwise read "not offered" as a failed approval.
 //
 // The currency exponent is not asked: FIAS posts in minor units with two decimal places, and edged fixes it.
 
@@ -162,12 +163,7 @@ export default function RoomChargePage() {
       {!isSiteAdmin && (
         <ReadOnlyNotice>Approving a PMS interface for room charge is a site administrator decision.</ReadOnlyNotice>
       )}
-      {postingWithheld && (
-        <Callout tone="warning" title="Room charge is not offered on this appliance">
-          Posting to the PMS is not authorised on this appliance. Room charge can be configured here, but it will not be
-          offered to clients and nothing is posted to the PMS.
-        </Callout>
-      )}
+      {postingWithheld && <SetupChecklist interfaces={data?.interfaces ?? []} />}
       {otherReadiness.length > 0 && (
         <Callout tone="info" title="Room charge is not ready">
           <CodeList codes={otherReadiness} />
@@ -293,6 +289,71 @@ export default function RoomChargePage() {
         />
       )}
     </PageShell>
+  );
+}
+
+// WHAT ROOM CHARGE STILL NEEDS. An operator who has just approved an interface and still sees "not offered" needs
+// to know that their part is done and what is missing -- not a sentence that reads as if the approval failed. The
+// last step is the appliance's posting switch: a safety switch set when the appliance is installed, not a setting
+// on any page, because switching it on makes real charges reach the PMS.
+function SetupChecklist({ interfaces }: { interfaces: OnboardingInterface[] }) {
+  const fias = interfaces.filter((i) => i.connector_kind === FIAS);
+  const approved = fias.filter((i) => i.approved_at || i.posting_target_model === "RESERVATION");
+  const meanings = approved.flatMap((i) => i.answer_meanings ?? []);
+  const confirmed = meanings.filter((m) => m.confirmed).length;
+  const steps: { done: boolean; title: string; detail: string; optional?: boolean }[] = [
+    {
+      done: approved.length > 0,
+      title: "Approve a PMS interface for room charge",
+      detail: approved.length > 0
+        ? `Done: ${approved.map((i) => i.display_label || "FIAS interface").join(", ")}.`
+        : "Use “Approve for room charge” on the FIAS interface below.",
+    },
+    {
+      done: meanings.length > 0 && confirmed === meanings.length,
+      optional: true,
+      title: "Confirm Protel's answer meanings",
+      detail: meanings.length === 0
+        ? "Available once an interface is approved."
+        : `${confirmed} of ${meanings.length} confirmed. Recommended: an unconfirmed answer is treated as unknown and the charge goes to Manual review instead of failing cleanly.`,
+    },
+    {
+      done: false,
+      title: "Switch on sending charges to the PMS on this appliance",
+      detail: "Off. This is a safety switch set when the appliance is installed, not a setting on this page, because it lets real charges reach Protel. Switching it on is a Product Owner decision; ask your OneGate installer.",
+    },
+  ];
+  return (
+    <Card data-testid="room-charge-checklist">
+      <CardHeader className="items-start">
+        <div className="min-w-0 space-y-1">
+          <CardTitle>Room charge is not offered to clients yet</CardTitle>
+          <CardDescription>
+            Your configuration is saved. Until every required step below is done, clients do not see Room charge and
+            nothing is sent to the PMS.
+          </CardDescription>
+        </div>
+      </CardHeader>
+      <ol className="space-y-3 px-5 pb-5">
+        {steps.map((st, n) => (
+          <li key={st.title} className="flex gap-3">
+            <span className="mt-0.5 shrink-0">
+              {st.done ? (
+                <Badge tone="ok" dot>Done</Badge>
+              ) : st.optional ? (
+                <Badge tone="default">Recommended</Badge>
+              ) : (
+                <Badge tone="warn">Needed</Badge>
+              )}
+            </span>
+            <div className="min-w-0">
+              <div className="text-sm font-medium">{n + 1}. {st.title}</div>
+              <div className="text-xs text-muted-foreground">{st.detail}</div>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </Card>
   );
 }
 
