@@ -718,6 +718,16 @@ Four independent axes per interface (thresholds marked `*` are defaults pending 
 
 Authentication requires axis 4 within the auth bound. **Financial creation requires all four green plus fresh stay revalidation (same reservation, IN_HOUSE, not blocked, room resolvable) and occupancy re-verification** (mandatory for room-only-posting connectors); otherwise the purchase is refused or routed to manual approval — never posted stale.
 
+**Financial freshness as implemented (D48, 2026-09-30, migration 0103).** One definition, asked at every
+room-charge stage (offer, posting creation, worker claim, abort-before-send, attempt creation, pmsd pre-wire
+authorisation): transport CONNECTED with the PMS's own link-alive within `heartbeat_timeout_ms`; continuity
+CONTINUOUS (no detected gap -- silence from a healthy feed is not a gap); IN_SYNC with no part-published
+resync generation; the posting's interface revision pinned; and a **successful complete resync within the
+interface's financial mirror maximum age** (an operational setting, default 4 hours, 1–24 hours, audited). A live
+guest event updates its own stay but does not reset that age. pmsd requests a read-only full resync at half the
+bound (serialized, with backoff); without a complete resync by the bound, room charge fails closed. The earlier
+"a live event within `feed_freshness_ms`" rule is removed from the financial path.
+
 The live Protel spike must measure and record: missed-checkout-while-link-down behavior; timeout-after-post → UNKNOWN → manual review verified against the folio; reversal semantics; stale-occupancy abort; heartbeat/keepalive cadence; resync/night-audit behavior; reservation-number uniqueness and non-reuse (drives `posting_target_model`, vendor-confirmed). Results populate the per-revision capability matrix: `can_post, supports_idempotency, read_back, reversal, reservation_target, room_only_posting, safe_retry` (`room_only_posting` is always false: a room-only `PS` is never sent). FIAS never auto-retries out of UNKNOWN. **A new interface revision starts with `posting_target_model = 'UNSET'` (fail-closed): every financial CHARGE is rejected until property onboarding records `RESERVATION` in a new revision (§4.1, §9a rule 6).**
 
 ### 9a. FIAS posting — grounded rules (from the accepted production-implementation review)
@@ -759,7 +769,9 @@ immutable.**
 - **What cannot be seen.** A guest record that is still in transit on the link when the `PS` is written cannot
   be seen by anyone; that attempt is decided by its `PA` (or is UNKNOWN), never by a guess. **"Stale" includes
   a disconnected link and a resync in progress**: a queued charge found in either state is aborted (definitely not
-  posted, purchase FAILED) rather than held, and the guest can buy again once the link is fresh.
+  posted, purchase FAILED) rather than held, and the guest can buy again once the link is fresh. A quiet feed is
+  **not** stale (D48): what makes the mirror too old for money is the absence of a successful complete resync within
+  the interface's financial mirror maximum age.
 8. **`PA` status is authoritative for the posting result.** `OK` settles the charge and grants access. A
 **definite non-posted** answer — a status the vendor has confirmed means nothing was posted (the only codes
 that can be confirmed so are `NP`, `NG`, `NR`, `NA` and `RY`; the confirmation is recorded per interface,

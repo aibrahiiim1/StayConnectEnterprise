@@ -184,7 +184,9 @@ Available only when `hospitality`, `paid_access` and `room_charge` are licensed,
   reservation numbers are never reused, base currency and exponent set, approval recorded) and the **package
   currency equals the interface currency** (no implicit FX);
 * the stay is `IN_HOUSE` and `posting_allowed` (it has a reservation number and no posting block), it has no
-  unresolved room charge, and every freshness/continuity axis is green;
+  unresolved room charge, and the interface is financially fresh (D48): connected with a recent PMS link-alive,
+  CONTINUOUS, IN_SYNC, the revision pinned, and a successful complete resync within the interface's financial mirror
+  maximum age (default 4 hours; pmsd refreshes it at half the bound). A quiet feed is not stale;
 * the charge **targets the reservation**: posting identity `(interface, G#)`, pinned at purchase; the room (RN) is the
   reservation's current room, refreshed before each attempt. There is no folio model and no folio-window selection
   ([Phase-0 Amendment A1, D46](StayConnect-IAM-Phase0-Amendment-A1.md));

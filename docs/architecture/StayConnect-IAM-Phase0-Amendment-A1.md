@@ -281,7 +281,9 @@ with
 > - **What cannot be seen.** A guest record that is still in transit on the link when the `PS` is written cannot
 >   be seen by anyone; that attempt is decided by its `PA` (or is UNKNOWN), never by a guess. **"Stale" includes
 >   a disconnected link and a resync in progress**: a queued charge found in either state is aborted (definitely not
->   posted, purchase FAILED) rather than held, and the guest can buy again once the link is fresh.
+>   posted, purchase FAILED) rather than held, and the guest can buy again once the link is fresh. A quiet feed is
+>   **not** stale (D48, 2026-09-30): what makes the mirror too old for money is the absence of a successful complete
+>   resync within the interface's financial mirror maximum age.
 
 **§9a new rule 8 — the PMS answer decides; our safety policy.**
 
