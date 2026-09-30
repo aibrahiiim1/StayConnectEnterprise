@@ -277,8 +277,8 @@ export function SettlementsView() {
                         </span>
                       </TD>
                       <TD className="hidden sm:table-cell">{PAID_BY[r.method] ?? humanize(r.method)}</TD>
-                      <TD className="text-right tabular">
-                        {r.method === "NOT_REQUIRED" ? "—" : money(r.amount_minor, r.currency, r.currency_exponent)}
+                      <TD className="whitespace-nowrap text-right tabular">
+                        {r.amount_minor === 0 ? "—" : money(r.amount_minor, r.currency, r.currency_exponent)}
                       </TD>
                       <TD><Badge tone={st.tone} dot>{st.label}</Badge></TD>
                       <TD className="text-right">
