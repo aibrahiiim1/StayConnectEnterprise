@@ -279,9 +279,9 @@ describe("Payment methods — Card payment configuration", () => {
 });
 
 describe("hosted payment domain validation", () => {
-  it("accepts domain names with at most one leading wildcard and refuses IPs and deeper wildcards", () => {
+  it("accepts exact domain names and refuses IPs and every wildcard (a wildcard cannot be opened before sign-in)", () => {
     expect(domainProblem("pay.example.com")).toBeNull();
-    expect(domainProblem("*.example.com")).toBeNull();
+    expect(domainProblem("*.example.com")).toMatch(/wildcard/);
     expect(domainProblem("10.0.0.1")).toMatch(/IP addresses/);
     expect(domainProblem("a.*.example.com")).toMatch(/wildcard/);
     expect(domainProblem("*.*.example.com")).toMatch(/wildcard/);

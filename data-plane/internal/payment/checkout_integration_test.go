@@ -359,3 +359,30 @@ func seedCardChain(t *testing.T, p *pgxpool.Pool) scope {
 		VALUES ($1,$2,$3,'ONLINE_PAYMENT','REQUIRED') RETURNING id::text`, s.tenant, s.site, s.purchase)
 	return s
 }
+
+// AN ACCOUNT CHANGE AND ITS CREDENTIAL ROTATION COMMIT TOGETHER. A second account saved as the new default,
+// whose credentials cannot be sealed, must leave nothing behind: not the new account, and not the demotion of the
+// working default (automated review finding on PR #202).
+func TestSaveAccountIsAtomicWithItsCredentials(t *testing.T) {
+	_, _, _, admin := cardFixture(t, ModeTest)
+	s := seedCardChain(t, admin)
+	ctx := context.Background()
+	k := testKey(t)
+	first, err := SaveAccount(ctx, admin, k, s.tenant, s.site, "", "stripe", "acct_a_"+runNonce+s.site[:8], "Stripe A", "USD", ModeTest,
+		"ACTIVE", true, Credentials{"secret_key": "sk_test_a"}, "test-operator", "first default")
+	if err != nil {
+		t.Fatalf("first account: %v", err)
+	}
+	before := count1(t, admin, `SELECT count(*)::int FROM iam_v2.payment_provider_accounts WHERE tenant_id=$1 AND site_id=$2`, s.tenant, s.site)
+	// No key: sealing fails AFTER the account row would have been written.
+	if _, err := SaveAccount(ctx, admin, PaymentKey{}, s.tenant, s.site, "", "stripe", "acct_b_"+runNonce+s.site[:8], "Stripe B", "USD", ModeTest,
+		"ACTIVE", true, Credentials{"secret_key": "sk_test_b"}, "test-operator", "second default"); err == nil {
+		t.Fatal("a save whose credentials cannot be sealed must fail")
+	}
+	if after := count1(t, admin, `SELECT count(*)::int FROM iam_v2.payment_provider_accounts WHERE tenant_id=$1 AND site_id=$2`, s.tenant, s.site); after != before {
+		t.Fatalf("the failed save left an account behind: %d -> %d", before, after)
+	}
+	if n := count1(t, admin, `SELECT count(*)::int FROM iam_v2.payment_provider_accounts WHERE id=$1 AND is_default`, first); n != 1 {
+		t.Fatal("the failed save demoted the working default")
+	}
+}

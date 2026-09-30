@@ -39,7 +39,7 @@ const MAX_EXTRA_DOMAINS = 20;
 
 /**
  * Why a typed domain is refused, or null when it is acceptable. The server validates again; this only saves a
- * round trip. A domain name only — never an IP address, never a path — with at most one leading `*.` label.
+ * round trip. A domain name only — never an IP address, never a path — with no wildcard (the garden opens the addresses a name resolves to, and a wildcard names no host).
  */
 export function domainProblem(raw: string): string | null {
   const s = raw.trim().toLowerCase();
@@ -48,8 +48,8 @@ export function domainProblem(raw: string): string | null {
     return "IP addresses are not allowed. Enter a domain name.";
   }
   if (/[\/\s?#@]/.test(s)) return "Enter the domain name only, without https:// or a path.";
-  const rest = s.startsWith("*.") ? s.slice(2) : s;
-  if (rest.includes("*")) return "A wildcard is allowed only as the first label, as in *.example.com.";
+  if (s.includes("*")) return "List each payment host name; a wildcard cannot be opened before sign-in.";
+  const rest = s;
   if (s.length > 253) return "That domain name is too long.";
   const labels = rest.split(".");
   if (labels.length < 2) return "Enter a full domain name, such as pay.example.com.";
@@ -394,7 +394,7 @@ function DomainsCard({
           <div className="text-label">Additional domains</div>
           <p className="text-xs text-muted-foreground">
             Only when your provider account uses a payment page on another domain. Domain names only — no IP
-            addresses — with at most one leading <span className="font-mono">*.</span> label. Up to {MAX_EXTRA_DOMAINS}.
+            addresses and no wildcards: list each host name. Up to {MAX_EXTRA_DOMAINS}.
           </p>
           {extra === null ? (
             <SkeletonRows rows={1} cols={2} />

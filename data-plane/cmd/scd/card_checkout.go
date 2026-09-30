@@ -43,12 +43,13 @@ type cardState struct {
 	unready    string // why card payment cannot run on this appliance at all ("" when it can)
 	statusMu   sync.Mutex
 	lastStatus map[string]time.Time // per-transaction rate limit for portal-driven status checks
+	verify     *cardVerifier        // provider-accepted credentials (card_verify.go)
 }
 
 // initCard builds the card engine when the deployment ceiling allows card payment. Missing credentials or key
 // are not fatal: card payment is simply not ready, which the Payment methods screen explains.
 func (s *server) initCard(ctx context.Context, secretsDir string) {
-	s.card = &cardState{lastStatus: map[string]time.Time{}}
+	s.card = &cardState{lastStatus: map[string]time.Time{}, verify: newCardVerifier()}
 	s.card.adapters = map[string]payment.HostedCheckoutProvider{"stripe": stripe.New()}
 	for _, region := range []string{"egypt", "ksa", "uae", "oman"} {
 		a, err := paymob.New(paymob.WithRegion(region))
@@ -132,6 +133,12 @@ func (s *server) cardReadiness(ctx context.Context, tenantID, siteID string) (bo
 	}
 	if !s.card.engine.Health.Healthy(acct.ID) {
 		return false, []string{"PROVIDER_UNREACHABLE"}
+	}
+	// The provider must have ACCEPTED these exact credentials recently (card_verify.go).
+	fp := credentialFingerprint(acct.ID, acct.Mode, acct.Credentials)
+	mode, merchant, creds := acct.Mode, acct.MerchantRef, acct.Credentials
+	if !s.card.verify.ready(fp, func(ctx context.Context) error { return ad.TestConnection(ctx, mode, merchant, creds) }) {
+		return false, []string{"PROVIDER_CREDENTIALS_NOT_VERIFIED"}
 	}
 	return true, nil
 }
@@ -334,7 +341,13 @@ func (s *server) paymentGardenDomains(ctx context.Context) []string {
 	seen := map[string]bool{}
 	var out []string
 	add := func(d string) {
-		d = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(d)), "*.")
+		d = strings.ToLower(strings.TrimSpace(d))
+		// A wildcard cannot be honoured: the garden opens the IP addresses a NAME resolves to, and "*.x" names
+		// no host. Opening the apex instead (the old behaviour) allowed a host nobody asked for and still left
+		// every subdomain closed. Such an entry is skipped; new ones are refused at save.
+		if strings.HasPrefix(d, "*.") {
+			return
+		}
 		if d != "" && !seen[d] {
 			seen[d] = true
 			out = append(out, d)
@@ -576,10 +589,13 @@ func (s *server) paymentAccountTest(w http.ResponseWriter, r *http.Request) {
 	cctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	// Non-financial: an authenticated read (balance / token) that moves no money.
+	fp := credentialFingerprint(id, payment.Mode(mode), creds)
 	if err := ad.TestConnection(cctx, payment.Mode(mode), merchant, creds); err != nil {
+		s.card.verify.record(fp, false)
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "connection_failed", "message": err.Error()})
 		return
 	}
+	s.card.verify.record(fp, true)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -598,6 +614,11 @@ func (s *server) paymentDomainsSave(w http.ResponseWriter, r *http.Request) {
 	clean := []string{}
 	for _, d := range req.Domains {
 		d = strings.ToLower(strings.TrimSpace(d))
+		if strings.Contains(d, "*") {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "not_saved",
+				"message": "Wildcard entries cannot be opened before sign-in: list each payment host name, for example checkout.provider.example."})
+			return
+		}
 		if d != "" {
 			clean = append(clean, d)
 		}

@@ -120,6 +120,8 @@ run_step "room charge hand-off"    "${GO[@]}" -run TestHandoff_ ./internal/posti
 run_step "room charge A1 + D48"   "${GO[@]}" -run "TestA1_|TestD48_|TestRoomCharge" ./internal/posting/ "$@"
 run_step "review + finops API"     "${GO[@]}" -run "IntegrationReviewAPI|IntegrationFinOpsAPI|IntegrationZeroAttemptAPI" ./cmd/edged/ "$@"
 run_step "payment runtime"         "${GO[@]}" -run IntegrationPayment ./internal/payment/ "$@"
+# Card checkout (D44): hosted checkout, reconciliation, and the account save committing with its credentials.
+run_step "card checkout"           "${GO[@]}" -run "TestCheckout|TestSaveAccount" ./internal/payment/ "$@"
 # Narrowed to the free GRANT path deliberately: TestC2RollbackAtEveryBoundary seeds a fixed device MAC and
 # collides with itself when it shares a database with another suite. That is a pre-existing fixture defect
 # in a test unrelated to the grant writer, and widening this step would be testing the fixture.

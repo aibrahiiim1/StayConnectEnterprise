@@ -652,26 +652,32 @@ func SaveAccount(ctx context.Context, db *pgxpool.Pool, k PaymentKey, tenantID, 
 	if id != "" {
 		idArg = id
 	}
-	err := db.QueryRow(ctx, `SELECT iam_v2.payment_account_save($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)::text`,
-		tenantID, siteID, idArg, provider, merchantRef, displayName, currency, string(mode), status, isDefault,
-		operator, reason).Scan(&newID)
+	// ONE TRANSACTION. The account change and its credential rotation commit together or not at all: saved
+	// separately, a failed seal or secret write left the metadata committed -- an account made default with
+	// missing or incompatible credentials, and the working default demoted -- while the API reported failure.
+	err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT iam_v2.payment_account_save($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)::text`,
+			tenantID, siteID, idArg, provider, merchantRef, displayName, currency, string(mode), status, isDefault,
+			operator, reason).Scan(&newID); err != nil {
+			return err
+		}
+		if len(creds) == 0 {
+			return nil
+		}
+		gen, err := newUUID()
+		if err != nil {
+			return err
+		}
+		sealed, err := SealCredentials(k, tenantID, siteID, newID, gen, creds)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `SELECT iam_v2.payment_account_set_secret($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+			tenantID, siteID, newID, gen, sealed.Ciphertext, sealed.Nonce, sealed.KeyID, int16(sealed.CipherVersion), operator)
+		return err
+	})
 	if err != nil {
 		return "", err
-	}
-	if len(creds) == 0 {
-		return newID, nil
-	}
-	gen, err := newUUID()
-	if err != nil {
-		return newID, err
-	}
-	sealed, err := SealCredentials(k, tenantID, siteID, newID, gen, creds)
-	if err != nil {
-		return newID, err
-	}
-	if _, err := db.Exec(ctx, `SELECT iam_v2.payment_account_set_secret($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-		tenantID, siteID, newID, gen, sealed.Ciphertext, sealed.Nonce, sealed.KeyID, int16(sealed.CipherVersion), operator); err != nil {
-		return newID, err
 	}
 	return newID, nil
 }
