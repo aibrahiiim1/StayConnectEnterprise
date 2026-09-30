@@ -95,7 +95,7 @@ for f in gatep-iam-ownership.sql gatep-iam-roles.sql gatep-grants.sql svc-edged-
 done
 
 # 0056-0064 used to be re-applied here, on top of the baseline. The baseline already carries them (it runs
-# through 0100), and re-running them now would roll back every later redefinition of the functions they
+# through 0102), and re-running them now would roll back every later redefinition of the functions they
 # create -- a schema no appliance has. Everything above the baseline is applied above, in order.
 
 # 0057's own grant is guarded on the role existing. Reassert the Gate-P chain afterwards so the test proves

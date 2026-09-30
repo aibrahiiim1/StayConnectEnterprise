@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0100, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0102, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -5103,6 +5103,20 @@ CREATE FUNCTION iam_v2.p4_room_charge_has_records(p_tenant uuid, p_site uuid) RE
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
   SELECT EXISTS (SELECT 1 FROM iam_v2.pms_postings WHERE tenant_id = p_tenant AND site_id = p_site);
+$$;
+
+
+--
+-- Name: p4_room_charge_interface_fresh(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_room_charge_interface_fresh(p_tenant uuid, p_site uuid, p_iface uuid) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT EXISTS (SELECT 1 FROM iam_v2.pms_interfaces i
+                  WHERE i.tenant_id = p_tenant AND i.site_id = p_site AND i.id = p_iface
+                    AND iam_v2.p4_interface_freshness_block(p_tenant, p_site, p_iface, i.current_revision_id, now()) IS NULL);
 $$;
 
 
@@ -18049,6 +18063,7 @@ REVOKE ALL ON FUNCTION iam_v2.p4_attempt_targets_posting_reservation() FROM PUBL
 
 REVOKE ALL ON FUNCTION iam_v2.p4_authorize_zero_attempt_retry(p_posting uuid, p_actor uuid, p_reason text, p_evidence jsonb) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.p4_authorize_zero_attempt_retry(p_posting uuid, p_actor uuid, p_reason text, p_evidence jsonb) TO sc_financial_operator;
+GRANT ALL ON FUNCTION iam_v2.p4_authorize_zero_attempt_retry(p_posting uuid, p_actor uuid, p_reason text, p_evidence jsonb) TO svc_edged;
 
 
 --
@@ -18080,6 +18095,7 @@ GRANT ALL ON FUNCTION iam_v2.p4_create_room_charge_posting(p_tenant uuid, p_site
 REVOKE ALL ON FUNCTION iam_v2.p4_current_restore_generation(p_tenant uuid, p_site uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.p4_current_restore_generation(p_tenant uuid, p_site uuid) TO sc_payment_runtime;
 GRANT ALL ON FUNCTION iam_v2.p4_current_restore_generation(p_tenant uuid, p_site uuid) TO sc_financial_operator;
+GRANT ALL ON FUNCTION iam_v2.p4_current_restore_generation(p_tenant uuid, p_site uuid) TO svc_edged;
 
 
 --
@@ -18111,6 +18127,7 @@ REVOKE ALL ON FUNCTION iam_v2.p4_entitlement_grant_kernel_v2(p_tenant uuid, p_si
 REVOKE ALL ON FUNCTION iam_v2.p4_financial_recovery_active(p_tenant uuid, p_site uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.p4_financial_recovery_active(p_tenant uuid, p_site uuid) TO sc_payment_runtime;
 GRANT ALL ON FUNCTION iam_v2.p4_financial_recovery_active(p_tenant uuid, p_site uuid) TO sc_financial_operator;
+GRANT ALL ON FUNCTION iam_v2.p4_financial_recovery_active(p_tenant uuid, p_site uuid) TO svc_edged;
 
 
 --
@@ -18309,6 +18326,7 @@ REVOKE ALL ON FUNCTION iam_v2.p4_refresh_stay_posting_permission(p_stay uuid) FR
 
 REVOKE ALL ON FUNCTION iam_v2.p4_release_financial_recovery(p_tenant uuid, p_site uuid, p_actor uuid, p_note text) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.p4_release_financial_recovery(p_tenant uuid, p_site uuid, p_actor uuid, p_note text) TO sc_financial_operator;
+GRANT ALL ON FUNCTION iam_v2.p4_release_financial_recovery(p_tenant uuid, p_site uuid, p_actor uuid, p_note text) TO svc_edged;
 
 
 --
@@ -18333,6 +18351,7 @@ GRANT ALL ON FUNCTION iam_v2.p4_resolve_payment_account_v2(p_tenant uuid, p_site
 
 REVOKE ALL ON FUNCTION iam_v2.p4_resolve_recovery_hold(p_hold uuid, p_resolution text, p_actor uuid, p_note text) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.p4_resolve_recovery_hold(p_hold uuid, p_resolution text, p_actor uuid, p_note text) TO sc_financial_operator;
+GRANT ALL ON FUNCTION iam_v2.p4_resolve_recovery_hold(p_hold uuid, p_resolution text, p_actor uuid, p_note text) TO svc_edged;
 
 
 --
@@ -18341,6 +18360,14 @@ GRANT ALL ON FUNCTION iam_v2.p4_resolve_recovery_hold(p_hold uuid, p_resolution 
 
 REVOKE ALL ON FUNCTION iam_v2.p4_room_charge_has_records(p_tenant uuid, p_site uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.p4_room_charge_has_records(p_tenant uuid, p_site uuid) TO svc_scd;
+
+
+--
+-- Name: FUNCTION p4_room_charge_interface_fresh(p_tenant uuid, p_site uuid, p_iface uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_room_charge_interface_fresh(p_tenant uuid, p_site uuid, p_iface uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p4_room_charge_interface_fresh(p_tenant uuid, p_site uuid, p_iface uuid) TO svc_scd;
 
 
 --
@@ -19042,6 +19069,7 @@ GRANT SELECT ON TABLE iam_v2.accounting_records TO svc_edged;
 -- Name: TABLE checkout_grace_audit; Type: ACL; Schema: iam_v2; Owner: -
 --
 
+GRANT SELECT ON TABLE iam_v2.checkout_grace_audit TO svc_edged;
 GRANT SELECT,INSERT ON TABLE iam_v2.checkout_grace_audit TO svc_pmsd;
 
 
@@ -19159,6 +19187,7 @@ GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.delayed_accounting_records TO svc_acc
 --
 
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.device_network_appearances TO svc_scd;
+GRANT SELECT ON TABLE iam_v2.device_network_appearances TO svc_edged;
 
 
 --
@@ -19242,6 +19271,7 @@ GRANT SELECT ON TABLE iam_v2.financial_epochs TO sc_financial_operator;
 --
 
 GRANT SELECT ON TABLE iam_v2.financial_recovery_holds TO sc_financial_operator;
+GRANT SELECT ON TABLE iam_v2.financial_recovery_holds TO svc_edged;
 
 
 --
@@ -19448,6 +19478,7 @@ GRANT SELECT ON TABLE iam_v2.payment_transaction_events TO sc_financial_operator
 GRANT SELECT,INSERT ON TABLE iam_v2.payment_transactions TO sc_payment_runtime;
 GRANT SELECT ON TABLE iam_v2.payment_transactions TO sc_financial_operator;
 GRANT SELECT ON TABLE iam_v2.payment_transactions TO sc_payment_outcome;
+GRANT SELECT ON TABLE iam_v2.payment_transactions TO svc_edged;
 
 
 --
@@ -19658,6 +19689,7 @@ GRANT SELECT ON TABLE iam_v2.posting_attempts TO svc_edged;
 
 GRANT SELECT ON TABLE iam_v2.posting_outbox TO sc_financial_operator;
 GRANT SELECT ON TABLE iam_v2.posting_outbox TO sc_posting_runtime;
+GRANT SELECT ON TABLE iam_v2.posting_outbox TO svc_edged;
 
 
 --
@@ -19847,6 +19879,7 @@ GRANT SELECT ON TABLE iam_v2.v_financial_payments TO svc_edged;
 GRANT SELECT ON TABLE iam_v2.v_financial_recovery TO sc_financial_readonly;
 GRANT SELECT ON TABLE iam_v2.v_financial_recovery TO sc_financial_operator;
 GRANT SELECT ON TABLE iam_v2.v_financial_recovery TO sc_payment_runtime;
+GRANT SELECT ON TABLE iam_v2.v_financial_recovery TO svc_edged;
 
 
 --
@@ -20166,7 +20199,7 @@ GRANT SELECT,DELETE ON TABLE public.stripe_events TO svc_scd;
 -- Name: TABLE system_network_audit; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT INSERT ON TABLE public.system_network_audit TO svc_netd;
+GRANT SELECT,INSERT ON TABLE public.system_network_audit TO svc_netd;
 
 
 --

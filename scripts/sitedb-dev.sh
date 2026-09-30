@@ -17,7 +17,7 @@ PORT="${SITEDB_PORT:-55480}"
 DB=stayconnect_site
 BASE="$ROOT/data-plane/migrations/baseline/0000_production_baseline.sql"
 GATEP="$ROOT/deploy/gatep"
-BASELINE_TOP="${SITEDB_BASELINE_TOP:-0100}"
+BASELINE_TOP="${SITEDB_BASELINE_TOP:-0102}"
 
 psql_run() { docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 "$@"; }
 
