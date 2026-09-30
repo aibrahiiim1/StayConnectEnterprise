@@ -405,3 +405,11 @@ GRANT EXECUTE ON FUNCTION iam_v2.p4_posting_review_apply(uuid,uuid,uuid) TO svc_
 -- Vendor-confirmed PA meanings per interface (migration 0100): append-only, one audited definer.
 GRANT SELECT ON iam_v2.pms_answer_confirmations TO svc_edged;
 GRANT EXECUTE ON FUNCTION iam_v2.pms_answer_confirmation_record(uuid,uuid,uuid,text,text,text,text,uuid) TO svc_edged;
+-- Charge health and Recovery (Financial operations, read side). These surfaces read through edged's own login and
+-- were only ever exercised as a superuser, so on an appliance every one answered "query failed". Read access only:
+-- counts and states for health, the recovery epoch view and the open holds. Resolving a hold or releasing recovery
+-- (p4_resolve_recovery_hold, p4_release_financial_recovery) is financial authority and is NOT granted here.
+GRANT SELECT ON iam_v2.posting_outbox, iam_v2.payment_transactions, iam_v2.v_financial_recovery,
+                iam_v2.financial_recovery_holds TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_financial_recovery_active(uuid,uuid) TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_current_restore_generation(uuid,uuid) TO svc_edged;
