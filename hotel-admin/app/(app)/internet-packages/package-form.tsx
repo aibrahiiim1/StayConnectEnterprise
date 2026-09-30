@@ -90,7 +90,7 @@ function emptyRule(type: RuleType): EligibilityRuleForm {
     case "ROOM_TYPE": return { type, room_types: "" };
     case "RATE_PLAN": return { type, rate_plans: "" };
     case "VIP": return { type, is_vip: "true" };
-    case "TRAVEL_AGENT": return { type, travel_agents: "" };
+    case "TRAVEL_AGENT": return { type, travel_agents: [] };
     case "PMS_INTERFACE": return { type, pms_interface_ids: "" };
   }
 }

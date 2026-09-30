@@ -8,8 +8,9 @@
 // several at a time. A name the PMS has not sent yet can still be added -- an agent whose first guests arrive
 // next week -- but it is shown as such.
 //
-// The rule's value stays what it always was: the chosen names, comma-separated. The server matches them
-// case-insensitively and ignoring surrounding spaces.
+// The value is a LIST of names, exactly the stored rule's shape, and a name is never split: a PMS may name an
+// agent "Sun Tours, Ltd", and that is one agent. The server matches names case-insensitively, ignoring
+// surrounding spaces.
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { api, TravelAgent } from "@/lib/api";
@@ -17,7 +18,6 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Check, ChevronDown, Plus, X } from "lucide-react";
 
-const splitNames = (s: string): string[] => s.split(",").map((x) => x.trim()).filter(Boolean);
 const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 export function TravelAgentPicker({
@@ -26,9 +26,9 @@ export function TravelAgentPicker({
   label,
   testId,
 }: {
-  /** Comma-separated names, as the rule stores them. */
-  value: string;
-  onChange: (v: string) => void;
+  /** The chosen names, as the rule stores them. */
+  value: string[];
+  onChange: (v: string[]) => void;
   label: string;
   testId?: string;
 }) {
@@ -57,7 +57,7 @@ export function TravelAgentPicker({
     return () => document.removeEventListener("mousedown", close);
   }, [open]);
 
-  const selected = splitNames(value);
+  const selected = value;
   const isSelected = (n: string) => selected.some((s) => same(s, n));
 
   const options = useMemo(() => {
@@ -66,20 +66,19 @@ export function TravelAgentPicker({
   }, [agents, query]);
 
   const typed = query.trim();
-  // A comma would split one agent into two names when the rule is saved, so such a name cannot be added.
+  // A typed name is ONE name, commas and all -- it is shown as one chip and stored as one list entry.
   const canAddTyped =
-    typed !== "" && !typed.includes(",") &&
-    !(agents ?? []).some((a) => same(a.name, typed)) && !isSelected(typed);
+    typed !== "" && !(agents ?? []).some((a) => same(a.name, typed)) && !isSelected(typed);
 
   function toggle(name: string) {
-    onChange((isSelected(name) ? selected.filter((s) => !same(s, name)) : [...selected, name]).join(", "));
+    onChange(isSelected(name) ? selected.filter((s) => !same(s, name)) : [...selected, name]);
   }
   function remove(name: string) {
-    onChange(selected.filter((s) => !same(s, name)).join(", "));
+    onChange(selected.filter((s) => !same(s, name)));
   }
   function addTyped() {
     if (!canAddTyped) return;
-    onChange([...selected, typed].join(", "));
+    onChange([...selected, typed]);
     setQuery("");
   }
 

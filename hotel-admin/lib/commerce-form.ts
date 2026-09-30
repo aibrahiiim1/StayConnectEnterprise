@@ -66,7 +66,10 @@ export type EligibilityRuleForm =
   | { type: "ROOM_TYPE"; room_types: string }
   | { type: "RATE_PLAN"; rate_plans: string }
   | { type: "VIP"; is_vip: "true" | "false" }
-  | { type: "TRAVEL_AGENT"; travel_agents: string }
+  // A LIST, not comma-separated text: travel-agent names come from the PMS and may themselves contain a comma
+  // ("Sun Tours, Ltd"). The stored rule has always been a JSON array; only this form model used to be text,
+  // which split such a name into two agents that match nobody.
+  | { type: "TRAVEL_AGENT"; travel_agents: string[] }
   | { type: "PMS_INTERFACE"; pms_interface_ids: string };
 
 export type GrantTierForm = { order: number | string; down_kbps?: number | string; up_kbps?: number | string };
@@ -82,6 +85,18 @@ export type PublishFormState = {
   duration: DurationForm;
   visible_from?: string;
   visible_until?: string;
+};
+
+// nameList keeps each name whole (never split): trimmed, empties dropped, and a name repeated in another case
+// kept once -- the engine matches case-insensitively, so a second spelling would add nothing.
+export const nameList = (names: readonly string[]): string[] => {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of names) {
+    const n = raw.trim();
+    if (n && !seen.has(n.toLowerCase())) { seen.add(n.toLowerCase()); out.push(n); }
+  }
+  return out;
 };
 
 const asList = (s: string): string[] =>
@@ -120,7 +135,7 @@ export function serializeRule(r: EligibilityRuleForm): { type: string; value: Re
     case "VIP":
       return { type: "VIP", value: { is_vip: r.is_vip === "true" } };
     case "TRAVEL_AGENT":
-      return { type: "TRAVEL_AGENT", value: { travel_agents: asList(r.travel_agents) } };
+      return { type: "TRAVEL_AGENT", value: { travel_agents: nameList(r.travel_agents) } };
     case "PMS_INTERFACE":
       return { type: "PMS_INTERFACE", value: { pms_interface_ids: asList(r.pms_interface_ids) } };
     default:

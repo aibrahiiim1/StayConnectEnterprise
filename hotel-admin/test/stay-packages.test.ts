@@ -101,7 +101,7 @@ describe("the PMS eligibility dimensions are selectable and serialize correctly"
       .toEqual({ type: "VIP", value: { is_vip: true } });
     expect(serializeRule({ type: "VIP", is_vip: "false" }))
       .toEqual({ type: "VIP", value: { is_vip: false } });
-    expect(serializeRule({ type: "TRAVEL_AGENT", travel_agents: "EXPEDIA" }))
+    expect(serializeRule({ type: "TRAVEL_AGENT", travel_agents: ["EXPEDIA"] }))
       .toEqual({ type: "TRAVEL_AGENT", value: { travel_agents: ["EXPEDIA"] } });
     expect(serializeRule({ type: "PMS_INTERFACE", pms_interface_ids: "ddff5d07-f588-4f1f-8133-a0f393524476" }))
       .toEqual({ type: "PMS_INTERFACE", value: { pms_interface_ids: ["ddff5d07-f588-4f1f-8133-a0f393524476"] } });

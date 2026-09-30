@@ -71,11 +71,11 @@ describe("Stays page — server paging", () => {
 });
 
 describe("Travel-agent picker", () => {
-  async function renderPicker(initial = "") {
+  async function renderPicker(initial: string[] = []) {
     const { TravelAgentPicker } = await import("@/app/(app)/internet-packages/travel-agent-picker");
-    const seen: string[] = [];
+    const seen: string[][] = [];
     function Host() {
-      const [v, setV] = useState(initial);
+      const [v, setV] = useState<string[]>(initial);
       return <TravelAgentPicker label="travel agents" value={v} onChange={(x) => { seen.push(x); setV(x); }} />;
     }
     render(<Host />);
@@ -98,24 +98,74 @@ describe("Travel-agent picker", () => {
     await userEvent.type(box, "sun");
     expect(screen.queryByText("Blue Sea")).toBeNull();
     await userEvent.click(screen.getByRole("option", { name: /Sunny Tours/ }));
-    expect(seen[seen.length - 1]).toBe("Sunny Tours");
+    expect(seen[seen.length - 1]).toEqual(["Sunny Tours"]);
 
     await userEvent.clear(box);
     await userEvent.click(screen.getByRole("option", { name: /Blue Sea/ }));
-    expect(seen[seen.length - 1]).toBe("Sunny Tours, Blue Sea");
+    expect(seen[seen.length - 1]).toEqual(["Sunny Tours", "Blue Sea"]);
 
     await userEvent.click(screen.getByRole("button", { name: "Remove Sunny Tours" }));
-    expect(seen[seen.length - 1]).toBe("Blue Sea");
+    expect(seen[seen.length - 1]).toEqual(["Blue Sea"]);
   });
 
-  it("can add an agent the PMS has not sent yet, but never a name with a comma", async () => {
+  // A PMS may name an agent with a comma in it. Chosen from the list, it is ONE agent: one chip, one entry.
+  it("keeps a PMS-provided name with a comma as one agent", async () => {
+    get.mockResolvedValue({ data: [
+      { name: "Sun Tours, Ltd", in_house: 4, stays: 6 },
+      { name: "Sun Tours", in_house: 1, stays: 1 },
+    ] });
+    const seen = await renderPicker();
+    const box = screen.getByRole("combobox", { name: "travel agents" });
+    await userEvent.click(box);
+    await userEvent.click(await screen.findByRole("option", { name: /Sun Tours, Ltd/ }));
+    expect(seen[seen.length - 1]).toEqual(["Sun Tours, Ltd"]);
+    expect(screen.getByRole("button", { name: "Remove Sun Tours, Ltd" })).toBeTruthy();
+    // The similarly named agent is still a separate, unselected choice.
+    expect(screen.getByRole("option", { name: /^Sun Tours1 in house$/ }).getAttribute("aria-selected")).toBe("false");
+
+    await userEvent.click(screen.getByRole("button", { name: "Remove Sun Tours, Ltd" }));
+    expect(seen[seen.length - 1]).toEqual([]);
+  });
+
+  it("adds a typed agent the PMS has not sent yet as one name, commas included", async () => {
     get.mockResolvedValue({ data: [] });
     const seen = await renderPicker();
     const box = screen.getByRole("combobox", { name: "travel agents" });
     await userEvent.type(box, "New Agent{Enter}");
-    expect(seen[seen.length - 1]).toBe("New Agent");
+    expect(seen[seen.length - 1]).toEqual(["New Agent"]);
 
-    await userEvent.type(box, "A, B");
+    await userEvent.type(box, "Coral Travel, Cairo{Enter}");
+    expect(seen[seen.length - 1]).toEqual(["New Agent", "Coral Travel, Cairo"]);
+  });
+
+  it("shows a saved comma name as one chip and does not add it twice", async () => {
+    get.mockResolvedValue({ data: [{ name: "Sun Tours, Ltd", in_house: 4, stays: 6 }] });
+    await renderPicker(["Sun Tours, Ltd"]);
+    expect(screen.getByRole("button", { name: "Remove Sun Tours, Ltd" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove Sun Tours" })).toBeNull();
+    const box = screen.getByRole("combobox", { name: "travel agents" });
+    await userEvent.type(box, "sun tours, ltd");
     expect(screen.queryByRole("option", { name: /Add/ })).toBeNull();
+  });
+});
+
+// THE RULE A PACKAGE STORES. Loading a saved package and saving it again must give back the same agents: a name
+// with a comma used to be joined into text on load and split into two agents on the next save.
+describe("Travel-agent rule round trip", () => {
+  it("serializes each name whole, trimmed, once", async () => {
+    const { serializeRule } = await import("@/lib/commerce-form");
+    expect(serializeRule({ type: "TRAVEL_AGENT", travel_agents: [" Sun Tours, Ltd ", "TUI", "tui", ""] }))
+      .toEqual({ type: "TRAVEL_AGENT", value: { travel_agents: ["Sun Tours, Ltd", "TUI"] } });
+  });
+
+  it("load then save returns the stored list unchanged", async () => {
+    const { serializeRule } = await import("@/lib/commerce-form");
+    const { rulesToForm } = await import("@/app/(app)/internet-packages/form-mapping");
+    const stored = { type: "TRAVEL_AGENT", value: { travel_agents: ["Sun Tours, Ltd", "Blue Sea"] } };
+    const form = rulesToForm([stored] as any);
+    expect(form).toEqual([{ type: "TRAVEL_AGENT", travel_agents: ["Sun Tours, Ltd", "Blue Sea"] }]);
+    expect(serializeRule(form[0])).toEqual(stored);
+    // Go's capitalised spelling loads the same way.
+    expect(rulesToForm([{ Type: "TRAVEL_AGENT", Value: stored.value }] as any)).toEqual(form);
   });
 });
