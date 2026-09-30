@@ -208,6 +208,24 @@ func TestA1_PostingPermissionIsEvaluatedNotAssumed(t *testing.T) {
 	}
 }
 
+// THE OFFER-TIME FRESHNESS READER (migrations 0101/0102). scd asks it, as svc_scd, before offering Room charge:
+// true for a fresh, onboarded interface, false once the feed is not fresh. The first version read "no block"
+// (NULL) as a block, so Room charge was never offered on PRE-LIVE.
+func TestA1_OfferFreshnessReaderAnswersFreshAndStale(t *testing.T) {
+	admin := rcPool(t, "ROOMCHARGE_TEST_DSN")
+	s := seedRoomCharge(t, admin)
+	if !scan1[bool](t, admin, `SELECT iam_v2.p4_room_charge_interface_fresh($1,$2,$3)`, s.tenant, s.site, s.iface) {
+		t.Fatal("a fresh, onboarded interface reads as not fresh, so Room charge would never be offered")
+	}
+	mustExec(t, admin, `UPDATE iam_v2.pms_interface_runtime SET transport_status='DISCONNECTED' WHERE pms_interface_id=$1`, s.iface)
+	if scan1[bool](t, admin, `SELECT iam_v2.p4_room_charge_interface_fresh($1,$2,$3)`, s.tenant, s.site, s.iface) {
+		t.Fatal("a disconnected interface reads as fresh")
+	}
+	if scan1[bool](t, admin, `SELECT iam_v2.p4_room_charge_interface_fresh($1,$2,gen_random_uuid())`, s.tenant, s.site) {
+		t.Fatal("an interface outside the scope reads as fresh")
+	}
+}
+
 // ---- E18 room-move races -------------------------------------------------------------------------------
 
 // Case 1: the room moves BEFORE the purchase. The posting pins the reservation; the attempt carries the room
