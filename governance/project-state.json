@@ -462,7 +462,7 @@
     "rollback_rehearsal_occurred": true,
     "corrected_software_deployed": true,
     "deployed_head_on_appliance": "MIXED -- see deployed_runtime_services; there is no single deployed head",
-    "deployed_head_note": "PRE-LIVE 172.21.60.25, re-read live after the D48 deployment (2026-09-30 ~15:12Z UTC). THE APPLIANCE RUNS BINARIES FROM FIVE COMMITS OF THE UNMERGED PR #202 and this field names none: scd 442f6e61, edged and pmsd d4a48a5f, portald d5c3e578, netd and acctd 99ba9f10; all read out of the INSTALLED bytes with vcs.modified=false and -tags=stayconnect_production, and /opt/stayconnect/DEPLOYED_BINARIES.{sha256,txt} were rewritten from them (sha256sum -c 6/6 OK). PRE-LIVE is AHEAD of master, as D42 intends. Site migration 0103 was applied through scripts/edge-migrate.sh as iam_v2_owner after a pg_dump backup; Gate-P was reconciled. WHY THE MIXED STATE IS KEPT: rebuilding unchanged services from a newer head to make this record uniform would ship unrelated changes onto PRE-LIVE.",
+    "deployed_head_note": "PRE-LIVE 172.21.60.25, re-read live after the D48 deployment (2026-09-30 ~15:12Z UTC). THE APPLIANCE RUNS BINARIES FROM FIVE COMMITS OF PR #202, ALL CONTAINED IN MASTER SINCE ITS MERGE AS 75997775 (T0207): scd 442f6e61, edged and pmsd d4a48a5f, portald d5c3e578, netd and acctd 99ba9f10; all read out of the INSTALLED bytes with vcs.modified=false and -tags=stayconnect_production, and /opt/stayconnect/DEPLOYED_BINARIES.{sha256,txt} were rewritten from them (sha256sum -c 6/6 OK). PRE-LIVE was ahead of master while PR #202 was open, as D42 intends; after the merge it runs no commit outside master. Site migration 0103 was applied through scripts/edge-migrate.sh as iam_v2_owner after a pg_dump backup; Gate-P was reconciled. WHY THE MIXED STATE IS KEPT: rebuilding unchanged services from a newer head to make this record uniform would ship unrelated changes onto PRE-LIVE.",
     "live_increment9_revalidated": true,
     "live_increment9_revalidated_on": "2026-08-11",
     "live_increment9_revalidation_verdicts": {
@@ -1259,8 +1259,8 @@
         "D47",
         "D48"
       ],
-      "transition": "T0206",
-      "status": "ACCEPTED by the Product Owner on 2026-09-30 (T0206) from the unmerged PR #202; the protected merge follows; the USD 1.00 verification posting has been reversed by Front Office",
+      "transition": "T0207",
+      "status": "ACCEPTED by the Product Owner on 2026-09-30 (T0206), MERGED to master as 75997775 and CLOSED (T0207); the USD 1.00 verification posting has been reversed by Front Office",
       "pr": 202,
       "contract": "docs/architecture/ONEGATE_MODULES_AND_ACQUISITION.md",
       "site_migrations": "0094-0103 applied on PRE-LIVE",
@@ -1268,7 +1268,7 @@
       "prelive_licence": "Central licence for the PRE-LIVE site (Site Type HOTEL, set by the Product Owner): hospitality, paid_access and room_charge licensed and effective; card_payment, email_otp, sms_otp, whatsapp_otp, social_login, white_label and ha not licensed",
       "prelive_site_type": "HOTEL (set by the Product Owner in Central)",
       "card_payment_accounts": 0,
-      "open_inputs": "provider credentials for the credential-dependent live tests (senders, Stripe/Paymob sandbox); module licensing of the PRE-LIVE site for the modules to be tested; Product Owner acceptance of PR #202. Deferred, not blocking: public Client Portal domain and trusted certificate (then real social-provider validation)",
+      "open_inputs": "provider credentials for the credential-dependent live tests (senders, Stripe/Paymob sandbox); module licensing of the PRE-LIVE site for the modules to be tested. Deferred, not blocking: public Client Portal domain and trusted certificate (then real social-provider validation)",
       "identity_methods": "Email/SMS/WhatsApp codes and Google/Facebook/Apple/Microsoft deployed (STAYCONNECT_IAMV2_OTP and _SOCIAL on PRE-LIVE); each offered only when licensed, switched on and a provider is ready",
       "social_provider_validation": "PENDING -- real Google/Facebook/Apple/Microsoft validation awaits the Product Owner's future public Client Portal domain and publicly trusted certificate decision (deferred 2026-09-29) and the provider credentials; NOT a blocker for PR #202. Portal hostname, Root CA and certificate architecture unchanged."
     },
@@ -1276,7 +1276,7 @@
     "prelive_phase4_flag_posture": "PRE-LIVE 172.21.60.25 since 2026-09-30 (D47): scd runs STAYCONNECT_PHASE4_MASTER, _PAYMENT, _PAYMENT_PROVIDER, _POSTING, _FINANCIAL_REVIEW, _OUTBOX_WORKER and _PMS_TRANSMIT; pmsd runs _MASTER, _OUTBOX_WORKER and _PMS_TRANSMIT; edged runs _MASTER, _POSTING and _FINANCIAL_REVIEW. STAYCONNECT_PAYMENT_LIVE_ALLOWED is set nowhere. Real PMS postings ever: one (T0204, USD 1.00, PA OK). Payment-provider traffic ever: none.",
     "phase4_flags_off_scope": "phase4_flags_off records the DELIVERED REPOSITORY configuration (no file in the tree enables a Phase-4 flag; scripts/ci/phase4-dark-check.sh asserts it). It is not a statement about the PRE-LIVE environment, whose posture is recorded in prelive_phase4_flag_posture."
   },
-  "latest_transition_id": "T0206",
+  "latest_transition_id": "T0207",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1771,19 +1771,19 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "SITE_MODULES_ACQUISITION",
+    "kind": "SITE_MODULES_ACQUISITION_CLOSED",
     "decision": "D44 (Site Type, licence v4 modules, Internet Package acquisition: Free, Voucher, Card payment, Room charge) and D45 (Room charge on the existing single FIAS connection; pmsd transport only), both 2026-09-28; D46 (FIAS guest posting targets the reservation, RN + G#, not a folio; Phase-0 Amendment A1), 2026-09-29; D47 (PRE-LIVE is the fully functional acceptance environment; real room-charge posting enabled on PRE-LIVE), 2026-09-30; D48 (room-charge financial freshness is feed health plus a proven mirror age), 2026-09-30.",
-    "decision_note": "Missions authorized implementation, migrations, PRE-LIVE and Central deployment and governance synchronization; they did NOT authorize the merge. Real PMS posting, LIVE provider transactions and Go-Live remain prohibited.",
-    "manifest": "docs/manifests/SiteModulesAcquisition-change-manifest.md",
-    "base": "42823d9dfecd4339ac540d1b5d19ee0bf5df40f4",
-    "base_note": "Master at the merge of PR #201, where delivery/site-modules-acquisition was cut.",
-    "head": "442f6e61",
-    "head_note": "The last CONTENT commit of PR #202 before its governance record; the manifest records base..HEAD including the governance, pack and manifest commits.",
-    "transition": "T0206",
-    "previous_delivery": "INDUSTRY_NEUTRAL_TERMINOLOGY (docs/manifests/NeutralTerminology-change-manifest.md, T0197 lineage)",
+    "decision_note": "Closure lineage for the OneGate site modules and acquisition delivery (T0198-T0206), accepted by the Product Owner on 2026-09-30 and merged to master as 75997775 at tested head 255a0e26. Governance only: no product, architecture, trust, permission or topology decision was taken inside it.",
+    "manifest": "docs/manifests/SiteModulesAcquisitionClosure-change-manifest.md",
+    "base": "75997775f1d22b2b66c7c6353a7f5b74f608fbfa",
+    "base_note": "Master after the merge of PR #202 (T0207).",
+    "head": "75997775",
+    "head_note": "No content commit: this lineage records the merge and closes the delivery. The delivery's last content commit is 442f6e61 (T0206).",
+    "transition": "T0207",
+    "previous_delivery": "T0206",
     "pr": 202,
-    "pr_state": "OPEN_UNMERGED -- READY FOR PRODUCT OWNER TESTING; merge only on explicit Product Owner acceptance (po-merge-approved)",
-    "note": "PRE-LIVE and Central run commits of this unmerged PR, as D42 intends; see current_state_facts.onegate_modules_acquisition."
+    "pr_state": "MERGED as 75997775 (2026-09-30) and CLOSED",
+    "note": "T0207. PR #202 merged through the protected path after Product Owner acceptance; every commit PRE-LIVE runs is contained in master. Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
