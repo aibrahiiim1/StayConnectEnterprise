@@ -194,7 +194,7 @@ describe("Hotel → Room charge", () => {
     expect(within(rows[3]).getByText(/ticket 48213/)).toBeInTheDocument();
     expect(within(rows[0]).getByText(/not confirmed — unknown/i)).toBeInTheDocument();
     expect(screen.getByText(/UR always, is treated as\s+unknown/i)).toBeInTheDocument();
-    expect(screen.getByText(/real posting to the PMS stays disabled on this appliance/i)).toBeInTheDocument();
+    expect(screen.getByText(/recording these does not switch posting on or off/i)).toBeInTheDocument();
     // Confirm on the unconfirmed ones, Withdraw on the confirmed one.
     expect(within(rows[0]).getByRole("button", { name: "Confirm NP on Protel main" })).toBeInTheDocument();
     expect(within(rows[3]).getByRole("button", { name: "Withdraw confirmation of NA on Protel main" })).toBeInTheDocument();
