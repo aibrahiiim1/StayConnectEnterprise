@@ -770,6 +770,19 @@
       "supersedes": "For the PRE-LIVE appliance only: the Amendment-A1 statement that real PMS posting stays disabled until the §A9 vendor confirmations are complete, and the ONEGATE_MODULES_AND_ACQUISITION §10/§11 statement that PMS_TRANSMIT is off on PRE-LIVE.",
       "does_not_authorize": "Go-Live or cutover; real posting on any appliance other than PRE-LIVE; LIVE-mode card transactions without credentials and their own decision; treating an unconfirmed PMS answer as definite; merging PR #202 before the PRE-LIVE result is complete and verified; Root-CA, trust or topology changes.",
       "implementation": "PR #202 (unmerged), recorded by T0204: recovery and read grants for svc_edged/svc_netd; pmsd's posting socket in its own runtime directory; migrations 0101/0102 (the room-charge offer asks interface freshness through a narrow definer); room sign-in records the device's network appearance; PRE-LIVE scd/pmsd transmit flags on; one controlled real USD 1.00 posting verified (P# 1, PA OK)."
+    },
+    {
+      "id": "D48",
+      "title": "ROOM-CHARGE FINANCIAL FRESHNESS IS FEED HEALTH PLUS A PROVEN MIRROR AGE (2026-09-30). The 15-minute 'a live guest event within feed_freshness_ms' rule is removed from room-charge freshness: normal silence on a healthy Protel feed does not make room charge stale. Financial freshness requires transport CONNECTED, the PMS heartbeat within heartbeat_timeout_ms, continuity CONTINUOUS, sync IN_SYNC, no resync/published-generation inconsistency, the posting pinned to the current interface revision, all existing stay/G#/RN/posting-block/D46 pre-send checks, and a SUCCESSFUL COMPLETE RESYNC within a per-interface financial mirror maximum age (PRE-LIVE/default 4 hours). A live guest event does not by itself prove the complete mirror and does not reset that age. pmsd requests a read-only full resync at half the bound with serialization and backoff; without a successful complete resync before the bound, room charge fails closed. One definition across offer eligibility, posting creation, worker claim, abort-before-send, attempt creation and pmsd pre-wire authorisation. UNKNOWN/no-auto-retry and all D46 protections preserved.",
+      "decided_on": "2026-09-30",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-09-30",
+      "authorization_evidence": "Product-Owner approval of 2026-09-30 of the reviewed recommendation, with the correction that the financial mirror age is proven only by a successful complete resync; authorising implementation on PR #202, deployment and verification on PRE-LIVE, and governance synchronization.",
+      "supersedes": "The 0012 financial freshness axis 2 ('a valid event within feed_freshness_ms') for room charge.",
+      "does_not_authorize": "Merging PR #202; Go-Live; another real charge unless strictly necessary; any change to guest room sign-in freshness.",
+      "implementation": "PR #202 (unmerged), recorded by T0205: migration 0103; pmsd financial resync scheduler; edged setting route; Room charge page 'Guest list proof' card; tests across all six stages."
     }
   ]
 }
