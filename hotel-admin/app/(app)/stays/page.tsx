@@ -22,10 +22,24 @@
 //
 //   2. THE DETAIL IS A DIALOG. It used to append a card BELOW the table: on a full hotel the operator clicked
 //      View and nothing appeared to happen, because the detail had opened several screens further down.
+//
+// ROOM CHARGE ON A STAY (Phase-0 Amendment A1). A room charge targets the reservation (room number +
+// reservation number); there are no folios to list. The stay says whether room charge is allowed, why not, who
+// decided it, and the history of its posting blocks. Only ADMIN_BLOCK is an operator's: a site administrator on
+// an appliance where room charge is licensed can set or remove it (reason + password). PMS_NO_POST and
+// PMS_DATA_SUSPECT clear only from fresh Protel data, POSTING_UNRESOLVED only from the charge's manual review —
+// the page never offers to lift them and says who does.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { api, ListResp, Stay, StayDetail } from "@/lib/api";
+import { api, ListResp, Stay, StayDetail, StayPostingBlock } from "@/lib/api";
+import { useOperatorRoles } from "@/lib/whoami-context";
+import { moduleLicensed, surfaceAvailable, useCapabilities } from "@/lib/capabilities";
+import {
+  POSTING_BLOCK_CLEARED_BY, postingBlockWords, postingSourceWords, saveErrorMessage,
+} from "@/lib/payment-admin";
+import { ConfirmDialog } from "@/components/ui/dialog";
+import { useToast } from "@/components/ui/toast";
 import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
 import { HelpSection } from "@/components/help";
 import { Card, CardBody } from "@/components/ui/card";
@@ -38,9 +52,9 @@ import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { DetailDialog } from "@/components/ui/dialog";
 import { Explain } from "@/components/ui/tooltip";
 import { DList, Metric, SkeletonRows } from "@/components/ui/misc";
-import { formatRelative } from "@/lib/utils";
+import { formatDate, formatRelative } from "@/lib/utils";
 import { speedPair } from "@/lib/session-words";
-import { Search, Hotel, Wifi, LogIn, LogOut } from "lucide-react";
+import { Search, Hotel, Wifi, LogIn, LogOut, Ban, Undo2 } from "lucide-react";
 
 // Operator wording for the lifecycle. The wire values are unchanged; nobody outside the domain should have
 // to read SCREAMING_SNAKE to find out whether a guest is in the building.
@@ -74,6 +88,18 @@ export default function StaysPage() {
   const [detail, setDetail] = useState<StayDetail | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
+  const toast = useToast();
+  const roles = useOperatorRoles();
+  const caps = useCapabilities();
+  // The administrative block is a site administrator's, and only where room charge is licensed and its
+  // surface is served here. Anything unknown fails closed: no button.
+  const canManageRoomCharge =
+    (roles?.includes("site_admin") ?? false) &&
+    surfaceAvailable(caps, "pms-financial-onboarding") &&
+    moduleLicensed(caps, "room_charge");
+  const [blockAction, setBlockAction] = useState<"SET" | "CLEAR" | null>(null);
+  const [blockBusy, setBlockBusy] = useState(false);
+  const [blockErr, setBlockErr] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setRows(null);
@@ -119,6 +145,29 @@ export default function StaysPage() {
     try { setDetail(await api.get<StayDetail>("/pms-stays/" + id)); }
     catch (e) { setErr(e); }
     finally { setDetailBusy(false); }
+  }
+
+  async function changeAdminBlock(action: "SET" | "CLEAR", reason: string, password: string) {
+    if (!detail) return;
+    setBlockBusy(true); setBlockErr(null);
+    try {
+      const r = await api.post<{ result: string }>(
+        `/pms-financial-onboarding/stays/${encodeURIComponent(detail.id)}/admin-block`,
+        { action, reason, password },
+      );
+      setBlockAction(null);
+      toast.success(
+        r?.result === "SET" ? "Room charge blocked for this stay"
+          : r?.result === "CLEARED" ? "Administrative block removed"
+          : "There was no administrative block to remove",
+      );
+      await open(detail.id);
+      void load();
+    } catch (e) {
+      setBlockErr(saveErrorMessage(e));
+    } finally {
+      setBlockBusy(false);
+    }
   }
 
   const inHouseNoInternet =
@@ -244,7 +293,7 @@ export default function StaysPage() {
                   <TH>Stay</TH>
                   <TH>Status</TH>
                   <TH>Internet package</TH>
-                  <TH>Charges</TH>
+                  <TH>Room charge</TH>
                   <TH />
                 </TR>
               </THead>
@@ -282,14 +331,12 @@ export default function StaysPage() {
                     </TD>
                     <TD>
                       {s.posting_allowed ? (
-                        <Badge tone="ok">Can be charged</Badge>
+                        <Badge tone="ok">Allowed</Badge>
                       ) : (
                         <span className="text-xs text-muted-foreground">
-                          Closed
+                          Not allowed
                           {s.posting_block_reason && (
-                            <span className="block text-2xs">
-                              {s.posting_block_reason.replace(/_/g, " ").toLowerCase()}
-                            </span>
+                            <span className="block text-2xs">{postingBlockWords(s.posting_block_reason)}</span>
                           )}
                         </span>
                       )}
@@ -323,8 +370,8 @@ export default function StaysPage() {
               <Badge tone={toneFor(detail.status) as any}>{label(detail.status)}</Badge>
               {detail.vip && <Badge tone="warn">VIP</Badge>}
               {detail.posting_allowed
-                ? <Badge tone="ok">Charges allowed</Badge>
-                : <Badge tone="default">Charges closed</Badge>}
+                ? <Badge tone="ok">Room charge allowed</Badge>
+                : <Badge tone="default">Room charge not allowed</Badge>}
             </div>
 
             {/* THE INTERNET BLOCK. First, because it is the reason a front-desk operator opens a stay in this
@@ -389,15 +436,6 @@ export default function StaysPage() {
                 },
                 { label: "Occupants", value: String(detail.occupants) },
                 {
-                  label: "Charges to room",
-                  value: detail.posting_allowed
-                    ? "Allowed"
-                    : `Closed${detail.posting_block_reason ? ` — ${detail.posting_block_reason.replace(/_/g, " ").toLowerCase()}` : ""}`,
-                },
-                ...(detail.posting_permission_source
-                  ? [{ label: "Decided by", value: detail.posting_permission_source }]
-                  : []),
-                {
                   label: "PMS last confirmed this stay",
                   value: detail.occupancy_evidence_at
                     ? formatRelative(detail.occupancy_evidence_at)
@@ -411,47 +449,171 @@ export default function StaysPage() {
               ]}
             />
 
-            <div className="grid gap-5 sm:grid-cols-2">
-              <div>
-                <h3 className="mb-1.5 text-sm font-semibold">Guests on this stay</h3>
-                {detail.occupant_list.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    The PMS did not send guest names for this stay.
-                  </p>
-                ) : (
-                  <ul className="space-y-1 text-sm">
-                    {detail.occupant_list.map((o, i) => (
-                      <li key={i} className="flex items-center gap-2">
-                        {o.display_name ?? <span className="text-muted-foreground">Name not provided</span>}
-                        {o.is_primary && <Badge tone="info">Main guest</Badge>}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-              <div>
-                <h3 className="mb-1.5 text-sm font-semibold">Folios</h3>
-                {detail.folios.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No folio is linked to this stay.</p>
-                ) : (
-                  <ul className="space-y-1 text-sm">
-                    {detail.folios.map((f) => (
-                      <li key={f.external_folio_id} className="flex flex-wrap items-center gap-1.5">
-                        <span className="font-mono text-xs">{f.external_folio_id}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {f.folio_kind.toLowerCase()} · {f.status.toLowerCase()}
-                        </span>
-                        {f.is_default_posting_target && <Badge tone="info">Charges go here</Badge>}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
+            <div>
+              <h3 className="mb-1.5 text-sm font-semibold">Guests on this stay</h3>
+              {detail.occupant_list.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  The PMS did not send guest names for this stay.
+                </p>
+              ) : (
+                <ul className="space-y-1 text-sm">
+                  {detail.occupant_list.map((o, i) => (
+                    <li key={i} className="flex items-center gap-2">
+                      {o.display_name ?? <span className="text-muted-foreground">Name not provided</span>}
+                      {o.is_primary && <Badge tone="info">Main guest</Badge>}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
+
+            <RoomChargeSection
+              stay={detail}
+              canManage={canManageRoomCharge}
+              onBlock={() => { setBlockErr(null); setBlockAction("SET"); }}
+              onUnblock={() => { setBlockErr(null); setBlockAction("CLEAR"); }}
+            />
           </>
         )}
       </DetailDialog>
+
+      {canManageRoomCharge && (
+        <ConfirmDialog
+          open={blockAction !== null}
+          onOpenChange={(v) => { if (!v && !blockBusy) setBlockAction(null); }}
+          title={blockAction === "SET" ? "Block room charge for this stay" : "Remove the administrative block"}
+          description={blockAction === "SET"
+            ? "No room charge is offered or accepted for this stay until a site administrator removes the block. Internet access the guest already has is not affected."
+            : "Room charge becomes possible again for this stay, unless another block remains. Blocks placed by Protel or by an unresolved charge are not affected."}
+          confirmLabel={blockAction === "SET" ? "Block room charge" : "Remove administrative block"}
+          confirmVariant={blockAction === "SET" ? "danger" : "primary"}
+          busy={blockBusy}
+          error={blockErr}
+          requireReason
+          reasonMinLength={4}
+          requirePassword
+          reasonPlaceholder={blockAction === "SET" ? "e.g. Guest asked to settle in cash" : "e.g. Guest cleared with Front Office"}
+          onConfirm={({ reason, password }) => { if (blockAction) return changeAdminBlock(blockAction, reason, password); }}
+        />
+      )}
     </PageShell>
+  );
+}
+
+/** One posting block, in words: what it is, where it came from, since when, and (for an active one) who clears it. */
+function BlockLine({ b }: { b: StayPostingBlock }) {
+  const active = !b.cleared_at;
+  return (
+    <li className="space-y-0.5 text-sm">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge tone={active ? "warn" : "default"}>{active ? "Active" : "Cleared"}</Badge>
+        <span className="font-medium">{postingBlockWords(b.reason)}</span>
+        {b.pa_as_status && <span className="font-mono text-xs text-muted-foreground">PMS answer {b.pa_as_status}</span>}
+      </div>
+      <div className="text-xs text-muted-foreground">
+        Placed by {b.created_by ?? postingSourceWords(b.source).toLowerCase()} · {formatDate(b.created_at)}
+        {b.cleared_at && (
+          <> · cleared {formatDate(b.cleared_at)}{b.cleared_by ? ` by ${b.cleared_by}` : b.cleared_by_source ? ` by ${postingSourceWords(b.cleared_by_source).toLowerCase()}` : ""}</>
+        )}
+      </div>
+      {b.note && <div className="text-xs text-muted-foreground">&ldquo;{b.note}&rdquo;</div>}
+      {b.cleared_reason && <div className="text-xs text-muted-foreground">Cleared because: &ldquo;{b.cleared_reason}&rdquo;</div>}
+      {active && POSTING_BLOCK_CLEARED_BY[b.reason] && (
+        <div className="text-xs">{POSTING_BLOCK_CLEARED_BY[b.reason]}</div>
+      )}
+    </li>
+  );
+}
+
+/** Whether room charge is allowed on this stay, why not, and the posting-block history. */
+function RoomChargeSection({
+  stay, canManage, onBlock, onUnblock,
+}: {
+  stay: StayDetail;
+  canManage: boolean;
+  onBlock: () => void;
+  onUnblock: () => void;
+}) {
+  const blocks = stay.posting_blocks ?? [];
+  const active = blocks.filter((b) => !b.cleared_at);
+  const cleared = blocks.filter((b) => b.cleared_at);
+  const adminBlocked = active.some((b) => b.reason === "ADMIN_BLOCK");
+  // A reason with no matching block row (NOT_IN_HOUSE, NO_RESERVATION) comes from the PMS feed itself.
+  const reason = stay.posting_block_reason ?? null;
+  const reasonHasBlock = reason !== null && active.some((b) => b.reason === reason);
+  return (
+    <section className="space-y-3 rounded-md border border-border p-4" aria-label="Room charge">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 space-y-1">
+          <h3 className="text-sm font-semibold">Room charge</h3>
+          {stay.room_charge_open && (
+            <p className="text-sm" data-testid="room-charge-open">
+              <Badge tone="info">In progress</Badge>{" "}
+              <span className="text-muted-foreground">
+                A room charge for this stay is pending, being sent or under review. No other is accepted until it
+                concludes.
+              </span>
+            </p>
+          )}
+          {stay.posting_allowed ? (
+            <p className="text-sm">
+              <Badge tone="ok">Allowed</Badge>{" "}
+              <span className="text-muted-foreground">
+                A charge goes to this guest&rsquo;s reservation (room and reservation number together).
+              </span>
+            </p>
+          ) : (
+            <div className="space-y-0.5 text-sm">
+              <div>
+                <Badge tone="default">Not allowed</Badge>{" "}
+                <span>{postingBlockWords(reason)}</span>
+              </div>
+              {stay.posting_permission_source && (
+                <div className="text-xs text-muted-foreground">
+                  Decided by: {postingSourceWords(stay.posting_permission_source)}
+                </div>
+              )}
+              {reason && !reasonHasBlock && POSTING_BLOCK_CLEARED_BY[reason] && (
+                <div className="text-xs">{POSTING_BLOCK_CLEARED_BY[reason]}</div>
+              )}
+            </div>
+          )}
+        </div>
+        {canManage && (
+          adminBlocked ? (
+            <Button size="sm" variant="secondary" onClick={onUnblock}>
+              <Undo2 /> Remove administrative block
+            </Button>
+          ) : (
+            <Button size="sm" variant="secondary" onClick={onBlock}>
+              <Ban /> Block room charge
+            </Button>
+          )
+        )}
+      </div>
+
+      {active.length > 0 && (
+        <div>
+          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Active blocks</h4>
+          <ul className="space-y-2">{active.map((b, i) => <BlockLine key={`a${i}`} b={b} />)}</ul>
+        </div>
+      )}
+      {cleared.length > 0 && (
+        <div>
+          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Earlier blocks</h4>
+          <ul className="space-y-2">{cleared.map((b, i) => <BlockLine key={`c${i}`} b={b} />)}</ul>
+        </div>
+      )}
+      {blocks.length === 0 && (
+        <p className="text-xs text-muted-foreground">Room charge has never been blocked on this stay.</p>
+      )}
+      {canManage && active.some((b) => b.reason !== "ADMIN_BLOCK") && (
+        <p className="text-xs text-muted-foreground">
+          Only an administrative block can be removed here. Blocks from Protel clear when fresh Protel data allows
+          posting, and a block from an unresolved charge clears when that charge is decided in Manual review.
+        </p>
+      )}
+    </section>
   );
 }
 

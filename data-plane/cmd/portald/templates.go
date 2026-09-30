@@ -291,6 +291,19 @@ const landingHTML = `<!doctype html>
     </script>
     {{end}}
 
+    <!-- OPEN PACKAGE SELECTION: choose a package without signing in, or come back with a return code. Shown only
+         when the site switched it on. -->
+    <div class="open-access" id="open-access" hidden>
+      <form method="post" action="/auth/open"><button class="btn" type="submit" data-i18n="open.button" data-i18n-en="Continue without signing in">{{index .T "open.button"}}</button></form>
+      <details class="open-code"><summary data-i18n="open.code.ask" data-i18n-en="Have a return code?">{{index .T "open.code.ask"}}</summary>
+        <form method="post" action="/auth/open" autocomplete="off">
+          <label for="return-code"><span data-i18n="open.code.hint" data-i18n-en="Enter the return code you were given to continue with the same access.">{{index .T "open.code.hint"}}</span></label>
+          <input id="return-code" name="return_code" maxlength="20" autocapitalize="characters" spellcheck="false" dir="ltr" required>
+          <button class="btn btn--outline" type="submit" data-i18n="open.code.submit" data-i18n-en="Continue">{{index .T "open.code.submit"}}</button>
+        </form>
+      </details>
+    </div>
+
     <div class="tabs" id="tabs" role="tablist"></div>
     <div class="panels" id="signin-panel">
 
@@ -407,6 +420,28 @@ const landingHTML = `<!doctype html>
     </form>
   </div>
 
+  <div class="panel" id="panel-whatsapp">
+    <form data-otp="whatsapp" data-stage="dest" autocomplete="off">
+      <div class="field">
+        <label for="wa-phone"><span data-i18n="sms.dest" data-i18n-en="Phone number">{{index .T "sms.dest"}}</span></label>
+        <input id="wa-phone" name="dest" type="tel" required placeholder="+1 555 123 4567" autocomplete="tel" dir="ltr" aria-describedby="wa-hint">
+        <p class="hint" id="wa-hint" data-i18n="sms.hint" data-i18n-en="Include the country code, for example +44 20 7946 0958">{{index .T "sms.hint"}}</p>
+      </div>
+      <button class="primary" type="submit"><span data-i18n="btn.sendcode" data-i18n-en="Send code">{{index .T "btn.sendcode"}}</span></button>
+      <div class="err" id="wa-dest-err" role="alert" data-for="wa-phone"></div>
+    </form>
+    <form data-otp="whatsapp" data-stage="code" autocomplete="off" style="display:none">
+      <p class="small"><span data-i18n="otp.sent.whatsapp" data-i18n-en="We sent a 6-digit code on WhatsApp to">{{index .T "otp.sent.whatsapp"}}</span> <bdi class="dest"></bdi></p>
+      <div class="field">
+        <label for="wa-code"><span data-i18n="otp.code" data-i18n-en="Verification code">{{index .T "otp.code"}}</span></label>
+        <input id="wa-code" name="code" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" required maxlength="6" placeholder="••••••" dir="ltr">
+      </div>
+      <button class="primary" type="submit"><span data-i18n="btn.verify" data-i18n-en="Verify">{{index .T "btn.verify"}}</span></button>
+      <button type="button" class="link" data-resend data-i18n="otp.retry.sms" data-i18n-en="Use a different number">{{index .T "otp.retry.sms"}}</button>
+      <div class="err" id="wa-code-err" role="alert" data-for="wa-code"></div>
+    </form>
+  </div>
+
       <div class="alt" id="alt-methods" style="display:none"></div>
     </div>
     </div>
@@ -434,6 +469,7 @@ const landingHTML = `<!doctype html>
         <li data-help-method="account"><strong data-i18n="method.account" data-i18n-en="Personal account">{{index .T "method.account"}}</strong><span data-i18n="help.account" data-i18n-en="Enter the username and password you were given. If a voucher field is showing, switch on “Use Personal Account” first.">{{index .T "help.account"}}</span></li>
         <li data-help-method="email"><strong data-i18n="method.email" data-i18n-en="Email">{{index .T "method.email"}}</strong><span data-i18n="help.email" data-i18n-en="Enter your email address and tap Send code, then type the 6-digit code from the email. Check your spam folder if it does not arrive.">{{index .T "help.email"}}</span></li>
         <li data-help-method="sms"><strong data-i18n="method.sms" data-i18n-en="Phone">{{index .T "method.sms"}}</strong><span data-i18n="help.sms" data-i18n-en="Enter your phone number with the country code and tap Send code, then type the 6-digit code from the text message.">{{index .T "help.sms"}}</span></li>
+        <li data-help-method="whatsapp"><strong data-i18n="method.whatsapp" data-i18n-en="WhatsApp">{{index .T "method.whatsapp"}}</strong><span data-i18n="help.whatsapp" data-i18n-en="Enter your WhatsApp phone number with the country code and tap Send code, then type the 6-digit code from the WhatsApp message.">{{index .T "help.whatsapp"}}</span></li>
         <li data-help-method="social"><strong data-i18n="method.social" data-i18n-en="Social">{{index .T "method.social"}}</strong><span data-i18n="social.note" data-i18n-en="You will be redirected to the provider, then back here.">{{index .T "social.note"}}</span></li>
       </ul>
       <p class="help-fail" data-i18n="help.fail" data-i18n-en="Something not working? Please contact the site team for assistance.">{{index .T "help.fail"}}</p>
@@ -458,7 +494,7 @@ const landingHTML = `<!doctype html>
 
     const Groups = {
       guest:   { id:'guest',   label:'Client Login',  icon: ICON_DOOR, members:['pms','poststay'] },
-      account: { id:'account', label:'Account Login', icon: ICON_KEYS, members:['voucher','account','email','sms','social'] },
+      account: { id:'account', label:'Account Login', icon: ICON_KEYS, members:['voucher','account','email','sms','whatsapp','social'] },
     };
     const Tabs = {
       // Both point at the merged panel: which FORM shows is the switch's business, not the tab's.
@@ -466,6 +502,7 @@ const landingHTML = `<!doctype html>
       account: { id:'account', label:'Personal account', panel:'panel-accountlogin' },
       email:   { id:'email',   label:'Email',   panel:'panel-email' },
       sms:     { id:'sms',     label:'Phone',   panel:'panel-sms' },
+      whatsapp:{ id:'whatsapp',label:'WhatsApp',panel:'panel-whatsapp' },
       pms:     { id:'pms',     label:'Room',    panel:'panel-pms' },
       social:  { id:'social',  label:'Social',  panel:'panel-social' },
       poststay:{ id:'poststay',label:'Post-stay',panel:'panel-poststay' },
@@ -992,6 +1029,7 @@ const landingHTML = `<!doctype html>
       if (cfg.guest_account && cfg.guest_account.enabled) enabled.push('account');
       if (cfg.email   && cfg.email.enabled)   enabled.push('email');
       if (cfg.sms     && cfg.sms.enabled)     enabled.push('sms');
+      if (cfg.whatsapp && cfg.whatsapp.enabled) enabled.push('whatsapp');
       PHASE3_PMS = !!cfg.phase3_pms;
       if (cfg.pms     && cfg.pms.enabled) {
         enabled.push('pms');
@@ -1047,10 +1085,19 @@ const landingHTML = `<!doctype html>
         n.textContent = t('notice.nopackages');
         n.classList.add('show');
       }
+      // OPEN PACKAGE SELECTION is shown beside (or instead of) the sign-in methods.
+      const openOn = !!(cfg.open && cfg.open.enabled);
+      if (openOn) document.getElementById('open-access').hidden = false;
       // THE HELP SHEET explains only the ways in this hotel offers.
       document.querySelectorAll('[data-help-method]').forEach(function (el) {
         el.hidden = enabled.indexOf(el.dataset.helpMethod) < 0;
       });
+      if (enabled.length === 0 && openOn) {
+        // Open selection is the only way in: no tabs, no empty sign-in panel.
+        tabsEl.style.display = 'none';
+        document.getElementById('signin-panel').style.display = 'none';
+        return;
+      }
       if (enabled.length === 0) {
         // NO WAY IN AT ALL: said plainly, with nothing on the page that looks like it might work.
         const none = document.createElement('p');
@@ -1183,6 +1230,7 @@ const landingHTML = `<!doctype html>
     }
     attach('email');
     attach('sms');
+    attach('whatsapp');
 
     // ---- Phase 3 (Stay resolution) ----------------------------------------
     // The guest sees exactly two possible outcomes: they are in, or the server's sentence. There is
@@ -1332,6 +1380,11 @@ const landingHTML = `<!doctype html>
         window.location = (j.redirect_to || '/success') + '?s=' + encodeURIComponent(j.session_id);
         return true;
       }
+      // A PAID choice (room charge or card): go to the provider's page or to the confirmation page.
+      if (j.ok && j.redirect_to && !j.needs_choice) {
+        window.location = j.redirect_to;
+        return true;
+      }
       if (j.ok && j.needs_choice) {
         PMS_AUTH_CONTEXT = j.auth_context_id || '';
         renderPhase3Choices(j.choices || [], errEl);
@@ -1389,12 +1442,20 @@ const landingHTML = `<!doctype html>
           detail.textContent = t('unit.mbps').split('{n}').join(String(down));
           text.appendChild(detail);
         }
+        if (c.method) {
+          const price = document.createElement('span');
+          price.className = 'c-detail c-price';
+          price.dir = 'auto';
+          const mk = { NOT_REQUIRED: 'acq.connect', PMS_POSTING: 'acq.room', ONLINE_PAYMENT: 'acq.card' }[c.method] || 'acq.connect';
+          price.textContent = (c.price || t('acq.free')) + ' · ' + t(mk);
+          text.appendChild(price);
+        }
         b.appendChild(text);
         b.insertAdjacentHTML('beforeend', ICON_CHEV);
         b.addEventListener('click', async function() {
           box.querySelectorAll('button').forEach(function(x){ x.disabled = true; });
           errEl.textContent = '';
-          const ok = await submitPhase3({ auth_context_id: PMS_AUTH_CONTEXT, package_revision_id: c.package_revision_id }, errEl);
+          const ok = await submitPhase3({ auth_context_id: PMS_AUTH_CONTEXT, package_revision_id: c.package_revision_id, method: c.method || '' }, errEl);
           // On success submitPhase3 has already navigated away. On failure the offer set can no longer be
           // trusted, so it is taken down rather than re-enabled.
           if (!ok) resetPhase3ToSignIn(errEl);
@@ -1472,10 +1533,12 @@ const packagesHTML = guestHead + `
 <div class="sc-body">
   <h1 class="page-title">{{index .T "pkg.title"}}</h1>
   <p class="page-lead">{{index .T "pkg.subtitle"}}</p>
+  {{with .ReturnCode}}<div class="notice show" role="status"><strong>{{index $.T "open.code.title"}}: <span dir="ltr" class="return-code">{{.}}</span></strong><br>{{index $.T "open.code.lead"}}</div>{{end}}
   <div class="choice-list">
   {{range .Packages}}<form method="post" action="/packages/acquire">
     <input type="hidden" name="package_id" value="{{.ID}}">
-    <button class="choice" type="submit"><span class="c-text"><span class="c-name" dir="auto">{{.Name}}</span>{{if .Detail}}<span class="c-detail">{{.Detail}}</span>{{end}}</span>` + iconChevNext + `</button>
+    <input type="hidden" name="method" value="{{.Method}}">
+    <button class="choice" type="submit"><span class="c-text"><span class="c-name" dir="auto">{{.Name}}</span>{{if .Detail}}<span class="c-detail">{{.Detail}}</span>{{end}}<span class="c-detail c-price" dir="auto">{{.Price}} · {{index $.T .MethodKey}}</span></span>` + iconChevNext + `</button>
   </form>{{end}}
   </div>
 </div>` + guestFoot + `
@@ -1493,6 +1556,51 @@ const packagesHTML = guestHead + `
         }, 0);
       });
     }
+  })();
+</script>
+</body></html>`
+
+// ============================================================================================================
+// CONFIRMING A PAYMENT (the page a card provider sends the client back to)
+// ============================================================================================================
+
+// payHTML asks the portal, every few seconds, where the purchase stands. The answer comes from scd, which asks
+// the payment provider; this page proves nothing and grants nothing. It works without any cookie: the device
+// is identified from the connection.
+const payHTML = guestHead + `
+<title>{{index .T "pay.title"}}</title>
+</head><body>
+<div class="page">` + guestChrome + `
+<main class="card card--page">` + guestBrandblock + `
+<div class="sc-body">
+  <h1 class="page-title">{{index .T "pay.title"}}</h1>
+  <p class="page-lead" id="pay-lead" role="status" aria-live="polite">{{if .Cancelled}}{{index .T "pay.cancelled"}}{{else if .Room}}{{index .T "room.pending"}}{{else}}{{index .T "pay.lead"}}{{end}}</p>
+  <div class="actions" id="pay-actions" hidden><a class="btn" href="/">{{index .T "pay.again"}}</a></div>
+</div>` + guestFoot + `
+</main>
+</div>` + guestScripts + `
+<script nonce="{{.Nonce}}">
+  (function () {
+    var p = {{.PurchaseID}};
+    var lead = document.getElementById('pay-lead');
+    var words = {{.JS}};
+    var started = Date.now();
+    function show(key) { lead.textContent = words[key] || lead.textContent; }
+    function done() { document.getElementById('pay-actions').hidden = false; }
+    function poll() {
+      fetch('/api/pay/status?p=' + encodeURIComponent(p), {cache: 'no-store'})
+        .then(function (r) { return r.json(); })
+        .then(function (s) {
+          if (s.state === 'connected' && s.redirect) { show('pay.connecting'); window.location.href = s.redirect; return; }
+          if (s.state === 'failed') { show('pay.failed'); done(); return; }
+          if (s.state === 'review') { show('pay.review'); done(); return; }
+          if (s.state === 'granted' && s.activation) { show('err.connect'); done(); return; }
+          if (Date.now() - started > 20 * 60 * 1000) { show('pay.review'); done(); return; }
+          setTimeout(poll, 3000);
+        })
+        .catch(function () { setTimeout(poll, 5000); });
+    }
+    poll();
   })();
 </script>
 </body></html>`

@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stayconnect/enterprise/data-plane/internal/payment"
@@ -75,6 +76,37 @@ type settlementRow struct {
 	AmountMinor   int64  `json:"amount_minor"`
 	Currency      string `json:"currency"`
 	Exponent      int16  `json:"currency_exponent"`
+	// What an operator needs to recognise the charge: which package, when, and how the client got access
+	// (ROOM with its room number, VOUCHER, ACCOUNT, OPEN). The same facts the Stays and Sessions screens show.
+	PackageName *string    `json:"package_name"`
+	At          *time.Time `json:"at"`
+	Source      string     `json:"source"`
+	Room        *string    `json:"room"`
+}
+
+// settlementSelect reads a settlement with the context above. Every join is to a table edged already reads.
+const settlementSelect = `
+SELECT v.settlement_id::text, v.purchase_id::text, v.method, v.status, v.purchase_state,
+       coalesce(v.amount_minor,0), coalesce(v.currency,''), coalesce(v.currency_exponent,0),
+       coalesce(r.display->>'name', ip.code), coalesce(q.consumed_at, e.activated_at),
+       CASE WHEN p.stay_id IS NOT NULL THEN 'ROOM'
+            WHEN e.voucher_id IS NOT NULL OR v.method = 'PREPAID' THEN 'VOUCHER'
+            WHEN e.guest_account_id IS NOT NULL THEN 'ACCOUNT'
+            WHEN e.anonymous_subject_id IS NOT NULL THEN 'OPEN'
+            ELSE '' END,
+       st.normalized_room_number
+  FROM iam_v2.v_financial_settlements v
+  JOIN iam_v2.purchases p ON p.id = v.purchase_id
+  LEFT JOIN iam_v2.internet_package_revisions r ON r.id = p.package_revision_id
+  LEFT JOIN iam_v2.internet_packages ip ON ip.id = r.package_id
+  LEFT JOIN iam_v2.offer_quotes q ON q.id = p.offer_quote_id
+  LEFT JOIN LATERAL (SELECT en.voucher_id, en.guest_account_id, en.anonymous_subject_id, en.activated_at
+                       FROM iam_v2.entitlements en WHERE en.purchase_id = p.id LIMIT 1) e ON true
+  LEFT JOIN iam_v2.stays st ON st.id = p.stay_id`
+
+func scanSettlement(row interface{ Scan(...any) error }, e *settlementRow) error {
+	return row.Scan(&e.SettlementID, &e.PurchaseID, &e.Method, &e.Status, &e.PurchaseState,
+		&e.AmountMinor, &e.Currency, &e.Exponent, &e.PackageName, &e.At, &e.Source, &e.Room)
 }
 
 func (s *server) listSettlements(w http.ResponseWriter, r *http.Request) {
@@ -84,12 +116,9 @@ func (s *server) listSettlements(w http.ResponseWriter, r *http.Request) {
 	if v := strings.TrimSpace(r.URL.Query().Get("status")); v != "" {
 		statusArg = v
 	}
-	rows, err := s.db.Query(ctx, `
-SELECT settlement_id::text, purchase_id::text, method, status, purchase_state,
-       coalesce(amount_minor,0), coalesce(currency,''), coalesce(currency_exponent,0)
-  FROM iam_v2.v_financial_settlements
- WHERE tenant_id=$1 AND site_id=$2 AND ($3::text IS NULL OR status=$3::text)
- ORDER BY status, settlement_id LIMIT 200`, s.tenantID, s.siteID, statusArg)
+	rows, err := s.db.Query(ctx, settlementSelect+`
+ WHERE v.tenant_id=$1 AND v.site_id=$2 AND ($3::text IS NULL OR v.status=$3::text)
+ ORDER BY coalesce(q.consumed_at, e.activated_at) DESC NULLS LAST, v.settlement_id LIMIT 200`, s.tenantID, s.siteID, statusArg)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
@@ -98,8 +127,7 @@ SELECT settlement_id::text, purchase_id::text, method, status, purchase_state,
 	out := []settlementRow{}
 	for rows.Next() {
 		var e settlementRow
-		if err := rows.Scan(&e.SettlementID, &e.PurchaseID, &e.Method, &e.Status, &e.PurchaseState,
-			&e.AmountMinor, &e.Currency, &e.Exponent); err != nil {
+		if err := scanSettlement(rows, &e); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
 			return
 		}
@@ -129,13 +157,8 @@ func (s *server) getSettlement(w http.ResponseWriter, r *http.Request) {
 	var se settlementRow
 	// Scoped by tenant AND site. A settlement id from another property of the same customer must read as
 	// absent, not as forbidden -- the response is identical either way.
-	err := s.db.QueryRow(ctx, `
-SELECT settlement_id::text, purchase_id::text, method, status, purchase_state,
-       coalesce(amount_minor,0), coalesce(currency,''), coalesce(currency_exponent,0)
-  FROM iam_v2.v_financial_settlements
- WHERE tenant_id=$1 AND site_id=$2 AND settlement_id=$3::uuid`, s.tenantID, s.siteID, id).
-		Scan(&se.SettlementID, &se.PurchaseID, &se.Method, &se.Status, &se.PurchaseState,
-			&se.AmountMinor, &se.Currency, &se.Exponent)
+	err := scanSettlement(s.db.QueryRow(ctx, settlementSelect+`
+ WHERE v.tenant_id=$1 AND v.site_id=$2 AND v.settlement_id=$3::uuid`, s.tenantID, s.siteID, id), &se)
 	if err != nil {
 		jsonErr(w, http.StatusNotFound, "not_found", "no such settlement")
 		return

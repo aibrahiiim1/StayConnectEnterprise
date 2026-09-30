@@ -88,7 +88,8 @@ roomsignin(){ ip netns exec $1 curl -s -H 'Content-Type: application/json' \
 lastroom(){ sleep 1; $PSQL "SELECT result FROM iam_v2.sign_in_attempts ORDER BY occurred_at DESC LIMIT 1"; }
 
 curl -sk $R -c $CK -o /dev/null -H 'Content-Type: application/json' -d '{"email":"admin","password":"admin"}' $B/auth/login
-pkgrev(){ $PSQL "SELECT p.current_revision_id FROM iam_v2.internet_packages p JOIN iam_v2.internet_package_revisions r ON r.id=p.current_revision_id JOIN iam_v2.service_plan_revisions s ON s.id=r.service_plan_revision_id WHERE p.active AND NOT p.is_system AND r.price_minor=0 AND s.max_concurrent_devices $1 ORDER BY r.revision_no DESC LIMIT 1"; }
+pkgrev(){ $PSQL "SELECT p.current_revision_id FROM iam_v2.internet_packages p JOIN iam_v2.internet_package_revisions r ON r.id=p.current_revision_id JOIN iam_v2.service_plan_revisions s ON s.id=r.service_plan_revision_id WHERE p.active AND NOT p.is_system AND r.price_minor=0 AND 'NOT_REQUIRED' = ANY(r.settlement_methods)
+  AND s.max_concurrent_devices $1 ORDER BY r.revision_no DESC LIMIT 1"; }
 REV1=$(pkgrev "= 1"); PKG1=$($PSQL "SELECT package_id FROM iam_v2.internet_package_revisions WHERE id='$REV1'")
 REVN=$(pkgrev "> 1"); PKGN=$($PSQL "SELECT package_id FROM iam_v2.internet_package_revisions WHERE id='$REVN'")
 issue(){ local out b; out=$(curl -sk $R -b $CK -H 'Content-Type: application/json' \
@@ -104,6 +105,16 @@ account(){ local out; UN="e2e-$(date +%s%N | cut -c10-16)"
 ent_of_session(){ $PSQL "SELECT entitlement_id FROM iam_v2.sessions WHERE id='$1'"; }
 devs_on(){ $PSQL "SELECT count(*) FROM iam_v2.entitlement_device_authorizations WHERE entitlement_id='$1' AND deauthorized_at IS NULL"; }
 
+# ROOM SIGN-IN BELONGS TO HOSPITALITY. On a site not licensed for it, the room steps assert that Room sign-in is
+# REFUSED (the licence is enforced by the backend) instead of expecting it to work.
+HOSP=$(curl -sk $R -b $CK "$B/capabilities" | python3 -c 'import sys,json;m=(json.load(sys.stdin).get("modules") or {}).get("hospitality") or {};print(1 if m.get("licensed") and m.get("deployed") else 0)' 2>/dev/null)
+[ "$HOSP" = 1 ] || HOSP=0
+echo "   (hospitality licensed here: $HOSP)"
+# The room tests need Room sign-in ON. The site's own setting is restored on exit (AM0) whatever it was; the
+# site's provider and mode are kept, only "enabled" is forced for the run.
+PMSON=$(printf '%s' "$AM0" | python3 -c 'import sys,json;p=(json.load(sys.stdin).get("pms") or {});p["enabled"]=True;p.setdefault("mode","room_any");p.setdefault("provider","protel-fias");print(json.dumps({"pms":p}))')
+pmson(){ [ "$HOSP" = 1 ] && methods "$PMSON"; return 0; }
+pmson
 echo "== 0. setup: guest network $GB ($GW); 1-device package ${REV1:0:8}, multi-device package ${REVN:0:8} =="
 issue; [ -n "$CODE" ] && [ -n "$VID" ] && ok "voucher issued through Hotel Admin (${VID:0:8})" || { bad "voucher issue failed"; exit 1; }
 client ga1; CIP1=$CIP; [ -n "$CIP1" ] && ok "device 1 leased $CIP1" || { bad "device 1 got no lease"; exit 1; }
@@ -120,7 +131,11 @@ curl -sk $R -b $CK -o /dev/null -H 'Content-Type: application/json' -d '{"passwo
 loc=$(signin ga1 /auth/voucher --data-urlencode "code=$RCODE")
 [ -z "$loc" ] && ok "a revoked voucher is refused (state $($PSQL "SELECT state FROM iam_v2.vouchers WHERE id='$RVID'"))" || bad "revoked voucher -> $loc"
 pj=$(roomsignin ga1 00000 e2e-no-such-guest)
-! printf '%s' "$pj" | grep -q '"ok":true' && [ "$(lastroom)" = ROOM_NOT_IN_MIRROR ] && ok "room sign-in refused for a room that does not exist (recorded ROOM_NOT_IN_MIRROR)" || bad "non-existent room: $(lastroom) $pj"
+if [ "$HOSP" = 1 ]; then
+  ! printf '%s' "$pj" | grep -q '"ok":true' && [ "$(lastroom)" = ROOM_NOT_IN_MIRROR ] && ok "room sign-in refused for a room that does not exist (recorded ROOM_NOT_IN_MIRROR)" || bad "non-existent room: $(lastroom) $pj"
+else
+  ! printf '%s' "$pj" | grep -q '"ok":true' && ok "without Hospitality, room sign-in is refused ($(lastroom))" || bad "room sign-in accepted without Hospitality: $pj"
+fi
 issue   # the voucher the rest of the run uses (the first one is spent on nothing; it is revoked on exit)
 
 echo "== 3. Hotel Admin's method switches are enforced by the backend, not only hidden =="
@@ -128,28 +143,29 @@ methods '{"voucher":{"enabled":false}}'
 loc=$(signin ga1 /auth/voucher --data-urlencode "code=$CODE")
 [ -z "$loc" ] && says ga1 "not available" && ok "voucher switched off: a valid voucher is refused ('not available')" || bad "disabled voucher method -> '$loc'"
 [ "$($PSQL "SELECT state FROM iam_v2.vouchers WHERE id='$VID'")" = UNUSED ] && ok "the refused voucher was not touched" || bad "voucher state changed"
-methods "$AM0"
+methods "$AM0"; pmson
 account; U1=$UN; P1=$PW
 methods '{"guest_account":{"enabled":false}}'
 loc=$(signin ga1 /auth/credentials --data-urlencode "username=$U1" --data-urlencode "password=$P1")
 [ -z "$loc" ] && says ga1 "not available" && ok "accounts switched off: correct credentials are refused ('not available')" || bad "disabled account method -> '$loc'"
-methods '{"pms":{"enabled":false,"mode":"room_any","provider":"protel-fias"}}'
-pj=$(roomsignin ga1 00000 x)
-printf '%s' "$pj" | grep -q '"ok":false' && [ "$(lastroom)" = SERVICE_UNAVAILABLE ] && ok "room sign-in switched off: refused before any room lookup (recorded SERVICE_UNAVAILABLE)" || bad "disabled PMS method: $(lastroom) $pj"
-methods "$AM0"; methods '{"guest_account":{"enabled":true}}'   # accounts on for the account tests below
+if [ "$HOSP" = 1 ]; then
+  methods '{"pms":{"enabled":false,"mode":"room_any","provider":"protel-fias"}}'
+  pj=$(roomsignin ga1 00000 x)
+  printf '%s' "$pj" | grep -q '"ok":false' && [ "$(lastroom)" = SERVICE_UNAVAILABLE ] && ok "room sign-in switched off: refused before any room lookup (recorded SERVICE_UNAVAILABLE)" || bad "disabled PMS method: $(lastroom) $pj"
+fi
+methods "$AM0"; pmson; methods '{"guest_account":{"enabled":true}}'   # accounts on for the account tests below
 
-echo "== 4. voucher: sign-in -> packages -> acquisition -> activation -> enforcement -> internet =="
-loc=$(signin ga1 /auth/voucher --data-urlencode "code=$CODE")
-[ "$loc" = "/packages" ] && ok "voucher authenticated; package selection" || bad "voucher sign-in went to '$loc'"
-[ "$($PSQL "SELECT state FROM iam_v2.vouchers WHERE id='$VID'")" = UNUSED ] && ok "voucher still UNUSED after authentication alone" || bad "voucher changed state at authentication"
-ip netns exec ga1 curl -s -o /tmp/ga1.pk -b /tmp/ga1.jar "$PORTAL/packages"
-N=$(grep -c 'name="package_id"' /tmp/ga1.pk); grep -q "value=\"$PKG1\"" /tmp/ga1.pk && [ "$N" = 1 ] && ok "exactly the voucher's own package is offered" || bad "$N packages offered; own offered: $(grep -c "$PKG1" /tmp/ga1.pk)"
-loc=$(acquire ga1 "$PKG1"); SID=$(sidof "$loc")
-[ -n "$SID" ] && ok "acquisition redirected to success only after activation" || bad "acquire went to '$loc'"
+echo "== 4. voucher: one step -- sign-in redeems the card's own package, activates, enforces -> internet =="
+# A VOUCHER IS A PACKAGE, PRINTED (docs/architecture/ONEGATE_MODULES_AND_ACQUISITION.md 6.2): the code pins the
+# package revision it grants, so sign-in quotes and confirms that revision at once, burns the voucher in the same
+# transaction as the grant, and lands on success only after activation. There is no package page to tap.
+loc=$(signin ga1 /auth/voucher --data-urlencode "code=$CODE"); SID=$(sidof "$loc")
+[ -n "$SID" ] && ok "voucher sign-in went straight to success, only after activation" || bad "voucher sign-in went to '$loc'"
 VENT=$(ent_of_session "$SID")
-row=$($PSQL "SELECT s.state||'|'||e.status||'|'||pu.state FROM iam_v2.sessions s JOIN iam_v2.entitlements e ON e.id=s.entitlement_id JOIN iam_v2.purchases pu ON pu.id=e.purchase_id WHERE s.id='$SID'")
-[ "$row" = "active|ACTIVE|GRANTED" ] && ok "session active (set by netd), entitlement ACTIVE, purchase GRANTED" || bad "state $row"
-[ "$($PSQL "SELECT state FROM iam_v2.vouchers WHERE id='$VID'")" = REDEEMED ] && ok "voucher REDEEMED at acquisition" || bad "voucher not redeemed"
+row=$($PSQL "SELECT s.state||'|'||e.status||'|'||pu.state||'|'||pu.trigger FROM iam_v2.sessions s JOIN iam_v2.entitlements e ON e.id=s.entitlement_id JOIN iam_v2.purchases pu ON pu.id=e.purchase_id WHERE s.id='$SID'")
+[ "$row" = "active|ACTIVE|GRANTED|VOUCHER_REDEMPTION" ] && ok "session active (set by netd), entitlement ACTIVE, purchase GRANTED by VOUCHER_REDEMPTION" || bad "state $row"
+[ "$($PSQL "SELECT e.package_revision_id FROM iam_v2.entitlements e WHERE e.id='$VENT'")" = "$REV1" ] && ok "the entitlement is the voucher's own pinned package revision" || bad "entitlement revision differs from the voucher's"
+[ "$($PSQL "SELECT state FROM iam_v2.vouchers WHERE id='$VID'")" = REDEEMED ] && ok "voucher REDEEMED atomically with the grant" || bad "voucher not redeemed"
 [ "$(devs_on "$VENT")" = 1 ] && ok "one device authorized on the entitlement" || bad "device authorizations: $(devs_on "$VENT")"
 inset "$CIP1" && ok "enforcement: device in nft set phase3_auth_ipv4" || bad "device not enforced"
 c=$(online ga1); [ "$c" = 204 ] && ok "REAL INTERNET: $PROBE answered 204" || bad "no internet after activation ($c)"
@@ -175,8 +191,10 @@ loc=$(signin ga1 /auth/voucher --data-urlencode "code=$CODE")
 [ -z "$loc" ] && ok "a redeemed voucher whose access ended cannot sign in again (single use)" || bad "ended voucher -> '$loc'"
 
 echo "== 6. the success-page panel path (/api/commerce/*) ends enforced, or not at all =="
-issue; client ga3; CIP3=$CIP
-signin ga3 /auth/voucher --data-urlencode "code=$CODE" >/dev/null
+# Run with a client account: an account still chooses its package, so it walks the panel's quote -> confirm.
+# (A voucher no longer does -- it is granted at sign-in, section 4.)
+account; UP=$UN; PP=$PW; client ga3; CIP3=$CIP
+signin ga3 /auth/credentials --data-urlencode "username=$UP" --data-urlencode "password=$PP" >/dev/null
 j=$(ip netns exec ga3 curl -s -b /tmp/ga3.jar "$PORTAL/api/commerce/packages")
 P3=$(printf '%s' "$j" | python3 -c 'import sys,json;print((json.load(sys.stdin).get("packages") or [{}])[0].get("package_id",""))' 2>/dev/null)
 q=$(ip netns exec ga3 curl -s -b /tmp/ga3.jar -H 'Content-Type: application/json' -d "{\"package_id\":\"$P3\"}" "$PORTAL/api/commerce/quote")
@@ -192,6 +210,11 @@ loc=$(signin ga2 /auth/credentials --data-urlencode "username=$U" --data-urlenco
 [ -z "$loc" ] && ok "a wrong account password is refused" || bad "wrong password -> $loc"
 loc=$(signin ga2 /auth/credentials --data-urlencode "username=$U" --data-urlencode "password=$P")
 [ "$loc" = "/packages" ] && ok "account authenticated; package selection (no access held yet)" || bad "account sign-in -> '$loc'"
+# The multi-device steps need a FREE multi-device package open to accounts. A site whose multi-device packages
+# are all Voucher-only has none, and that is its configuration, not a defect: say so rather than fail.
+if [ -z "$REVN" ]; then
+  echo "  SKIP multi-device account steps: no active free multi-device package allows Free acquisition here"
+else
 ip netns exec ga2 curl -s -o /tmp/ga2.pk -b /tmp/ga2.jar "$PORTAL/packages"
 grep -q "value=\"$PKGN\"" /tmp/ga2.pk && ok "the multi-device package is offered to the account" || bad "multi-device package not offered"
 loc=$(acquire ga2 "$PKGN"); ASID=$(sidof "$loc"); AENT=$(ent_of_session "$ASID")
@@ -206,6 +229,7 @@ logout ga2
 loc=$(signin ga2 /auth/credentials --data-urlencode "username=$U" --data-urlencode "password=$P"); RSID=$(sidof "$loc")
 [ -n "$RSID" ] && [ "$(ent_of_session "$RSID")" = "$AENT" ] && [ "$(online ga2)" = 204 ] && ok "account device A reconnects to the same entitlement (204)" || bad "account reconnect -> '$loc'"
 logout ga2; logout ga4
+fi
 # The device limit, on the 1-device package with a fresh account.
 account; U=$UN; P=$PW
 signin ga2 /auth/credentials --data-urlencode "username=$U" --data-urlencode "password=$P" >/dev/null
@@ -217,6 +241,10 @@ loc=$(signin ga4 /auth/credentials --data-urlencode "username=$U" --data-urlenco
 logout ga2
 
 echo "== 8. PMS room sign-in: one in-house stay from the live mirror (not printed) =="
+if [ "$HOSP" = 0 ]; then
+  pj=$(roomsignin ga1 00000 x)
+  ! printf '%s' "$pj" | grep -q '"ok":true' && ok "Hospitality not licensed: the positive room test does not apply, and room sign-in is refused" || bad "room sign-in accepted without Hospitality"
+else
 methods '{"guest_account":{"enabled":false}}'
 STAY=$($PSQL "SELECT s.id FROM iam_v2.stays s WHERE s.status='IN_HOUSE' AND s.external_reservation_id IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM iam_v2.entitlements e WHERE e.stay_id=s.id)
@@ -228,7 +256,11 @@ pms(){ roomsignin $1 "$ROOM" "$2"; }
 pmschoose(){ local n=$1 j=$2 acx prv
   if printf '%s' "$j" | grep -q '"needs_choice":true'; then
     acx=$(printf '%s' "$j" | python3 -c 'import sys,json;print(json.load(sys.stdin)["auth_context_id"])')
-    prv=$(printf '%s' "$j" | python3 -c 'import sys,json;c=json.load(sys.stdin)["choices"];print(c[-1]["package_revision_id"])')
+    # ONLY EVER A FREE CHOICE. Room charge is live on an appliance that posts to the real PMS: picking a priced
+    # choice here would charge a real guest's reservation. No free choice means this step cannot run -- it fails
+    # rather than falling back to one that costs money.
+    prv=$(printf '%s' "$j" | python3 -c 'import sys,json;c=[x for x in json.load(sys.stdin)["choices"] if x.get("method")=="NOT_REQUIRED"];print(c[-1]["package_revision_id"] if c else "")')
+    [ -n "$prv" ] || { echo "  (no free choice offered to this stay; refusing to choose a priced one)" >&2; printf '%s' '{"ok":false}'; return 0; }
     j=$(ip netns exec $n curl -s -H 'Content-Type: application/json' -d "{\"auth_context_id\":\"$acx\",\"package_revision_id\":\"$prv\"}" "$PORTAL/auth/pms/phase3")
   fi
   printf '%s' "$j"; }
@@ -255,13 +287,22 @@ fi
 if [ -n "$STAY" ]; then
   ok "test stay selected (${STAY:0:8}): in house, alone in its room, no access held"
   j=$(pms ga2 "wrong-$RES"); ! printf '%s' "$j" | grep -q '"ok":true' && [ "$(lastroom)" = CREDENTIAL_MISMATCH ] && ok "the right room with the wrong verification is refused (CREDENTIAL_MISMATCH)" || bad "wrong verification: $(lastroom)"
-  j=$(pmschoose ga2 "$(pms ga2 "$RES")")
+  j0=$(pms ga2 "$RES")
+  # ROOM CHARGE IS OFFERED where it is effective and a package takes it: the verified stay's choices include a
+  # Room charge one. It is only looked at, never chosen (pmschoose picks a free choice).
+  RC=$(curl -sk $R -b $CK "$B/modules" | python3 -c 'import sys,json;d=json.load(sys.stdin);d=d.get("data",d);m=d.get("modules") or {};m=m if isinstance(m,dict) else {x.get("id"):x for x in m};print(1 if (m.get("room_charge") or {}).get("effective") else 0)' 2>/dev/null)
+  RCPKG=$($PSQL "SELECT count(*) FROM iam_v2.internet_packages p JOIN iam_v2.internet_package_revisions r ON r.id=p.current_revision_id WHERE p.active AND 'PMS_POSTING' = ANY(r.settlement_methods)")
+  if [ "$RC" = 1 ] && [ "${RCPKG:-0}" -gt 0 ]; then
+    printf '%s' "$j0" | grep -q '"method":"PMS_POSTING"' && ok "room charge is offered to the verified stay (looked at, not chosen)" || bad "room charge not offered: $(printf '%s' "$j0" | head -c 300)"
+  fi
+  j=$(pmschoose ga2 "$j0")
   PSID=$(printf '%s' "$j" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("session_id",""))' 2>/dev/null)
   PMS_ENT=$(ent_of_session "$PSID")
   [ -n "$PSID" ] && [ "$($PSQL "SELECT stay_id FROM iam_v2.entitlements WHERE id='$PMS_ENT'")" = "$STAY" ] && ok "room sign-in granted the stay's entitlement and a session" || bad "PMS grant: $(printf '%s' "$j" | head -c 200)"
   inset "$CIP2" && [ "$(online ga2)" = 204 ] && ok "room device enforced and online (204)" || bad "room device probe $(online ga2)"
   PMAX=$($PSQL "SELECT sp.max_concurrent_devices FROM iam_v2.entitlements e JOIN iam_v2.service_plan_revisions sp ON sp.id=e.service_plan_revision_id WHERE e.id='$PMS_ENT'")
   LEFT=$(caplimit)
+  [ -n "${CIP4:-}" ] || { client ga4; CIP4=$CIP; }   # created by section 7 unless its multi-device steps were skipped
   j=$(pmschoose ga4 "$(pms ga4 "$RES")")
   if [ "$LEFT" = 0 ]; then
     # The second device of the room is verified, but joining opens a new session and the licence is full.
@@ -298,6 +339,8 @@ if [ -n "$STAY" ]; then
   fi
 elif [ -z "${SKIP_ROOM:-}" ]; then
   bad "no in-house stay suitable for the positive room test"
+fi
+
 fi
 
 echo "== 9. no PMS posting, payment or financial traffic =="

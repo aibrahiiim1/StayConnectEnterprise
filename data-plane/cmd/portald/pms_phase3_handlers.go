@@ -28,10 +28,14 @@ import (
 // purpose: what scd tells portald (outcomes, offers, context ids) is strictly more than what the guest is
 // told, and one shared struct is how the extra fields eventually leak out.
 type scdOffer struct {
-	PackageRevisionID string `json:"package_revision_id"`
-	Code              string `json:"code"`
-	DownKbps          int    `json:"down_kbps"`
-	UpKbps            int    `json:"up_kbps"`
+	PackageRevisionID string   `json:"package_revision_id"`
+	Code              string   `json:"code"`
+	DownKbps          int      `json:"down_kbps"`
+	UpKbps            int      `json:"up_kbps"`
+	PriceMinor        int64    `json:"price_minor"`
+	Currency          string   `json:"currency"`
+	CurrencyExponent  int      `json:"currency_exponent"`
+	Methods           []string `json:"methods"`
 }
 
 type scdResolveResp struct {
@@ -52,6 +56,11 @@ type scdGrantResp struct {
 	FailureClass  string `json:"failure_class"`
 	SessionID     string `json:"session_id"`
 	EntitlementID string `json:"entitlement_id"`
+	// A PAID choice answers PENDING: nothing is granted until the PMS or the card provider confirms.
+	PurchaseID  string `json:"purchase_id"`
+	Method      string `json:"method"`
+	RedirectURL string `json:"redirect_url"`
+	State       string `json:"state"`
 }
 
 // The two classes portald may decide on its own. Everything else comes from scd: portald knows what it could
@@ -93,6 +102,8 @@ type phase3In struct {
 	// several offers. On the first call they are empty and the portal resolves first.
 	AuthContextID     string `json:"auth_context_id,omitempty"`
 	PackageRevisionID string `json:"package_revision_id,omitempty"`
+	// Method is the acquisition method the guest chose for a priced offer (PMS_POSTING, ONLINE_PAYMENT).
+	Method string `json:"method,omitempty"`
 }
 
 // phase3Out is the guest-facing body. On success it names their own session; on failure it is the uniform
@@ -119,6 +130,9 @@ type phase3Choice struct {
 	Code              string `json:"code"`
 	DownKbps          int    `json:"down_kbps"`
 	UpKbps            int    `json:"up_kbps"`
+	// Method and Price: one choice per (package, method) this stay may use; Price is display text.
+	Method string `json:"method"`
+	Price  string `json:"price"`
 }
 
 // authPMSPhase3 serves POST /auth/pms/phase3.
@@ -153,7 +167,7 @@ func (h *handler) authPMSPhase3(w http.ResponseWriter, r *http.Request) {
 
 	// SECOND CALL: the guest already proved who they are and has now chosen a package.
 	if strings.TrimSpace(in.AuthContextID) != "" {
-		h.phase3Grant(w, r, b, in.AuthContextID, in.PackageRevisionID, device)
+		h.phase3Grant(w, r, b, in.AuthContextID, in.PackageRevisionID, in.Method, device)
 		return
 	}
 
@@ -161,23 +175,36 @@ func (h *handler) authPMSPhase3(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return // the uniform failure has already been written
 	}
-	switch len(res.Offers) {
-	case 0:
-		// A verified guest with nothing they may be granted is a configuration problem, not an identity one.
-		// It is TECHNICAL for the same reason scd records it as its own result: their details were right, and
-		// "check your details" is advice that cannot help them.
-		h.phase3Fail(w, r, b, "verified_without_offers", classTechnical)
-	case 1:
-		h.phase3Grant(w, r, b, res.AuthContextID, res.Offers[0].PackageRevisionID, device)
-	default:
-		choices := make([]phase3Choice, 0, len(res.Offers))
-		for _, o := range res.Offers {
-			choices = append(choices, phase3Choice{
-				PackageRevisionID: o.PackageRevisionID, Code: o.Code, DownKbps: o.DownKbps, UpKbps: o.UpKbps})
+	// One choice per (offer, method): a single included offer is granted at once, as before; anything priced,
+	// or more than one way in, is the guest's choice.
+	// Prices are formatted here without the page dictionary (no extra scd hop inside the response-time
+	// budget); a free choice carries no price text and the page shows its own word for "Free".
+	noWords := map[string]string{"acq.free": ""}
+	var choices []phase3Choice
+	for _, o := range res.Offers {
+		ms := o.Methods
+		if len(ms) == 0 {
+			ms = []string{"NOT_REQUIRED"}
 		}
+		for _, m := range ms {
+			choices = append(choices, phase3Choice{PackageRevisionID: o.PackageRevisionID, Code: o.Code,
+				DownKbps: o.DownKbps, UpKbps: o.UpKbps, Method: m,
+				Price: formatPrice(noWords, o.PriceMinor, o.Currency, o.CurrencyExponent)})
+		}
+	}
+	if len(choices) == 1 && choices[0].Method == "NOT_REQUIRED" {
+		h.phase3Grant(w, r, b, res.AuthContextID, choices[0].PackageRevisionID, "", device)
+		return
+	}
+	if len(choices) > 1 || (len(choices) == 1 && choices[0].Method != "NOT_REQUIRED") {
 		writeJSONPortal(w, http.StatusOK, phase3Out{
 			OK: true, NeedsChoice: true, AuthContextID: res.AuthContextID, Choices: choices})
+		return
 	}
+	// A verified guest with nothing they may be granted is a configuration problem, not an identity one. It is
+	// TECHNICAL for the same reason scd records it as its own result: their details were right, and "check your
+	// details" is advice that cannot help them.
+	h.phase3Fail(w, r, b, "verified_without_offers", classTechnical)
 }
 
 func (h *handler) phase3Resolve(w http.ResponseWriter, r *http.Request, b *phase3Budget, in phase3In, device map[string]string) (scdResolveResp, bool) {
@@ -210,15 +237,37 @@ func (h *handler) phase3Resolve(w http.ResponseWriter, r *http.Request, b *phase
 	return out, true
 }
 
-func (h *handler) phase3Grant(w http.ResponseWriter, r *http.Request, b *phase3Budget, authContextID, packageRevID string, device map[string]string) {
-	body, _ := json.Marshal(map[string]any{
+func (h *handler) phase3Grant(w http.ResponseWriter, r *http.Request, b *phase3Budget, authContextID, packageRevID, method string, device map[string]string) {
+	req := map[string]any{
 		"auth_context_id":     authContextID,
 		"package_revision_id": packageRevID,
 		"device":              device,
-	})
+	}
+	if method != "" && method != "NOT_REQUIRED" {
+		if len(method) > 32 {
+			h.phase3Fail(w, r, b, "malformed_request", classCredential)
+			return
+		}
+		req["method"] = method
+		req["return_base"] = portalOrigin(r)
+	}
+	body, _ := json.Marshal(req)
 	var out scdGrantResp
 	if !h.scdPhase3Call(b, "http://unix/v1/phase3/auth/pms/grant", body, &out) {
 		h.phase3Fail(w, r, b, "scd_unavailable", classTechnical)
+		return
+	}
+	if out.Outcome == "PENDING" && validPurchaseID(out.PurchaseID) && out.State != "failed" {
+		// A PAID choice: the purchase awaits the PMS (room charge) or the card provider. The guest goes to
+		// the provider's page, or to the page that asks where the purchase stands.
+		to := "/pay/return?p=" + out.PurchaseID
+		if out.Method == "PMS_POSTING" {
+			to += "&m=room"
+		}
+		if strings.HasPrefix(out.RedirectURL, "https://") {
+			to = out.RedirectURL
+		}
+		writeJSONPortal(w, http.StatusOK, phase3Out{OK: true, RedirectTo: to})
 		return
 	}
 	if out.Outcome != "VERIFIED" || out.SessionID == "" {

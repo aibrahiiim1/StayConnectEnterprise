@@ -26,6 +26,7 @@ import { useToast } from "@/components/ui/toast";
 import { Plus, KeyRound, Eye, EyeOff, Pencil, Power, Users } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
 import { useOperatorRoles } from "@/lib/whoami-context";
+import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 
 function weakPassword(pw: string): boolean {
   return pw.length > 0 && pw.length < 8;
@@ -41,6 +42,9 @@ function weakPassword(pw: string): boolean {
 
 export default function GuestAccountsPage() {
   const toast = useToast();
+  // A room number is an alternative to an account only where hospitality is licensed; elsewhere the help does
+  // not describe a hotel.
+  const hospitality = moduleLicensed(useCapabilities(), "hospitality");
   const [rows, setRows] = useState<GuestAccount[] | null>(null);
   const [portalOn, setPortalOn] = useState<boolean>(false);
   const [err, setErr] = useState<string | null>(null);
@@ -254,7 +258,7 @@ export default function GuestAccountsPage() {
           <>
             <HelpSection title="What a client account is">
               <p>
-                A username and password a client can sign in with, instead of a room number or a voucher.
+                A username and password a client can sign in with, instead of {hospitality ? "a room number or a voucher" : "a voucher"}.
               </p>
             </HelpSection>
             <HelpSection title="What a client can take">

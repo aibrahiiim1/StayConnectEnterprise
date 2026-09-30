@@ -396,11 +396,21 @@ func (t *pgCommerceAdminTx) InsertPackageRevision(ctx context.Context, spec Pack
 		   (tenant_id, site_id, package_id, revision_no, service_plan_revision_id, package_type,
 		    price_minor, currency, currency_exponent, settlement_methods, duration_policy,
 		    visible_from, visible_until, display, data_allocation_policy)
-		 VALUES ($1,$2,$3,$4,$5,'GENERAL',0,'USD',2,'{NOT_REQUIRED}',$6::jsonb,$7,$8,$9::jsonb,$10::jsonb)
+		 VALUES ($1,$2,$3,$4,$5,'GENERAL',$11,$12,$13,$14::text[],$6::jsonb,$7,$8,$9::jsonb,$10::jsonb)
 		 RETURNING id::text`,
 		spec.TenantID, spec.SiteID, packageID, revNo, spec.ServicePlanRevisionID,
-		duration, spec.VisibleFrom, spec.VisibleUntil, display, alloc).Scan(&id)
+		duration, spec.VisibleFrom, spec.VisibleUntil, display, alloc,
+		spec.PriceMinor, spec.Currency, spec.CurrencyExponent, spec.AcquisitionMethods).Scan(&id)
 	return id, err
+}
+
+func (t *pgCommerceAdminTx) InsertRoomChargeMapping(ctx context.Context, tenantID, siteID, revisionID string, m RoomChargeMapping) error {
+	_, err := t.tx.Exec(ctx,
+		`INSERT INTO iam_v2.package_settlement_mappings
+		   (tenant_id, site_id, package_revision_id, pms_interface_id, mapping_revision, posting_code, tax_code, tax_rate_bp)
+		 VALUES ($1,$2,$3,$4,1,$5,NULLIF($6,''),$7)`,
+		tenantID, siteID, revisionID, m.PMSInterfaceID, m.PostingCode, m.TaxCode, m.TaxRateBP)
+	return err
 }
 
 func (t *pgCommerceAdminTx) InsertEligibilityRule(ctx context.Context, tenantID, siteID, revisionID string, rule EligibilityRule) error {
@@ -860,7 +870,28 @@ func (r *PgCommerceAdminRepository) GetPackageCurrent(ctx context.Context, tenan
 	// pgx reports a denied read when the rows are DRAINED rather than when the statement is sent, so this
 	// return is classified too. Wrapping only the Query error is what made a permission problem surface to
 	// the operator as "no current configuration for this package".
-	return c, wrapIfDenied(rows.Err())
+	if err := rows.Err(); err != nil {
+		return c, wrapIfDenied(err)
+	}
+	rows.Close()
+	// The live room-charge mappings, so the editor hands them back unchanged on the next publish.
+	mrows, err := r.db.Query(ctx,
+		`SELECT pms_interface_id::text, posting_code, COALESCE(tax_code,''), tax_rate_bp
+		   FROM iam_v2.package_settlement_mappings
+		  WHERE tenant_id=$1 AND site_id=$2 AND package_revision_id=$3 AND retired_at IS NULL
+		  ORDER BY pms_interface_id`, tenantID, siteID, c.RevisionID)
+	if err != nil {
+		return c, wrapIfDenied(err)
+	}
+	defer mrows.Close()
+	for mrows.Next() {
+		var m RoomChargeMapping
+		if err := mrows.Scan(&m.PMSInterfaceID, &m.PostingCode, &m.TaxCode, &m.TaxRateBP); err != nil {
+			return c, err
+		}
+		c.RoomChargeMappings = append(c.RoomChargeMappings, m)
+	}
+	return c, wrapIfDenied(mrows.Err())
 }
 
 // packageConditionsSQL calls the scoped reader. It is a function so commerce_admin_privilege_test.go can

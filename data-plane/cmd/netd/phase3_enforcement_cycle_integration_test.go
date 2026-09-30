@@ -82,14 +82,31 @@ func seedPendingSession(t *testing.T, p *pgxpool.Pool) cycleFixture {
 	ctx := context.Background()
 	cycleOctet++
 	f := cycleFixture{pool: p, mac: fmt.Sprintf("02:00:00:00:%02x:01", cycleOctet)}
-	f.bridge = fmt.Sprintf("br-cyc-%d", cycleOctet)
+	// On the full production schema bridge_name is globally unique and parent_interface is unique among enabled
+	// untagged networks, and several packages (and earlier runs) share one database; both names are therefore
+	// derived from a fresh uuid rather than from the process-local octet.
+	uniq := mustText(t, p, `SELECT substr(md5(gen_random_uuid()::text),1,12)`)
+	f.bridge = "b" + uniq
+	parent := "p" + uniq
 	f.ip = fmt.Sprintf("10.%d.0.7", cycleOctet)
 	subnet := fmt.Sprintf("10.%d.0.0/24", cycleOctet)
 	gateway := fmt.Sprintf("10.%d.0.1", cycleOctet)
 
-	if err := p.QueryRow(ctx, `WITH
-	  t AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
-	  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id),
+	// The stay family and the commerce intent (purchases) are controlled writers on the production schema: the
+	// whole seed runs in one transaction that opens both operations, as the grant path does.
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	for _, family := range []string{"stay", "commerce_intent"} {
+		if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation($1)`, family); err != nil {
+			t.Fatalf("open controlled operation %s: %v", family, err)
+		}
+	}
+	if err := tx.QueryRow(ctx, `WITH
+	  t AS (INSERT INTO public.tenants(id,slug,name) SELECT g, g::text, 't' FROM gen_random_uuid() g RETURNING id),
+	  si AS (INSERT INTO public.sites(id,tenant_id,code,name) SELECT g, t.id, g::text, 's' FROM t, gen_random_uuid() g RETURNING id, tenant_id),
 	  gn AS (INSERT INTO public.guest_networks
 	           (id,tenant_id,site_id,name,parent_interface,bridge_name,gateway_cidr,gateway_ip,subnet_cidr,enabled)
 	         SELECT gen_random_uuid(), si.tenant_id, si.id,'guests',$3,$4,($5::text)::inet,($6::text)::inet,($7::text)::cidr,true
@@ -117,7 +134,7 @@ func seedPendingSession(t *testing.T, p *pgxpool.Pool) cycleFixture {
 	                 ARRAY['NOT_REQUIRED']::text[],'{}'::jsonb FROM ip, spr RETURNING id)
 	SELECT (SELECT tenant_id FROM pi)::text, (SELECT site_id FROM pi)::text, (SELECT id FROM pi)::text,
 	       (SELECT id FROM st)::text, (SELECT id FROM dv)::text, (SELECT id FROM spr)::text, (SELECT id FROM ipr)::text`,
-		fmt.Sprintf("%d", cycleOctet), f.mac, "ens-cyc-"+fmt.Sprintf("%d", cycleOctet), f.bridge,
+		uniq, f.mac, parent, f.bridge,
 		gateway+"/24", gateway, subnet).
 		Scan(&f.tenant, &f.site, &f.iface, &f.stay, &f.device, &f.svcRev, &f.pkgRev); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -125,11 +142,6 @@ func seedPendingSession(t *testing.T, p *pgxpool.Pool) cycleFixture {
 	f.appliance = mustText(t, p, `SELECT gen_random_uuid()::text`)
 
 	// The entitlement and its history, through the same controlled writer the grant path uses.
-	tx, err := p.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
 	var purchase string
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.purchases
 		(tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,trigger,amount_minor,state)

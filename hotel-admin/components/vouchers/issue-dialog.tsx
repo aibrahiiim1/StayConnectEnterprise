@@ -168,7 +168,7 @@ export function IssueDialog({
               <EmptyState
                 icon={<Package />}
                 title="No internet package can be put on a card yet"
-                hint="Create and publish an active package under Internet packages, then come back to issue vouchers for it."
+                hint="Vouchers are issued only for an active package that clients may get by Voucher. Under Internet packages, tick Voucher on the package, then come back to issue cards for it."
               />
             ) : (
               <div role="radiogroup" aria-label="Package the cards grant" className="grid gap-3 sm:grid-cols-2">

@@ -115,7 +115,7 @@ func TestRESTRevision_Mews_StoredConfigShape(t *testing.T) {
 			t.Fatalf("a credential key reached the revision config: %s", b)
 		}
 	}
-	if in.SourceTimezone != "Europe/Prague" || in.CredentialMode != "AUTH_KEY" || in.FolioIdentityStrategy != "UNSET" {
+	if in.SourceTimezone != "Europe/Prague" || in.CredentialMode != "AUTH_KEY" || in.PostingTargetModel != "UNSET" {
 		t.Fatalf("revision columns not stamped: %+v", in)
 	}
 }
@@ -126,14 +126,14 @@ func TestRESTRevision_Refusals(t *testing.T) {
 		mut  func(*authorRevisionReq)
 		code string
 	}{
-		"unknown key":   {func(in *authorRevisionReq) { in.ProviderConfig["endpoint"] = "x:1" }, pmsprovider.CodeUnknownField},
-		"plain http":    {func(in *authorRevisionReq) { in.ProviderConfig["platform_url"] = "http://api.mews.com" }, pmsprovider.CodeFieldInvalid},
-		"poll too fast": {func(in *authorRevisionReq) { in.ProviderConfig["poll_interval_seconds"] = json.Number("5") }, pmsprovider.CodeFieldInvalid},
-		"fractional":    {func(in *authorRevisionReq) { in.ProviderConfig["poll_interval_seconds"] = json.Number("60.5") }, pmsprovider.CodeFieldInvalid},
-		"no timezone":   {func(in *authorRevisionReq) { in.SourceTimezone = "" }, pmsprovider.CodeFieldRequired},
-		"bad timezone":  {func(in *authorRevisionReq) { in.SourceTimezone = "Mars/Olympus" }, pmsprovider.CodeFieldInvalid},
-		"folio":         {func(in *authorRevisionReq) { in.FolioIdentityStrategy = "GLOBALLY_UNIQUE" }, "validation"},
-		"currency":      {func(in *authorRevisionReq) { in.FinancialBaseCurrency = "EUR" }, "validation"},
+		"unknown key":    {func(in *authorRevisionReq) { in.ProviderConfig["endpoint"] = "x:1" }, pmsprovider.CodeUnknownField},
+		"plain http":     {func(in *authorRevisionReq) { in.ProviderConfig["platform_url"] = "http://api.mews.com" }, pmsprovider.CodeFieldInvalid},
+		"poll too fast":  {func(in *authorRevisionReq) { in.ProviderConfig["poll_interval_seconds"] = json.Number("5") }, pmsprovider.CodeFieldInvalid},
+		"fractional":     {func(in *authorRevisionReq) { in.ProviderConfig["poll_interval_seconds"] = json.Number("60.5") }, pmsprovider.CodeFieldInvalid},
+		"no timezone":    {func(in *authorRevisionReq) { in.SourceTimezone = "" }, pmsprovider.CodeFieldRequired},
+		"bad timezone":   {func(in *authorRevisionReq) { in.SourceTimezone = "Mars/Olympus" }, pmsprovider.CodeFieldInvalid},
+		"posting target": {func(in *authorRevisionReq) { in.PostingTargetModel = "RESERVATION" }, "validation"},
+		"currency":       {func(in *authorRevisionReq) { in.FinancialBaseCurrency = "EUR" }, "validation"},
 		"bad enterprise": {func(in *authorRevisionReq) { in.ProviderConfig["enterprise_id"] = "not-a-guid" },
 			pmsprovider.CodeFieldInvalid},
 	}
@@ -231,7 +231,7 @@ func TestProvidersCatalogue_Contract(t *testing.T) {
 	// from the UI. (A hand-written list also collided with a text guard in scripts/pmsd-pg-integration.sh that
 	// looks for Phase-4 schema names: two of these request fields share their names with Phase-4 columns.)
 	fixedByValidation := map[string]bool{
-		"folio_identity_strategy": true, "normalization_version": true, "credential_mode": true,
+		"posting_target_model": true, "normalization_version": true, "credential_mode": true,
 		"read_only": true, "resync_supported": true, "provider_config": true,
 	}
 	want := map[string]bool{}

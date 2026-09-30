@@ -53,6 +53,7 @@ type activateReq struct {
 		Code     string `json:"code"`
 		Timezone string `json:"timezone"`
 		Country  string `json:"country"`
+		SiteType string `json:"site_type"`
 	} `json:"new_site"`
 	License licenseTerms `json:"license"`
 	Reason  string       `json:"reason"`
@@ -155,7 +156,7 @@ func (b *Base) activate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if in.NewSite != nil {
-		if siteID, err = createSite(ctx, tx, customerID, in.NewSite.Name, in.NewSite.Code, in.NewSite.Timezone, in.NewSite.Country); err != nil {
+		if siteID, err = createSite(ctx, tx, customerID, in.NewSite.Name, in.NewSite.Code, in.NewSite.Timezone, in.NewSite.Country, in.NewSite.SiteType); err != nil {
 			Fail(w, r, http.StatusBadRequest, CodeBadRequest, err.Error())
 			return
 		}
@@ -222,7 +223,8 @@ func (b *Base) activate(w http.ResponseWriter, r *http.Request) {
 	}
 	audit.Op(ctx, b.DB, r, "appliance.activated", "appliance", id, map[string]any{
 		"_tenant_id": customerID, "site_id": siteID, "license_id": doc.LicenseID,
-		"license_version": doc.LicenseVersion, "assignment_version": asg.Version, "cert_issued": certIssued,
+		"license_version": doc.LicenseVersion, "license_modules": doc.Modules.ModuleIDs(),
+		"assignment_version": asg.Version, "site_type": asg.SiteType, "cert_issued": certIssued,
 		"new_customer": in.NewCustomer != nil, "new_site": in.NewSite != nil, "reason": in.Reason})
 	b.completeReplacementIfPending(ctx, r, id, siteID)
 	b.writeAppliance(w, r, http.StatusOK, id)

@@ -63,6 +63,11 @@ type IssueParams struct {
 	GracePeriodDays           int // grace AFTER valid_until (new sessions still allowed)
 	OfflineGraceDays          int // cloud-staleness allowance (default 30)
 
+	// Modules are the registered module ids the licence authorises (license/modules.go). Empty = core only.
+	// They are the SOLE commercial authority of the v4 document; the legacy Features block is their
+	// projection. A preserved-terms re-issue carries exactly what is stored, never an invented module.
+	Modules []string
+
 	Status lic.DocStatus // zero value -> active
 }
 
@@ -73,7 +78,22 @@ func PreservedTerms(cur IssueParams, createdBy string) IssueParams {
 	p := cur
 	p.CreatedBy = createdBy
 	p.ValidFor = 0 // valid_until is carried explicitly; never re-derived from "now"
+	p.Modules = append([]string{}, cur.Modules...)
 	return p
+}
+
+// ModuleTerms validates module ids against the registry (unknown ids and unmet dependencies are refused) and
+// returns the signed Modules map, its Features projection and the sorted, de-duplicated ids to persist. It
+// never returns a nil map: a core-only v4 licence carries an explicit empty modules object.
+func ModuleTerms(ids []string) (lic.Modules, lic.Features, []string, error) {
+	m, err := lic.ModulesFromIDs(ids)
+	if err != nil {
+		return nil, lic.Features{}, nil, err
+	}
+	if m == nil {
+		m = lic.Modules{}
+	}
+	return m, lic.ProjectFeatures(m), m.ModuleIDs(), nil
 }
 
 // applianceBinding reads the per-appliance binding facts from the appliances row.
@@ -163,6 +183,10 @@ func (s *Service) IssueTx(ctx context.Context, tx pgx.Tx, p IssueParams) (*lic.D
 	if p.GracePeriodDays < 0 || p.GracePeriodDays > 365 {
 		return nil, nil, errors.New("grace_period_days must be between 0 and 365")
 	}
+	modules, feats, moduleIDs, err := ModuleTerms(p.Modules)
+	if err != nil {
+		return nil, nil, err
+	}
 	now := time.Now().UTC().Truncate(time.Second)
 	validFrom := p.ValidFrom.UTC().Truncate(time.Second)
 	if p.ValidFrom.IsZero() {
@@ -208,10 +232,9 @@ func (s *Service) IssueTx(ctx context.Context, tx pgx.Tx, p IssueParams) (*lic.D
          WHERE $1::uuid = ANY(appliance_ids) AND status IN ('active','suspended')
          ORDER BY issued_at DESC LIMIT 1`, p.ApplianceID).Scan(&prevID)
 
-	// All product features are available; the ONLY commercial controls are the binding, the concurrent cap,
-	// and the validity window. The legacy Limits mirror carries the cap so pre-v3 appliances enforce it.
-	feats := lic.Features{PMS: true, PaidWiFi: true, SMSOTP: true, EmailOTP: true,
-		SocialLogin: true, HA: true, WhiteLabel: true}
+	// The commercial controls are the binding, the concurrent cap, the validity window and the modules.
+	// Features is only the modules' compatibility projection. The legacy Limits mirror carries the cap so
+	// pre-v3 appliances enforce it.
 	lims := lic.Limits{MaxConcurrentGuestSessions: p.MaxConcurrentOnlineGuests}
 	applianceIDs := []string{p.ApplianceID}
 
@@ -227,6 +250,7 @@ func (s *Service) IssueTx(ctx context.Context, tx pgx.Tx, p IssueParams) (*lic.D
 		OfflineGraceDays:   p.OfflineGraceDays,
 		Features:           feats,
 		Limits:             lims,
+		Modules:            modules,
 
 		ApplianceID:            p.ApplianceID,
 		ApplianceSerial:        bind.serial,
@@ -266,19 +290,20 @@ func (s *Service) IssueTx(ctx context.Context, tx pgx.Tx, p IssueParams) (*lic.D
 	if p.Status == lic.DocSuspended {
 		rowStatus = "suspended"
 	}
-	// The queryable projection. Features, limits and the plan code live only in the signed envelope.
+	// The queryable projection, including the module ids a preserved-terms re-issue reads back. Features,
+	// limits and the plan code live only in the signed envelope.
 	if _, err := tx.Exec(ctx, `
         INSERT INTO licenses (id, tenant_id, site_id, status,
                               issued_at, valid_until, valid_from, offline_grace_days, appliance_ids,
                               signed_envelope, key_id, created_by,
                               license_version, max_concurrent_online_guests, grace_period_days,
-                              supersedes_license_id)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NULLIF($16,'')::uuid)
+                              supersedes_license_id, modules)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NULLIF($16,'')::uuid,$17)
     `, doc.LicenseID, p.TenantID, p.SiteID, rowStatus,
 		doc.IssuedAt, doc.ValidUntil, doc.ValidFrom, p.OfflineGraceDays, applianceIDs,
 		string(envRaw), env.KeyID, createdByArg,
 		doc.LicenseVersion, p.MaxConcurrentOnlineGuests, p.GracePeriodDays,
-		doc.SupersedesLicenseID); err != nil {
+		doc.SupersedesLicenseID, moduleIDs); err != nil {
 		return nil, nil, err
 	}
 	return doc, env, nil
@@ -316,13 +341,13 @@ func (s *Service) Revoke(ctx context.Context, licenseID string) error {
 
 const currentTermsColumns = `tenant_id::text, site_id::text, valid_until, valid_from, offline_grace_days,
                COALESCE(max_concurrent_online_guests, 0), COALESCE(grace_period_days, 0),
-               COALESCE(appliance_ids[1]::text, ''), status`
+               COALESCE(appliance_ids[1]::text, ''), status, COALESCE(modules, '{}')`
 
 func scanTerms(row pgx.Row) (p IssueParams, err error) {
 	var validFrom *time.Time
 	var status string
 	err = row.Scan(&p.TenantID, &p.SiteID, &p.ValidUntil, &validFrom, &p.OfflineGraceDays,
-		&p.MaxConcurrentOnlineGuests, &p.GracePeriodDays, &p.ApplianceID, &status)
+		&p.MaxConcurrentOnlineGuests, &p.GracePeriodDays, &p.ApplianceID, &status, &p.Modules)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return IssueParams{}, ErrNoLicense
 	}

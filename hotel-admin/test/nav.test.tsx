@@ -30,10 +30,14 @@ vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
 //
 // vi.mock is hoisted and file-scoped. The holder lets each test choose the answer without touching the
 // registry, and surfaceAvailable stays the real implementation.
-const CAPS: { surfaces: string[] | null } = { surfaces: null };
+const ALL_MODULES = Object.fromEntries(
+  ["hospitality", "paid_access", "card_payment", "room_charge", "social_login", "email_otp", "sms_otp", "whatsapp_otp"].map(
+    (id) => [id, { deployed: true, licensed: true, enabled: true, ready: true, effective: true, manageable: true }]),
+);
+const CAPS: { surfaces: string[] | null; modules: Record<string, unknown> | null } = { surfaces: null, modules: ALL_MODULES };
 vi.mock("@/lib/capabilities", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/capabilities")>();
-  return { ...actual, useCapabilities: () => (CAPS.surfaces === null ? null : { surfaces: CAPS.surfaces }) };
+  return { ...actual, useCapabilities: () => (CAPS.surfaces === null ? null : { surfaces: CAPS.surfaces, modules: CAPS.modules as never }) };
 });
 
 const NAV_SRC = readFileSync(join(process.cwd(), "components/nav.tsx"), "utf8");
@@ -46,7 +50,7 @@ const SERVED = [
   "guest-signin-protection", "guest-signin-restrictions", "license", "network", "notification-providers",
   "operational-alerts", "operators", "pms-events", "pms-interfaces", "pms-reconciliation", "pms-resolutions",
   "pms-roster-reconciliation", "pms-routing", "pms-source-conflicts", "pms-stays", "portal-assets",
-  "portal-branding", "reports", "sessions", "social-providers", "stripe-accounts", "usage", "walled-garden",
+  "portal-branding", "reports", "sessions", "social-providers", "payment-providers", "modules", "pms-financial-onboarding", "usage", "walled-garden",
 ];
 
 async function renderNavWith(surfaces: string[], roles: string[]) {
@@ -56,8 +60,16 @@ async function renderNavWith(surfaces: string[], roles: string[]) {
 }
 
 describe("the navigation contract", () => {
-  beforeEach(() => { CAPS.surfaces = null; });
-  afterEach(() => { cleanup(); CAPS.surfaces = null; });
+  beforeEach(() => { CAPS.surfaces = null; CAPS.modules = ALL_MODULES; });
+  afterEach(() => { cleanup(); CAPS.surfaces = null; CAPS.modules = ALL_MODULES; });
+
+  it("optional sign-in provider screens appear only with their module", async () => {
+    CAPS.modules = { hospitality: ALL_MODULES.hospitality };
+    await renderNavWith(SERVED, ["site_admin"]);
+    expect(screen.queryByText("Social login")).toBeNull();
+    expect(screen.queryByText("Email & SMS")).toBeNull();
+    expect(screen.getByText("Sign-in methods")).toBeInTheDocument();
+  });
 
   it("offers every destination the contract requires, on an appliance that serves it", async () => {
     // Data-driven from capability-contract.json, so a destination added to the contract is covered without
@@ -85,11 +97,19 @@ describe("the navigation contract", () => {
     expect(screen.queryByText("Operators")).toBeNull();
   });
 
-  it("shows nothing that needs a surface while the capability answer is still unknown", async () => {
+  it("keeps core destinations while the capability answer is still unknown", async () => {
     // Unknown must not empty the menu — a sidebar that blanks for a second on every load is its own defect —
-    // so an unknown answer is optimistic and every page enforces its own state.
+    // so an unknown answer is optimistic for the CORE, and every page enforces its own state.
     await renderNavWith([], ["site_admin"]);
-    expect(screen.getByText("Stays")).toBeInTheDocument();
+    expect(screen.getByText("Internet packages")).toBeInTheDocument();
+    expect(screen.getByText("Modules")).toBeInTheDocument();
+  });
+
+  it("offers no licence-controlled destination until the appliance says it serves it", async () => {
+    // A module the site is not licensed for is never presented, not even for the moment before the answer.
+    await renderNavWith([], ["site_admin"]);
+    expect(screen.queryByText("Stays")).toBeNull();
+    expect(screen.queryByText("Room charge")).toBeNull();
   });
 });
 

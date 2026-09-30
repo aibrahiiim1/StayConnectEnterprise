@@ -149,7 +149,8 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 			       AND ac.device_id = $5 AND ac.guest_network_id = $6
 			       AND ac.consumed_at IS NULL AND ac.expires_at > now()
 			       AND (e.voucher_id = ac.voucher_id OR e.guest_account_id = ac.guest_account_id
-			            OR e.guest_principal_id = ac.guest_principal_id)
+			            OR e.guest_principal_id = ac.guest_principal_id
+			            OR e.anonymous_subject_id = ac.anonymous_subject_id)
 			    RETURNING ac.id::text`,
 				req.AuthContextID, req.EntitlementID, s.tenID, s.siteID, req.DeviceID, nc.NetworkID).Scan(&joined)
 			if errors.Is(err, pgx.ErrNoRows) {

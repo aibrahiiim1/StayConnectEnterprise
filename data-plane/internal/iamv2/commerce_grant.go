@@ -50,6 +50,12 @@ type GrantSnapshot struct {
 	EndMode        string          `json:"end_mode"`
 	WindowEndsAt   string          `json:"window_ends_at,omitempty"`  // RFC3339 UTC, "" = none
 	DurationPolicy json.RawMessage `json:"duration_policy,omitempty"` // verbatim source policy (audit)
+	// AcquisitionMethod is how the client chose to acquire this quote (NOT_REQUIRED, PREPAID, ONLINE_PAYMENT,
+	// PMS_POSTING). Pinned at quote time and re-validated at confirm; "" on quotes that predate it means Free.
+	AcquisitionMethod string `json:"acquisition_method,omitempty"`
+	// FrozenDataQuotaBytes is a PER_STAY_NIGHT allowance resolved once from the pinned stay. The grant kernel
+	// freezes it onto the entitlement; 0 means the entitlement reads its plan revision as always.
+	FrozenDataQuotaBytes int64 `json:"frozen_data_quota_bytes,omitempty"`
 }
 
 // asInt64 accepts only INTEGER numeric JSON (json.Number without a fractional part, or an int/int64).

@@ -71,7 +71,7 @@ func readEvidence(t *testing.T, p *pgxpool.Pool, s scope, res string) evidence {
 func insertLiveReceivedAt(t *testing.T, p *pgxpool.Pool, s scope, identity, eventType, payloadJSON string,
 	receivedAt time.Time, clockSuspect bool) {
 	t.Helper()
-	if _, err := p.Exec(context.Background(), `INSERT INTO iam_v2.stay_events
+	if err := guardedExec(p, stayFamily, `INSERT INTO iam_v2.stay_events
 		(tenant_id, site_id, pms_interface_id, external_event_identity, event_type, payload,
 		 admission_kind, admission_runtime_generation, resync_generation, received_at, clock_suspect)
 		VALUES ($1,$2,$3,$4,$5,$6::jsonb,'LIVE',1,0,$7,$8)`,

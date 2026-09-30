@@ -43,6 +43,24 @@ deliberately not granted to read; their devices still appear under *By device*.
 **The Overview card** that reports PMS state is named **Property Management System**: it is the PMS, not the
 whole Hotel module.
 
+## Modules, Site Type and how a client gets a package
+
+The model is [`ONEGATE_MODULES_AND_ACQUISITION.md`](architecture/ONEGATE_MODULES_AND_ACQUISITION.md).
+
+| Use | Meaning |
+|---|---|
+| **Module** | A licence-controlled capability: *Hospitality*, *Paid access*, *Card payment*, *Room charge*, *SMS one-time code*, *Email one-time code*, *Social sign-in*, *White label*, *High availability*. A module is **available**, **licensed**, **switched on** and **ready** — four separate states, never one "enabled". |
+| **Site type** | What kind of place the site is (Hotel, Café, Office, Clinic, Campus, Venue, Compound, Beach club, Other), set in Central. Descriptive only: it suggests modules and never authorises or switches one. |
+| **Free** | A package with no price, acquired without payment (stored `NOT_REQUIRED`). |
+| **Voucher** | A package acquired with a printed or sent code that pins the package version it grants (stored `PREPAID`). OneGate records no money for it. |
+| **Card payment** | A package paid on the payment provider's own page, verified with the provider before access is granted (stored `ONLINE_PAYMENT`). |
+| **Room charge** | A package charged to a verified stay's room, granted only when the PMS confirms the posting (stored `PMS_POSTING`). |
+| **Payment methods** | The Admin Console page listing those four ways and configuring Card payment. |
+| **Choose a package without signing in** | Open package selection: a client gets a Free or card-paid package with no credential. |
+
+There is no **Cash** method, and OneGate has no refund feature: a refund or chargeback the provider reports is
+recorded, never initiated.
+
 ## The Hotel module
 
 The Admin Console's **Hotel** section holds every screen whose meaning depends on hospitality or a PMS. It

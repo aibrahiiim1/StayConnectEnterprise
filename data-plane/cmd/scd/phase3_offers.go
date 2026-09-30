@@ -18,6 +18,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -42,6 +43,13 @@ type offerDecision struct {
 	// EvidenceVersion is the occupancy-evidence version the decision was made under, carried so the offer
 	// record and the Quote can both be re-justified against the exact evidence that produced them.
 	EvidenceVersion int64
+	// Price and acquisition: what the package costs and every method THIS stay may use for it now
+	// (phase3_paid.go). An included package has exactly NOT_REQUIRED.
+	PriceMinor        int64
+	Currency          string
+	CurrencyExponent  int
+	SettlementMethods []string
+	Methods           []string
 }
 
 // stayEvidenceFor reads the authoritative Stay facts an eligibility rule may test. It reads them from the
@@ -100,7 +108,8 @@ func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID string, 
 	// remaining lever is visible_until, which dates a package rather than disabling it.
 	rows, err := p.srv.db.Query(ctx, `
 		SELECT ipr.id::text, ip.id::text, ip.code, ipr.service_plan_revision_id::text, ipr.package_type,
-		       ipr.duration_policy, COALESCE(spr.down_kbps,0), COALESCE(spr.up_kbps,0)
+		       ipr.duration_policy, COALESCE(spr.down_kbps,0), COALESCE(spr.up_kbps,0),
+		       ipr.price_minor, COALESCE(ipr.currency,''), COALESCE(ipr.currency_exponent,2), ipr.settlement_methods
 		  FROM iam_v2.internet_package_revisions ipr
 		  JOIN iam_v2.internet_packages ip
 		    ON ip.tenant_id=ipr.tenant_id AND ip.site_id=ipr.site_id AND ip.id=ipr.package_id
@@ -116,8 +125,10 @@ func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID string, 
 		   AND ipr.package_type <> 'CHECKOUT_GRACE'
 		   AND (ipr.visible_from IS NULL OR ipr.visible_from <= now())
 		   AND (ipr.visible_until IS NULL OR ipr.visible_until > now())
-		   AND ipr.price_minor = 0
-		   AND ipr.settlement_methods = ARRAY['NOT_REQUIRED']::text[]
+		   -- Included packages (price 0, acquirable as Free) and priced packages; which methods apply to THIS
+		   -- stay is decided per package below (stayMethods), so nothing is offered that would then fail.
+		   AND ((ipr.price_minor = 0 AND 'NOT_REQUIRED' = ANY (ipr.settlement_methods))
+		        OR (ipr.price_minor > 0 AND ipr.settlement_methods && ARRAY['PMS_POSTING','ONLINE_PAYMENT']::text[]))
 		   -- A STAY TAKES EACH PACKAGE REVISION ONCE (purchase_once_per_stay, contract). One it already holds
 		   -- was still offered, and choosing it failed on that index -- after the guest's details were right,
 		   -- as "we are unable to verify your stay". Same predicate as the index, so the offer set and the
@@ -146,7 +157,8 @@ func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID string, 
 	for rows.Next() {
 		var d offerDecision
 		if err := rows.Scan(&d.PackageRevisionID, &d.PackageID, &d.Code, &d.ServicePlanRevID,
-			&d.PackageType, &d.DurationPolicy, &d.DownKbps, &d.UpKbps); err != nil {
+			&d.PackageType, &d.DurationPolicy, &d.DownKbps, &d.UpKbps,
+			&d.PriceMinor, &d.Currency, &d.CurrencyExponent, &d.SettlementMethods); err != nil {
 			return nil, err
 		}
 		candidates = append(candidates, d)
@@ -180,6 +192,11 @@ func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID string, 
 			d.MatchedTierRaw, _ = json.Marshal(tier.Value)
 		}
 		d.EvidenceVersion = evidence.EvidenceVersion
+		d.Currency = strings.TrimSpace(d.Currency)
+		d.Methods = p.stayMethods(ctx, stayID, interfaceID, d)
+		if len(d.Methods) == 0 {
+			continue // nothing this stay could complete: not an offer
+		}
 		out = append(out, d)
 	}
 	return out, nil

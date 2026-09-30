@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { canRead } from "@/lib/roles";
-import { useCapabilities, surfaceAvailable } from "@/lib/capabilities";
+import { useCapabilities, surfaceAvailable, moduleLicensed } from "@/lib/capabilities";
 import { ROLE_LABELS, type SiteRole } from "@/lib/roles";
 import {
   LayoutDashboard, Users, LogOut, Monitor, Shield, ScrollText, Hotel, Send, KeyRound,
@@ -13,6 +13,7 @@ import {
   PanelLeftClose, PanelLeftOpen, ClipboardCheck, Ticket,
   DoorOpen, DoorClosed, BedDouble, Plug, Route, Inbox, ShieldCheck, UserX, Layers, ArrowLeftRight, HeartPulse, Receipt,
   LifeBuoy, Globe, AtSign, MessageSquare, Stethoscope, Bell, Hourglass, CalendarClock, ChartColumn,
+  CreditCard, BedSingle, Blocks,
 } from "lucide-react";
 import { BySemantics, OneGateLockup } from "@/components/brand";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -59,6 +60,9 @@ type Item = {
    *  live under the always-mounted "sessions" resource but need a sub-feature that most appliances do not
    *  run, so the resource name alone would keep offering a screen with nothing behind it. */
   capability?: string;
+  /** Optional licence modules this destination belongs to: shown only when at least one is licensed. An
+   *  optional sign-in provider screen is not offered to a site that cannot offer that sign-in method. */
+  modules?: string[];
   keywords?: string;
 };
 type Section = { title: string; items: Item[] };
@@ -86,6 +90,9 @@ const SECTIONS: Section[] = [
       { href: "/service-plans",     label: "Service plans",     icon: Gauge,   resource: "commercial-packages", keywords: "speed bandwidth quota devices mbps" },
       // Vouchers sit with the offer rather than with the client: a voucher IS an internet package, printed.
       { href: "/vouchers",          label: "Vouchers",          icon: Ticket,  resource: "vouchers", keywords: "code card print batch redeem scratch prepaid" },
+      // How a client may get a package here: Free, Voucher, Card payment, Room charge. Under the always-mounted
+      // "modules" resource because the page explains a method that is NOT available as much as one that is.
+      { href: "/payment-methods",   label: "Payment methods",   icon: CreditCard, resource: "modules", keywords: "card stripe paymob provider price paid free voucher room charge checkout acquisition" },
     ],
   },
   {
@@ -106,8 +113,8 @@ const SECTIONS: Section[] = [
       { href: "/sign-in-methods",  label: "Sign-in methods", icon: LogIn,    resource: "auth-methods", keywords: "room number voucher otp sms email social guest portal" },
       { href: "/portal-branding",  label: "Portal settings", icon: Paintbrush, resource: "portal-branding", keywords: "branding logo background colours terms languages translations guest portal" },
       { href: "/walled-garden",    label: "Allowed sites", icon: Globe,     resource: "walled-garden", keywords: "whitelist domains before login guest portal" },
-      { href: "/social-providers", label: "Social login",  icon: AtSign,   resource: "social-providers", keywords: "google apple facebook microsoft oauth guest portal" },
-      { href: "/notifications",    label: "Email & SMS",   icon: MessageSquare,       resource: "notification-providers", keywords: "sendgrid twilio ses otp delivery guest portal" },
+      { href: "/social-providers", label: "Social login",  icon: AtSign,   resource: "social-providers", modules: ["social_login"], keywords: "google apple facebook microsoft oauth guest portal" },
+      { href: "/notifications",    label: "Email & SMS",   icon: MessageSquare,       resource: "notification-providers", modules: ["email_otp", "sms_otp", "whatsapp_otp"], keywords: "sendgrid twilio ses otp whatsapp delivery guest portal" },
     ],
   },
   {
@@ -131,9 +138,10 @@ const SECTIONS: Section[] = [
       { href: "/guest-signin-attempts", label: "Guest sign-in attempts", icon: UserX, resource: "guest-signin-attempts", keywords: "attempt failed reason room typed credential mismatch why cannot connect client sign-in attempts hotel" },
       { href: "/checkout-grace",       label: "Grace Period",         icon: DoorOpen,  resource: "checkout-grace", keywords: "checkout grace after checkout late departure hotel" },
       { href: "/post-stay",            label: "Post-stay access",     icon: CalendarClock, resource: "post-stay-profiles", keywords: "after departure loyalty guests hotel" },
+      { href: "/room-charge",           label: "Room charge",   icon: BedSingle, resource: "pms-financial-onboarding", keywords: "charge to room reservation folio posting fias onboarding approve currency answer meanings hotel" },
       { href: "/financial-health",      label: "Charge health", icon: HeartPulse, resource: "financial-review", keywords: "charges posting queue outbox money hotel" },
       { href: "/financial-review",      label: "Manual review", icon: ClipboardCheck, resource: "financial-review", keywords: "charges failed posting decide hotel" },
-      { href: "/financial-settlements", label: "Settlements",   icon: Receipt, resource: "financial-review", keywords: "charges payment room charge card hotel" },
+      { href: "/financial-settlements", label: "Package payments", icon: Receipt, resource: "financial-review", keywords: "settlements charges payment room charge card voucher free hotel" },
       { href: "/financial-recovery",    label: "Recovery",      icon: LifeBuoy, resource: "financial-review", keywords: "charges held restore epoch hotel" },
       { href: "/pms-routing",          label: "PMS routing",          icon: Route, resource: "pms-routing", keywords: "network routing which pms per network vlan mapping hotel" },
       // RECONCILIATION IS NOT DAY-TO-DAY WORK. Both reconciliation screens are diagnostics with no action on
@@ -181,6 +189,7 @@ const SECTIONS: Section[] = [
       { href: "/audit",              label: "Activity",    icon: ScrollText, resource: "audit", keywords: "audit log who did what history trail security changes" },
       // Running it.
       { href: "/appliance",          label: "Appliance & licence", icon: ServerCog, resource: "license", keywords: "enrol claim serial activate setup cloud connection central licence capacity expiry plan offline renewal first-time" },
+      { href: "/modules",            label: "Modules",     icon: Blocks,     resource: "modules", keywords: "licence licensed features hospitality paid access card payment room charge switch on off site type" },
       { href: "/backups",            label: "Backups",     icon: Archive,    resource: "backups", keywords: "restore snapshot database retention schedule" },
       // Who may.
       { href: "/operators",          label: "Operators",   icon: Users,      resource: "operators", keywords: "staff users roles password" },
@@ -247,11 +256,17 @@ export function Nav({
 
   const visibleSections = useMemo(() => {
     const q = query.trim().toLowerCase();
+    // A SITE WITHOUT HOSPITALITY IS NOT A HOTEL, so its menu has no Hotel section at all. Records it kept from
+    // before (stays, PMS activity, sign-in history, charge review) stay reachable from the Hotel card on the
+    // Modules page, not from day-to-day navigation.
+    const hotel = moduleLicensed(caps, "hospitality");
     return SECTIONS.map((sec) => ({
       title: sec.title,
       items: sec.items.filter((it) => {
+        if (sec.title === "Hotel" && !hotel) return false;
         if (!canRead(it.resource, roles)) return false;
         if (!surfaceAvailable(caps, it.capability ?? it.resource)) return false;
+        if (it.modules && !it.modules.some((m) => moduleLicensed(caps, m))) return false;
         if (!q) return true;
         return (
           it.label.toLowerCase().includes(q) ||

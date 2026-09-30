@@ -59,8 +59,20 @@ GRANT SELECT ON iam_v2.auth_resolutions                TO svc_edged;
 GRANT SELECT ON iam_v2.stays                           TO svc_edged;
 GRANT SELECT ON iam_v2.stay_guests                     TO svc_edged;
 GRANT SELECT ON iam_v2.stay_events                     TO svc_edged;
-GRANT SELECT ON iam_v2.stay_folios                     TO svc_edged;
-GRANT SELECT ON iam_v2.folios                          TO svc_edged;
+-- Posting permission (Amendment A1, migration 0100): the stay's blocks and the pre-send aborts are readable;
+-- the only block an operator writes is ADMIN_BLOCK, through its definer.
+GRANT SELECT ON iam_v2.stay_posting_blocks             TO svc_edged;
+GRANT SELECT ON iam_v2.posting_presend_aborts          TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_admin_posting_block(uuid,uuid,uuid,text,text,uuid) TO svc_edged;
+-- Whether the stay has a room charge in progress, and why an attempt was not sent: two narrow definers instead of
+-- reads of the posting and attempt-event ledgers.
+GRANT EXECUTE ON FUNCTION iam_v2.p4_stay_room_charge_open(uuid) TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_attempt_not_sent_reason(uuid) TO svc_edged;
+-- The financial mirror maximum age (migration 0103, D48): read it and its change log; change it only through the
+-- audited definer.
+GRANT SELECT ON iam_v2.pms_interface_financial_settings, iam_v2.pms_interface_financial_setting_changes TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_financial_mirror_max_age_seconds(uuid,uuid,uuid) TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_set_financial_mirror_max_age(uuid,uuid,uuid,integer,text,uuid) TO svc_edged;
 
 -- Publishing an interface revision moves the interface's current-revision pointer and rotates its secret
 -- generation. These are the ONLY two write targets in the Phase-3 admin source, and the controlled-writer
@@ -364,3 +376,55 @@ GRANT EXECUTE ON FUNCTION iam_v2.p6_set_guest_device_self_service(uuid, uuid, uu
 -- operation on the operator surface.
 GRANT EXECUTE ON FUNCTION
   iam_v2.p4_reconcile_financial_epoch_v2(uuid, uuid, text, bigint, boolean) TO svc_edged;
+
+-- LOCAL MODULE ENABLEMENT (migration 0094). The Modules screen reads the site's switches and their history
+-- and changes a switch through one definer function that writes the change row in the same transaction. No
+-- table write privilege: the change log is mandatory by privilege.
+GRANT SELECT ON iam_v2.site_module_changes TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.site_module_get(uuid,uuid)                         TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.site_module_set(uuid,uuid,text,boolean,text,text)  TO svc_edged;
+
+-- ACQUISITION (migration 0095): usage by access source reads the anonymous subject; the Vouchers screen reads
+-- who revoked what and why.
+GRANT SELECT ON iam_v2.anonymous_access_subjects TO svc_edged;
+GRANT SELECT ON iam_v2.voucher_revocations       TO svc_edged;
+
+-- CARD PAYMENT (migration 0096): the Payment methods screen reads accounts (never their secrets), their change
+-- history, the extra payment domains and checkout state. Every write goes through scd.
+GRANT SELECT ON iam_v2.payment_provider_accounts, iam_v2.payment_provider_account_changes,
+                iam_v2.site_payment_domains, iam_v2.site_payment_domain_changes, iam_v2.payment_checkouts TO svc_edged;
+-- Card payment settings (0096): checkout expiry and reconciliation grace, read and changed through definer
+-- functions that write the change row; the history is readable.
+GRANT SELECT ON iam_v2.site_card_payment_setting_changes TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.card_payment_settings_get(uuid,uuid)                           TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.card_payment_settings_set(uuid,uuid,integer,integer,text,text) TO svc_edged;
+
+-- ROOM CHARGE (migration 0097): per-interface financial onboarding (one audited definer: new revision +
+-- approval record), readiness, the package -> posting code mapping writer, and applying an accepted review
+-- decision to its settlement (CONFIRM_POSTED settles and grants, ABANDON fails, RETRY requeues once).
+GRANT SELECT ON iam_v2.pms_financial_onboardings TO svc_edged;
+GRANT SELECT, INSERT ON iam_v2.package_settlement_mappings TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_interface_financial_onboard(uuid,uuid,uuid,uuid,text,text,smallint,text,text,uuid) TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_interface_financially_ready(uuid,uuid,uuid) TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_posting_review_apply(uuid,uuid,uuid) TO svc_edged;
+-- Vendor-confirmed PA meanings per interface (migration 0100): append-only, one audited definer.
+GRANT SELECT ON iam_v2.pms_answer_confirmations TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_answer_confirmation_record(uuid,uuid,uuid,text,text,text,text,uuid) TO svc_edged;
+-- Charge health and Recovery (Financial operations, read side). These surfaces read through edged's own login and
+-- were only ever exercised as a superuser, so on an appliance every one answered "query failed". Read access only:
+-- counts and states for health, the recovery epoch view and the open holds. Resolving a hold or releasing recovery
+-- (p4_resolve_recovery_hold, p4_release_financial_recovery) is financial authority and is NOT granted here.
+GRANT SELECT ON iam_v2.posting_outbox, iam_v2.payment_transactions, iam_v2.v_financial_recovery,
+                iam_v2.financial_recovery_holds TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_financial_recovery_active(uuid,uuid) TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_current_restore_generation(uuid,uuid) TO svc_edged;
+-- Recovery ACTIONS (Financial operations). Resolving a hold, releasing recovery and authorising a zero-attempt
+-- retry are definer functions that validate the decision, require a reason and write the author (taken by edged
+-- from the step-up-authenticated session, never the request body) into an append-only record. EXECUTE on exactly
+-- these three is the least authority the Recovery screen needs; edged is not made a financial operator.
+GRANT EXECUTE ON FUNCTION iam_v2.p4_resolve_recovery_hold(uuid,text,uuid,text) TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_release_financial_recovery(uuid,uuid,uuid,text) TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_authorize_zero_attempt_retry(uuid,uuid,text,jsonb) TO svc_edged;
+-- Reads that screens already make and that were silently denied: the emergency-grace history on Checkout grace,
+-- and the active-client count that guards deleting a client network.
+GRANT SELECT ON iam_v2.checkout_grace_audit, iam_v2.device_network_appearances TO svc_edged;

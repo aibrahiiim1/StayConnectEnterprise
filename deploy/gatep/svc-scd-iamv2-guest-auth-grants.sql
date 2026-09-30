@@ -282,3 +282,40 @@ GRANT EXECUTE ON FUNCTION iam_v2.guest_signin_note_success(uuid,uuid,macaddr)   
 -- Gate-P entry for a privilege the chain withdrew, so this cannot come back as a mirroring accident.
 GRANT EXECUTE ON FUNCTION iam_v2.p6_guest_release_device_policy(uuid, uuid)   TO svc_scd;
 GRANT SELECT          ON iam_v2.appliance_product_settings                    TO svc_scd;
+
+-- LOCAL MODULE ENABLEMENT (migration 0094). scd hosts the module resolver: it reads the site's switches and
+-- can change none of them.
+GRANT EXECUTE ON FUNCTION iam_v2.site_module_get(uuid,uuid) TO svc_scd;
+
+-- ACQUISITION (migration 0095). The voucher grant entry point beside the free one; the anonymous access
+-- subject of open package selection (create, read, and stamp its last resume -- nothing else) and its
+-- HMAC-only resume/recovery credentials.
+GRANT EXECUTE ON FUNCTION iam_v2.p4_grant_quoted_entitlement(uuid,uuid,uuid)  TO svc_scd;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_grant_voucher_entitlement(uuid,uuid,uuid) TO svc_scd;
+GRANT SELECT, INSERT              ON iam_v2.anonymous_access_subjects      TO svc_scd;
+GRANT UPDATE (last_resumed_at)    ON iam_v2.anonymous_access_subjects      TO svc_scd;
+GRANT SELECT, INSERT              ON iam_v2.anonymous_subject_credentials  TO svc_scd;
+
+-- CARD PAYMENT (migration 0096). scd owns the payment key: it saves provider accounts, seals and stores their
+-- credentials, sets the site's extra payment domains, and reads what it needs to run checkouts. Every write is
+-- a definer function that records who changed what; no table write privilege.
+GRANT EXECUTE ON FUNCTION iam_v2.payment_account_save(uuid,uuid,uuid,text,text,text,text,text,text,boolean,text,text) TO svc_scd;
+GRANT EXECUTE ON FUNCTION iam_v2.payment_account_set_secret(uuid,uuid,uuid,uuid,bytea,bytea,text,smallint,text)       TO svc_scd;
+GRANT EXECUTE ON FUNCTION iam_v2.site_payment_domains_set(uuid,uuid,text[],text,text)                                  TO svc_scd;
+GRANT SELECT ON iam_v2.payment_provider_accounts, iam_v2.payment_provider_secret_generations,
+                iam_v2.site_payment_domains, iam_v2.payment_checkouts TO svc_scd;
+GRANT EXECUTE ON FUNCTION iam_v2.card_payment_settings_get(uuid,uuid) TO svc_scd;
+
+-- ROOM CHARGE (migration 0097). scd creates a room-charge posting through one definer function that
+-- re-derives every pin from the purchase (the caller names only the settlement), and asks whether an
+-- interface is financially onboarded. No table privilege on the posting ledger.
+GRANT EXECUTE ON FUNCTION iam_v2.p4_create_room_charge_posting(uuid,uuid,uuid)  TO svc_scd;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_interface_financially_ready(uuid,uuid,uuid) TO svc_scd;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_room_charge_has_records(uuid,uuid)           TO svc_scd;
+-- Offering a room charge reads the package's posting-code mapping and asks whether the stay already has an
+-- unresolved room charge (Amendment A1: one per stay); it holds no read of the posting ledger.
+GRANT SELECT ON iam_v2.package_settlement_mappings TO svc_scd;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_stay_room_charge_open(uuid) TO svc_scd;
+-- Whether the interface is fresh enough to offer Room charge (migration 0101): one boolean through a definer, and
+-- NOT SELECT on iam_v2.pms_interface_runtime, for the reason given above p3_guest_network_mirror_state.
+GRANT EXECUTE ON FUNCTION iam_v2.p4_room_charge_interface_fresh(uuid,uuid,uuid) TO svc_scd;

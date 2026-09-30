@@ -1,0 +1,43 @@
+{
+  "transition_id": "T0201",
+  "seq": 201,
+  "timestamp": "2026-09-29T07:55:00+03:00",
+  "timestamp_derivation": "Written on receipt of the Product Owner's deferral instruction, before the commit that introduces this receipt.",
+  "record_type": "PUBLIC_CLIENT_PORTAL_DOMAIN_DEFERRED",
+  "authorisation": "Product-Owner instruction of 2026-09-29: defer the public Client Portal domain and publicly trusted certificate decision; change no portal hostname, Root CA or certificate architecture in this mission; record real social-provider validation as pending that decision and provider credentials, not as a blocker; leave PR #202 READY FOR PRODUCT OWNER TESTING, unmerged.",
+  "decision": "D45",
+  "decisions_recorded": [],
+  "delivered": [
+    "Recorded the deferral in the contract (docs/architecture/ONEGATE_MODULES_AND_ACQUISITION.md section 12) and in current_state_facts.onegate_modules_acquisition. No runtime change and no deployment."
+  ],
+  "verification": "Governance validators (project-state validate, generated blocks, current-state parity, delivery protocol). No code changed.",
+  "deployment_provenance": "Unchanged since T0200: PRE-LIVE scd, edged, portald and the Admin Console d5c3e578; pmsd db05d7ba; netd, acctd and keybootstrap 99ba9f10; Central 8e4bed4e.",
+  "financial_traffic": "NONE (no runtime action in this record).",
+  "open_inputs": [
+    "Deferred (Product Owner, future): the public Client Portal domain and its publicly trusted certificate. Real Google/Facebook/Apple/Microsoft validation is pending that decision and the provider credentials; not a blocker for PR #202.",
+    "Provider credentials for the other credential-dependent live tests: email/SMS/WhatsApp senders (Meta or Twilio approved authentication template) and Stripe/Paymob sandbox keys.",
+    "Central operator (Product Owner): licence the modules to be tested on the PRE-LIVE site (currently Site Type CAFE, no optional module).",
+    "Product Owner acceptance of PR #202 before any merge."
+  ],
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0200."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. The PR #202 corrections are delivered to PRE-LIVE for Product Owner testing on the unmerged PR. PRE-LIVE remains PRE-LIVE."
+  },
+  "state_note": "No phase, activity or acceptance state changes. The delivery is READY FOR PRODUCT OWNER TESTING, not merged and not closed.",
+  "base": "42823d9dfecd4339ac540d1b5d19ee0bf5df40f4",
+  "base_note": "Master at the time the branch was cut (the merge of PR #201).",
+  "head": "d5c3e578",
+  "head_note": "PR #202's last content commit before this governance record.",
+  "previous_delivery": "T0200",
+  "go_live": "NOT authorised. Real PMS posting and LIVE provider transactions remain prohibited."
+}

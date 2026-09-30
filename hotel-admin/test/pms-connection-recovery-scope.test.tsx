@@ -76,7 +76,7 @@ const recovery = {
 };
 
 const revisions = [
-  { id: "r1", revision_no: 1, source_timezone: "Europe/Berlin", folio_identity_strategy: "UNIQUE_PER_STAY",
+  { id: "r1", revision_no: 1, source_timezone: "Europe/Berlin", posting_target_model: "UNSET",
     normalization_version: 1, config: { endpoint: "10.0.0.1:5003" }, published: true },
 ];
 

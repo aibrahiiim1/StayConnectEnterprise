@@ -74,7 +74,10 @@ const MATRIX: Matrix = {
     usage: "read",
     "auth-methods": "write", "walled-garden": "write",
     "portal-branding": "write", "notification-providers": "write",
-    "social-providers": "write", "stripe-accounts": "write",
+    "social-providers": "write",
+    // Card payment provider accounts (site-local; credentials write-only). Modules and a PMS interface's
+    // financial onboarding are READ here: switching a module and approving room charge are site_admin only.
+    "payment-providers": "write", modules: "read", "pms-financial-onboarding": "read",
     network: "write",
     "financial-review": "read", "financial-ops": "read",
     // Vouchers: prints and cancels cards, and CHOOSES THE FORMAT -- which is a property configuration
@@ -129,7 +132,7 @@ const MATRIX: Matrix = {
   },
   payments_operator: {
     "guest-device-self-service": "read",
-    "stripe-accounts": "read",
+    "payment-providers": "read", modules: "read", "pms-financial-onboarding": "read",
     // Contract section 15 gives the charge decision to this role; edged additionally requires password
     // re-authentication at the route.
     "financial-review": "write", "financial-ops": "write",
@@ -153,7 +156,7 @@ const MATRIX: Matrix = {
     "financial-review": "read", "financial-ops": "read",
     "guest-accounts": "read", sessions: "read", usage: "read", "auth-methods": "read",
     "walled-garden": "read", "portal-branding": "read", "notification-providers": "read", "social-providers": "read",
-    "stripe-accounts": "read", audit: "read", reports: "read",
+    "payment-providers": "read", modules: "read", audit: "read", reports: "read",
     backups: "read", license: "read", network: "read", diagnostics: "read",
     // Sees which cards exist and in what state; reads no code, for the same reason
     // guest-signin-credentials is absent from this role.

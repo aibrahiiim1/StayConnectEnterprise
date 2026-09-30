@@ -111,12 +111,21 @@ cert_sans(){ openssl x509 -in "$1" -noout -ext subjectAltName 2>/dev/null | tr '
 want_sans(){ printf 'DNS:%s\nIP:%s\n' "$DNS_SAN" "$1" | sort; }
 
 # ---- candidate validation (all checks; echoes reason on failure) -------------
-validate_candidate(){ # keyfile crtfile chainfile ip
-  local k="$1" c="$2" ch="$3" ip="$4"
+validate_candidate(){ # keyfile crtfile chainfile ip [served]
+  local k="$1" c="$2" ch="$3" ip="$4" mode="${5:-candidate}"
   openssl x509 -in "$c" -noout >/dev/null 2>&1 || { echo "unparseable cert"; return 1; }
-  # signed by the expected Caddy local CA
-  openssl verify -CAfile "$CA_DIR/root.crt" -untrusted "$CA_DIR/intermediate.crt" "$c" >/dev/null 2>&1 \
-    || { echo "not signed by Caddy local CA"; return 1; }
+  # SIGNED BY THE CADDY LOCAL CA. A freshly minted CANDIDATE must chain through the CURRENT intermediate. The
+  # SERVED certificate is judged by the chain it is actually served with: Caddy rotates its seven-day
+  # intermediate (new key) about a day before the old one expires, and a leaf minted under the previous
+  # intermediate is still valid, and still verifies against the unchanged root, until the renewal replaces
+  # it. Judging it against the new intermediate reported "not signed by Caddy local CA" (exit 10) for a
+  # healthy certificate in that window. The root is the trust anchor in both cases and is never changed here.
+  if [ "$mode" = "served" ]; then
+    chain_verifies "$ch" || { echo "the served chain does not verify against the Caddy local root"; return 1; }
+  else
+    openssl verify -CAfile "$CA_DIR/root.crt" -untrusted "$CA_DIR/intermediate.crt" "$c" >/dev/null 2>&1 \
+      || { echo "not signed by Caddy local CA"; return 1; }
+  fi
   openssl x509 -in "$c" -noout -issuer 2>/dev/null | grep -q "Caddy Local Authority" \
     || { echo "unexpected issuer"; return 1; }
   # private key matches certificate
@@ -475,11 +484,22 @@ rollback(){ # ip reason
 cmd_status(){ [ -f "$STATUS_JSON" ] && cat "$STATUS_JSON" || echo '{}'; }
 
 cmd_check(){
-  local ip; ip="$(resolve_mgmt_ip)" || { write_status check_failed "mgmt IP unresolved" "" 0; echo "mgmt IP unresolved" >&2; return 20; }
-  local vr; vr="$(validate_candidate "$KEY" "$CRT" "$CHAIN" "$ip" 2>/dev/null)"
-  write_status "$([ -z "$vr" ] && echo check_ok || echo check_failed)" "$vr" "$ip" 0
-  if [ -n "$vr" ]; then echo "INVALID: $vr" >&2; return 10; fi
-  echo "OK"; return 0
+  local ip; ip="$(resolve_mgmt_ip)" || { write_status check_failed "mgmt IP unresolved" "" 0; echo "INVALID: management IP unresolved" >&2; return 20; }
+  local vr; vr="$(validate_candidate "$KEY" "$CRT" "$CHAIN" "$ip" served 2>/dev/null)"
+  if [ -z "$vr" ]; then
+    # The served chain can be valid and still be due for renewal (an intermediate inside its renewal window).
+    # Say so: it is information for the operator, not a failure, and the daily timer will act on it.
+    local why; if why="$(needs_renewal "$ip")"; then
+      :
+    else
+      why=""
+    fi
+    write_status check_ok "" "$ip" 0
+    if [ -n "$why" ]; then echo "OK (renewal due: $why)"; else echo "OK"; fi
+    return 0
+  fi
+  write_status check_failed "$vr" "$ip" 0
+  echo "INVALID: $vr" >&2; return 10
 }
 
 cmd_renew(){ # force(0/1)

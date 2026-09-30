@@ -27,6 +27,7 @@ import { Sheet, SheetContent, SheetHeader, SheetBody, SheetSection } from "@/com
 import { LiveStatus, ReadOnlyNotice, refreshingClass } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { HelpList, HelpSection } from "@/components/help";
+import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 import {
   Stethoscope, RefreshCw, RotateCw, FileText, CheckCircle2, XCircle, Server, Hourglass,
 } from "lucide-react";
@@ -112,6 +113,7 @@ const POLL_SECONDS = 10;
 
 export default function HealthPage() {
   const toast = useToast();
+  const hospitality = moduleLicensed(useCapabilities(), "hospitality");
   const [sum, setSum] = useState<Summary | null>(null);
   const [me, setMe] = useState<Whoami | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
@@ -503,7 +505,9 @@ export default function HealthPage() {
         open={restarting !== null}
         onOpenChange={(v) => { if (!v) { setRestarting(null); setRestartErr(null); } }}
         title={restarting ? `Restart ${restarting}?` : "Restart service"}
-        description={restarting ? RESTART_IMPACT[restarting] ?? GENERIC_RESTART_IMPACT : undefined}
+        description={restarting
+          ? (hospitality ? RESTART_IMPACT_HOSPITALITY[restarting] : undefined) ?? RESTART_IMPACT[restarting] ?? GENERIC_RESTART_IMPACT
+          : undefined}
         confirmLabel="Restart now"
         confirmVariant="danger"
         busy={busy === "restart:" + restarting}
@@ -535,6 +539,12 @@ const RESTART_IMPACT: Record<string, string> = {
   caddy: "Both the admin interface and the Client Portal are briefly unreachable. Clients already online stay online.",
   kea: "New devices cannot get an IP address until it returns, so new clients cannot connect. Existing devices keep their lease.",
   unbound: "Name lookups stop for clients, which looks to them like the internet is down, until it returns.",
+  postgres: "Everything stops: client sign-in and this admin both depend on the database.",
+};
+
+/** The PMS connection is named as a casualty only where hospitality is licensed: a site without one must not
+ *  be warned about a PMS it does not have. */
+const RESTART_IMPACT_HOSPITALITY: Record<string, string> = {
   postgres: "Everything stops: client sign-in, this admin and the PMS connection all depend on the database.",
 };
 const GENERIC_RESTART_IMPACT =

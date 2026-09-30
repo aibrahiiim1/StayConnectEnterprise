@@ -8,8 +8,59 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// opTx opens a transaction with the named controlled-operation families already open. On the production
+// schema the test login (postgres) no longer owns the iam_v2 openers, so a seed that writes a capability-scoped
+// family (stays -> 'stay', purchases -> 'commerce_intent', ...) must declare the operation exactly as the
+// product's own writers do. The caller commits; a deferred Rollback after Commit is a no-op.
+func opTx(t *testing.T, p *pgxpool.Pool, families ...string) pgx.Tx {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fam := range families {
+		if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation($1)`, fam); err != nil {
+			_ = tx.Rollback(ctx)
+			t.Fatalf("open controlled operation %s: %v", fam, err)
+		}
+	}
+	return tx
+}
+
+// ownerTx opens a transaction running as iam_v2_owner. It exists ONLY for SEEDS that need a raw write to an
+// owner-guarded table (accounting_records, UPDATE of a session's accounting identity). On the historical
+// scratch chain the test login WAS the owner, so this reproduces exactly what those seeds did there. It is
+// never used for the code path under test, nor where a test asserts that such a write is refused.
+func ownerTx(t *testing.T, p *pgxpool.Pool) pgx.Tx {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `SET LOCAL ROLE iam_v2_owner`); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("assume iam_v2_owner: %v", err)
+	}
+	return tx
+}
+
+// ownerExec runs one SEED statement through ownerTx and commits it.
+func ownerExec(t *testing.T, p *pgxpool.Pool, sql string, args ...any) error {
+	t.Helper()
+	ctx := context.Background()
+	tx := ownerTx(t, p)
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, sql, args...); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
 
 func pool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -36,9 +87,11 @@ func seed(t *testing.T, p *pgxpool.Pool, down, up int, quota int64) fixture {
 	t.Helper()
 	ctx := context.Background()
 	var f fixture
-	if err := p.QueryRow(ctx, `WITH
-	  t AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
-	  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id),
+	tx := opTx(t, p, "stay")
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := tx.QueryRow(ctx, `WITH
+	  t AS (INSERT INTO public.tenants(id,slug,name) SELECT g, g::text, 't' FROM gen_random_uuid() g RETURNING id),
+	  si AS (INSERT INTO public.sites(id,tenant_id,code,name) SELECT g, t.id, g::text, 's' FROM t, gen_random_uuid() g RETURNING id, tenant_id),
 	  pi AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)
 	         SELECT gen_random_uuid(), si.tenant_id, si.id,'protel-fias','ACTIVE' FROM si RETURNING id,tenant_id,site_id),
 	  st AS (INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version,last_applied_event_version)
@@ -58,6 +111,9 @@ func seed(t *testing.T, p *pgxpool.Pool, down, up int, quota int64) fixture {
 		down, up, quota).Scan(&f.tenant, &f.site, &f.iface, &f.stay, &f.device, &f.pkgRev, &f.svcRev); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
 	return f
 }
 
@@ -65,10 +121,7 @@ func seed(t *testing.T, p *pgxpool.Pool, down, up int, quota int64) fixture {
 func grant(t *testing.T, p *pgxpool.Pool, f fixture, window *time.Time, startedAt time.Time) (string, string) {
 	t.Helper()
 	ctx := context.Background()
-	tx, err := p.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tx := opTx(t, p, "commerce_intent")
 	defer func() { _ = tx.Rollback(ctx) }()
 	var pur, ent string
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.purchases
@@ -215,7 +268,7 @@ func TestIntegration_QuotaExpiryEndsWhenTheQuotaWasCrossed(t *testing.T) {
 		{crossing, 400, 400, 2}, // running total reaches 1100 >= 1000 here
 		{time.Now().Add(-time.Hour), 10, 10, 3},
 	} {
-		if _, err := p.Exec(ctx, `INSERT INTO iam_v2.accounting_records
+		if err := ownerExec(t, p, `INSERT INTO iam_v2.accounting_records
 			(tenant_id,site_id,session_id,sample_seq,bytes_up,bytes_down,sampled_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
 			f.tenant, f.site, sess, s.seq, s.up, s.down, s.at); err != nil {
 			t.Fatalf("sample %d: %v", i, err)
@@ -258,7 +311,7 @@ func TestIntegration_UnexpiredAccessIsUntouched(t *testing.T) {
 	f := seed(t, p, 5000, 2000, 1_000_000)
 	win := time.Now().Add(2 * time.Hour)
 	ent, sess := grant(t, p, f, &win, time.Now().Add(-time.Hour))
-	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.accounting_records
+	if err := ownerExec(t, p, `INSERT INTO iam_v2.accounting_records
 		(tenant_id,site_id,session_id,sample_seq,bytes_up,bytes_down,sampled_at) VALUES ($1,$2,$3,1,10,10,now())`,
 		f.tenant, f.site, sess); err != nil {
 		t.Fatal(err)
@@ -299,6 +352,21 @@ func TestIntegration_ExpiryWorksWithoutThePhase6DataCrossing(t *testing.T) {
 		WHERE n.nspname='iam_v2' AND p.proname='p6_data_crossing'`).Scan(&def); err != nil {
 		t.Skip("p6_data_crossing is not present in this schema; the fallback is already what runs")
 	}
+	// On the production schema the function is owned by iam_v2_owner and EXECUTE is granted to named roles
+	// only. Re-running its definition would leave it owned by postgres with PUBLIC EXECUTE, silently changing
+	// the privilege posture every other suite sharing this database runs against, so owner and grants are
+	// captured here and put back with it.
+	var owner string
+	var grantees []string
+	if err := p.QueryRow(ctx, `SELECT p.proowner::regrole::text,
+		       COALESCE(array_agg(CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE quote_ident(a.grantee::regrole::text) END)
+		                FILTER (WHERE a.privilege_type = 'EXECUTE' AND a.grantee <> p.proowner), '{}')
+		  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+		  LEFT JOIN LATERAL aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a ON true
+		 WHERE n.nspname='iam_v2' AND p.proname='p6_data_crossing'
+		 GROUP BY p.proowner`).Scan(&owner, &grantees); err != nil {
+		t.Fatalf("read the Phase-6 crossing's privileges: %v", err)
+	}
 
 	f := seed(t, p, 8000, 3000, 1000)
 	past := time.Now().Add(-2 * time.Hour)
@@ -310,8 +378,21 @@ func TestIntegration_ExpiryWorksWithoutThePhase6DataCrossing(t *testing.T) {
 	// Put it back whatever happens: a test that leaves the schema short of a function every later test needs
 	// is a worse failure than the one it was written to catch.
 	defer func() {
-		if _, err := p.Exec(context.Background(), def); err != nil {
+		rctx := context.Background()
+		if _, err := p.Exec(rctx, def); err != nil {
 			t.Fatalf("restore the Phase-6 crossing: %v", err)
+		}
+		restore := []string{
+			`ALTER FUNCTION iam_v2.p6_data_crossing(uuid) OWNER TO ` + owner,
+			`REVOKE ALL ON FUNCTION iam_v2.p6_data_crossing(uuid) FROM PUBLIC`,
+		}
+		for _, g := range grantees {
+			restore = append(restore, `GRANT EXECUTE ON FUNCTION iam_v2.p6_data_crossing(uuid) TO `+g)
+		}
+		for _, q := range restore {
+			if _, err := p.Exec(rctx, q); err != nil {
+				t.Fatalf("restore the Phase-6 crossing's privileges (%s): %v", q, err)
+			}
 		}
 	}()
 

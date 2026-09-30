@@ -4,7 +4,12 @@
 // grant tiers the form does not display prominently — because saving republishes all of it, and anything not
 // loaded would be silently dropped.
 
-import type { EligibilityRuleForm, GrantTierForm, DurationForm } from "@/lib/commerce-form";
+import type {
+  EligibilityRuleForm, GrantTierForm, DurationForm, AcquisitionForm, AcquisitionMethod,
+} from "@/lib/commerce-form";
+import {
+  DEFAULT_CURRENCY, bpToPct, currencyExponent, formatMajor, isAcquisitionMethod,
+} from "@/lib/commerce-form";
 
 export type PackageCurrent = {
   package_id: string; code: string; revision_id: string; revision_no: number;
@@ -15,7 +20,42 @@ export type PackageCurrent = {
   eligibility_rules?: { Type?: string; type?: string; Value?: Record<string, unknown>; value?: Record<string, unknown> }[] | null;
   grant_tiers?: { Order?: number; order?: number; Value?: Record<string, unknown>; value?: Record<string, unknown> }[] | null;
   visible_from?: string | null; visible_until?: string | null;
+  // PRICE AND HOW CLIENTS GET IT. Loaded for the same reason as the allowance policy: saving republishes all
+  // of it, so a rename must hand the price, the methods and the room-charge posting codes back unchanged.
+  price_minor?: number | null;
+  currency?: string | null;
+  currency_exponent?: number | null;
+  /** The stored acquisition methods (NOT_REQUIRED, PREPAID, ONLINE_PAYMENT, PMS_POSTING). */
+  settlement_methods?: string[] | null;
+  room_charge_mappings?: {
+    pms_interface_id: string; posting_code: string; tax_code?: string | null; tax_rate_bp?: number | null;
+  }[] | null;
 };
+
+// acquisitionToForm reads the stored price section back into the form. A revision published before prices
+// existed carries price 0 and {NOT_REQUIRED}, or nothing at all; both read as Free, which is what it is.
+// The stored exponent is kept alongside the currency so a currency this build does not list is still
+// handed back with the exponent it was published with, never a guessed one.
+export function acquisitionToForm(cur: Pick<PackageCurrent,
+  "price_minor" | "currency" | "currency_exponent" | "settlement_methods" | "room_charge_mappings">): AcquisitionForm {
+  const currency = (cur.currency ?? "").trim().toUpperCase() || DEFAULT_CURRENCY;
+  const exponent = currencyExponent(currency, cur.currency_exponent) ?? 2;
+  const minor = typeof cur.price_minor === "number" && cur.price_minor > 0 ? cur.price_minor : 0;
+  const stored = (cur.settlement_methods ?? []).filter(isAcquisitionMethod);
+  const methods: AcquisitionMethod[] = stored.length ? stored : minor > 0 ? [] : ["NOT_REQUIRED"];
+  return {
+    price: minor > 0 ? formatMajor(minor, exponent) : "0",
+    currency,
+    ...(typeof cur.currency_exponent === "number" ? { currency_exponent: cur.currency_exponent } : {}),
+    methods,
+    room_charge: (cur.room_charge_mappings ?? []).map((m) => ({
+      pms_interface_id: m.pms_interface_id,
+      posting_code: m.posting_code ?? "",
+      tax_code: m.tax_code ?? "",
+      tax_rate_pct: typeof m.tax_rate_bp === "number" ? bpToPct(m.tax_rate_bp) : "",
+    })),
+  };
+}
 
 // Go marshals these structs with capitalised keys (the fields carry no json tags), so both spellings are
 // accepted rather than assuming one. Getting this wrong would drop rules on save.

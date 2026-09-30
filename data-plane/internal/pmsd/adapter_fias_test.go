@@ -42,6 +42,16 @@ type recordingSink struct {
 	continuityFlt     int
 	initialResync     int
 	q                 *BoundedQueue
+	// finDue is what FinancialResyncDue answers (nil = never due); finAsks counts the questions.
+	finDue  *bool
+	finAsks int
+}
+
+func (s *recordingSink) FinancialResyncDue() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.finAsks++
+	return s.finDue != nil && *s.finDue
 }
 
 func (s *recordingSink) OnConnected(time.Time) error {

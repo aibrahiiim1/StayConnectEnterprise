@@ -30,11 +30,14 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
-// seedSiteActivity fills one site with one of everything the dashboard counts, and returns nothing: the point is
-// always "does the OTHER site see it", never the ids.
-func seedSiteActivity(t *testing.T, f *apiFixture, roomNumber string) {
+// seedSiteActivity fills one site with one of everything the dashboard counts. The point is always "does the
+// OTHER site see it", never the ids; it returns only the guest network's bridge name, which on the shared
+// production-shaped database is derived from the network's uuid (bridge names are globally unique).
+func seedSiteActivity(t *testing.T, f *apiFixture, roomNumber string) string {
 	t.Helper()
 	ctx := context.Background()
 
@@ -47,12 +50,15 @@ func seedSiteActivity(t *testing.T, f *apiFixture, roomNumber string) {
 	}
 
 	var stay string
-	if err := f.pool.QueryRow(ctx, `
+	// posting_allowed is computed by the database (IN_HOUSE + a reservation => postable); not set by hand.
+	if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
 		INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,
-		  external_stay_identity,normalized_room_number,status,posting_allowed,arrival,departure)
-		VALUES (gen_random_uuid(),$1,$2,$3::uuid,$4,$4,$5,'IN_HOUSE',true,current_date,current_date)
+		  external_stay_identity,normalized_room_number,status,arrival,departure)
+		VALUES (gen_random_uuid(),$1,$2,$3::uuid,$4,$4,$5,'IN_HOUSE',current_date,current_date)
 		RETURNING id::text`,
-		f.tenant, f.site, iface, "R"+roomNumber, roomNumber).Scan(&stay); err != nil {
+			f.tenant, f.site, iface, "R"+roomNumber, roomNumber).Scan(&stay)
+	}); err != nil {
 		t.Fatalf("seed stay: %v", err)
 	}
 
@@ -62,11 +68,14 @@ func seedSiteActivity(t *testing.T, f *apiFixture, roomNumber string) {
 	// event arrives unprocessed and unresolved, and only the applier may move it on. A fixture that wrote
 	// 'APPLIED' with a pre-resolved stay_id was rejected by the trigger -- correctly, and the test is corrected
 	// rather than the rule being worked around, because that rule is the Stay domain's append-only guarantee.
-	if _, err := f.pool.Exec(ctx, `
+	if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
 		INSERT INTO iam_v2.stay_events(id,tenant_id,site_id,pms_interface_id,external_event_identity,
 		  event_type,processing_status,received_at)
 		VALUES (gen_random_uuid(),$1,$2,$3::uuid,$4,'GUEST_IN','PENDING',now())`,
-		f.tenant, f.site, iface, fmt.Sprintf("EV-%s-%d", roomNumber, time.Now().UnixNano())); err != nil {
+			f.tenant, f.site, iface, fmt.Sprintf("EV-%s-%d", roomNumber, time.Now().UnixNano()))
+		return err
+	}); err != nil {
 		t.Fatalf("seed stay event: %v", err)
 	}
 
@@ -74,21 +83,18 @@ func seedSiteActivity(t *testing.T, f *apiFixture, roomNumber string) {
 	// Seeded with its ADDRESSING, not just a name: the dashboard reports the subnet and counts devices by bridge,
 	// and a name-only stub would exercise neither. It also pins the COALESCE fix -- before it, a network missing
 	// these columns was silently dropped from the response.
-	var gn string
-	if err := f.pool.QueryRow(ctx, `
-		INSERT INTO public.guest_networks(id,tenant_id,site_id,name,enabled,bridge_name,subnet_cidr,parent_interface)
-		VALUES (gen_random_uuid(),$1,$2,$3,true,$4,$5::cidr,'ens192') RETURNING id::text`,
-		f.tenant, f.site, "Guest VLAN "+roomNumber,
-		"br-guest-"+roomNumber, "10."+roomNumber[:1]+".0.0/24").Scan(&gn); err != nil {
-		t.Fatalf("seed guest network: %v", err)
-	}
-	if _, err := f.pool.Exec(ctx, `
+	gn, bridge := seedGuestNetwork(t, f.pool, f.tenant, f.site, "Guest VLAN "+roomNumber, "10."+roomNumber[:1]+".0.0/24")
+	if err := controlled(ctx, f.pool, []string{"auth_resolution"}, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
 		INSERT INTO iam_v2.auth_resolutions(id,tenant_id,site_id,guest_network_id,resolved_stay_id,
 		  outcome_code,resolved_at)
 		VALUES (gen_random_uuid(),$1,$2,$3::uuid,$4::uuid,'VERIFIED',now())`,
-		f.tenant, f.site, gn, stay); err != nil {
+			f.tenant, f.site, gn, stay)
+		return err
+	}); err != nil {
 		t.Fatalf("seed resolution: %v", err)
 	}
+	return bridge
 }
 
 // body is `do` with the status asserted, for the reads whose status is not the thing under test.
@@ -190,7 +196,7 @@ func TestIntegration_API_DashboardCountsOnlyItsOwnSite(t *testing.T) {
 // topology, which is a different and more sensitive disclosure than a count.
 func TestIntegration_API_DashboardNetworksAreSiteConfined(t *testing.T) {
 	a := newAPI(t)
-	seedSiteActivity(t, a, "301")
+	wantBridge := seedSiteActivity(t, a, "301")
 	b := newAPIIn(t, a.tenant)
 	seedSiteActivity(t, b, "302")
 
@@ -207,7 +213,9 @@ func TestIntegration_API_DashboardNetworksAreSiteConfined(t *testing.T) {
 	if cidr, _ := first["subnet_cidr"].(string); cidr != "10.3.0.0/24" {
 		t.Fatalf("networks[0].subnet_cidr = %q; the network's addressing was not reported", cidr)
 	}
-	if br, _ := first["bridge_name"].(string); br != "br-guest-301" {
+	// The bridge name is derived from the network's uuid (bridge names are globally unique on the shared
+	// production-shaped database); the assertion is unchanged in substance: it is THIS site's network's bridge.
+	if br, _ := first["bridge_name"].(string); br != wantBridge {
 		t.Fatalf("networks[0].bridge_name = %q", br)
 	}
 }
@@ -275,7 +283,9 @@ func TestIntegration_API_DashboardRefusesAnonymousCallers(t *testing.T) {
 func TestIntegration_API_DashboardRequiresTheReportsPermission(t *testing.T) {
 	// `no_such_role` is in no row of rolePerms, so permFor answers false for every resource. It stands in for
 	// any future role that has not been granted reports.
-	f := newAPI(t, "no_such_role")
+	// It was `no_such_role`; the production operator_roles CHECK refuses an unknown role, so the fixture uses
+	// `billing`, a role the database accepts but which has no row in rolePerms -- the same "no claim" case.
+	f := newAPI(t, "billing")
 	code, _ := f.do(t, http.MethodGet, "/reports/dashboard", nil)
 	if code != http.StatusForbidden {
 		t.Fatalf("a role with no reports claim read the dashboard with status %d; want 403", code)
@@ -295,12 +305,7 @@ func TestIntegration_API_DashboardRequiresTheReportsPermission(t *testing.T) {
 
 func (f *apiFixture) seedNet(t *testing.T, name string) string {
 	t.Helper()
-	var id string
-	if err := f.pool.QueryRow(context.Background(), `
-		INSERT INTO public.guest_networks(id,tenant_id,site_id,name,enabled)
-		VALUES (gen_random_uuid(),$1,$2,$3,true) RETURNING id::text`, f.tenant, f.site, name).Scan(&id); err != nil {
-		t.Fatalf("seed guest network %q: %v", name, err)
-	}
+	id, _ := seedGuestNetwork(t, f.pool, f.tenant, f.site, name, "10.250.0.0/24")
 	return id
 }
 

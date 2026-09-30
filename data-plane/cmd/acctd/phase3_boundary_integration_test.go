@@ -295,7 +295,8 @@ func TestIntegration_Acct_NoBindingIsRefusedNotAttributedToTheCurrentOne(t *test
 	// close the open interval, leaving the session bound to nothing at all. Closing the latest open interval
 	// once is the only mutation the append-only history permits, and it is exactly what a termination does.
 	gap := time.Now()
-	if _, err := f.pool.Exec(ctx, `
+	// (session_entitlement_bindings is the 'session_binding' controlled family on the production schema.)
+	if err := opExec(t, f.pool, "session_binding", `
 		UPDATE iam_v2.session_entitlement_bindings SET bound_until=$2
 		 WHERE session_id=$1 AND bound_until IS NULL`, sess, gap.Add(-time.Minute)); err != nil {
 		t.Fatalf("close the binding: %v", err)
@@ -443,7 +444,8 @@ func TestIntegration_Acct_ForgedRowCannotBeAttributedThroughTheCurrentPointer(t 
 	// close the interval so the session is bound to NOTHING at the forged sample's time, while
 	// sessions.entitlement_id still points at the entitlement — precisely the state the old fallback used.
 	gap := time.Now()
-	if _, err := f.pool.Exec(ctx, `
+	// (session_entitlement_bindings is the 'session_binding' controlled family on the production schema.)
+	if err := opExec(t, f.pool, "session_binding", `
 		UPDATE iam_v2.session_entitlement_bindings SET bound_until=$2
 		 WHERE session_id=$1 AND bound_until IS NULL`, sess, gap.Add(-time.Minute)); err != nil {
 		t.Fatalf("close the binding: %v", err)
@@ -702,13 +704,19 @@ func TestIntegration_Acct_DelayedDeliveryCannotRewriteAFrozenWindow(t *testing.T
 
 	// freeze the decision as a boundary would
 	boundary := t0.Add(10 * time.Minute)
+	// (entitlement_boundary_watermarks is the 'checkout_conversion' controlled family on the production schema.)
 	var wm string
-	if err := f.pool.QueryRow(ctx, `
+	wtx := opTx(t, f.pool, "checkout_conversion")
+	defer func() { _ = wtx.Rollback(ctx) }()
+	if err := wtx.QueryRow(ctx, `
 		INSERT INTO iam_v2.entitlement_boundary_watermarks
 		  (tenant_id,site_id,entitlement_id,boundary_at,bytes_up,bytes_down,records_counted)
 		SELECT $1,$2,$3,$4,u.bytes_up,u.bytes_down,u.records
 		  FROM iam_v2.entitlement_usage_bytes($3,$4) u RETURNING id::text`,
 		f.tenant, f.site, ent, boundary).Scan(&wm); err != nil {
+		t.Fatalf("freeze: %v", err)
+	}
+	if err := wtx.Commit(ctx); err != nil {
 		t.Fatalf("freeze: %v", err)
 	}
 	var frozenUp, frozenDown int64

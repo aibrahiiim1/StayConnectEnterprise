@@ -35,14 +35,17 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/appliancecert"
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/data-plane/internal/buildprofile"
+	"github.com/stayconnect/enterprise/data-plane/internal/deployment"
 	"github.com/stayconnect/enterprise/data-plane/internal/hwid"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/identity"
 	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
 	"github.com/stayconnect/enterprise/data-plane/internal/mail"
 	"github.com/stayconnect/enterprise/data-plane/internal/metrics"
+	"github.com/stayconnect/enterprise/data-plane/internal/modules"
 	"github.com/stayconnect/enterprise/data-plane/internal/nft"
 	"github.com/stayconnect/enterprise/data-plane/internal/notifyloader"
+	"github.com/stayconnect/enterprise/data-plane/internal/otp"
 	"github.com/stayconnect/enterprise/data-plane/internal/otpkey"
 	"github.com/stayconnect/enterprise/data-plane/internal/pms"
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsloader"
@@ -54,6 +57,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
 	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
 	"github.com/stayconnect/enterprise/data-plane/internal/throttle"
+	"github.com/stayconnect/enterprise/data-plane/internal/whatsapp"
 	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 	lic "github.com/stayconnect/enterprise/license"
 )
@@ -66,6 +70,8 @@ type cfg struct {
 	ApplianceID string
 	MailLogPath string
 	SMSLogPath  string
+	// WhatsAppLogPath is the development stub's file for WhatsApp codes (used only when no provider is set).
+	WhatsAppLogPath string
 
 	// Appliance identity. identity.json (appliance id + public key) and the
 	// private key live in IdentityDir. A factory-clean appliance registers itself
@@ -111,13 +117,14 @@ type cfg struct {
 
 func loadCfg() cfg {
 	return cfg{
-		SocketPath:  envOr("SCD_SOCKET", "/run/stayconnect/scd.sock"),
-		DBURL:       envOr("SCD_DB_URL", "postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect?sslmode=disable"),
-		TenantID:    os.Getenv("SCD_TENANT_ID"),
-		SiteID:      os.Getenv("SCD_SITE_ID"),
-		ApplianceID: os.Getenv("SCD_APPLIANCE_ID"),
-		MailLogPath: envOr("SCD_MAIL_LOG", "/var/log/stayconnect/otp-mail.log"),
-		SMSLogPath:  envOr("SCD_SMS_LOG", "/var/log/stayconnect/otp-sms.log"),
+		SocketPath:      envOr("SCD_SOCKET", "/run/stayconnect/scd.sock"),
+		DBURL:           envOr("SCD_DB_URL", "postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect?sslmode=disable"),
+		TenantID:        os.Getenv("SCD_TENANT_ID"),
+		SiteID:          os.Getenv("SCD_SITE_ID"),
+		ApplianceID:     os.Getenv("SCD_APPLIANCE_ID"),
+		MailLogPath:     envOr("SCD_MAIL_LOG", "/var/log/stayconnect/otp-mail.log"),
+		SMSLogPath:      envOr("SCD_SMS_LOG", "/var/log/stayconnect/otp-sms.log"),
+		WhatsAppLogPath: envOr("SCD_WHATSAPP_LOG", "/var/log/stayconnect/otp-whatsapp.log"),
 
 		IdentityDir:  envOr("SCD_IDENTITY_DIR", "/etc/stayconnect/identity"),
 		CtrlAPIBase:  os.Getenv("SCD_CTRLAPI_BASE"),
@@ -175,8 +182,12 @@ type server struct {
 	shp            *shape.Client
 	mail           mail.Mailer
 	sms            sms.Sender
-	socialReg      *social.Registry
-	loginRL        *loginLimiter // layered throttling for guest username/password logins (optional fast in-memory layer)
+	// whatsapp delivers one-time codes as a WhatsApp authentication template (its own channel, not SMS).
+	whatsapp whatsapp.Sender
+	// otpIssuer issues a challenge; nil means otp.Issue against s.db. A test with no database supplies its own.
+	otpIssuer func(ctx context.Context, p otp.IssueParams) (*otp.Issued, error)
+	socialReg *social.Registry
+	loginRL   *loginLimiter // layered throttling for guest username/password logins (optional fast in-memory layer)
 
 	// Phase 1B dark-auth machinery. All are inert unless explicitly enabled at deploy time:
 	//   - authThrottle: durable, DB-backed authoritative throttle (D4). nil => legacy in-memory only.
@@ -212,6 +223,18 @@ type server struct {
 	// can still tell whether the aggregate mode may be reported at all. It is not a second gate: the routes
 	// Phase 6 owns are still absent while dark.
 	p6cfg iamv2.Phase6Config
+
+	// ceiling is the deployment ceiling and modules the four-gate module resolver (modules.go). New product
+	// logic asks these, never the phase flags directly.
+	ceiling deployment.Ceiling
+	// providerReadiness overrides the sender/social-application lookup (tests); nil reads the database.
+	providerReadiness providerReadinessFunc
+	modules           *modules.Resolver
+	// card is the card-payment wiring (card_checkout.go); never nil after initCard.
+	card *cardState
+	// openAccess issues OPEN auth contexts (open_access.go); nil when its key is missing.
+	openAccess  *iamv2.OpenAccess
+	openLimiter *recoveryLimiter
 
 	// PMS registry is live-reloadable (phase 5.3). All readers must go
 	// through currentPMSReg(); the reload path atomically swaps it under
@@ -256,6 +279,9 @@ type server struct {
 	central *centralContact
 	reg     *registrar
 	asgKick chan struct{}
+	// certReconcile asks the certificate agent to check, now, that Central still honours the installed
+	// certificate (appliancecert.Reconcile). Sent when an mTLS call is refused with 401/403.
+	certReconcile chan struct{}
 
 	// The two messages to Central that are retried until Central confirms (central_retry.go): the
 	// terminal-assignment acknowledgement and the offline-package reconciliation. centralTransport overrides
@@ -624,6 +650,7 @@ func main() {
 		shp:          shape.New(),
 		mail:         mail.NewStub(c.MailLogPath),
 		sms:          sms.NewStub(c.SMSLogPath),
+		whatsapp:     whatsapp.NewStub(c.WhatsAppLogPath),
 		socialReg:    socialReg,
 		loginRL:      newLoginLimiter(),
 		pmsReg:       pmsReg,
@@ -687,6 +714,7 @@ func main() {
 	s.idStore = idStore
 	s.central = central
 	s.asgKick = make(chan struct{}, 1)
+	s.certReconcile = make(chan struct{}, 1)
 	s.reconcileKick = make(chan struct{}, 1)
 	if ident != nil {
 		s.idPriv = ident.PrivateKey()
@@ -751,6 +779,13 @@ func main() {
 		WANMAC:                 s.hw.WANMAC,
 	})
 	s.lic.Load(rootCtx)
+	if err := s.initModules(); err != nil {
+		slog.Error("deployment ceiling: incoherent configuration", "err", err)
+		os.Exit(2)
+	}
+	s.initCard(rootCtx, c.SecretsDir)
+	s.initOpenAccess(c.SecretsDir)
+	s.registerModuleProbes()
 	// CRASH RECOVERY FOR OFFLINE FIRST ACTIVATION. Runs after the licence state is loaded, because deciding
 	// whether an interrupted activation completed means asking whether the licence actually landed. Either
 	// finishes the activation or rolls it back to unassigned; never leaves it half-applied.
@@ -775,14 +810,15 @@ func main() {
 	// columns (last_success_at / last_error_at) for the admin UI.
 	{
 		nctx, ncancel := context.WithTimeout(rootCtx, 10*time.Second)
-		nloaded, err := notifyloader.Load(nctx, pool, c.TenantID, s.mail, s.sms)
+		nloaded, err := notifyloader.Load(nctx, pool, c.TenantID, s.mail, s.sms, s.whatsapp)
 		ncancel()
 		if err != nil {
 			slog.Warn("notifyloader: load failed; using stubs", "err", err)
 		}
 		s.mail = notifyloader.WrapMailer(nloaded.Mailer, nloaded.MailerKind, s.met, pool, c.TenantID)
 		s.sms = notifyloader.WrapSender(nloaded.Sender, nloaded.SenderKind, s.met, pool, c.TenantID)
-		slog.Info("notification providers loaded", "email", nloaded.MailerKind, "sms", nloaded.SenderKind)
+		s.whatsapp = notifyloader.WrapWhatsApp(nloaded.WhatsApp, nloaded.WhatsAppKind, s.met, pool, c.TenantID)
+		slog.Info("notification providers loaded", "email", nloaded.MailerKind, "sms", nloaded.SenderKind, "whatsapp", nloaded.WhatsAppKind)
 	}
 
 	r := chi.NewRouter()
@@ -815,6 +851,7 @@ func main() {
 	r.Post("/v1/vouchers/export", s.exportVoucherCodes)
 	r.Post("/v1/vouchers/{id}/reveal", s.revealVoucherCode)
 	r.Post("/v1/vouchers/{id}/revoke", s.revokeVoucher)
+	r.Post("/v1/voucher-batches/{id}/revoke", s.revokeVoucherBatch)
 	// Key rotation. superseded_at was read by issuance and written by nothing, so a per-generation blind
 	// index key was the key forever; this is the deliberate audited path the grant file always described.
 	r.Get("/v1/voucher-key-generations", s.listVoucherKeyGenerations)
@@ -823,6 +860,8 @@ func main() {
 	// resulting entitlement into something the enforcement plane can act on.
 	r.Post("/v1/sessions/activate", s.activateIAMv2Session)
 	r.Post("/v1/sessions/authorize", s.authorize)
+	// Open package selection: the anonymous access subject (open_access.go). A guest route, like authorize.
+	r.Post("/v1/sessions/authorize-open", s.authorizeOpen)
 	r.Post("/v1/sessions/authorize-otp", s.authorizeOTP)
 	r.Post("/v1/sessions/authorize-credentials", s.authorizeGuestAccount)
 	r.Post("/v1/sessions/revoke", s.revoke)
@@ -852,6 +891,8 @@ func main() {
 	// Appliance activation, licence and the link to Central (docs/CENTRAL_CONTROL_PLANE.md section 8). edged
 	// proxies these for Hotel Admin; central.go holds the one computation of every state they report.
 	r.Get("/v1/central/status", s.centralStatus)
+	r.Get("/v1/modules", s.modulesStatus)
+	s.paymentAdminRoutes(r)
 	r.Post("/v1/central/refresh", s.centralRefresh)
 	// OFFLINE ACTIVATION: the request this appliance emits, and the package (first activation OR a licence
 	// package for an activated appliance) that comes back. See offline_first_activation.go / offline_import.go.
@@ -873,6 +914,8 @@ func main() {
 		r.Get("/v1/commerce/packages", s.commercePackages)
 		r.Post("/v1/commerce/quote", s.commerceQuote)
 		r.Post("/v1/commerce/confirm", s.commerceConfirm)
+		r.Post("/v1/commerce/redeem", s.commerceRedeemVoucher)
+		r.Post("/v1/commerce/purchase-status", s.purchaseStatus)
 		slog.Info("phase2 portal commerce routes mounted")
 	}
 
@@ -1003,6 +1046,8 @@ func main() {
 	// Edge-first refactor: walled-garden rules from the (site) DB are now
 	// actually enforced — reconciled into the nft walled_garden_ip set.
 	go s.gardenReconcileLoop(rootCtx)
+	go s.cardReconcileLoop(rootCtx)
+	go s.postingLoop(rootCtx, s.initPostingWorker(rootCtx))
 	// Periodic safety-net reload: Hotel Admin changes reload immediately through /v1/admin/pms/reload, and a
 	// 10-minute background sweep guarantees eventual consistency from the DB if one was missed.
 	go s.pmsReloadSafetyLoop(rootCtx)
@@ -1110,8 +1155,43 @@ func main() {
 					slog.Info("license fetch cut over to mTLS transport", "base", base)
 				}
 			}
+			// A NEW CERTIFICATE MUST REACH EVERY USER OF IT. The assignment agent asks certMgr for the client on
+			// every call; the licence fetcher was handed one client once, so after a rotation or a reissue it would
+			// have kept presenting the old certificate. Re-handed after every change.
+			rehand := func() {
+				if cl, base, ok := certMgr.Transport(); ok {
+					s.lic.SetMTLSTransport(cl, base)
+				}
+				select {
+				case s.asgKick <- struct{}{}:
+				default:
+				}
+			}
+			var lastReconcile time.Time
+			reconcile := func(why string) {
+				if time.Since(lastReconcile) < time.Minute {
+					return
+				}
+				lastReconcile = time.Now()
+				out, err := certMgr.Reconcile(rootCtx)
+				if err != nil {
+					central.record(err, time.Now())
+					slog.Warn("appliancecert: reconcile failed", "why", why, "err", err)
+					return
+				}
+				switch out {
+				case appliancecert.ReconcileInstalled, appliancecert.ReconcileReissued:
+					slog.Info("appliancecert: certificate replaced", "why", why, "outcome", string(out))
+					rehand()
+				case appliancecert.ReconcileWaiting:
+					slog.Info("appliancecert: a certificate request is waiting at Central", "why", why)
+				}
+			}
+			reconcile("startup")
 			t := time.NewTicker(6 * time.Hour)
 			defer t.Stop()
+			rt := time.NewTicker(5 * time.Minute)
+			defer rt.Stop()
 			for {
 				select {
 				case <-rootCtx.Done():
@@ -1119,7 +1199,13 @@ func main() {
 				case <-t.C:
 					if err := certMgr.MaybeRotate(rootCtx, 14*24*time.Hour); err != nil {
 						slog.Warn("appliancecert: rotation failed", "err", err)
+					} else {
+						rehand()
 					}
+				case <-rt.C:
+					reconcile("periodic")
+				case <-s.certReconcile:
+					reconcile("mtls_refused")
 				}
 			}
 		}()

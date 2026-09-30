@@ -574,6 +574,9 @@ var usageSubjectColumn = map[string]string{
 	"stay":    "stay_id",
 	"account": "guest_account_id",
 	"voucher": "voucher_id",
+	// A package chosen without signing in: the anonymous access subject (0095). Identified only by its
+	// opaque reference -- it carries no name, no MAC and no identity factor to show.
+	"open": "anonymous_subject_id",
 }
 
 type usageSourceRow struct {
@@ -606,8 +609,9 @@ func usageSourceListSQL(limit int) string {
 		WITH src AS (
 		  SELECT CASE WHEN e.stay_id IS NOT NULL THEN 'stay'
 		              WHEN e.guest_account_id IS NOT NULL THEN 'account'
-		              ELSE 'voucher' END                                AS kind,
-		         COALESCE(e.stay_id, e.guest_account_id, e.voucher_id) AS subject_id,
+		              WHEN e.voucher_id IS NOT NULL THEN 'voucher'
+		              ELSE 'open' END                                   AS kind,
+		         COALESCE(e.stay_id, e.guest_account_id, e.voucher_id, e.anonymous_subject_id) AS subject_id,
 		         COALESCE(SUM(se.bytes_down), 0) AS down,
 		         COALESCE(SUM(se.bytes_up), 0)   AS up,
 		         COUNT(se.id)                    AS sessions,
@@ -625,7 +629,8 @@ func usageSourceListSQL(limit int) string {
 		     AND ($5 = ''
 		          OR ($5 = 'stay'    AND e.stay_id IS NOT NULL)
 		          OR ($5 = 'account' AND e.guest_account_id IS NOT NULL)
-		          OR ($5 = 'voucher' AND e.voucher_id IS NOT NULL))
+		          OR ($5 = 'voucher' AND e.voucher_id IS NOT NULL)
+		          OR ($5 = 'open'    AND e.anonymous_subject_id IS NOT NULL))
 		   GROUP BY 1, 2
 		)
 		SELECT u.kind, u.subject_id::text,
@@ -647,7 +652,8 @@ func usageSourceListSQL(limit int) string {
 		        OR (u.kind = 'stay' AND (st.normalized_room_number ILIKE '%' || $6 || '%'
 		                             OR st.external_reservation_id ILIKE '%' || $6 || '%'))
 		        OR (u.kind = 'account' AND ga.username ILIKE '%' || $6 || '%')
-		        OR (u.kind = 'voucher' AND u.subject_id::text ILIKE $6 || '%'))
+		        OR (u.kind = 'voucher' AND u.subject_id::text ILIKE $6 || '%')
+		        OR (u.kind = 'open'    AND u.subject_id::text ILIKE $6 || '%'))
 		 ORDER BY (u.down + u.up) DESC, u.last_started DESC NULLS LAST, u.kind, u.subject_id
 		 LIMIT ` + strconv.Itoa(limit)
 }
@@ -677,7 +683,7 @@ func (s *server) listUsageSources(w http.ResponseWriter, r *http.Request) {
 	kind, ok := parseSourceType(r.URL.Query().Get("type"))
 	if !ok {
 		jsonErr(w, http.StatusBadRequest, "bad_type",
-			"the access source type must be one of: stay, account, voucher")
+			"the access source type must be one of: stay, account, voucher, open")
 		return
 	}
 	from, to := parseWindow(r)
@@ -756,6 +762,16 @@ const voucherHeaderSQL = `
 		 WHERE x.voucher_id = $1 AND x.tenant_id = $2 AND x.site_id = $3
 		 ORDER BY x.activated_at DESC NULLS LAST LIMIT 1`
 
+// openHeaderSQL is voucherHeaderSQL for the anonymous access subject: its most recent entitlement here.
+const openHeaderSQL = `
+		SELECT x.anonymous_subject_id::text,
+		       x.data_quota_bytes, x.consumed_data_bytes, COALESCE(x.terminal_reason, ''),
+		       x.status, COALESCE(spr.name, '')
+		  FROM iam_v2.entitlements x
+		  LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = x.service_plan_revision_id
+		 WHERE x.anonymous_subject_id = $1 AND x.tenant_id = $2 AND x.site_id = $3
+		 ORDER BY x.activated_at DESC NULLS LAST LIMIT 1`
+
 type sourceUsageDetail struct {
 	Source       usageSourceRow   `json:"source"`
 	Plan         string           `json:"service_plan,omitempty"`
@@ -770,7 +786,7 @@ func (s *server) getSourceUsage(w http.ResponseWriter, r *http.Request) {
 	kind, ok := parseSourceType(chi.URLParam(r, "type"))
 	if !ok || kind == "" {
 		jsonErr(w, http.StatusBadRequest, "bad_type",
-			"the access source type must be one of: stay, account, voucher")
+			"the access source type must be one of: stay, account, voucher, open")
 		return
 	}
 	id := chi.URLParam(r, "id")
@@ -820,6 +836,10 @@ func (s *server) readSourceUsage(ctx context.Context, kind, id string) (sourceUs
 			&out.Source.EndReason, &out.AccessStatus, &out.Plan)
 	case "voucher":
 		err = s.db.QueryRow(ctx, voucherHeaderSQL, id, s.tenantID, s.siteID).Scan(
+			&out.Source.ID, &out.Source.QuotaBytes, &out.Source.ConsumedBytes,
+			&out.Source.EndReason, &out.AccessStatus, &out.Plan)
+	case "open":
+		err = s.db.QueryRow(ctx, openHeaderSQL, id, s.tenantID, s.siteID).Scan(
 			&out.Source.ID, &out.Source.QuotaBytes, &out.Source.ConsumedBytes,
 			&out.Source.EndReason, &out.AccessStatus, &out.Plan)
 	default:

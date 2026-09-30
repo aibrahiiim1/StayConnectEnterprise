@@ -34,6 +34,21 @@ func (g *guardedConn) writeFrame(body string) error {
 	return pms.WriteFramedRecord(g.c, body)
 }
 
+// writeFinancialFrame is the ONE path by which a PS reaches the wire (decision D45), and it is not a
+// general-purpose writer: it accepts a PS record and nothing else -- never a PA, never a control or domain
+// record -- and it is reachable only from the serialized writer for a request the financial relay submitted
+// after the database confirmed the exact bytes. The read-only allowlist above is unchanged and still refuses
+// PS and PA for every other caller.
+func (g *guardedConn) writeFinancialFrame(body string) error {
+	if pms.RecordID(body) != "PS" || !IsFinancialRecord("PS") {
+		return coded(CodeOutboundBlocked, ErrOutboundNotAllowed{Record: pms.RecordID(body)})
+	}
+	if g.writeTimeout > 0 {
+		_ = g.c.SetWriteDeadline(time.Now().Add(g.writeTimeout))
+	}
+	return pms.WriteFramedRecord(g.c, body)
+}
+
 // fiasAdapter is the production-capable read-only FIAS connection. It reuses internal/pms framing + parsing
 // (no second parser) and drives the interface-level axes + typed domain-event queue via the AxisSink.
 type fiasAdapter struct {
@@ -50,6 +65,9 @@ type fiasAdapter struct {
 	// log carries the connector's redacted diagnostics. A nil logger is inert, so tests that construct an
 	// adapter directly need not supply one.
 	log *slog.Logger
+	// relay, when non-nil, lets the financial path hand a posting command to THIS link (decision D45). Nil
+	// on every connector that is not a FIAS link and whenever room-charge transmission is not deployed.
+	relay *FinancialRelay
 }
 
 // AdapterKeys carries the two DISTINCT keyed-HMAC keys the adapter needs, each with its own purpose and
@@ -70,6 +88,12 @@ type AdapterKeys struct {
 // refuses is visible solely as a bounded code in pms_interface_runtime — which is how a live appliance came
 // to sit CONNECTED, resyncing every few seconds, admitting nothing, and saying nothing about why.
 func NewFIASDial(dialer Dialer, keys AdapterKeys, now func() time.Time, log *slog.Logger) func(context.Context, DialParams) (Conn, error) {
+	return NewFIASDialWithRelay(dialer, keys, now, log, nil)
+}
+
+// NewFIASDialWithRelay is NewFIASDial with the financial relay attached: each FIAS link this dial opens can
+// carry authorised posting commands (financial_relay.go). A nil relay is exactly NewFIASDial.
+func NewFIASDialWithRelay(dialer Dialer, keys AdapterKeys, now func() time.Time, log *slog.Logger, relay *FinancialRelay) func(context.Context, DialParams) (Conn, error) {
 	if now == nil {
 		now = time.Now
 	}
@@ -90,7 +114,7 @@ func NewFIASDial(dialer Dialer, keys AdapterKeys, now func() time.Time, log *slo
 			iface: p.Iface, rev: p.Rev,
 			evKey: keys.EvidenceKey, evKeyNo: keys.EvidenceKeyVersion,
 			identKey: keys.IdentityKey, identKeyN: keys.IdentityKeyVersion,
-			profile: "protel-fias/v1", now: now, log: log,
+			profile: "protel-fias/v1", now: now, log: log, relay: relay,
 		}, nil
 	}
 }
@@ -124,6 +148,15 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 	if err := sink.OnConnected(a.now()); err != nil {
 		return err
 	}
+	// THE FINANCIAL PORT (decision D45). The link is offered to the relay only after the handshake, and it is
+	// withdrawn when this ownership cycle ends; a command waiting on it at that moment is resolved UNKNOWN,
+	// because its PS may already be with the PMS. The port starts NOT steady: nothing is carried until a full
+	// DS..DE generation has been published.
+	var port *relayPort
+	if a.relay != nil {
+		port = a.relay.attach(a.iface.ID, w.SubmitFinancial)
+		defer a.relay.detach(port)
+	}
 	// §G/§H: raise the application barrier and request the INITIAL full resync through the single writer. Until
 	// a complete DS→DE generation is published, no LIVE admission occurs. The DR is submitted (bounded, async
 	// through the serialized writer) so the read loop can immediately begin consuming DS…DE; a DR write failure
@@ -138,7 +171,8 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 	// plugged the socket back in sees a connected interface sitting on REQUESTING_FULL_SYNC indefinitely.
 	sink.OnFullSyncRequested()
 
-	resyncing := true // a DR is outstanding; we are awaiting DS…DE (gates duplicate DR requests only)
+	resyncing := true          // a DR is outstanding; we are awaiting DS…DE (gates duplicate DR requests only)
+	var fin finResyncScheduler // the financial mirror's own resync cadence (financial_resync.go)
 	// Per-sweep observation, reset at every DS. Two SETS rather than one set and two counters, because the
 	// question "did this sweep contradict itself?" cannot be asked of a tally. A room the PMS reports as both
 	// occupied and empty in the same sweep is not a building this system can reason about, and it must not be
@@ -154,6 +188,10 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 	lastReportedSkipped := 0
 	readDeadline := a.rev.HeartbeatTimeout
 	for {
+		if port != nil {
+			// A posting command is carried only between resyncs, never inside a DS..DE window.
+			port.setSteady(!resyncing)
+		}
 		if ctx.Err() != nil {
 			return ctx.Err() // the writer emits LE + closes the socket on wctx cancel (deferred)
 		}
@@ -226,6 +264,30 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 				resyncing = true
 			}
 		}
+		// THE FINANCIAL MIRROR'S OWN RESYNC (D48), from the same single place, under the same gate.
+		if asker, ok := sink.(FinancialResyncAsker); ok {
+			now := a.now()
+			if fin.unanswered(now) && resyncing {
+				// Our DR was never begun. Release the gate so an operator's resync and posting are not held by
+				// it; the mirror age keeps running and room charge fails closed at the bound.
+				resyncing = false
+				if a.log != nil {
+					a.log.Warn("pmsd: the PMS did not begin the financial mirror resync; releasing and backing off",
+						"interface", a.iface.ID)
+				}
+			}
+			if fin.shouldRequest(now, resyncing, asker.FinancialResyncDue) {
+				if werr := w.SubmitSync(ctx, pms.BuildDR()); werr != nil {
+					return werr
+				}
+				sink.OnFullSyncRequested()
+				resyncing = true
+				fin.requested(now)
+				if a.log != nil {
+					a.log.Info("pmsd: financial mirror resync requested", "interface", a.iface.ID)
+				}
+			}
+		}
 		switch pr.RecordType {
 		case RecLS, RecLA:
 			// Record the heartbeat evidence we OBSERVED first (receiving a valid LS/LA is the evidence), then
@@ -238,8 +300,18 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			}
 		case RecLE:
 			return coded(CodeProtocolLinkEnded, nil)
+		case RecPA:
+			// A posting answer. Handed back verbatim to the command waiting for this P#, if there is one; it
+			// is never interpreted here and never changes connector state. A PA nobody is waiting for is
+			// reported (without its content) and dropped -- it cannot settle anything from here.
+			if port == nil || !port.onPA(body) {
+				if a.log != nil {
+					a.log.Warn("pmsd: posting answer with no waiting command ignored", "interface", a.iface.ID)
+				}
+			}
 		case RecDS:
 			resyncing = true
+			fin.started()
 			// WHAT THIS SWEEP SEES, which is not the same as what it admits. The vacant rooms below are
 			// deliberately never admitted as departures -- that defect is closed -- but they are still the
 			// PMS describing the building, and that description is the only thing that can prove a roster
@@ -293,6 +365,7 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 				sink.RecordSkipped(int64(skippedNoIdentity))
 			}
 			resyncing = false
+			fin.completed()
 			if err := sink.OnResyncComplete(a.now(), ""); err != nil { // never use the record id "DE" as a cursor
 				return err
 			}
@@ -342,6 +415,11 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			ev, perr := a.toEvent(body)
 			if perr == nil {
 				perr = ev.Validate()
+			}
+			if perr == nil && a.relay != nil {
+				// The financial relay's view of this reservation, updated the moment the record is read and
+				// BEFORE it is admitted: a room move on the link stops a stale posting command at the writer.
+				a.relay.ObserveGuestRecord(a.iface.ID, pr.RecordType, ev.ReservationRef, ev.RoomNumber)
 			}
 			// A well-formed record with no Stay identity is SKIPPED, not faulted. It cannot be admitted — there
 			// is nothing to key a Stay on — but it is normal content of a real in-house roster (house-use and

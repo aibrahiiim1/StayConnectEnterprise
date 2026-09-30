@@ -1,22 +1,41 @@
 #!/usr/bin/env bash
-# Build a disposable PostgreSQL 16 carrying the authoritative chain through 0029, then run the Phase-5
-# gates and the `integration && phase5` matrix against it. Self-contained: it creates and tears down its own
-# container. No Production/appliance access, no PMS, no financial egress, no flag enablement.
+# The Phase-5 gate, on TWO disposable PostgreSQL 16 databases, each for what it can prove:
+#
+#   * THE MIGRATION CHAIN (container <name>-chain): the authoritative chain through 0029 plus 0050-0080. The
+#     three shell gates below are about migration 0027 ITSELF -- its objects, its UP / raw re-apply / DOWN /
+#     DOWN->UP lifecycle and its derived DARK privileges -- and they rehearse rolling 0027 back and forward.
+#     That rehearsal needs the chain 0027 was written against; run on a production schema it would roll a
+#     2026-era migration back underneath ninety later ones.
+#   * THE FULL APPLIANCE SCHEMA (container <name>): Gate-P roles, the production baseline, Gate-P ownership,
+#     every migration above the baseline, Gate-P grants (scripts/lib-fullschema-testdb.sh). Every Go suite runs
+#     here. The product now reads what migration 0100 creates, and that chain can never carry 0100, so a suite
+#     run on it would be testing a schema no appliance has.
+#
+# Self-contained: it creates and tears down its own containers. No Production/appliance access, no PMS, no
+# financial egress, no flag enablement.
 #
 # EXIT CODES (the CI retry policy depends on these):
 #   0  every gate and test passed
-#   1  a GATE or TEST failed — deterministic. CI must NOT retry: a second run that passes would hide a defect.
+#   1  a GATE or TEST failed, or a schema did not apply — deterministic. CI must NOT retry: a second run that
+#      passes would hide a defect.
 #   2  the disposable infrastructure could not be built. That IS transient, and is the only retryable case.
 set -uo pipefail
 export PATH="$PATH:/c/Program Files/Docker/Docker/resources/bin"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-C="${PHASE5_INTEG_CONTAINER:-iamv2-p5integ}"; DB=iam_scratch; PORT="${PHASE5_INTEG_PORT:-55439}"
+P5C="${PHASE5_INTEG_CONTAINER:-iamv2-p5integ}"; DB=iam_scratch; P5PORT="${PHASE5_INTEG_PORT:-55439}"
+CHAIN="${P5C}-chain"; CHAIN_PORT="${PHASE5_CHAIN_PORT:-55438}"
+# shellcheck source=lib-fullschema-testdb.sh
+. "$ROOT/scripts/lib-fullschema-testdb.sh"
 
-cleanup(){ docker rm -f "$C" >/dev/null 2>&1 || true; }
+cleanup(){ docker rm -f "$P5C" "$CHAIN" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 cleanup
 
-echo "== disposable PG16 for Phase 5 (container=$C port=$PORT) =="
+# ---------------------------------------------------------------------------------------------------------
+# 1. THE MIGRATION CHAIN, for the 0027 gates.
+# ---------------------------------------------------------------------------------------------------------
+C="$CHAIN"; PORT="$CHAIN_PORT"
+echo "== disposable PG16, migration chain for the 0027 gates (container=$C port=$PORT) =="
 docker run -d --name "$C" -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB="$DB" \
   -p "127.0.0.1:$PORT:5432" postgres:16-alpine >/dev/null 2>&1 \
   || { echo "INFRA: could not start the disposable container"; exit 2; }
@@ -120,6 +139,15 @@ run_gate(){
 run_gate "Phase-5 foundation + security"      "$ROOT/iam_v2_scratch/phase5_0027_foundation.sh"
 run_gate "Phase-5 migration lifecycle"        "$ROOT/iam_v2_scratch/phase5_0027_lifecycle.sh"
 run_gate "Phase-5 least privilege (derived)"  "$ROOT/iam_v2_scratch/phase5_least_privilege.sh"
+docker rm -f "$CHAIN" >/dev/null 2>&1 || true
+
+# ---------------------------------------------------------------------------------------------------------
+# 2. THE FULL APPLIANCE SCHEMA, for every Go suite and the grace ledger privilege probe.
+# ---------------------------------------------------------------------------------------------------------
+C="$P5C"; PORT="$P5PORT"
+echo "== disposable PG16, FULL appliance schema, for the Phase-5 suites (container=$C port=$PORT) =="
+fullschema_build "$C" "$PORT" "$DB"; rc=$?
+[ "$rc" = 0 ] || exit "$rc"
 
 echo "== Phase-5 integration matrix (integration && phase5) =="
 if ! (cd "$ROOT/data-plane" && PHASE3_TEST_DSN="postgres://postgres:postgres@127.0.0.1:$PORT/$DB?sslmode=disable" \
@@ -137,9 +165,9 @@ fi
 # the reserved-code guards, and the derivation that turns an operator's typed policy into a package the
 # checkout validator accepts -- was green everywhere and executed nowhere.
 #
-# THIS database is the right home rather than Phase-4's: the grace tests read plan columns (speed_allocation
-# among them) that arrive later than 0026, so on the Phase-4 chain they fail on the schema instead of on the
-# product.
+# They run on the full appliance schema, like every other suite: the grace tests read plan columns
+# (speed_allocation among them) that arrive long after 0026, and a partial chain fails them on the schema
+# instead of on the product.
 # LEAST PRIVILEGE, PROVEN AS A RESTRICTED ROLE RATHER THAN AS THE OWNER.
 #
 # This step exists because of a defect it would have caught. Hotel Admin's Policy History reads

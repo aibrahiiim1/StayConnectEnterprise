@@ -94,7 +94,7 @@ function mockBackend(over: {
     if (path.endsWith("/revisions")) {
       return Promise.resolve({
         revisions: over.revisions ?? [{ id: "r1", revision_no: 1, source_timezone: "Europe/Berlin",
-          folio_identity_strategy: "UNSET", normalization_version: 1, config: { endpoint: "10.0.0.1:5003" }, published: true }],
+          posting_target_model: "UNSET", normalization_version: 1, config: { endpoint: "10.0.0.1:5003" }, published: true }],
       });
     }
     if (path.endsWith("/connection-settings")) return Promise.reject(new Error("none"));

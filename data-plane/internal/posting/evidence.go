@@ -25,13 +25,12 @@ type Pinned struct {
 	// the posting revision because they are genuinely allowed to differ: authentication happened earlier.
 	AuthInterfaceRevisionID string
 	// PostingInterfaceRevisionID is the revision whose financial configuration authorizes THIS posting —
-	// folio identity strategy and financial base currency both come from it.
+	// the posting target model and the financial base currency both come from it.
 	PostingInterfaceRevisionID string
 	// SecretGenerationID is pinned when the connector used a credential; empty when it did not.
 	SecretGenerationID string
 
-	StayID  string
-	FolioID string
+	StayID string
 
 	PackageRevisionID   string
 	SettlementMappingID string
@@ -42,8 +41,10 @@ type Pinned struct {
 	Currency         string
 	CurrencyExponent int16
 
-	// RN and G# are financial TARGETING evidence. RN is never the posting's identity — the identity is
-	// IdempotencyKey, and the protocol reference is the P# allocated at transmission time.
+	// G# is the reservation the posting targets: pinned at creation (pms_postings.g_number) and never
+	// re-resolved. RN is MUTABLE targeting data: the reservation's current room, re-read from the pinned stay
+	// immediately before each attempt is built (Phase-0 Amendment A1, contract section 9a rule 7). Neither is
+	// the posting's business identity (IdempotencyKey), and the protocol reference is the P# of the attempt.
 	RN      string
 	GNumber string
 
@@ -52,6 +53,11 @@ type Pinned struct {
 	PostingCode string
 
 	IdempotencyKey string
+
+	// PostingID is set once the posting exists (execution). Posting permission is then evaluated FOR THIS
+	// CHARGE: its own POSTING_UNRESOLVED block (from an UNKNOWN a reviewer has since authorised to retry)
+	// does not stop it; every other block does.
+	PostingID string
 
 	// Expectations the caller read when it decided to charge. If the database disagrees at creation time,
 	// the evidence is stale and the posting is refused rather than silently created against newer facts.
@@ -65,9 +71,9 @@ type Snapshot struct {
 	InterfaceLifecycleState  string
 	InterfaceCurrentRevision string
 
-	FolioIdentityStrategy string
-	InterfaceCurrency     string
-	InterfaceExponent     *int16
+	PostingTargetModel string
+	InterfaceCurrency  string
+	InterfaceExponent  *int16
 
 	PurchaseCurrency string
 	PurchaseExponent *int16
@@ -79,12 +85,12 @@ type Snapshot struct {
 	StayStatus           string
 	StayPostingAllowed   bool
 	StayLifecycleVersion int
-	// The PMS's own targeting values for the PINNED stay and folio. RN is the normalized room number and
-	// G# is the folio's external identifier -- which is precisely why folio_identity_strategy gates posting
-	// at all. The gate compares the caller's verified values against these, so a guest who moved room
-	// between authorization and transmission produces a refusal rather than a charge to the wrong room.
+	// The PMS's own targeting values for the PINNED stay, as the database knows them NOW: its reservation
+	// number (G#) and its current, normalized room. The posting's G# must equal the reservation; the RN an
+	// attempt carries is this room (A1 rule 7), so a room move before the attempt re-targets the room and never
+	// the reservation.
 	StayRoomNumber  string
-	FolioExternalID string
+	StayReservation string
 
 	SettlementMappingRetired bool
 
@@ -108,7 +114,7 @@ var ErrEvidenceNotResolvable = errors.New("pinned financial evidence does not re
 // LoadSnapshot reads every pinned object in a single statement.
 //
 // Every join below is COMPOSITE-pinned on (tenant, site, interface). That is not decoration: it means a
-// folio, stay or revision belonging to a different property cannot be read at all, so cross-scope evidence
+// stay or revision belonging to a different property cannot be read at all, so cross-scope evidence
 // fails as "not resolvable" instead of quietly passing a field-by-field comparison. The database enforces
 // the same thing again through composite foreign keys when the row is written; this is the check that
 // happens BEFORE anything is written.
@@ -119,13 +125,13 @@ SELECT i.lifecycle_state,
        coalesce(i.current_revision_id::text, ''),
        i.connector_kind,
        coalesce(iam_v2.p4_interface_freshness_block(i.tenant_id, i.site_id, i.id, r.id, now()), ''),
-       r.folio_identity_strategy,
+       r.posting_target_model,
        coalesce(r.financial_base_currency, ''),
        r.financial_base_currency_exponent,
        coalesce(pu.currency, ''), pu.currency_exponent, pu.state,
        coalesce(pk.currency, ''), pk.currency_exponent,
-       st.status, st.posting_allowed, st.lifecycle_version,
-       coalesce(st.normalized_room_number, ''), fo.external_folio_id,
+       st.status, coalesce(iam_v2.p4_stay_postable_for(st.id, NULLIF($10,'')::uuid), false), st.lifecycle_version,
+       coalesce(st.normalized_room_number, ''), st.external_reservation_id,
        (sm.retired_at IS NOT NULL)
   FROM iam_v2.pms_interfaces i
   JOIN iam_v2.pms_interface_revisions r
@@ -140,26 +146,23 @@ SELECT i.lifecycle_state,
   JOIN iam_v2.stays st
     ON st.tenant_id = i.tenant_id AND st.site_id = i.site_id
    AND st.pms_interface_id = i.id AND st.id = $7
-  JOIN iam_v2.folios fo
-    ON fo.tenant_id = i.tenant_id AND fo.site_id = i.site_id
-   AND fo.pms_interface_id = i.id AND fo.id = $8
   JOIN iam_v2.package_settlement_mappings sm
     ON sm.tenant_id = i.tenant_id AND sm.site_id = i.site_id
-   AND sm.pms_interface_id = i.id AND sm.package_revision_id = pk.id AND sm.id = $9
+   AND sm.pms_interface_id = i.id AND sm.package_revision_id = pk.id AND sm.id = $8
   JOIN iam_v2.settlements se
-    ON se.tenant_id = i.tenant_id AND se.site_id = i.site_id AND se.id = $10
+    ON se.tenant_id = i.tenant_id AND se.site_id = i.site_id AND se.id = $9
    AND se.purchase_id = pu.id
  WHERE i.tenant_id = $1 AND i.site_id = $2 AND i.id = $3`
 	err := q.QueryRow(ctx, sql,
 		p.TenantID, p.SiteID, p.PMSInterfaceID, p.PostingInterfaceRevisionID,
-		p.PurchaseID, p.PackageRevisionID, p.StayID, p.FolioID, p.SettlementMappingID, p.SettlementID,
+		p.PurchaseID, p.PackageRevisionID, p.StayID, p.SettlementMappingID, p.SettlementID, p.PostingID,
 	).Scan(
 		&s.InterfaceLifecycleState, &s.InterfaceCurrentRevision, &s.ConnectorKind, &s.FreshnessBlock,
-		&s.FolioIdentityStrategy, &s.InterfaceCurrency, &s.InterfaceExponent,
+		&s.PostingTargetModel, &s.InterfaceCurrency, &s.InterfaceExponent,
 		&s.PurchaseCurrency, &s.PurchaseExponent, &s.PurchaseState,
 		&s.PackageCurrency, &s.PackageExponent,
 		&s.StayStatus, &s.StayPostingAllowed, &s.StayLifecycleVersion,
-		&s.StayRoomNumber, &s.FolioExternalID,
+		&s.StayRoomNumber, &s.StayReservation,
 		&s.SettlementMappingRetired,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {

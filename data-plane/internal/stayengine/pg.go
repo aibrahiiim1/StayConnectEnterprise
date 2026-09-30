@@ -241,21 +241,9 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 		return false, lerr
 	}
 
-	// SOURCE CONFLICT pre-check, BEFORE anything is written: a GUEST folio that already acts as another Stay's
-	// posting target must never be silently re-pointed (that would move one Stay's postings onto another). It is
-	// checked here so the event can be routed to MANUAL_REVIEW without leaving a half-created Stay behind.
-	curID := ""
-	if cur != nil {
-		curID = cur.ID
-	}
-	if code, cerr := precheckFolioConflict(ctx, tx, tenant, site, iface, curID, ev.Folio); cerr != nil {
-		return false, cerr
-	} else if code != "" {
-		if ferr := failEvent(ctx, tx, eventID, "MANUAL_REVIEW", code); ferr != nil {
-			return false, ferr
-		}
-		return true, tx.Commit(ctx)
-	}
+	// NO FOLIO MODEL (Phase-0 Amendment A1, D46). A room charge targets the reservation (RN + G#), so a guest
+	// record's folio field -- which this Protel link does not send -- is not stored and cannot conflict. Posting
+	// permission is re-evaluated by the database whenever this stay changes (trigger stay_posting_permission).
 
 	d := Resolve(ev, cur)
 	occ := occupancyEvidence{At: evReceivedAt, RevisionID: pinnedRevision,
@@ -364,8 +352,8 @@ func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, e
 	}
 }
 
-// createStay inserts the Stay (IN_HOUSE, lifecycle_version 1), its primary Guest, and — if a Folio is present
-// — a Folio IDENTITY record linked as the default posting target (identity only; no financial state).
+// createStay inserts the Stay (IN_HOUSE, lifecycle_version 1). Its occupancy facts (the primary guest or the
+// sharer list) are written by applyOccupancyFacts.
 func createStay(ctx context.Context, tx pgx.Tx, tenant, site, iface string, ev InboxEvent) (string, error) {
 	var stayID string
 	// external_stay_identity == reservation: one authoritative Stay per reservation per interface, episodes
@@ -379,16 +367,14 @@ func createStay(ctx context.Context, tx pgx.Tx, tenant, site, iface string, ev I
 		parseYYMMDD(ev.ArrivalRaw), parseYYMMDD(ev.DepartureRaw)).Scan(&stayID); err != nil {
 		return "", err
 	}
-	// occupancy + folio facts are written by applyOccupancyFacts on BOTH the create and update paths, so the
-	// same conflict rules apply either way and nothing is written twice.
+	// occupancy facts are written by applyOccupancyFacts on BOTH the create and update paths, so the same rules
+	// apply either way and nothing is written twice.
 	return stayID, nil
 }
 
 // upsertPrimaryGuest inserts or refreshes the single primary guest for the Stay from the (validated) names.
-// applyOccupancyFacts writes the event's occupancy + folio facts for the Stay. With no sharer list the event's
-// own name fields describe the single primary guest (the historical behaviour); with one, the whole list is
-// reconciled. A folio SOURCE CONFLICT returns its bounded code and ErrSourceConflict so the caller can route
-// the event to MANUAL_REVIEW with the transaction intact.
+// applyOccupancyFacts writes the event's occupancy facts for the Stay. With no sharer list the event's own name
+// fields describe the single primary guest (the historical behaviour); with one, the whole list is reconciled.
 func applyOccupancyFacts(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID string, ev InboxEvent) (string, error) {
 	if len(ev.Sharers) == 0 {
 		if ev.FirstName != "" || ev.LastName != "" {
@@ -399,7 +385,7 @@ func applyOccupancyFacts(ctx context.Context, tx pgx.Tx, tenant, site, iface, st
 	} else if err := applySharers(ctx, tx, tenant, site, iface, stayID, ev.Sharers); err != nil {
 		return "", err
 	}
-	return applyFolio(ctx, tx, tenant, site, iface, stayID, ev.Folio)
+	return "", nil
 }
 
 func upsertPrimaryGuest(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID string, ev InboxEvent) error {

@@ -25,6 +25,10 @@ func TestTheBatchListAndHistoryAreRegisteredAsReadsOnly(t *testing.T) {
 		if _, ok := want[key]; ok {
 			want[key] = true
 		}
+		// The one write under /batches is the audited, step-up batch REVOCATION (0095), which reads no code.
+		if method == http.MethodPost && route == "/batches/{id}/revoke" {
+			return nil
+		}
 		if method != http.MethodGet && (strings.Contains(route, "batches") || strings.Contains(route, "history")) {
 			t.Errorf("%s %s: the batch list and the card history are reads; nothing may write through them", method, route)
 		}

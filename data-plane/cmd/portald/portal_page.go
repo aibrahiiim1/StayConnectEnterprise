@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -565,17 +566,55 @@ type successView struct {
 
 // ---- the package choice ------------------------------------------------------------------------------------
 
-type packageRow struct{ ID, Name, Detail string }
+type packageRow struct{ ID, Name, Detail, Method, MethodKey, Price string }
 
 type packagesView struct {
 	guestPage
 	Packages []packageRow
+	// ReturnCode is shown once, to a client who just chose open package selection and got a new return code.
+	ReturnCode string
 }
 
-func packageRows(words map[string]string, pkgs []struct {
-	PackageID string         `json:"package_id"`
-	Display   map[string]any `json:"display"`
-}) []packageRow {
+// guestPackage is one package as scd lists it: an opaque id, display text, the price and every acquisition
+// method this client may use for it right now.
+type guestPackage struct {
+	PackageID        string         `json:"package_id"`
+	Display          map[string]any `json:"display"`
+	Methods          []string       `json:"methods"`
+	PriceMinor       int64          `json:"price_minor"`
+	Currency         string         `json:"currency"`
+	CurrencyExponent int            `json:"currency_exponent"`
+}
+
+// methodKeys names each acquisition method's button text.
+var methodKeys = map[string]string{
+	"NOT_REQUIRED": "acq.connect", "ONLINE_PAYMENT": "acq.card", "PMS_POSTING": "acq.room", "PREPAID": "acq.connect",
+}
+
+// formatPrice renders minor units in the package currency, e.g. EGP 25.00; a free package reads "Free".
+func formatPrice(words map[string]string, minor int64, currency string, exp int) string {
+	if minor == 0 {
+		return words["acq.free"]
+	}
+	if exp < 0 || exp > 4 {
+		exp = 2
+	}
+	div := int64(1)
+	for i := 0; i < exp; i++ {
+		div *= 10
+	}
+	s := strconv.FormatInt(minor/div, 10)
+	if exp > 0 {
+		frac := strconv.FormatInt(minor%div, 10)
+		for len(frac) < exp {
+			frac = "0" + frac
+		}
+		s += "." + frac
+	}
+	return strings.TrimSpace(currency + " " + s)
+}
+
+func packageRows(words map[string]string, pkgs []guestPackage) []packageRow {
 	rows := make([]packageRow, 0, len(pkgs))
 	for _, p := range pkgs {
 		name, _ := p.Display["name"].(string)
@@ -589,7 +628,19 @@ func packageRows(words map[string]string, pkgs []struct {
 		if t, ok := p.Display["time_quota_seconds"].(float64); ok && t > 0 {
 			detail = append(detail, humanSpan(words, time.Duration(t)*time.Second))
 		}
-		rows = append(rows, packageRow{ID: p.PackageID, Name: name, Detail: strings.Join(detail, " · ")})
+		methods := p.Methods
+		if len(methods) == 0 {
+			methods = []string{"NOT_REQUIRED"}
+		}
+		price := formatPrice(words, p.PriceMinor, p.Currency, p.CurrencyExponent)
+		for _, m := range methods {
+			key := methodKeys[m]
+			if key == "" {
+				continue
+			}
+			rows = append(rows, packageRow{ID: p.PackageID, Name: name, Detail: strings.Join(detail, " · "),
+				Method: m, MethodKey: key, Price: price})
+		}
 	}
 	return rows
 }

@@ -141,10 +141,14 @@ type phase3Response struct {
 // offers; they never name one that was not offered, and the grant re-validates the choice against the same
 // rules anyway — an offer is a convenience, never an authorization.
 type phase3Offer struct {
-	PackageRevisionID string `json:"package_revision_id"`
-	Code              string `json:"code"`
-	DownKbps          int    `json:"down_kbps"`
-	UpKbps            int    `json:"up_kbps"`
+	PackageRevisionID string   `json:"package_revision_id"`
+	Code              string   `json:"code"`
+	DownKbps          int      `json:"down_kbps"`
+	UpKbps            int      `json:"up_kbps"`
+	PriceMinor        int64    `json:"price_minor"`
+	Currency          string   `json:"currency,omitempty"`
+	CurrencyExponent  int      `json:"currency_exponent"`
+	Methods           []string `json:"methods"`
 }
 
 // notVerified writes the non-success answer for an exact internal result. The result is for the log and the
@@ -275,6 +279,18 @@ func (p *phase3Auth) device(ctx context.Context, d wireDevice) (deviceIdentity, 
 		RETURNING id::text`,
 		p.srv.tenID, p.srv.siteID, p.srv.applID, mac.String()).Scan(&id)
 	if err != nil {
+		return out, fmt.Errorf("%w: %v", errDeviceStore, err)
+	}
+	// ...AND WHERE IT WAS SEEN. Session activation admits a device only on a guest network it has appeared on
+	// (iamv2_session_activate.go). Voucher and account sign-in record the appearance at sign-in; room sign-in
+	// relied on the free grant opening the session, so a PAID room charge -- whose session is activated later,
+	// by the portal's status page once the PMS has answered -- was refused as DEVICE_IDENTITY_MISMATCH after the
+	// charge had posted (found on PRE-LIVE). Recorded here, for every room sign-in, exactly as the others do.
+	if _, err := p.srv.db.Exec(ctx, `
+		INSERT INTO iam_v2.device_network_appearances (tenant_id, site_id, device_id, guest_network_id, first_seen, last_seen)
+		VALUES ($1,$2,$3,$4,now(),now())
+		ON CONFLICT (device_id, guest_network_id) DO UPDATE SET last_seen = now()`,
+		p.srv.tenID, p.srv.siteID, id, nc.NetworkID); err != nil {
 		return out, fmt.Errorf("%w: %v", errDeviceStore, err)
 	}
 	return deviceIdentity{Tenant: p.srv.tenID, Site: p.srv.siteID, DeviceID: id,
@@ -590,7 +606,8 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 	for _, d := range decisions {
 		offers = append(offers, phase3Offer{
 			PackageRevisionID: d.PackageRevisionID, Code: d.Code,
-			DownKbps: d.DownKbps, UpKbps: d.UpKbps})
+			DownKbps: d.DownKbps, UpKbps: d.UpKbps,
+			PriceMinor: d.PriceMinor, Currency: d.Currency, CurrencyExponent: d.CurrencyExponent, Methods: d.Methods})
 	}
 	writeJSONScd(w, http.StatusOK, phase3Response{
 		Outcome: outcomeVerified, AuthContextID: id, ExpiresIn: int(p.contextTTL.Seconds()), Offers: offers})
@@ -651,6 +668,11 @@ func (p *phase3Auth) probeInterface(ctx context.Context, seen *observations, ifa
 		  FROM iam_v2.stays s
 		 WHERE s.tenant_id=$1 AND s.site_id=$2 AND s.pms_interface_id=$3
 		   AND s.normalized_room_number = $4
+		 -- ELIGIBLE STAYS FIRST. The window is bounded and a busy room accumulates departed stays; without an
+		 -- order the window is whatever the scan returns first, and on PRE-LIVE that was 16 departed stays with
+		 -- the in-house guest outside it (refused as STAY_NOT_ELIGIBLE). Departed stays still fill the rest of
+		 -- the window, so "the room exists" keeps its meaning.
+		 ORDER BY (s.status IN ('IN_HOUSE','POST_STAY_ACTIVE')) DESC, s.id
 		 LIMIT 16`, p.srv.tenID, p.srv.siteID, ifaceID, room, last, first, res)
 	if err != nil {
 		// An interface whose state cannot be read is INDETERMINATE, never a determinate "no such guest".
@@ -821,6 +843,11 @@ type phase3GrantReq struct {
 	AuthContextID string     `json:"auth_context_id"`
 	PackageRevID  string     `json:"package_revision_id"`
 	Device        wireDevice `json:"device"`
+	// Method is the acquisition method chosen for this offer: "" / NOT_REQUIRED for an included package,
+	// PMS_POSTING (room charge) or ONLINE_PAYMENT (card) for a priced one (phase3_paid.go).
+	Method string `json:"method,omitempty"`
+	// ReturnBase is the portal origin a card provider sends the client back to.
+	ReturnBase string `json:"return_base,omitempty"`
 }
 
 type phase3GrantResp struct {
@@ -963,6 +990,18 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 		// proved against facts that no longer hold.
 		grantResult = signinattempt.StayNotEligible
 		notVerified(w, grantResult, "stay_evidence_changed_since_the_offer")
+		return
+	}
+
+	// A PAID CHOICE: a quote, a purchase awaiting settlement and a REQUIRED settlement (and, for a room
+	// charge, the posting) -- and no access until the PMS or the card provider says the money is there.
+	if m := strings.TrimSpace(req.Method); m != "" && m != "NOT_REQUIRED" {
+		req.Method = m
+		res, ok := p.paidPurchase(w, r, tx, req, dev, offeredTier)
+		grantResult = res
+		if ok {
+			grantResult = signinattempt.Verified
+		}
 		return
 	}
 

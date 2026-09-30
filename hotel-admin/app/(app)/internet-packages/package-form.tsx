@@ -1,6 +1,7 @@
 "use client";
 
-// ONE FORM FOR A PACKAGE — what it is called, WHICH SERVICE PLAN it uses, who gets it, how long it lasts.
+// ONE FORM FOR A PACKAGE — what it is called, WHICH SERVICE PLAN it uses, what it costs and how clients get
+// it, who gets it, how long it lasts.
 //
 // The two concepts stay distinct, because they are. A SERVICE PLAN is the technical service: speed, data,
 // time, devices, how the speed is shared. An INTERNET PACKAGE is the guest offer: a name, a duration, who is
@@ -28,6 +29,11 @@ import {
   END_MODE_LABELS,
   RULE_TYPE_LABELS,
   buildPublishPayload,
+  buildAcquisition,
+  newAcquisitionForm,
+  type AcquisitionForm,
+  type ModulesReport,
+  type RoomChargeInterface,
   type EligibilityRuleForm,
   isPMSRuleType,
   type GrantTierForm,
@@ -35,6 +41,8 @@ import {
   type PublishPayload,
   type RuleType,
 } from "@/lib/commerce-form";
+import { moduleLicensedIn } from "@/lib/commerce-form";
+import { AcquisitionSection } from "./acquisition-section";
 
 export type PackageFormValue = {
   payload: PublishPayload;
@@ -66,6 +74,8 @@ export type PackageFormInitial = {
   visibleUntil?: string;
   /** The package's existing data-allowance policy. Absent means the plan's flat allowance. */
   allocation?: AllocationForm;
+  /** The package's price, currency, acquisition methods and room-charge mappings, handed back unchanged. */
+  acquisition?: AcquisitionForm;
 };
 
 function emptyRule(type: RuleType): EligibilityRuleForm {
@@ -91,7 +101,7 @@ const num = (v: unknown): number | null => {
 };
 
 export function PackageForm({
-  mode, initial, plans, busy, onSave, onCancel,
+  mode, initial, plans, busy, onSave, onCancel, modules = null, roomChargeInterfaces = null,
 }: {
   mode: "add" | "edit";
   initial?: PackageFormInitial;
@@ -100,7 +110,13 @@ export function PackageForm({
   busy?: boolean;
   onSave: (v: PackageFormValue) => void | Promise<void>;
   onCancel?: () => void;
+  /** GET /modules: which acquisition methods this site can offer. null while loading; "error" fails closed. */
+  modules?: ModulesReport | "error" | null;
+  /** The PMS interfaces a room charge can be mapped to. null while loading; "error" when they cannot be listed. */
+  roomChargeInterfaces?: RoomChargeInterface[] | "error" | null;
 }) {
+  // HOSPITALITY decides whether hotel conditions and the per-night allowance are offered at all.
+  const hotel = moduleLicensedIn("hospitality", modules ?? null);
   const [code, setCode] = useState(initial?.code ?? "");
   const [name, setName] = useState(initial?.name ?? "");
   const [rules, setRules] = useState<EligibilityRuleForm[]>(initial?.rules ?? []);
@@ -113,6 +129,10 @@ export function PackageForm({
   // change cannot quietly turn a per-night package back into a flat one.
   const [alloc, setAlloc] = useState<AllocationForm>(
     initial?.allocation ?? { mode: "FIXED", gb_per_night: "", min_gb: "", max_gb: "" });
+  // PRICE AND HOW CLIENTS GET IT. Loaded on Edit for the same reason as the allowance: a save republishes
+  // everything, so a rename must not quietly make a priced package free or drop its room-charge posting codes.
+  // A new package starts Free, which is what the server publishes when these fields are absent.
+  const [acq, setAcq] = useState<AcquisitionForm>(initial?.acquisition ?? newAcquisitionForm());
   const [visFrom, setVisFrom] = useState(initial?.visibleFrom ?? "");
   const [visUntil, setVisUntil] = useState(initial?.visibleUntil ?? "");
   const [durationHours, setDurationHours] = useState(
@@ -156,6 +176,9 @@ export function PackageForm({
     if (allocErr) { setError(allocErr); return; }
     const policy = serializeAllocation(alloc);
     if (policy) res.payload.data_allocation_policy = policy;
+    const acqRes = buildAcquisition(acq);
+    if (acqRes.error || !acqRes.fields) { setError(acqRes.error ?? "Please check the price section"); return; }
+    Object.assign(res.payload, acqRes.fields);
     onSave({ payload: res.payload, selectedPlanID: planID });
   }
 
@@ -256,9 +279,13 @@ export function PackageForm({
         <Select data-testid="allocation-mode" aria-labelledby={allocHeadingID}
           value={alloc.mode}
           onChange={(e) => setAlloc((a) => ({ ...a, mode: e.target.value as AllocationForm["mode"] }))}>
-          {(Object.keys(ALLOCATION_MODE_LABELS) as (keyof typeof ALLOCATION_MODE_LABELS)[]).map((m) => (
-            <option key={m} value={m}>{ALLOCATION_MODE_LABELS[m]}</option>
-          ))}
+          {(Object.keys(ALLOCATION_MODE_LABELS) as (keyof typeof ALLOCATION_MODE_LABELS)[])
+            // A per-night allowance needs a stay to count nights of: offered with Hospitality, and kept for a
+            // stored package that already uses it.
+            .filter((m) => m !== "PER_STAY_NIGHT" || hotel || alloc.mode === "PER_STAY_NIGHT")
+            .map((m) => (
+              <option key={m} value={m}>{ALLOCATION_MODE_LABELS[m]}</option>
+            ))}
         </Select>
         {alloc.mode === "PER_STAY_NIGHT" && (
           <div className="mt-2 space-y-2">
@@ -342,6 +369,8 @@ export function PackageForm({
         )}
       </div>
 
+      <AcquisitionSection value={acq} onChange={setAcq} modules={modules} interfaces={roomChargeInterfaces} />
+
       <div>
         <div className="flex items-center justify-between mb-1">
           <h3 className="text-sm font-medium">Who this package is offered to</h3>
@@ -371,9 +400,12 @@ export function PackageForm({
               <optgroup label="General">
                 {SUPPORTED_RULE_TYPES.filter((t) => !isPMSRuleType(t)).map((t) => <option key={t} value={t}>{RULE_TYPE_LABELS[t]}</option>)}
               </optgroup>
-              <optgroup label="Hotel (PMS stay)">
-                {SUPPORTED_RULE_TYPES.filter((t) => isPMSRuleType(t)).map((t) => <option key={t} value={t}>{RULE_TYPE_LABELS[t]}</option>)}
-              </optgroup>
+              {/* Offered only with Hospitality; a stored condition of this kind stays visible so it can be changed. */}
+              {(hotel || isPMSRuleType(r.type)) && (
+                <optgroup label="Hotel (PMS stay)">
+                  {SUPPORTED_RULE_TYPES.filter((t) => isPMSRuleType(t) && (hotel || t === r.type)).map((t) => <option key={t} value={t}>{RULE_TYPE_LABELS[t]}</option>)}
+                </optgroup>
+              )}
             </Select>
             {r.type === "AUTH_METHOD" && <Input data-testid={`rule-methods-${i}`} aria-label={`${n}: sign-in methods`} placeholder="account, voucher" value={r.methods} onChange={(e) => setRule(i, { methods: e.target.value })} />}
             {r.type === "SUBJECT_KIND" && <Input data-testid={`rule-kinds-${i}`} aria-label={`${n}: client kinds`} placeholder="ACCOUNT, VOUCHER" value={r.kinds} onChange={(e) => setRule(i, { kinds: e.target.value })} />}
@@ -447,10 +479,6 @@ export function PackageForm({
             </div>
           </div>
         )}
-      </div>
-
-      <div className="text-xs text-muted-foreground">
-        This package is <strong>free to the client</strong>.
       </div>
 
       <div className="flex gap-2">

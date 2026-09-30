@@ -37,13 +37,38 @@ func pool(t *testing.T) *pgxpool.Pool {
 
 type scope struct{ tenant, site, iface string }
 
+// guardedExec runs ONE write in a transaction that first opens the named controlled-operation families. On the
+// full production schema the controlled-writer triggers (stays/stay_events -> 'stay', purchases ->
+// 'commerce_intent', ...) no longer let the superuser through merely for owning the objects, so a test seed must
+// open the family exactly as the product's own writers do. It returns the write's error so callers that assert
+// a GENUINE refusal (uniqueness, append-only) still see it -- and see it for the right reason.
+func guardedExec(p *pgxpool.Pool, families []string, q string, args ...any) error {
+	ctx := context.Background()
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	for _, f := range families {
+		if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation($1)`, f); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(ctx, q, args...); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+var stayFamily = []string{"stay"}
+
 func seed(t *testing.T, p *pgxpool.Pool) scope {
 	t.Helper()
 	ctx := context.Background()
 	var s scope
 	if err := p.QueryRow(ctx, `WITH
-	  t AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
-	  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id),
+	  t AS (INSERT INTO public.tenants(id,slug,name) SELECT g, g::text, 't' FROM gen_random_uuid() g RETURNING id),
+	  si AS (INSERT INTO public.sites(id,tenant_id,code,name) SELECT g, t.id, g::text, 's' FROM t, gen_random_uuid() g RETURNING id, tenant_id),
 	  pi AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state,current_revision_id)
 	         SELECT gen_random_uuid(), si.tenant_id, si.id, 'protel-fias','ACTIVE',NULL FROM si RETURNING id,tenant_id,site_id)
 	SELECT tenant_id::text, site_id::text, id::text FROM pi`).Scan(&s.tenant, &s.site, &s.iface); err != nil {
@@ -60,7 +85,7 @@ func seed(t *testing.T, p *pgxpool.Pool) scope {
 // insertLive appends a LIVE PENDING inbox row and returns nothing (the processor consumes it next).
 func insertLive(t *testing.T, p *pgxpool.Pool, s scope, identity, eventType, payloadJSON string) {
 	t.Helper()
-	if _, err := p.Exec(context.Background(), `INSERT INTO iam_v2.stay_events
+	if err := guardedExec(p, stayFamily, `INSERT INTO iam_v2.stay_events
 		(tenant_id, site_id, pms_interface_id, external_event_identity, event_type, payload,
 		 admission_kind, admission_runtime_generation, resync_generation, received_at)
 		VALUES ($1,$2,$3,$4,$5,$6::jsonb,'LIVE',1,0,now())`,
@@ -101,7 +126,7 @@ func eventOutcome(t *testing.T, p *pgxpool.Pool, s scope, identity string) (stat
 }
 
 // TestIntegration_StayLifecycle drives GI→GC→room-move→GO→reinstate through the real transactional processor
-// and asserts the authoritative Stay state, lifecycle_version episodes, primary guest, folio identity, and the
+// and asserts the authoritative Stay state, lifecycle_version episodes, primary guest, and the
 // terminal event outcomes — end to end on PostgreSQL through the real append-only + lifecycle triggers.
 func TestIntegration_StayLifecycle(t *testing.T) {
 	p := pool(t)
@@ -113,7 +138,7 @@ func TestIntegration_StayLifecycle(t *testing.T) {
 	pr := NewProcessorWithCheckout(p, checkout.NewConverter(p))
 	res := "RES-1"
 
-	// GI → create IN_HOUSE stay + primary guest + folio identity
+	// GI → create IN_HOUSE stay + primary guest (the FO field is not stored, A1)
 	insertLive(t, p, s, "e-gi", "GI", pay(res, "1408", "Smith", "John", "F900", "260101", "260105"))
 	process(t, pr, s)
 	if st, lv, room := stayState(t, p, s, res); st != "IN_HOUSE" || lv != 1 || room != "1408" {
@@ -125,9 +150,9 @@ func TestIntegration_StayLifecycle(t *testing.T) {
 		WHERE s.external_reservation_id=$1 AND s.pms_interface_id=$2 AND g.is_primary`, res, s.iface); n != 1 {
 		t.Fatalf("primary guest count=%d, want 1", n)
 	}
-	if n := scalar(t, p, `SELECT count(*) FROM iam_v2.folios WHERE pms_interface_id=$1 AND external_folio_id='F900'`, s.iface); n != 1 {
-		t.Fatalf("folio identity count=%d, want 1", n)
-	}
+	// A1 (D46, migration 0100): the FO field is no longer stored as a folio identity (formerly asserted
+	// iam_v2.folios count=1); the folio tables are dropped.
+	assertNoFolioTables(t, p)
 	if st, _ := eventOutcome(t, p, s, "e-gi"); st != "APPLIED" {
 		t.Fatalf("GI outcome=%s, want APPLIED", st)
 	}

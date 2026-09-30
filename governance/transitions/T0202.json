@@ -1,0 +1,44 @@
+{
+  "transition_id": "T0202",
+  "seq": 202,
+  "timestamp": "2026-09-29T11:20:00+03:00",
+  "timestamp_derivation": "Written after the Admin Console deployment was read back and checked in a browser on PRE-LIVE, before the commit that introduces this receipt.",
+  "record_type": "CAFE_NAVIGATION_AND_MODULES_PAGE_CORRECTED_READY_FOR_PRODUCT_OWNER_TESTING",
+  "authorisation": "Product-Owner finding of 2026-09-29 on PRE-LIVE (Site Type CAFE, every module Not licensed, yet the menu showed the Hotel section), within the standing PR #202 mission and the standing PRE-LIVE deployment decision.",
+  "decision": "D45",
+  "decisions_recorded": [],
+  "delivered": [
+    "A site without Hospitality licensed has no Hotel section in its navigation; hotel records it kept stay served and are reached from the Hotel card on System > Modules ('Records kept here').",
+    "System > Modules lists every module the appliance reports, including WhatsApp one-time code and any module it does not yet know; for an unlicensed module Switched on and Ready show a dash, 'Switched off at this site' is not given as a reason, and no configuration link is offered."
+  ],
+  "verification": "Admin Console vitest 55 files / 628 tests (new: café navigation without a Hotel section; Modules page on a café) and tsc. Live on PRE-LIVE in Chrome: no Hotel link or wording in the menu, WhatsApp card present, dashes for unlicensed modules, no PMS connection link, Records kept here: Stays, PMS activity, Guest sign-in checks, Guest sign-in attempts.",
+  "deployment_provenance": "PRE-LIVE 172.21.60.25: Admin Console 8650643a (release 20260929-081525, clean); scd, edged and portald d5c3e578; pmsd db05d7ba; netd, acctd and keybootstrap 99ba9f10; site migrations through 0099. Central unchanged at 8e4bed4e.",
+  "financial_traffic": "NONE (UI-only change).",
+  "open_inputs": [
+    "Deferred (Product Owner, future): the public Client Portal domain and its publicly trusted certificate. Real Google/Facebook/Apple/Microsoft validation is pending that decision and the provider credentials; not a blocker for PR #202.",
+    "Provider credentials for the other credential-dependent live tests: email/SMS/WhatsApp senders (Meta or Twilio approved authentication template) and Stripe/Paymob sandbox keys.",
+    "Central operator (Product Owner): licence the modules to be tested on the PRE-LIVE site (currently Site Type CAFE, no optional module).",
+    "Product Owner acceptance of PR #202 before any merge."
+  ],
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0201."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. The PR #202 corrections are delivered to PRE-LIVE for Product Owner testing on the unmerged PR. PRE-LIVE remains PRE-LIVE."
+  },
+  "state_note": "No phase, activity or acceptance state changes. The delivery is READY FOR PRODUCT OWNER TESTING, not merged and not closed.",
+  "base": "42823d9dfecd4339ac540d1b5d19ee0bf5df40f4",
+  "base_note": "Master at the time the branch was cut (the merge of PR #201).",
+  "head": "8650643a",
+  "head_note": "PR #202's last content commit before this governance record.",
+  "previous_delivery": "T0201",
+  "go_live": "NOT authorised. Real PMS posting and LIVE provider transactions remain prohibited."
+}

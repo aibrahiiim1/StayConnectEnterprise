@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -46,7 +47,7 @@ func (h *handler) socialStart(w http.ResponseWriter, r *http.Request) {
 	// Always over the portal's external host so the browser can reach it
 	// without DNS surgery on the guest network.
 	scheme := "http"
-	if r.TLS != nil {
+	if r.TLS != nil || forwardedHTTPS(r) {
 		scheme = "https"
 	}
 	host := r.Host // includes :port
@@ -90,14 +91,21 @@ func (h *handler) socialStart(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, sr.AuthorizeURL, http.StatusFound)
 }
 
-// ---- /auth/social/callback?provider=google&state=...&code=... ---------------
+// ---- /auth/social/callback?state=...&code=... (GET) or the same as a POST form ---
+//
+// Google, Microsoft and Facebook return code + state in the query of a GET. Sign in with Apple POSTs them as
+// a form (response_mode=form_post), which Apple mandates as soon as the email scope is requested, so the
+// route accepts both and FormValue reads either. A real provider sends no `provider` parameter -- the
+// redirect_uri registered with it is this bare path -- so scd resolves the provider from the state row; the
+// Stub still round-trips one, and scd checks it against the state when present. The POST is a cross-site
+// form submission by design; it carries no more authority than the GET, because the state it names is bound
+// to the device that started the flow and is consumed once.
 
 func (h *handler) socialCallback(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	provider, state, code := q.Get("provider"), q.Get("state"), q.Get("code")
+	provider, state, code := r.FormValue("provider"), r.FormValue("state"), r.FormValue("code")
 	// Every refusal on this return leg is a page the guest's browser lands on, so each is the branded,
 	// translated failure page. The status codes are the ones this handler has always sent.
-	if provider == "" || state == "" || code == "" {
+	if state == "" || code == "" {
 		h.renderGuestError(w, r, http.StatusBadRequest, "errpage.social")
 		return
 	}
@@ -242,4 +250,16 @@ func (h *handler) stubAuthorizeConfirm(w http.ResponseWriter, r *http.Request) {
 		"&state=" + url.QueryEscape(state) +
 		"&code=" + url.QueryEscape(code)
 	http.Redirect(w, r, dst, http.StatusFound)
+}
+
+// forwardedHTTPS reports whether the request reached the portal over HTTPS through the appliance's own reverse
+// proxy (Caddy terminates TLS for portal.stayconnect.local and forwards over loopback). The header is believed
+// only from a loopback peer: a guest cannot set it on a direct request.
+func forwardedHTTPS(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback() && strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
 }

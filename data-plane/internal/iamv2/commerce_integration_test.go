@@ -57,7 +57,7 @@ type seed struct {
 // `tiers` are optional JSON specs; opts adjust price/settlement/visibility for negative cases.
 func seedFreeCommerce(t *testing.T, db *pgxpool.Pool, opts func(*seedOpts)) seed {
 	t.Helper()
-	o := seedOpts{price: 0, currency: "USD", exp: 2, settlement: "{NOT_REQUIRED}", tiers: `[{"order":10,"grant":{"down_kbps":5000}}]`, duration: `{"end_mode":"MANUAL_END"}`,
+	o := seedOpts{price: 0, currency: "USD", exp: 2, settlement: "{NOT_REQUIRED,PREPAID}", tiers: `[{"order":10,"grant":{"down_kbps":5000}}]`, duration: `{"end_mode":"MANUAL_END"}`,
 		timeMode: TimeModeValidityWindow}
 	if opts != nil {
 		opts(&o)
@@ -239,12 +239,12 @@ func TestC2QuoteDenials(t *testing.T) {
 		t.Fatalf("ineligible must deny: %+v", q)
 	}
 
-	// not free (priced) -> deny
+	// priced, card payment not effective at this site (no method gate) -> deny
 	db3 := p2DB(t)
-	sp := seedFreeCommerce(t, db3, func(o *seedOpts) { o.price = 500 })
+	sp := seedFreeCommerce(t, db3, func(o *seedOpts) { o.price = 500; o.settlement = "{ONLINE_PAYMENT}" })
 	ep := newEngine(t, db3, 5*time.Minute)
-	if q, _ := ep.CreateQuote(ctx, req(sp)); q.QuoteID != "" || q.Reason != "not_free" {
-		t.Fatalf("priced package must deny not_free: %+v", q)
+	if q, _ := ep.CreateQuote(ctx, req(sp)); q.QuoteID != "" || q.Reason != "method_not_available" {
+		t.Fatalf("priced package without an effective method must deny: %+v", q)
 	}
 
 	// no matching tier -> deny

@@ -250,6 +250,14 @@ func (s *server) fetchAssignment(ctx context.Context, _ string) (*assignment.Doc
 	}
 	if resp.StatusCode != http.StatusOK {
 		s.central.record(&httpStatusErr{code: resp.StatusCode}, time.Now())
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			// Central answered and refused the certificate: have the certificate agent check whether it was
+			// revoked or reissued, and repair it (appliancecert.Reconcile).
+			select {
+			case s.certReconcile <- struct{}{}:
+			default:
+			}
+		}
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		slog.Warn("assignment: fetch non-200", "status", resp.StatusCode, "body", string(b))
 		return nil, false

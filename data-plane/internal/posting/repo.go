@@ -39,12 +39,12 @@ func (r *Repo) InsertPosting(ctx context.Context, tx pgx.Tx, p Pinned) (string, 
 	var id string
 	if err := tx.QueryRow(ctx, `
 INSERT INTO iam_v2.pms_postings
-  (tenant_id, site_id, pms_interface_id, settlement_id, purchase_id, stay_id, folio_id,
+  (tenant_id, site_id, pms_interface_id, settlement_id, purchase_id, stay_id, g_number,
    posting_interface_revision_id, secret_generation_id, posting_type,
    amount_minor, currency, currency_exponent, idempotency_key)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'CHARGE',$10,$11,$12,$13)
 RETURNING id::text`,
-		p.TenantID, p.SiteID, p.PMSInterfaceID, p.SettlementID, p.PurchaseID, p.StayID, p.FolioID,
+		p.TenantID, p.SiteID, p.PMSInterfaceID, p.SettlementID, p.PurchaseID, p.StayID, p.GNumber,
 		p.PostingInterfaceRevisionID, nullable(p.SecretGenerationID),
 		p.AmountMinor, p.Currency, p.CurrencyExponent, p.IdempotencyKey).Scan(&id); err != nil {
 		return "", classify(err)
@@ -89,12 +89,12 @@ UPDATE iam_v2.posting_outbox o
   FROM claimed, iam_v2.pms_postings p
  WHERE o.id = claimed.id AND p.id = o.posting_id
 RETURNING o.id::text, p.id::text, p.settlement_id::text, p.purchase_id::text, p.stay_id::text,
-          p.folio_id::text, p.posting_interface_revision_id::text,
+          p.g_number, p.posting_interface_revision_id::text,
           coalesce(p.secret_generation_id::text,''), p.amount_minor, p.currency, p.currency_exponent,
           p.idempotency_key`,
 		tenantID, siteID, interfaceID).Scan(
 		&c.OutboxID, &c.PostingID, &c.Pinned.SettlementID, &c.Pinned.PurchaseID, &c.Pinned.StayID,
-		&c.Pinned.FolioID, &c.Pinned.PostingInterfaceRevisionID, &c.Pinned.SecretGenerationID,
+		&c.Pinned.GNumber, &c.Pinned.PostingInterfaceRevisionID, &c.Pinned.SecretGenerationID,
 		&c.Pinned.AmountMinor, &c.Pinned.Currency, &c.Pinned.CurrencyExponent, &c.Pinned.IdempotencyKey)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -103,6 +103,7 @@ RETURNING o.id::text, p.id::text, p.settlement_id::text, p.purchase_id::text, p.
 		return nil, classify(err)
 	}
 	c.Pinned.TenantID, c.Pinned.SiteID, c.Pinned.PMSInterfaceID = tenantID, siteID, interfaceID
+	c.Pinned.PostingID = c.PostingID
 
 	// The remaining pinned fields are read from the objects the posting already points at. This is reading
 	// the pin, not re-resolving it: package revision and settlement mapping are the ones this purchase was
@@ -153,17 +154,17 @@ func (r *Repo) AllocatePNumber(ctx context.Context, tx pgx.Tx, tenantID, siteID,
 // InsertAttempt records a transmission attempt as SENDING. The database refuses it outright unless RN and
 // G# are present and wire-safe, the attempt number continues the sequence, and any retry after an UNKNOWN
 // or ACKED attempt carries an audited authorization.
-func (r *Repo) InsertAttempt(ctx context.Context, tx pgx.Tx, p Pinned, postingID string, attemptNo int, pNumber int64) (string, error) {
+func (r *Repo) InsertAttempt(ctx context.Context, tx pgx.Tx, p Pinned, postingID string, attemptNo int, pNumber int64, psSHA256 string) (string, error) {
 	var id string
 	if err := tx.QueryRow(ctx, `
 INSERT INTO iam_v2.posting_attempts
-  (tenant_id, site_id, internal_posting_id, pms_interface_id, attempt_no, p_number, rn, g_number, sent_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
+  (tenant_id, site_id, internal_posting_id, pms_interface_id, attempt_no, p_number, rn, g_number, sent_at, ps_sha256)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now(), NULLIF($9,''))
 RETURNING id::text`,
 		p.TenantID, p.SiteID, postingID, p.PMSInterfaceID, attemptNo,
 		// p_number is a text column: render the allocated integer here rather than casting in SQL, so the
 		// value that is stored is byte-for-byte the value that goes on the wire.
-		strconv.FormatInt(pNumber, 10), p.RN, p.GNumber).Scan(&id); err != nil {
+		strconv.FormatInt(pNumber, 10), p.RN, p.GNumber, psSHA256).Scan(&id); err != nil {
 		return "", classify(err)
 	}
 	return id, nil
@@ -272,7 +273,11 @@ func classify(err error) error {
 		needle string
 		code   Code
 	}{
-		{"FOLIO_STRATEGY_UNSET", ErrFolioStrategyUnset},
+		{"POSTING_TARGET_UNSET", ErrPostingTargetUnset},
+		{"POSTING_RESERVATION_MISMATCH", ErrReservationMismatch},
+		{"ATTEMPT_RESERVATION_MISMATCH", ErrReservationMismatch},
+		{"ROOM_CHARGE_UNRESOLVED", ErrStayChargeOpen},
+		{"POSTING_NO_STAY", ErrReservationMismatch},
 		{"POSTING_NOT_ALLOWED", ErrPostingNotAllowed},
 		{"INTERFACE_CURRENCY_NOT_ONBOARDED", ErrInterfaceNoCurrency},
 		{"POSTING_CURRENCY_MISMATCH", ErrCurrencyMismatch},

@@ -50,7 +50,7 @@ func (h *handler) authMethods(w http.ResponseWriter, r *http.Request) {
 // ---- /auth/otp/request (channel-agnostic: email | sms) ----------------------
 
 type otpReqIn struct {
-	Channel     string `json:"channel"`     // "email" | "sms"
+	Channel     string `json:"channel"`     // "email" | "sms" | "whatsapp"
 	Destination string `json:"destination"` // email or E.164-ish phone
 }
 
@@ -61,9 +61,9 @@ func (h *handler) authOTPRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch in.Channel {
-	case "email", "sms":
+	case "email", "sms", "whatsapp":
 	default:
-		jsonErr(w, 400, "channel must be email or sms")
+		jsonErr(w, 400, "channel must be email, sms or whatsapp")
 		return
 	}
 	ip := clientIP(r)

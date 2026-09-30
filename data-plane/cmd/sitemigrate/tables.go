@@ -152,13 +152,6 @@ var migrationTables = []tableSpec{
 		Note:  "tenant-scoped (no site_id)",
 	},
 	{
-		Name:  "stripe_accounts",
-		Where: "tenant_id = $1",
-		PK:    "id",
-		FKs:   []fkRef{{"tenant_id", "tenants", "id"}},
-		Note:  "tenant-scoped (no site_id)",
-	},
-	{
 		Name:  "stripe_events",
 		Where: "tenant_id = $1",
 		PK:    "event_id",

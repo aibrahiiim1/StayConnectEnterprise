@@ -528,6 +528,11 @@ func classify(err error) error {
 		{"RECOVERY_REASON_REQUIRED", ErrUntrustedInput},
 		{"RECOVERY_RESOLUTION_INVALID", ErrUntrustedInput},
 		{"RECOVERY_ACTOR_REQUIRED", ErrUntrustedInput},
+		// Refusals an operator can act on, returned in the database's own words (edged answers 400) rather than
+		// as an opaque repository failure: releasing recovery when none is active, resolving a hold that is not
+		// there.
+		{"RECOVERY_NOT_ACTIVE", ErrUntrustedInput},
+		{"RECOVERY_HOLD_UNKNOWN", ErrUntrustedInput},
 		{"PAYMENT_NO_CONFIGURED_ACCOUNT", ErrNoAccount},
 		{"PAYMENT_ACCOUNT_NOT_ACTIVE", ErrNoAccount},
 		{"PAYMENT_ACCOUNT_UNKNOWN", ErrNoAccount},

@@ -119,7 +119,10 @@ func (s *server) initAuthSecurity(ctx context.Context, pool *pgxpool.Pool, c cfg
 	// A runtime that could create an aggregate entitlement it cannot account for is the state the gate
 	// exists to prevent, so the two must never be configured independently.
 	comm, err := iamv2.NewCommerceEngine(commCfg, commRepo, iamv2.NopObserver{},
-		iamv2.WithAggregateOnlineTime(phase6AggregateOn()))
+		iamv2.WithAggregateOnlineTime(phase6AggregateOn()),
+		// Which optional acquisition methods are effective at this site is the module resolver's answer (all
+		// four gates, readiness included), read on every list, quote and confirm -- never cached here.
+		iamv2.WithMethodGate(s.siteAcquisitionMethods))
 	if err != nil {
 		return fmt.Errorf("phase2 commerce new: %w", err)
 	}

@@ -69,10 +69,10 @@ func (Gate) CheckFor(purpose Purpose, p Pinned, s Snapshot) error {
 		return err
 	}
 
-	// ---- Tier-2 onboarding: folio identity, then financial currency -------------------------------
-	if s.FolioIdentityStrategy == "" || s.FolioIdentityStrategy == "UNSET" {
-		return fail(ErrFolioStrategyUnset,
-			"pinned interface revision has no folio identity strategy (property not onboarded)")
+	// ---- Tier-2 onboarding: posting target, then financial currency --------------------------------
+	if s.PostingTargetModel != "RESERVATION" {
+		return fail(ErrPostingTargetUnset,
+			"pinned interface revision has no posting target (property not financially onboarded)")
 	}
 	if s.InterfaceCurrency == "" || s.InterfaceExponent == nil {
 		return fail(ErrInterfaceNoCurrency,
@@ -115,27 +115,28 @@ func (Gate) CheckFor(purpose Purpose, p Pinned, s Snapshot) error {
 		return fail(ErrPostingNotAllowed, "pinned stay does not allow posting")
 	}
 
-	// ---- financial targeting evidence ------------------------------------------------------------
-	if blank(p.RN) {
-		return fail(ErrRNMissing, "no verified room number")
-	}
+	// ---- financial targeting evidence (Phase-0 Amendment A1) ---------------------------------------
+	// G# is the posting identity: mandatory, wire-safe, and exactly the pinned stay's reservation number. A
+	// room-only posting can never be built, because there is no path past this check without a G#.
 	if blank(p.GNumber) {
-		return fail(ErrGNumberMissing, "no verified guest number")
-	}
-	if wireUnsafe(p.RN) || len(p.RN) > maxWireField {
-		return fail(ErrRNNotWireSafe, "room number is not transmissible as a FIAS field")
+		return fail(ErrGNumberMissing, "no reservation number (G#)")
 	}
 	if wireUnsafe(p.GNumber) || len(p.GNumber) > maxWireField {
-		return fail(ErrGNumberNotWireSafe, "guest number is not transmissible as a FIAS field")
+		return fail(ErrGNumberNotWireSafe, "reservation number is not transmissible as a FIAS field")
 	}
-	// VERIFIED, not merely present: the values must be the ones the PINNED stay and folio actually carry.
-	// This is what stops a stale RN from being transmitted after a room move, and it is re-run before every
-	// attempt, so a change between authorization and transmission refuses instead of charging a stranger.
-	if p.RN != s.StayRoomNumber {
-		return fail(ErrEvidenceStale, "room number does not match the pinned stay's current room")
+	if p.GNumber != s.StayReservation {
+		return fail(ErrReservationMismatch, "the posting's reservation is not the pinned stay's reservation")
 	}
-	if p.GNumber != s.FolioExternalID {
-		return fail(ErrEvidenceStale, "guest number does not match the pinned folio's external identifier")
+	// RN is mutable targeting data: the reservation's CURRENT room. It must resolve; at execution the attempt's
+	// RN must be exactly that room (the engine refreshes it from the stay immediately before building the PS).
+	if blank(s.StayRoomNumber) {
+		return fail(ErrRNMissing, "the reservation's current room cannot be resolved")
+	}
+	if wireUnsafe(s.StayRoomNumber) || len(s.StayRoomNumber) > maxWireField {
+		return fail(ErrRNNotWireSafe, "room number is not transmissible as a FIAS field")
+	}
+	if purpose == PurposeExecute && p.RN != s.StayRoomNumber {
+		return fail(ErrEvidenceStale, "the attempt's room is not the reservation's current room")
 	}
 	if blank(p.PostingCode) || wireUnsafe(p.PostingCode) || len(p.PostingCode) > maxWireField {
 		return fail(ErrWireFieldInvalid, "pinned posting code is not transmissible as a FIAS field")

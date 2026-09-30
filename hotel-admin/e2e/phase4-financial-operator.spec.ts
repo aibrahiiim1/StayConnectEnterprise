@@ -37,8 +37,8 @@ const REVIEW_ROW = {
 };
 const REVIEW_DETAIL = {
   posting: REVIEW_ROW,
-  pinned_evidence: { settlement_id: "s1", purchase_id: "pu1", stay_id: "st1", folio_id: "f1",
-    connector_kind: "protel-fias", folio_identity_strategy: "UNIQUE_PER_STAY",
+  pinned_evidence: { settlement_id: "s1", purchase_id: "pu1", stay_id: "st1", g_number: "7",
+    connector_kind: "protel-fias", posting_target_model: "RESERVATION",
     interface_lifecycle_state: "ACTIVE", settlement_status: "REQUIRED",
     purchase_state: "AWAITING_SETTLEMENT" },
   attempts: [{ attempt_no: 1, p_number: "42", rn: "101", g_number: "7", outcome: "UNKNOWN",

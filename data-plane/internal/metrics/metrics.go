@@ -37,7 +37,7 @@ type Registry struct {
 	SessionsClosed      *prometheus.CounterVec // labels: reason
 	SessionBytesTotal   *prometheus.CounterVec // labels: direction (up|down)
 
-	OTPIssued *prometheus.CounterVec // labels: channel (email|sms)
+	OTPIssued *prometheus.CounterVec // labels: channel (email|sms|whatsapp)
 	OTPVerify *prometheus.CounterVec // labels: channel, result (ok|bad|expired|locked)
 
 	PMSValidate         *prometheus.CounterVec   // labels: provider, result
@@ -221,7 +221,7 @@ func New(version string, constLabels prometheus.Labels) *Registry {
 	for _, dir := range []string{"up", "down"} {
 		r.SessionBytesTotal.WithLabelValues(dir).Add(0)
 	}
-	for _, ch := range []string{"email", "sms"} {
+	for _, ch := range []string{"email", "sms", "whatsapp"} {
 		r.OTPIssued.WithLabelValues(ch).Add(0)
 	}
 	for _, op := range []string{"add", "del"} {

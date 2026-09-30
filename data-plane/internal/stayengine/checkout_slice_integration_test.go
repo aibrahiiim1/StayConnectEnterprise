@@ -59,6 +59,10 @@ func grantEntitlement(t *testing.T, p *pgxpool.Pool, s scope, stayID, pkgRev str
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	// purchases are a controlled-writer table ('commerce_intent') on the full schema
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('commerce_intent')`); err != nil {
+		t.Fatal(err)
+	}
 	var svcRev, purchase, ent string
 	if err := tx.QueryRow(ctx, `SELECT service_plan_revision_id::text FROM iam_v2.internet_package_revisions WHERE id=$1`, pkgRev).Scan(&svcRev); err != nil {
 		t.Fatal(err)
@@ -88,7 +92,7 @@ func grantEntitlement(t *testing.T, p *pgxpool.Pool, s scope, stayID, pkgRev str
 // insertLiveAt is insertLive with an explicit normalized PMS timestamp (the trusted checkout boundary source).
 func insertLiveAt(t *testing.T, p *pgxpool.Pool, s scope, identity, eventType, payloadJSON string, ts time.Time) {
 	t.Helper()
-	if _, err := p.Exec(context.Background(), `INSERT INTO iam_v2.stay_events
+	if err := guardedExec(p, stayFamily, `INSERT INTO iam_v2.stay_events
 		(tenant_id, site_id, pms_interface_id, external_event_identity, event_type, payload, pms_timestamp_utc,
 		 admission_kind, admission_runtime_generation, resync_generation, received_at)
 		VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,'LIVE',1,0,now())`,
@@ -338,7 +342,7 @@ func TestIntegration_LateStageRollback(t *testing.T) {
 	// Pre-plant a CHECKOUT_GRACE purchase for THIS episode but NO audit row: the conversion passes its audit
 	// idempotency gate, terminates the original Entitlement, and only then collides on
 	// purchases.one_conversion_per_episode — a genuine LATE-stage failure.
-	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.purchases
+	if err := guardedExec(p, []string{"commerce_intent"}, `INSERT INTO iam_v2.purchases
 		(tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,trigger,amount_minor,state,checkout_episode)
 		VALUES ($1,$2,$3,$4,$5,'CHECKOUT_GRACE',0,'GRANTED',1)`, s.tenant, s.site, pkgRev, s.iface, stayID); err != nil {
 		t.Fatal(err)
@@ -373,7 +377,8 @@ func paySharers(res, room, folio string, sharers string) string {
 
 // TestIntegration_SharersAndFolios proves sharing a Stay is ordinary and legal: several occupants are recorded
 // for one Stay with EXACTLY one primary, the primary can move between them across events without ever
-// duplicating, and the event's folio becomes the Stay's single default posting target.
+// duplicating. (Formerly also: the event's folio becomes the Stay's default posting target -- removed by
+// Amendment A1 / migration 0100; the FO field is ignored and the reservation is the posting target.)
 func TestIntegration_SharersAndFolios(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -398,11 +403,9 @@ func TestIntegration_SharersAndFolios(t *testing.T) {
 	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stay_guests WHERE stay_id=$1 AND external_guest_id='G1' AND is_primary`, stayID); n != 1 {
 		t.Fatal("the flagged occupant is not the primary")
 	}
-	// the folio is linked as the single default posting target
-	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stay_folios sf JOIN iam_v2.folios f ON f.id=sf.folio_id
-		WHERE sf.stay_id=$1 AND f.external_folio_id='F700' AND sf.is_default_posting_target`, stayID); n != 1 {
-		t.Fatal("folio not linked as the default posting target")
-	}
+	// A1 (D46, migration 0100): the event's FO field is NOT stored -- a room charge targets the reservation,
+	// so there is no folio link to assert; assert instead that no folio table exists to receive one.
+	assertNoFolioTables(t, p)
 
 	// a later event moves the primary AND adds a third occupant — still exactly one primary, no duplicates
 	insertLive(t, p, s, "SH-2", "GC", paySharers("R700", "700", "F700",
@@ -449,46 +452,66 @@ func TestIntegration_ContradictorySharerPayloadGoesToReview(t *testing.T) {
 	}
 }
 
-// TestIntegration_FolioSourceConflictGoesToReview proves a GUEST folio already acting as another Stay's
-// posting target is never silently stolen — that would move one Stay's postings onto another. The event goes
-// to MANUAL_REVIEW and the original link is untouched.
-func TestIntegration_FolioSourceConflictGoesToReview(t *testing.T) {
+// TestIntegration_FolioFieldAppliesWithoutFolioSideEffect replaces the former
+// TestIntegration_FolioSourceConflictGoesToReview (which asserted MANUAL_REVIEW/CodeFolioStayConflict when two
+// reservations claimed the same GUEST folio). Phase-0 Amendment A1 (D46, migration 0100): a room charge targets
+// the reservation (RN + G#), not a folio. The stay engine no longer stores folios -- iam_v2.folios and
+// iam_v2.stay_folios are dropped and CodeFolioStayConflict is gone -- so a guest record's FO field is ignored.
+// This proves the new contract: two DIFFERENT reservations carrying the SAME FO value are both applied
+// normally (APPLIED, no MANUAL_REVIEW, no review code), each creates its own IN_HOUSE Stay, no source-conflict
+// row is written for the interface, and no folio table exists to receive a side effect.
+func TestIntegration_FolioFieldAppliesWithoutFolioSideEffect(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
-	ctx := context.Background()
 	s := seed(t, p)
 	pr := NewProcessor(p)
 	insertLive(t, p, s, "FC-1", "GI", paySharers("R710", "710", "FSHARED", `{"external_guest_id":"G1","last_name":"First","is_primary":true}`))
 	process(t, pr, s)
-	var firstStay string
-	if err := p.QueryRow(ctx, `SELECT id::text FROM iam_v2.stays WHERE pms_interface_id=$1 AND external_reservation_id='R710'`, s.iface).Scan(&firstStay); err != nil {
-		t.Fatal(err)
-	}
-	// a DIFFERENT reservation claiming the same open GUEST folio
+	// a DIFFERENT reservation carrying the same FO value -- formerly a folio source conflict
 	insertLive(t, p, s, "FC-2", "GI", paySharers("R711", "711", "FSHARED", `{"external_guest_id":"G2","last_name":"Second","is_primary":true}`))
 	process(t, pr, s)
-	var status, code string
-	if err := p.QueryRow(ctx, `SELECT processing_status, COALESCE(review_code,'') FROM iam_v2.stay_events
-		WHERE pms_interface_id=$1 AND external_event_identity='FC-2'`, s.iface).Scan(&status, &code); err != nil {
+	for _, ident := range []string{"FC-1", "FC-2"} {
+		if st, code := eventOutcome(t, p, s, ident); st != "APPLIED" || code != "" {
+			t.Fatalf("%s: status=%s code=%q, want APPLIED with no review code (an FO field is not a conflict)", ident, st, code)
+		}
+	}
+	for _, res := range []string{"R710", "R711"} {
+		if st, lv, _ := stayState(t, p, s, res); st != "IN_HOUSE" || lv != 1 {
+			t.Fatalf("%s: status=%s lv=%d, want IN_HOUSE/1", res, st, lv)
+		}
+	}
+	// a later update of the first stay carrying the FO field again is also applied normally
+	insertLive(t, p, s, "FC-3", "GC", paySharers("R710", "712", "FSHARED", `{"external_guest_id":"G1","last_name":"First","is_primary":true}`))
+	process(t, pr, s)
+	if st, code := eventOutcome(t, p, s, "FC-3"); st != "APPLIED" || code != "" {
+		t.Fatalf("FC-3: status=%s code=%q, want APPLIED", st, code)
+	}
+	if st, _, room := stayState(t, p, s, "R710"); st != "IN_HOUSE" || room != "712" {
+		t.Fatalf("R710 after GC: status=%s room=%s, want IN_HOUSE/712", st, room)
+	}
+	// no source-conflict row involving this interface
+	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.pms_source_conflicts
+		WHERE site_id=$1 AND (interface_a=$2 OR interface_b=$2)`, s.site, s.iface); n != 0 {
+		t.Fatalf("source conflicts = %d, want 0 (an FO field never conflicts)", n)
+	}
+	// no MANUAL_REVIEW anywhere on this interface
+	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stay_events
+		WHERE pms_interface_id=$1 AND processing_status='MANUAL_REVIEW'`, s.iface); n != 0 {
+		t.Fatalf("MANUAL_REVIEW events = %d, want 0", n)
+	}
+	assertNoFolioTables(t, p)
+}
+
+// assertNoFolioTables proves there is nowhere for a folio side effect to land (migration 0100 dropped them).
+func assertNoFolioTables(t *testing.T, p *pgxpool.Pool) {
+	t.Helper()
+	var folios, stayFolios *string
+	if err := p.QueryRow(context.Background(),
+		`SELECT to_regclass('iam_v2.folios')::text, to_regclass('iam_v2.stay_folios')::text`).Scan(&folios, &stayFolios); err != nil {
 		t.Fatal(err)
 	}
-	if status != "MANUAL_REVIEW" || code != CodeFolioStayConflict {
-		t.Fatalf("status=%s code=%s, want MANUAL_REVIEW/%s", status, code, CodeFolioStayConflict)
-	}
-	// the first Stay keeps the folio, and the conflicting event wrote nothing
-	// SCOPED to this test's own interface, for the same reason: 'FSHARED' is an external folio id, unique
-	// only within an interface, so an unscoped count grows with every previous run.
-	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stay_folios sf JOIN iam_v2.folios f ON f.id=sf.folio_id
-		WHERE f.external_folio_id='FSHARED' AND f.pms_interface_id=$1 AND sf.is_default_posting_target`,
-		s.iface); n != 1 {
-		t.Fatal("the folio's default posting target was stolen or duplicated")
-	}
-	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stay_folios sf JOIN iam_v2.folios f ON f.id=sf.folio_id
-		WHERE f.external_folio_id='FSHARED' AND sf.stay_id=$1`, firstStay); n != 1 {
-		t.Fatal("the original stay lost its folio link")
-	}
-	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stays WHERE pms_interface_id=$1 AND external_reservation_id='R711'`, s.iface); n != 0 {
-		t.Fatal("the conflicting event created a stay anyway")
+	if folios != nil || stayFolios != nil {
+		t.Fatal("a folio table exists; migration 0100 drops iam_v2.folios and iam_v2.stay_folios")
 	}
 }
 
@@ -502,7 +525,7 @@ func countRows(t *testing.T, p *pgxpool.Pool, q string, args ...any) int {
 }
 
 // F1 — ROOM MOVE PRESERVATION. A room move changes ONLY the lookup room number: the Stay identity, its
-// episode counter, its occupants and its folio link all survive, because the room is evidence, never identity.
+// episode counter, its occupants and its reservation (the posting target, A1) all survive, because the room is evidence, never identity.
 func TestIntegration_F1_RoomMovePreservesTheStay(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -540,9 +563,10 @@ func TestIntegration_F1_RoomMovePreservesTheStay(t *testing.T) {
 	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stay_guests WHERE stay_id=$1`, stayID); n != 2 {
 		t.Fatalf("occupants after the move = %d, want the original 2 preserved", n)
 	}
-	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stay_folios sf JOIN iam_v2.folios f ON f.id=sf.folio_id
-		WHERE sf.stay_id=$1 AND f.external_folio_id='F800' AND sf.is_default_posting_target`, stayID); n != 1 {
-		t.Fatal("the folio link was lost in the room move")
+	// A1 (D46): the posting target is the reservation, which a room move keeps (formerly: the folio link).
+	var resv string
+	if err := p.QueryRow(ctx, `SELECT external_reservation_id FROM iam_v2.stays WHERE id=$1`, stayID).Scan(&resv); err != nil || resv != "R800" {
+		t.Fatalf("reservation after the move = %q (%v), want R800 preserved", resv, err)
 	}
 }
 
@@ -561,7 +585,8 @@ func TestIntegration_F2_StaleEventIsANoOp(t *testing.T) {
 	process(t, pr, s)
 
 	// (a) the durable inbox refuses a second LIVE event with the SAME identity — a replay never becomes a fact
-	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.stay_events
+	// (the 'stay' family is opened so the refusal is the genuine identity uniqueness, not the writer guard)
+	if err := guardedExec(p, stayFamily, `INSERT INTO iam_v2.stay_events
 		(tenant_id, site_id, pms_interface_id, external_event_identity, event_type, payload, pms_timestamp_utc,
 		 admission_kind, admission_runtime_generation, resync_generation, received_at)
 		VALUES ($1,$2,$3,'F2-GI','GI',$4::jsonb,now(),'LIVE',1,0,now())`,

@@ -32,9 +32,12 @@ import (
 func quotaSeed(t *testing.T, p *pgxpool.Pool, quota any, alloc, timeMode string) fixture {
 	t.Helper()
 	var f fixture
-	if err := p.QueryRow(context.Background(), `WITH
-	  t AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
-	  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id),
+	ctx := context.Background()
+	tx := opTx(t, p, "stay")
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := tx.QueryRow(ctx, `WITH
+	  t AS (INSERT INTO public.tenants(id,slug,name) SELECT g, g::text, 't' FROM gen_random_uuid() g RETURNING id),
+	  si AS (INSERT INTO public.sites(id,tenant_id,code,name) SELECT g, t.id, g::text, 's' FROM t, gen_random_uuid() g RETURNING id, tenant_id),
 	  pi AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)
 	         SELECT gen_random_uuid(), si.tenant_id, si.id,'protel-fias','ACTIVE' FROM si RETURNING id,tenant_id,site_id),
 	  st AS (INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version,last_applied_event_version)
@@ -52,6 +55,9 @@ func quotaSeed(t *testing.T, p *pgxpool.Pool, quota any, alloc, timeMode string)
 	SELECT (SELECT tenant_id FROM pi)::text, (SELECT site_id FROM pi)::text, (SELECT id FROM pi)::text,
 	       (SELECT id FROM st)::text, (SELECT id FROM dv)::text, (SELECT id FROM ipr)::text, (SELECT id FROM spr)::text`,
 		quota, timeMode, alloc).Scan(&f.tenant, &f.site, &f.iface, &f.stay, &f.device, &f.pkgRev, &f.svcRev); err != nil {
+		t.Fatalf("quota seed: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
 		t.Fatalf("quota seed: %v", err)
 	}
 	return f
@@ -90,8 +96,17 @@ func onBridge(t *testing.T, p *pgxpool.Pool, sess, iface string) measured {
 	t.Helper()
 	var m measured
 	m.id, m.iface = sess, iface
-	if err := p.QueryRow(context.Background(), `UPDATE iam_v2.sessions SET ingress_interface=$2
+	// A session's ingress interface is accounting identity, which only the ingestion owner may change on the
+	// production schema. This is a SEED (the session grant() opened is placed on a bridge before any reading
+	// exists), so it runs as iam_v2_owner — what the test login was on the historical scratch chain.
+	ctx := context.Background()
+	tx := ownerTx(t, p)
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := tx.QueryRow(ctx, `UPDATE iam_v2.sessions SET ingress_interface=$2
 		WHERE id=$1 RETURNING device_id::text, host(ip)`, sess, iface).Scan(&m.device, &m.ip); err != nil {
+		t.Fatalf("place session on bridge: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
 		t.Fatalf("place session on bridge: %v", err)
 	}
 	return m
@@ -700,6 +715,12 @@ func TestIntegration_Quota_RebindingBoundarySampleIsCountedOnce(t *testing.T) {
 	// Phase-5 transfer IS, so this is the real shape rather than a convenient one.
 	second := secondEntitlement(t, p, f, at)
 	boundary := at.Add(2 * time.Minute)
+	// The production schema refuses a live session on an entitlement its device is not authorized on
+	// (p6_session_requires_authorized_binding). The product's own transfer (checkout.go) authorizes the device
+	// on the successor before rebinding, so the seed does the same.
+	if _, err := p.Exec(ctx, `SELECT iam_v2.authorize_entitlement_device($1,$2,$3)`, second, m.device, boundary); err != nil {
+		t.Fatalf("authorize device on the successor: %v", err)
+	}
 	if _, err := p.Exec(ctx, `SELECT iam_v2.rebind_session_entitlement($1,$2,$3)`, m.id, second, boundary); err != nil {
 		t.Fatalf("rebind: %v", err)
 	}
@@ -761,17 +782,19 @@ func secondEntitlement(t *testing.T, p *pgxpool.Pool, f fixture, at time.Time) s
 	t.Helper()
 	ctx := context.Background()
 	var stay string
-	if err := p.QueryRow(ctx, `INSERT INTO iam_v2.stays
+	stx := opTx(t, p, "stay")
+	defer func() { _ = stx.Rollback(ctx) }()
+	if err := stx.QueryRow(ctx, `INSERT INTO iam_v2.stays
 		(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,
 		 lifecycle_version,last_applied_event_version)
 		VALUES (gen_random_uuid(),$1,$2,$3,'RQ2','SQ2','IN_HOUSE',1,0) RETURNING id::text`,
 		f.tenant, f.site, f.iface).Scan(&stay); err != nil {
 		t.Fatalf("second stay: %v", err)
 	}
-	tx, err := p.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
+	if err := stx.Commit(ctx); err != nil {
+		t.Fatalf("second stay: %v", err)
 	}
+	tx := opTx(t, p, "commerce_intent")
 	defer func() { _ = tx.Rollback(ctx) }()
 	var pur, ent string
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.purchases

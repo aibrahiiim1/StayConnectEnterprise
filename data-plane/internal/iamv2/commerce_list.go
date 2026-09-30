@@ -21,6 +21,12 @@ type PackageListRequest struct {
 type PackageListItem struct {
 	PackageID string         `json:"package_id"`
 	Display   map[string]any `json:"display"`
+	// Methods are the acquisition methods this client may use for this package right now (never a method
+	// that would predictably fail after selection). Price fields are for display; the quote pins them.
+	Methods          []string `json:"methods"`
+	PriceMinor       int64    `json:"price_minor"`
+	Currency         string   `json:"currency"`
+	CurrencyExponent int      `json:"currency_exponent"`
 }
 
 // voucherMayHavePackage answers whether this package revision is the one the voucher was printed against.
@@ -73,17 +79,37 @@ func (e *CommerceEngine) ListEligiblePackages(ctx context.Context, req PackageLi
 			return nil
 		}
 		if ac.StayID != "" {
-			res = PackageListResult{Reason: "pms_not_supported_phase2"}
+			res = PackageListResult{Reason: "pms_uses_room_sign_in"}
 			return nil
 		}
 		if ac.Consumed || !ac.ExpiresAt.After(now) {
 			res = PackageListResult{Reason: "auth_context_unavailable"}
 			return nil
 		}
-		pkgs, err := tx.ListActivePackageRevisions(ctx, req.TenantID, req.SiteID)
-		if err != nil {
-			return err
+		var pkgs []PackageRevisionRow
+		if ac.Subject.Kind == SubjectVoucher {
+			// A voucher is offered the revision it was printed against and nothing else -- even after the
+			// package was republished or deactivated (an issued card is honoured until it is revoked).
+			pinned, perr := tx.VoucherPinnedPackageRevision(ctx, req.TenantID, req.SiteID, ac.Subject.VoucherID)
+			if perr != nil {
+				return perr
+			}
+			if pinned != "" {
+				pkg, lerr := tx.LoadPackageRevisionByID(ctx, req.TenantID, req.SiteID, pinned)
+				if lerr != nil && !isNotFound(lerr) {
+					return lerr
+				}
+				if lerr == nil {
+					pkgs = append(pkgs, pkg)
+				}
+			}
+		} else {
+			pkgs, err = tx.ListActivePackageRevisions(ctx, req.TenantID, req.SiteID)
+			if err != nil {
+				return err
+			}
 		}
+		site := e.siteMethods(ctx)
 		var items []PackageListItem
 		for _, pkg := range pkgs {
 			snap, display, eligible, herr := e.evalPackageForSubject(ctx, tx, now, req, ac, pkg)
@@ -94,7 +120,12 @@ func (e *CommerceEngine) ListEligiblePackages(ctx context.Context, req PackageLi
 				continue // silently excluded — never reveals an ineligible package
 			}
 			_ = snap
-			items = append(items, PackageListItem{PackageID: pkg.PackageID, Display: display})
+			methods := applicableMethods(pkg, ac, site)
+			if len(methods) == 0 {
+				continue // nothing this client could complete: not offered at all
+			}
+			items = append(items, PackageListItem{PackageID: pkg.PackageID, Display: display, Methods: methods,
+				PriceMinor: pkg.PriceMinor, Currency: pkg.Currency, CurrencyExponent: pkg.CurrencyExponent})
 		}
 		res = PackageListResult{Packages: items, Reason: "ok"}
 		return nil
@@ -110,7 +141,8 @@ func (e *CommerceEngine) ListEligiblePackages(ctx context.Context, req PackageLi
 // (never an error) so the caller silently excludes the package. Only a repository/read error is a hard
 // error. This mirrors the CreateQuote pipeline exactly, minus any write.
 func (e *CommerceEngine) evalPackageForSubject(ctx context.Context, tx CommerceTx, now time.Time, req PackageListRequest, ac AuthContextRow, pkg PackageRevisionRow) (GrantSnapshot, map[string]any, bool, error) {
-	if !pkg.PackageActive || !pkg.IsCurrent {
+	isVoucher := ac.Subject.Kind == SubjectVoucher
+	if !isVoucher && (!pkg.PackageActive || !pkg.IsCurrent) {
 		return GrantSnapshot{}, nil, false, nil
 	}
 	// A VOUCHER IS OFFERED WHAT IT WAS PRINTED FOR, AND NOTHING ELSE.
@@ -123,13 +155,11 @@ func (e *CommerceEngine) evalPackageForSubject(ctx context.Context, tx CommerceT
 	if ok, err := e.voucherMayHavePackage(ctx, tx, req, ac, pkg); err != nil || !ok {
 		return GrantSnapshot{}, nil, false, err
 	}
-	if pkg.VisibleFrom != nil && now.Before(*pkg.VisibleFrom) {
+	// The sale window governs OFFERS; a voucher already issued is not an offer and is not re-windowed.
+	if !isVoucher && pkg.VisibleFrom != nil && now.Before(*pkg.VisibleFrom) {
 		return GrantSnapshot{}, nil, false, nil
 	}
-	if pkg.VisibleUntil != nil && !now.Before(*pkg.VisibleUntil) {
-		return GrantSnapshot{}, nil, false, nil
-	}
-	if ok, _ := IsFreePackage(MoneySpec{PriceMinor: pkg.PriceMinor, Currency: pkg.Currency, CurrencyExponent: pkg.CurrencyExponent, SettlementMethods: pkg.SettlementMethods}); !ok {
+	if !isVoucher && pkg.VisibleUntil != nil && !now.Before(*pkg.VisibleUntil) {
 		return GrantSnapshot{}, nil, false, nil
 	}
 	if _, err := ValidateCurrency(pkg.Currency, pkg.CurrencyExponent); err != nil {

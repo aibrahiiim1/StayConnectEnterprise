@@ -31,7 +31,7 @@ so no JSON canonicalization is needed.
 }
 ```
 
-Decoded Document, as Central issues it today (schema_version 3):
+Decoded Document, as Central issues it today (schema_version 4):
 
 ```json
 {
@@ -45,8 +45,8 @@ Decoded Document, as Central issues it today (schema_version 3):
   "valid_until": "2027-09-27T23:59:59Z",
   "offline_grace_days": 30,
   "features": {
-    "pms": true, "paid_wifi": true, "sms_otp": true, "email_otp": true,
-    "social_login": true, "ha": true, "white_label": true
+    "pms": true, "paid_wifi": true, "sms_otp": false, "email_otp": false,
+    "social_login": false, "ha": false, "white_label": false
   },
   "limits": { "max_concurrent_guest_sessions": 500 },
   "appliance_id": "a1...",
@@ -60,15 +60,38 @@ Decoded Document, as Central issues it today (schema_version 3):
   "grace_period_days": 30,
   "license_version": 4,
   "supersedes_license_id": "…previous license id…",
-  "schema_version": 3
+  "modules": { "hospitality": {}, "paid_access": {} },
+  "schema_version": 4
 }
 ```
 
 Field notes: `status` ∈ {`active`, `suspended`} (issuer-declared).
 `max_concurrent_online_guests` is the capacity, `0` = unlimited; the legacy
-`limits` block mirrors it so pre-v3 appliances enforce the same cap. Every
-licence Central issues carries **all** features — the only commercial controls
-are the hardware/identity binding, the capacity and the validity window.
+`limits` block mirrors it so pre-v3 appliances enforce the same cap. The
+commercial controls are the hardware/identity binding, the capacity, the
+validity window and the **modules**.
+
+**Modules (schema 4).** `modules` maps each authorised module id to a (usually
+empty) grant; it is the **sole** commercial authority of a v4 document. The
+registry (`license/modules.go`, served to the console by `GET
+/cloud/v1/modules`) is `hospitality`, `paid_access`, `card_payment` (requires
+`paid_access`), `room_charge` (requires `hospitality` and `paid_access`),
+`sms_otp`, `email_otp`, `social_login`, `white_label` and `ha`. A core-only
+licence carries an explicit empty `"modules": {}`; a v4 document without
+`modules` is invalid. `features` is only a compatibility projection
+(`ProjectFeatures`: `hospitality`→`pms`, `paid_access`→`paid_wifi`, the other
+five by the same name); `Validate` rejects a v4 document whose `features`
+differ from that projection, so it can never carry an independent grant. A
+module is an authorisation ceiling only: the site still enables it locally, and
+a site's type never authorises one. On the appliance, unknown module ids and
+modules whose dependencies are missing are ignored (fail closed).
+
+**Legacy documents (schema 1–3)** are read through a conservative mapping of
+their `features`: `pms`→`hospitality`; `sms_otp`, `email_otp`,
+`social_login`, `ha` and `white_label` to the module of the same name.
+`paid_wifi` is **not** mapped — Central hard-coded it to `true`, so it never
+recorded a commercial grant — and no financial module (`paid_access`,
+`card_payment`, `room_charge`) is ever derived from a legacy licence.
 `commercial_plan_code` is always `direct`: plans and subscriptions no longer
 exist, and the field stays only because the signed format carries it. Central
 migration 0047 dropped the database copies of `commercial_plan_code`,
@@ -206,7 +229,15 @@ offline for the year. Grace only matters when validity lapses while offline:
   /cloud/v1/appliances/{id}/license` (platform admin + step-up) — signs a new
   Document bound to that appliance's registered hardware and identity, with a
   higher `license_version`, superseding the appliance's current licence in the
-  same transaction. There is no plan or subscription input.
+  same transaction. There is no plan or subscription input. The request's
+  `modules` (omitted = core only) are validated against the registry —
+  unknown ids and unmet dependencies are `400` — then signed as the
+  document's `modules`, with `features` set to their projection. The ids are
+  also stored in `licenses.modules` (Central migration 0049).
+- **Preserved-terms re-issue** (suspend, resume, WAN-MAC rebind, move) reads
+  the stored terms, including `licenses.modules`, and signs them unchanged as
+  the next version. A licence issued before modules existed has
+  `modules = '{}'` and re-issues as core only: no module is invented.
 - **Deliver:** appliance pulls `GET /v1/appliance/license` (Ed25519 appliance
   JWT, ≤60s lifetime; over mTLS once it holds a certificate) →
   `{license_id, envelope, revoked[], server_time}`. Manual path for offline

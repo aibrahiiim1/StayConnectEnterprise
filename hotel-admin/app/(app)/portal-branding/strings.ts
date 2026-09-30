@@ -55,44 +55,77 @@ export const SHIPPED_LANGUAGES: { code: string; label: string; rtl?: boolean }[]
 
 export const isShippedLanguage = (code: string) => SHIPPED_LANGUAGES.some((l) => l.code === code);
 
+/** THE OPTIONAL MODULES A STRING CAN BELONG TO. A string tagged with one is wording for a part of the portal
+ *  that exists only when that module is licensed here: room sign-in and post-stay (hospitality), a one-time
+ *  code by email, text or WhatsApp, social sign-in, card payment, and charging to a room. The Languages editor
+ *  lists it only then, so a site without hospitality is never asked to translate "Room Number".
+ *
+ *  Hiding is presentation only. A saved translation for a hidden string stays in the document and is saved
+ *  back unchanged: the licence can return, and the hotel's wording must still be there when it does. */
+export type PortalModule =
+  | "hospitality" | "email_otp" | "sms_otp" | "whatsapp_otp" | "social_login" | "card_payment" | "room_charge";
+
+/** Wording shared by every one-time-code channel: listed while any of them is licensed. */
+const OTP: PortalModule[] = ["email_otp", "sms_otp", "whatsapp_otp"];
+
+/** One guest-facing string. `module`, when present, comes AFTER `english`: the portal's contract test reads
+ *  `key: "…", english: "…"` as one pattern. An array means "any of these". */
+export type PortalString = { group: string; key: string; english: string; module?: PortalModule | PortalModule[] };
+
+/** Whether a string belongs on this site's editor, given which modules are licensed. Untagged strings are
+ *  core and always apply. */
+export function stringApplies(s: PortalString, licensed: (m: PortalModule) => boolean): boolean {
+  if (!s.module) return true;
+  return (Array.isArray(s.module) ? s.module : [s.module]).some(licensed);
+}
+
+/** WHAT THIS SIGN-IN PAGE COLLECTS, in the words the warnings on this screen use. Room numbers only where
+ *  hospitality is licensed: an office or a campus is told about its own voucher codes and passwords, not a
+ *  hotel's. */
+export function collectedDetails(hospitality: boolean): string {
+  return hospitality ? "room numbers and voucher codes" : "voucher codes and passwords";
+}
+
 /** The guest-facing strings, grouped the way they appear on the page rather than as one long list. */
-export const PORTAL_STRINGS: { group: string; key: string; english: string }[] = [
+export const PORTAL_STRINGS: PortalString[] = [
   { group: "Navigation", key: "tab.guest", english: "Client Login" },
   { group: "Navigation", key: "tab.account", english: "Account Login" },
   { group: "Navigation", key: "alt.title", english: "Or sign in with" },
-  { group: "Navigation", key: "method.pms", english: "Room" },
-  { group: "Navigation", key: "method.poststay", english: "Post-stay" },
+  { group: "Navigation", key: "method.pms", english: "Room", module: "hospitality" },
+  { group: "Navigation", key: "method.poststay", english: "Post-stay", module: "hospitality" },
   { group: "Navigation", key: "method.voucher", english: "Voucher" },
   { group: "Navigation", key: "method.account", english: "Personal account" },
-  { group: "Navigation", key: "method.email", english: "Email" },
-  { group: "Navigation", key: "method.sms", english: "Phone" },
-  { group: "Navigation", key: "method.social", english: "Social" },
+  { group: "Navigation", key: "method.email", english: "Email", module: "email_otp" },
+  { group: "Navigation", key: "method.sms", english: "Phone", module: "sms_otp" },
+  { group: "Navigation", key: "method.whatsapp", english: "WhatsApp", module: "whatsapp_otp" },
+  { group: "Navigation", key: "method.social", english: "Social", module: "social_login" },
 
-  { group: "Client Login", key: "pms.room", english: "Room Number" },
-  { group: "Client Login", key: "pms.secondary", english: "Password" },
-  { group: "Client Login", key: "pms.prompt.lastname", english: "Last name on the reservation" },
-  { group: "Client Login", key: "pms.prompt.firstname", english: "First name on the reservation" },
-  { group: "Client Login", key: "pms.prompt.reservation", english: "Reservation / confirmation number" },
-  { group: "Client Login", key: "pms.prompt.any", english: "First name, last name, or reservation number" },
-  { group: "Client Login", key: "pms.prompt.either", english: "Last name OR reservation number" },
-  { group: "Client Login", key: "pms.choose", english: "Choose your internet package" },
+  { group: "Client Login", key: "pms.room", english: "Room Number", module: "hospitality" },
+  { group: "Client Login", key: "pms.secondary", english: "Password", module: "hospitality" },
+  { group: "Client Login", key: "pms.prompt.lastname", english: "Last name on the reservation", module: "hospitality" },
+  { group: "Client Login", key: "pms.prompt.firstname", english: "First name on the reservation", module: "hospitality" },
+  { group: "Client Login", key: "pms.prompt.reservation", english: "Reservation / confirmation number", module: "hospitality" },
+  { group: "Client Login", key: "pms.prompt.any", english: "First name, last name, or reservation number", module: "hospitality" },
+  { group: "Client Login", key: "pms.prompt.either", english: "Last name OR reservation number", module: "hospitality" },
+  { group: "Client Login", key: "pms.choose", english: "Choose your internet package", module: "hospitality" },
 
   { group: "Account Login", key: "account.personal", english: "Use Personal Account" },
   { group: "Account Login", key: "voucher.label", english: "Voucher Code" },
   { group: "Account Login", key: "account.user", english: "Username" },
   { group: "Account Login", key: "account.pass", english: "Password" },
 
-  { group: "Email and SMS", key: "email.dest", english: "Email address" },
-  { group: "Email and SMS", key: "sms.dest", english: "Phone number" },
-  { group: "Email and SMS", key: "sms.hint", english: "Include the country code, for example +44 20 7946 0958" },
-  { group: "Email and SMS", key: "otp.code", english: "Verification code" },
-  { group: "Email and SMS", key: "otp.sent.email", english: "We sent a 6-digit code to" },
-  { group: "Email and SMS", key: "otp.sent.sms", english: "We texted a 6-digit code to" },
-  { group: "Email and SMS", key: "otp.retry.email", english: "Try a different email" },
-  { group: "Email and SMS", key: "otp.retry.sms", english: "Use a different number" },
+  { group: "Email and SMS", key: "email.dest", english: "Email address", module: "email_otp" },
+  { group: "Email and SMS", key: "sms.dest", english: "Phone number", module: ["sms_otp", "whatsapp_otp"] },
+  { group: "Email and SMS", key: "sms.hint", english: "Include the country code, for example +44 20 7946 0958", module: ["sms_otp", "whatsapp_otp"] },
+  { group: "Email and SMS", key: "otp.code", english: "Verification code", module: OTP },
+  { group: "Email and SMS", key: "otp.sent.email", english: "We sent a 6-digit code to", module: "email_otp" },
+  { group: "Email and SMS", key: "otp.sent.sms", english: "We texted a 6-digit code to", module: "sms_otp" },
+  { group: "Email and SMS", key: "otp.sent.whatsapp", english: "We sent a 6-digit code on WhatsApp to", module: "whatsapp_otp" },
+  { group: "Email and SMS", key: "otp.retry.email", english: "Try a different email", module: "email_otp" },
+  { group: "Email and SMS", key: "otp.retry.sms", english: "Use a different number", module: ["sms_otp", "whatsapp_otp"] },
 
-  { group: "Post-stay", key: "poststay.pin", english: "Post-stay PIN" },
-  { group: "Post-stay", key: "poststay.hint", english: "The PIN you were given at checkout" },
+  { group: "Post-stay", key: "poststay.pin", english: "Post-stay PIN", module: "hospitality" },
+  { group: "Post-stay", key: "poststay.hint", english: "The PIN you were given at checkout", module: "hospitality" },
 
   { group: "Buttons", key: "btn.login", english: "Login" },
   { group: "Buttons", key: "btn.submit", english: "Submit" },
@@ -100,11 +133,11 @@ export const PORTAL_STRINGS: { group: string; key: string; english: string }[] =
   { group: "Buttons", key: "btn.verify", english: "Verify" },
   { group: "Buttons", key: "btn.reconnect", english: "Reconnect" },
 
-  { group: "Social sign-in", key: "social.note", english: "You will be redirected to the provider, then back here." },
-  { group: "Social sign-in", key: "social.google", english: "Continue with Google" },
-  { group: "Social sign-in", key: "social.apple", english: "Continue with Apple" },
-  { group: "Social sign-in", key: "social.facebook", english: "Continue with Facebook" },
-  { group: "Social sign-in", key: "social.microsoft", english: "Continue with Microsoft" },
+  { group: "Social sign-in", key: "social.note", english: "You will be redirected to the provider, then back here.", module: "social_login" },
+  { group: "Social sign-in", key: "social.google", english: "Continue with Google", module: "social_login" },
+  { group: "Social sign-in", key: "social.apple", english: "Continue with Apple", module: "social_login" },
+  { group: "Social sign-in", key: "social.facebook", english: "Continue with Facebook", module: "social_login" },
+  { group: "Social sign-in", key: "social.microsoft", english: "Continue with Microsoft", module: "social_login" },
 
   { group: "Device info", key: "info.device", english: "Your device" },
   { group: "Device info", key: "info.ip", english: "IP address" },
@@ -113,7 +146,7 @@ export const PORTAL_STRINGS: { group: string; key: string; english: string }[] =
 
   { group: "Messages", key: "notice.nomethods", english: "There is no way to sign in on this network yet. Please contact the site team for assistance." },
   { group: "Messages", key: "notice.nopackages", english: "Internet access is not available here at the moment. You can still sign in, but there is nothing to connect you to yet — please let the site team know." },
-  { group: "Messages", key: "err.generic", english: "We could not verify your stay. Please check your details or contact the site team for assistance." },
+  { group: "Messages", key: "err.generic", english: "We could not verify your stay. Please check your details or contact the site team for assistance.", module: "hospitality" },
   { group: "Messages", key: "err.retry", english: "You can try again now." },
   { group: "Messages", key: "lang.label", english: "Language" },
   { group: "Messages", key: "terms.link", english: "Terms of use" },
@@ -122,8 +155,8 @@ export const PORTAL_STRINGS: { group: string; key: string; english: string }[] =
   { group: "Device info", key: "info.none", english: "Not detected" },
   { group: "Messages", key: "notice.ended.data", english: "Your Internet package has ended because the data allowance was used." },
   { group: "Messages", key: "notice.ended.time", english: "Your Internet package has ended because the access time expired." },
-  { group: "Messages", key: "err.room.credential", english: "The room number or guest detail you entered is incorrect. Check the room number and enter the full first name, family name, or reservation number." },
-  { group: "Messages", key: "err.room.technical", english: "We are unable to verify your stay right now. Please try again or contact the site team for assistance." },
+  { group: "Messages", key: "err.room.credential", english: "The room number or guest detail you entered is incorrect. Check the room number and enter the full first name, family name, or reservation number.", module: "hospitality" },
+  { group: "Messages", key: "err.room.technical", english: "We are unable to verify your stay right now. Please try again or contact the site team for assistance.", module: "hospitality" },
   { group: "Messages", key: "err.wait", english: "Too many attempts. Please wait and try again." },
   { group: "Messages", key: "err.wait.seconds", english: "Too many attempts. Please wait {n} seconds and try again." },
   { group: "Messages", key: "err.attempts", english: "Too many attempts. Please wait a minute and try again." },
@@ -133,7 +166,7 @@ export const PORTAL_STRINGS: { group: string; key: string; english: string }[] =
   { group: "Messages", key: "err.account.empty", english: "Please enter your username and password." },
   { group: "Messages", key: "err.account.invalid", english: "The username or password is incorrect." },
   { group: "Messages", key: "err.account.devices", english: "This account has reached its device limit. Disconnect another device and try again." },
-  { group: "Messages", key: "err.room.devices", english: "This room has reached its device limit. Disconnect another device and try again." },
+  { group: "Messages", key: "err.room.devices", english: "This room has reached its device limit. Disconnect another device and try again.", module: "hospitality" },
   { group: "Messages", key: "err.method.disabled", english: "This sign-in method is not available. Please contact the site team for assistance." },
   { group: "Messages", key: "err.capacity", english: "The Wi-Fi network is at capacity. Please try again shortly." },
   { group: "Messages", key: "err.device.network", english: "Your device isn't connected to this Wi-Fi network." },
@@ -144,11 +177,11 @@ export const PORTAL_STRINGS: { group: string; key: string; english: string }[] =
   { group: "Messages", key: "err.package.gone", english: "That package is not available. Please choose another." },
   { group: "Messages", key: "err.signin.again", english: "Please sign in again." },
   { group: "Messages", key: "err.connect", english: "We could not bring your device online. Please try again in a moment." },
-  { group: "Messages", key: "err.otp.send", english: "We couldn't send a code right now. Please try again, or choose another way to sign in." },
-  { group: "Messages", key: "err.otp.dest", english: "Please check what you entered and try again." },
-  { group: "Messages", key: "err.otp.wait", english: "Please wait a moment before asking for another code." },
-  { group: "Messages", key: "err.otp.code", english: "That code isn't right. Check it and try again." },
-  { group: "Messages", key: "err.otp.expired", english: "That code can no longer be used. Please ask for a new one." },
+  { group: "Messages", key: "err.otp.send", english: "We couldn't send a code right now. Please try again, or choose another way to sign in.", module: OTP },
+  { group: "Messages", key: "err.otp.dest", english: "Please check what you entered and try again.", module: OTP },
+  { group: "Messages", key: "err.otp.wait", english: "Please wait a moment before asking for another code.", module: OTP },
+  { group: "Messages", key: "err.otp.code", english: "That code isn't right. Check it and try again.", module: OTP },
+  { group: "Messages", key: "err.otp.expired", english: "That code can no longer be used. Please ask for a new one.", module: OTP },
   { group: "Units", key: "unit.mbps", english: "{n} Mbps" },
   { group: "Units", key: "unit.h", english: "{n} h" },
   { group: "Units", key: "unit.min", english: "{n} min" },
@@ -156,6 +189,26 @@ export const PORTAL_STRINGS: { group: string; key: string; english: string }[] =
   { group: "Choose your package", key: "pkg.title", english: "Choose your package" },
   { group: "Choose your package", key: "pkg.subtitle", english: "You're signed in. Select a package to get online." },
   { group: "Choose your package", key: "pkg.default", english: "Internet access" },
+  { group: "Choose your package", key: "acq.free", english: "Free" },
+  { group: "Choose your package", key: "acq.connect", english: "Connect" },
+  { group: "Choose your package", key: "acq.card", english: "Pay by card", module: "card_payment" },
+  { group: "Choose your package", key: "acq.room", english: "Charge to my room", module: "room_charge" },
+  { group: "Confirming a payment", key: "pay.title", english: "Confirming your payment", module: "card_payment" },
+  { group: "Confirming a payment", key: "pay.lead", english: "Keep this page open. We are confirming your payment with the payment provider.", module: "card_payment" },
+  { group: "Confirming a payment", key: "pay.cancelled", english: "You left the payment page. If you completed the payment, it will still be confirmed here.", module: "card_payment" },
+  { group: "Confirming a payment", key: "pay.failed", english: "The payment was not completed. Nothing was charged for internet access. You can try again.", module: "card_payment" },
+  { group: "Confirming a payment", key: "pay.review", english: "We could not confirm your payment automatically. The site team will check it; please contact them if you were charged.", module: "card_payment" },
+  { group: "Confirming a payment", key: "pay.connecting", english: "Payment confirmed. Connecting your device…", module: "card_payment" },
+  { group: "Confirming a payment", key: "pay.again", english: "Back to sign-in", module: "card_payment" },
+  { group: "Choose your package", key: "room.pending", english: "We are charging your room. This takes a moment…", module: "room_charge" },
+  { group: "Continue without signing in", key: "open.button", english: "Continue without signing in" },
+  { group: "Continue without signing in", key: "open.code.ask", english: "Have a return code?" },
+  { group: "Continue without signing in", key: "open.code.hint", english: "Enter the return code you were given to continue with the same access." },
+  { group: "Continue without signing in", key: "open.code.submit", english: "Continue" },
+  { group: "Continue without signing in", key: "open.code.title", english: "Your return code" },
+  { group: "Continue without signing in", key: "open.code.lead", english: "Keep this code. If this device forgets you, or you use another device, enter it on the sign-in page to continue with the same access." },
+  { group: "Messages", key: "err.returncode", english: "That return code was not recognised. Check it and try again." },
+  { group: "Messages", key: "err.card.unavailable", english: "Card payment is not available right now. Please choose another way to get online.", module: "card_payment" },
   { group: "You're online", key: "online.title", english: "You're online" },
   { group: "You're online", key: "online.lead", english: "Your device is connected to the internet." },
   { group: "You're online", key: "online.remaining", english: "Time remaining" },
@@ -184,17 +237,18 @@ export const PORTAL_STRINGS: { group: string; key: string; english: string }[] =
   { group: "Your devices", key: "dev.refused", english: "That didn’t work. Please try again in a moment." },
   { group: "Your devices", key: "dev.removed", english: "That device has been removed and its place is free. It can connect again at any time." },
   { group: "Sign-in failed page", key: "errpage.title", english: "Sign-in didn't work" },
-  { group: "Sign-in failed page", key: "errpage.social", english: "We couldn't finish signing you in with that account. Please try again, or choose another way to sign in." },
+  { group: "Sign-in failed page", key: "errpage.social", english: "We couldn't finish signing you in with that account. Please try again, or choose another way to sign in.", module: "social_login" },
   { group: "Sign-in failed page", key: "errpage.back", english: "Back to sign-in" },
   { group: "Help and tips", key: "help.button", english: "Help and tips" },
   { group: "Help and tips", key: "help.title", english: "Help with signing in" },
   { group: "Help and tips", key: "help.close", english: "Close" },
-  { group: "Help and tips", key: "help.pms", english: "Enter your room number, then the detail asked for below it, exactly as it appears on your reservation." },
-  { group: "Help and tips", key: "help.poststay", english: "Already checked out? Enter the PIN you were given at checkout to reconnect." },
+  { group: "Help and tips", key: "help.pms", english: "Enter your room number, then the detail asked for below it, exactly as it appears on your reservation.", module: "hospitality" },
+  { group: "Help and tips", key: "help.poststay", english: "Already checked out? Enter the PIN you were given at checkout to reconnect.", module: "hospitality" },
   { group: "Help and tips", key: "help.voucher", english: "Type the code exactly as it is printed on your voucher, then tap Login." },
   { group: "Help and tips", key: "help.account", english: "Enter the username and password you were given. If a voucher field is showing, switch on “Use Personal Account” first." },
-  { group: "Help and tips", key: "help.email", english: "Enter your email address and tap Send code, then type the 6-digit code from the email. Check your spam folder if it does not arrive." },
-  { group: "Help and tips", key: "help.sms", english: "Enter your phone number with the country code and tap Send code, then type the 6-digit code from the text message." },
+  { group: "Help and tips", key: "help.email", english: "Enter your email address and tap Send code, then type the 6-digit code from the email. Check your spam folder if it does not arrive.", module: "email_otp" },
+  { group: "Help and tips", key: "help.sms", english: "Enter your phone number with the country code and tap Send code, then type the 6-digit code from the text message.", module: "sms_otp" },
+  { group: "Help and tips", key: "help.whatsapp", english: "Enter your WhatsApp phone number with the country code and tap Send code, then type the 6-digit code from the WhatsApp message.", module: "whatsapp_otp" },
   { group: "Help and tips", key: "help.fail", english: "Something not working? Please contact the site team for assistance." },
   { group: "Sign-in page", key: "brand.by", english: "Wi-Fi by" },
 ];

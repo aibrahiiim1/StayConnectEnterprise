@@ -33,6 +33,10 @@ func authorizeDevice(t *testing.T, p *pgxpool.Pool, f fx) {
 		t.Fatalf("begin: %v", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	// purchases are a controlled-writer table (commerce_intent) on the full schema
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('commerce_intent')`); err != nil {
+		t.Fatalf("open commerce_intent: %v", err)
+	}
 	var purchase, ent string
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.purchases
 		(tenant_id,site_id,package_revision_id,stay_id,trigger,amount_minor,state)

@@ -29,10 +29,11 @@ import { FilterChips, KeyValueGrid, SearchInput } from "@/components/ui/data";
 import { refreshingClass } from "@/components/ui/patterns";
 import { cn, formatDate } from "@/lib/utils";
 import {
-  auditWords, auditActor, AUDIT_CATEGORIES, type AuditCategory,
+  auditWords, auditActor, AUDIT_CATEGORIES, MODULE_CATEGORIES, auditCategoriesFor, type AuditCategory,
 } from "@/lib/audit-words";
 import { ScrollText, ChevronRight, ShieldAlert, RefreshCw } from "lucide-react";
 import { HelpList, HelpSection } from "@/components/help";
+import { moduleHasHistory, useCapabilities } from "@/lib/capabilities";
 
 type Row = {
   ts: string;
@@ -145,6 +146,13 @@ export default function ActivityPage() {
     return out;
   }, [rows]);
 
+  // The Hotel filter only where hospitality has history -- or where a Hotel entry is on screen, because a filter
+  // must never be missing for rows that exist. The rows themselves are never filtered by module.
+  const caps = useCapabilities();
+  const categories = auditCategoriesFor((m) =>
+    moduleHasHistory(caps, m)
+    || AUDIT_CATEGORIES.some((c) => MODULE_CATEGORIES[c] === m && ((counts.byCategory.get(c) ?? 0) > 0 || chip === c)));
+
   const chipOptions: { value: Chip; label: React.ReactNode; count?: number; tone?: "warn" }[] = [
     { value: "all", label: "Everything", count: narrowed || !rows ? undefined : rows.length },
     // SECURITY EVENTS FIRST, because that is the filter somebody reaches for under pressure.
@@ -154,7 +162,7 @@ export default function ActivityPage() {
       count: narrowed || !rows ? undefined : counts.security,
       tone: "warn",
     },
-    ...AUDIT_CATEGORIES.map((c) => ({
+    ...categories.map((c) => ({
       value: c as Chip,
       label: c,
       count: narrowed || !rows ? undefined : counts.byCategory.get(c) ?? 0,

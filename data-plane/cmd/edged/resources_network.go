@@ -36,6 +36,7 @@ func (s *server) networkRoutes() http.Handler {
 	r.Put("/guest-networks/{id}", s.updateGuestNetwork)
 	r.Delete("/guest-networks/{id}", s.deleteGuestNetwork)
 	r.Post("/guest-networks/{id}/disable", s.disableGuestNetwork)
+	r.Post("/guest-networks/{id}/enable", s.enableGuestNetwork)
 	r.Get("/guest-networks/{id}/status", s.guestNetworkStatus)
 
 	// validate / apply operate on the whole intent (all networks) via netd.
@@ -469,6 +470,26 @@ func (s *server) disableGuestNetwork(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit(r, "network.guest.disabled", "guest_network", id, nil)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "disabled", "note": "apply to activate the change"})
+}
+
+// enableGuestNetwork is the way back from disableGuestNetwork: it stages the network as enabled and touches
+// nothing else (a PUT carrying only "enabled" would clear the description and SSID label). Like disabling, it
+// takes effect on the next apply.
+func (s *server) enableGuestNetwork(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	tag, err := s.db.Exec(ctx, `UPDATE guest_networks SET enabled=true, updated_at=now() WHERE id=$1`, id)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "enable failed")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		jsonErr(w, http.StatusNotFound, "not_found", "guest network not found")
+		return
+	}
+	s.audit(r, "network.guest.enabled", "guest_network", id, nil)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "enabled", "note": "apply to activate the change"})
 }
 
 func (s *server) guestNetworkStatus(w http.ResponseWriter, r *http.Request) {

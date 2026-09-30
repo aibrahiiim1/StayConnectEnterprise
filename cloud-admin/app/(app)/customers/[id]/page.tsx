@@ -25,7 +25,8 @@ import { ApplianceTable, sortAppliances } from "@/components/appliance-table";
 import { LicenseTable } from "@/components/license-table";
 import { UsersManager } from "@/components/users-manager";
 import { AuditLog } from "@/components/audit-log";
-import { TimezoneSelect, browserTimezone } from "@/components/placement-fields";
+import { SiteTypeSelect, TimezoneSelect, browserTimezone } from "@/components/placement-fields";
+import { DEFAULT_SITE_TYPE, siteTypeLabel } from "@/lib/site-types";
 import { CUSTOMER_USER_ROLES, usePermissions } from "@/lib/permissions";
 import { useSession } from "@/lib/session";
 import { useQueryState } from "@/lib/use-query-state";
@@ -262,7 +263,7 @@ function Summary({ c, onTab }: { c: Customer; onTab: (t: Tab) => void }) {
   );
 }
 
-type SiteDraft = { name: string; code: string; timezone: string; country: string };
+type SiteDraft = { name: string; code: string; timezone: string; country: string; siteType: string };
 
 function Sites({ customerId, canManage, onChanged }: { customerId: string; canManage: boolean; onChanged: () => void }) {
   const toast = useToast();
@@ -305,7 +306,7 @@ function Sites({ customerId, canManage, onChanged }: { customerId: string; canMa
   function save() {
     if (!edit) return;
     const d = edit.draft;
-    const body: Record<string, string> = { name: d.name.trim(), timezone: d.timezone.trim() };
+    const body: Record<string, string> = { name: d.name.trim(), timezone: d.timezone.trim(), site_type: d.siteType };
     if (d.country.trim()) body.country = d.country.trim().toUpperCase();
     if (edit.site) {
       const s = edit.site;
@@ -320,8 +321,11 @@ function Sites({ customerId, canManage, onChanged }: { customerId: string; canMa
     setEdit({
       site,
       draft: site
-        ? { name: site.name, code: site.code ?? "", timezone: site.timezone, country: site.country ?? "" }
-        : { name: "", code: "", timezone: browserTimezone(), country: "" },
+        ? {
+            name: site.name, code: site.code ?? "", timezone: site.timezone, country: site.country ?? "",
+            siteType: site.site_type || DEFAULT_SITE_TYPE,
+          }
+        : { name: "", code: "", timezone: browserTimezone(), country: "", siteType: DEFAULT_SITE_TYPE },
     });
   };
 
@@ -338,14 +342,14 @@ function Sites({ customerId, canManage, onChanged }: { customerId: string; canMa
       </div>
       <ErrorBanner err={err} className="m-4" />
       {rows === null ? (
-        <SkeletonRows rows={3} cols={4} />
+        <SkeletonRows rows={3} cols={5} />
       ) : rows.length === 0 ? (
         <EmptyState icon={<MapPin />} title="No sites yet" hint="Add one here, or when you activate an appliance for this customer." />
       ) : (
         <Table aria-label="Sites">
           <THead>
             <TR>
-              <TH>Site</TH><TH className="hidden md:table-cell">Time zone</TH>
+              <TH>Site</TH><TH className="hidden sm:table-cell">Type</TH><TH className="hidden md:table-cell">Time zone</TH>
               <TH className="text-end">Appliances</TH><TH>Status</TH><TH><span className="sr-only">Actions</span></TH>
             </TR>
           </THead>
@@ -356,6 +360,7 @@ function Sites({ customerId, canManage, onChanged }: { customerId: string; canMa
                   <div className="font-medium">{s.name}</div>
                   <div className="text-caption text-muted-foreground">{[s.code, s.country].filter(Boolean).join(" · ") || "—"}</div>
                 </TD>
+                <TD className="hidden sm:table-cell">{siteTypeLabel(s.site_type)}</TD>
                 <TD className="hidden text-muted-foreground md:table-cell">{s.timezone}</TD>
                 <TD className="text-end tabular">
                   {s.appliances > 0 ? (
@@ -413,6 +418,9 @@ function Sites({ customerId, canManage, onChanged }: { customerId: string; canMa
             </Field>
             <Field label="Country" hint="Two letters, such as EG. Optional.">
               <Input value={d.country} maxLength={2} className="uppercase" onChange={(e) => setD({ country: e.target.value })} />
+            </Field>
+            <Field label="Site type" hint="Describes the place. It does not turn anything on; the license's modules do." className="sm:col-span-2">
+              <SiteTypeSelect value={d.siteType} onChange={(v) => setD({ siteType: v })} />
             </Field>
             {!edit?.site && (
               <Field label="Short code" hint="Optional. Generated from the name when left empty." className="sm:col-span-2">

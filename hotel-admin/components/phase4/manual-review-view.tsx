@@ -45,8 +45,34 @@ import { useToast } from "@/components/ui/toast";
 import { formatDate } from "@/lib/utils";
 import { humanize, money } from "./format";
 
+// NOT_SENT means pmsd proved no byte was written (Phase-0 Amendment A1): it is not a PMS failure and not UNKNOWN.
 const OUTCOME_TONE = (o: string) =>
-  o === "UNKNOWN" ? "err" : o === "FAILED" ? "warn" : o === "ACKED" ? "ok" : "info";
+  o === "UNKNOWN" ? "err" : o === "NOT_SENT" ? "neutral" : o === "ACKED" ? "ok" : "info";
+
+// Why the appliance wrote nothing (pmsd's reason on a NOT_SENT attempt).
+const NOT_SENT_REASON_WORDS: Record<string, string> = {
+  ROOM_CHANGED: "The guest had moved room before it was sent",
+  ROOM_CHANGED_ON_LINK: "The guest moved room just before it was sent",
+  RESERVATION_DEPARTED_ON_LINK: "The guest checked out just before it was sent",
+  STAY_NOT_POSTABLE: "The stay could no longer be charged",
+  RESERVATION_MISMATCH: "The reservation no longer matched",
+  INTERFACE_NOT_FRESH: "The PMS connection was not up to date",
+  LINK_NOT_CONNECTED: "The PMS connection was down",
+  LINK_RESYNCING: "The PMS connection was resynchronising",
+  LINK_BUSY: "Another charge was being sent",
+};
+
+const OUTCOME_WORDS: Record<string, string> = {
+  SENDING: "Sending",
+  ACKED: "Answered by the PMS",
+  UNKNOWN: "Unknown",
+  NOT_SENT: "Not sent (nothing reached the PMS)",
+};
+
+const TARGET_WORDS: Record<string, string> = {
+  RESERVATION: "Reservation (room + reservation number)",
+  UNSET: "Not recorded",
+};
 
 export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
   const toast = useToast();
@@ -270,7 +296,11 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
                         label: "Interface",
                         value: `${detail.pinned_evidence.connector_kind} (${detail.pinned_evidence.interface_lifecycle_state})`,
                       },
-                      { label: "Folio identity", value: detail.pinned_evidence.folio_identity_strategy },
+                      { label: "Reservation (G#)", value: detail.pinned_evidence.g_number || "—" },
+                      {
+                        label: "Posting target",
+                        value: TARGET_WORDS[detail.pinned_evidence.posting_target_model] ?? detail.pinned_evidence.posting_target_model,
+                      },
                       { label: "Interface freshness", value: detail.diagnostics.interface_freshness_block ?? "OK" },
                     ]}
                   />
@@ -288,7 +318,7 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
                           <TR>
                             <TH>#</TH>
                             <TH>P#</TH>
-                            <TH>Room / Guest</TH>
+                            <TH>Room / Reservation</TH>
                             <TH>Outcome</TH>
                             <TH>PMS answer</TH>
                             <TH>Sent</TH>
@@ -304,7 +334,12 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
                                 {a.g_number ? ` / ${a.g_number}` : ""}
                               </TD>
                               <TD>
-                                <Badge tone={OUTCOME_TONE(a.outcome)}>{a.outcome}</Badge>
+                                <Badge tone={OUTCOME_TONE(a.outcome)}>{OUTCOME_WORDS[a.outcome] ?? a.outcome}</Badge>
+                                {a.outcome === "NOT_SENT" && a.not_sent_reason && (
+                                  <div className="mt-0.5 text-2xs text-muted-foreground" data-testid="not-sent-reason">
+                                    {NOT_SENT_REASON_WORDS[a.not_sent_reason] ?? a.not_sent_reason}
+                                  </div>
+                                )}
                               </TD>
                               <TD>{a.pa_as_status ?? "—"}</TD>
                               <TD className="whitespace-nowrap text-muted-foreground">{formatDate(a.sent_at)}</TD>
@@ -313,6 +348,13 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
                         </TBody>
                       </Table>
                     </div>
+                  )}
+                  {detail.attempts.length > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      Each attempt keeps the room it actually carried. The reservation number never changes; if the
+                      guest moved rooms, a later attempt carries the new room and the earlier one still shows the old one.
+                      &ldquo;Not sent&rdquo; means the appliance proved nothing reached the PMS — it is not a PMS failure.
+                    </p>
                   )}
                   {detail.diagnostics.has_unknown_history ? (
                     <div className="rounded-md border border-warning/30 bg-warning-subtle px-3.5 py-2.5 text-sm text-warning-subtle-foreground">

@@ -19,6 +19,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // testSecretKeyHex is a 32-byte AES key for the disposable database only. It never leaves this file and is
@@ -41,9 +43,9 @@ func (f *apiFixture) seedInterface(t *testing.T) (iface, rev1, rev2 string) {
 		var id string
 		if err := f.pool.QueryRow(ctx, `
 			INSERT INTO iam_v2.pms_interface_revisions
-			  (id,tenant_id,site_id,pms_interface_id,revision_no,source_timezone,folio_identity_strategy,
+			  (id,tenant_id,site_id,pms_interface_id,revision_no,source_timezone,posting_target_model,
 			   config,normalization_version)
-			VALUES (gen_random_uuid(),$1,$2,$3::uuid,$4,'Europe/Berlin','UNIQUE_PER_STAY',$5::jsonb,1)
+			VALUES (gen_random_uuid(),$1,$2,$3::uuid,$4,'Europe/Berlin','RESERVATION',$5::jsonb,1)
 			RETURNING id::text`, f.tenant, f.site, iface, no, cfg).Scan(&id); err != nil {
 			t.Fatalf("seed revision %d: %v", no, err)
 		}
@@ -204,7 +206,7 @@ func TestIntegration_API_PublicationIsAudited(t *testing.T) {
 	var payload []byte
 	if err := f.pool.QueryRow(context.Background(),
 		`SELECT payload FROM public.audit_log WHERE action='pms_interface.revision_published' AND target_id=$1
-		 ORDER BY id DESC LIMIT 1`, iface).Scan(&payload); err != nil {
+		 ORDER BY ts DESC LIMIT 1`, iface).Scan(&payload); err != nil {
 		t.Fatalf("no audit row: %v", err)
 	}
 	var m map[string]any
@@ -238,8 +240,8 @@ func TestIntegration_API_AnotherSitesInterfaceIsNotFound(t *testing.T) {
 	f := newAPI(t)
 	var otherIface string
 	if err := f.pool.QueryRow(context.Background(), `WITH
-	  t AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
-	  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id),
+	  t AS (INSERT INTO public.tenants(id,slug,name) SELECT g, g::text, 't' FROM gen_random_uuid() g RETURNING id),
+	  si AS (INSERT INTO public.sites(id,tenant_id,code,name) SELECT g, t.id, g::text, 's' FROM t, gen_random_uuid() g RETURNING id, tenant_id),
 	  pi AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,display_label,lifecycle_state)
 	         SELECT gen_random_uuid(), si.tenant_id, si.id, 'protel-fias','Neighbour PMS','ACTIVE' FROM si RETURNING id)
 	SELECT (SELECT id FROM pi)::text`).Scan(&otherIface); err != nil {
@@ -329,7 +331,7 @@ func TestIntegration_API_ARotatedCredentialIsNeverReadableAgain(t *testing.T) {
 	var payload []byte
 	if err := f.pool.QueryRow(context.Background(),
 		`SELECT payload FROM public.audit_log WHERE action='pms_interface.secret_rotated' AND target_id=$1
-		 ORDER BY id DESC LIMIT 1`, iface).Scan(&payload); err != nil {
+		 ORDER BY ts DESC LIMIT 1`, iface).Scan(&payload); err != nil {
 		t.Fatalf("no audit row: %v", err)
 	}
 	if bytes.Contains(payload, []byte(secret)) {
@@ -444,28 +446,34 @@ func TestIntegration_API_InterfaceHealthIsDerivedFromTheFacts(t *testing.T) {
 		t.Fatalf("seed runtime: %v", err)
 	}
 	for i := 0; i < 2; i++ {
-		if _, err := f.pool.Exec(ctx, `INSERT INTO iam_v2.stay_events
+		if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `INSERT INTO iam_v2.stay_events
 			(tenant_id,site_id,pms_interface_id,external_event_identity,event_type,payload,pms_timestamp_utc,
 			 admission_kind,admission_runtime_generation,resync_generation,received_at,processing_status)
 			VALUES ($1,$2,$3::uuid,$4,'GI','{}'::jsonb,now(),'LIVE',1,0,now() - interval '5 minutes','PENDING')`,
-			f.tenant, f.site, iface, fmt.Sprintf("EV-P-%d-%d", time.Now().UnixNano(), i)); err != nil {
+				f.tenant, f.site, iface, fmt.Sprintf("EV-P-%d-%d", time.Now().UnixNano(), i))
+			return err
+		}); err != nil {
 			t.Fatalf("seed pending event: %v", err)
 		}
 	}
 	// Events are ADMITTED as PENDING and only the engine moves one to a terminal state — the schema enforces
 	// that directly. So the review event is seeded the way the engine produces it: admitted, then moved.
 	var review string
-	if err := f.pool.QueryRow(ctx, `INSERT INTO iam_v2.stay_events
+	if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.stay_events
 		(tenant_id,site_id,pms_interface_id,external_event_identity,event_type,payload,pms_timestamp_utc,
 		 admission_kind,admission_runtime_generation,resync_generation,received_at)
 		VALUES ($1,$2,$3::uuid,$4,'GI','{}'::jsonb,now(),'LIVE',1,0,now()) RETURNING id::text`,
-		f.tenant, f.site, iface, fmt.Sprintf("EV-R-%d", time.Now().UnixNano())).Scan(&review); err != nil {
-		t.Fatalf("seed review event: %v", err)
-	}
-	if _, err := f.pool.Exec(ctx, `UPDATE iam_v2.stay_events
+			f.tenant, f.site, iface, fmt.Sprintf("EV-R-%d", time.Now().UnixNano())).Scan(&review); err != nil {
+			return fmt.Errorf("seed: %w", err)
+		}
+		_, err := tx.Exec(ctx, `UPDATE iam_v2.stay_events
 		SET processing_status='MANUAL_REVIEW', processed_at=now(), review_code='AMBIGUOUS' WHERE id=$1::uuid`,
-		review); err != nil {
-		t.Fatalf("move the review event: %v", err)
+			review)
+		return err
+	}); err != nil {
+		t.Fatalf("seed/move the review event: %v", err)
 	}
 
 	code, body := f.do(t, http.MethodGet, "/pms-interfaces/"+iface+"/health", nil)
@@ -512,12 +520,7 @@ func TestIntegration_API_RoutingNamesTheUnmappedGuestNetworksToo(t *testing.T) {
 	ctx := context.Background()
 
 	mkNet := func(name string) string {
-		var id string
-		if err := f.pool.QueryRow(ctx, `
-			INSERT INTO public.guest_networks(id,tenant_id,site_id,name,enabled)
-			VALUES (gen_random_uuid(),$1,$2,$3,true) RETURNING id::text`, f.tenant, f.site, name).Scan(&id); err != nil {
-			t.Fatalf("seed guest network %q: %v", name, err)
-		}
+		id, _ := seedGuestNetwork(t, f.pool, f.tenant, f.site, name, "10.251.0.0/24")
 		return id
 	}
 	mapped := mkNet("Guest VLAN 10")
@@ -556,10 +559,13 @@ func TestIntegration_API_SourceConflictsNameBothInterfaces(t *testing.T) {
 	if ifaceB < ifaceA {
 		ifaceA, ifaceB = ifaceB, ifaceA
 	}
-	if _, err := f.pool.Exec(context.Background(), `INSERT INTO iam_v2.pms_source_conflicts
+	if err := controlled(context.Background(), f.pool, []string{"source_conflict"}, func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(), `INSERT INTO iam_v2.pms_source_conflicts
 		(id,tenant_id,site_id,interface_a,interface_b,severity,resolution)
 		VALUES (gen_random_uuid(),$1,$2,$3::uuid,$4::uuid,'HIGH','UNRESOLVED')`,
-		f.tenant, f.site, ifaceA, ifaceB); err != nil {
+			f.tenant, f.site, ifaceA, ifaceB)
+		return err
+	}); err != nil {
 		t.Fatalf("seed conflict: %v", err)
 	}
 	code, body := f.do(t, http.MethodGet, "/pms-source-conflicts", nil)

@@ -11,11 +11,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 // THE ZERO-ATTEMPT OPERATOR PATH, at the API.
@@ -43,13 +45,22 @@ func (f *apiFixture) seedZeroAttemptHold(t *testing.T, reconciled bool) string {
 			t.Fatalf("seed zero-attempt posting: %v", err)
 		}
 	}
-	var ifaceID, revID, stayID, folioID, purchaseID, settlementID, postingID, outboxID string
+	// qc is q inside the controlled operation a guarded table demands on the full appliance schema.
+	qc := func(family string, dst *string, sql string, args ...any) {
+		t.Helper()
+		if err := controlled(ctx, f.pool, []string{family}, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, sql, args...).Scan(dst)
+		}); err != nil {
+			t.Fatalf("seed zero-attempt posting: %v", err)
+		}
+	}
+	var ifaceID, revID, stayID, reservation, purchaseID, settlementID, postingID, outboxID string
 	q(&ifaceID, `INSERT INTO iam_v2.pms_interfaces(tenant_id,site_id,connector_kind)
 		VALUES ($1,$2,'protel-fias') RETURNING id::text`, f.tenant, f.site)
 	q(&revID, `INSERT INTO iam_v2.pms_interface_revisions
-		(tenant_id,site_id,pms_interface_id,revision_no,source_timezone,folio_identity_strategy,config,
+		(tenant_id,site_id,pms_interface_id,revision_no,source_timezone,posting_target_model,config,
 		 financial_base_currency,financial_base_currency_exponent)
-		VALUES ($1,$2,$3,1,'UTC','GLOBALLY_UNIQUE','{}','USD',2) RETURNING id::text`,
+		VALUES ($1,$2,$3,1,'UTC','RESERVATION','{}','USD',2) RETURNING id::text`,
 		f.tenant, f.site, ifaceID)
 	if _, err := f.pool.Exec(ctx, `UPDATE iam_v2.pms_interfaces SET current_revision_id=$2 WHERE id=$1`,
 		ifaceID, revID); err != nil {
@@ -63,12 +74,13 @@ func (f *apiFixture) seedZeroAttemptHold(t *testing.T, reconciled bool) string {
 		f.tenant, f.site, ifaceID, revID); err != nil {
 		t.Fatal(err)
 	}
-	q(&stayID, `INSERT INTO iam_v2.stays
-		(tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,posting_allowed)
-		VALUES ($1,$2,$3,'R'||substr(md5(random()::text),1,8),'S'||substr(md5(random()::text),1,8),
-		        'IN_HOUSE',true) RETURNING id::text`, f.tenant, f.site, ifaceID)
-	q(&folioID, `INSERT INTO iam_v2.folios(tenant_id,site_id,pms_interface_id,external_folio_id)
-		VALUES ($1,$2,$3,'F'||substr(md5(random()::text),1,8)) RETURNING id::text`, f.tenant, f.site, ifaceID)
+	// posting_allowed is computed by the database (IN_HOUSE + a reservation => postable). The posting targets
+	// the reservation (Amendment A1), so its g_number is this stay's reservation number.
+	reservation = "R" + fmt.Sprintf("%d", time.Now().UnixNano())
+	qc("stay", &stayID, `INSERT INTO iam_v2.stays
+		(tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status)
+		VALUES ($1,$2,$3,$4,'S'||substr(md5(random()::text),1,8),
+		        'IN_HOUSE') RETURNING id::text`, f.tenant, f.site, ifaceID, reservation)
 
 	var planID, planRev, pkgID, pkgRev string
 	q(&planID, `INSERT INTO iam_v2.service_plans(tenant_id,site_id,code)
@@ -79,20 +91,21 @@ func (f *apiFixture) seedZeroAttemptHold(t *testing.T, reconciled bool) string {
 	q(&pkgID, `INSERT INTO iam_v2.internet_packages(tenant_id,site_id,code)
 		VALUES ($1,$2,'za-'||substr(md5(random()::text),1,8)) RETURNING id::text`, f.tenant, f.site)
 	q(&pkgRev, `INSERT INTO iam_v2.internet_package_revisions
-		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent)
-		VALUES ($1,$2,$3,1,$4,'GENERAL',100,'USD',2) RETURNING id::text`, f.tenant, f.site, pkgID, planRev)
-	q(&purchaseID, `INSERT INTO iam_v2.purchases
+		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent,
+		 settlement_methods)
+		VALUES ($1,$2,$3,1,$4,'GENERAL',100,'USD',2,'{PMS_POSTING}') RETURNING id::text`, f.tenant, f.site, pkgID, planRev)
+	qc("commerce_intent", &purchaseID, `INSERT INTO iam_v2.purchases
 		(tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,trigger,
 		 amount_minor,currency,currency_exponent,state)
 		VALUES ($1,$2,$3,$4,$5,'ADMIN_GRANT',100,'USD',2,'AWAITING_SETTLEMENT') RETURNING id::text`,
 		f.tenant, f.site, pkgRev, ifaceID, stayID)
-	q(&settlementID, `INSERT INTO iam_v2.settlements(tenant_id,site_id,purchase_id,method,status)
+	qc("commerce_intent", &settlementID, `INSERT INTO iam_v2.settlements(tenant_id,site_id,purchase_id,method,status)
 		VALUES ($1,$2,$3,'PMS_POSTING','REQUIRED') RETURNING id::text`, f.tenant, f.site, purchaseID)
 	q(&postingID, `INSERT INTO iam_v2.pms_postings
-		(tenant_id,site_id,pms_interface_id,settlement_id,purchase_id,stay_id,folio_id,
+		(tenant_id,site_id,pms_interface_id,settlement_id,purchase_id,stay_id,g_number,
 		 posting_interface_revision_id,posting_type,amount_minor,currency,currency_exponent,idempotency_key)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'CHARGE',100,'USD',2,'za-'||substr(md5(random()::text),1,12))
-		RETURNING id::text`, f.tenant, f.site, ifaceID, settlementID, purchaseID, stayID, folioID, revID)
+		RETURNING id::text`, f.tenant, f.site, ifaceID, settlementID, purchaseID, stayID, reservation, revID)
 	q(&outboxID, `INSERT INTO iam_v2.posting_outbox(tenant_id,site_id,pms_interface_id,posting_id,state)
 		VALUES ($1,$2,$3,$4,'QUEUED') RETURNING id::text`, f.tenant, f.site, ifaceID, postingID)
 

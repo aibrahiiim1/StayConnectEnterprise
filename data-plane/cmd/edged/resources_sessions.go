@@ -68,7 +68,7 @@ type edgeSessionRow struct {
 
 	// THE SUBJECT — the single answer to "who is this".
 	//
-	// SubjectKind is a closed set: room | account | voucher | guest. SubjectLabel is what to show (a room
+	// SubjectKind is a closed set: room | account | voucher | guest | open (a package chosen without signing in). SubjectLabel is what to show (a room
 	// number, a username); SubjectName is the human name when one is known. Both may be absent, and a client
 	// that falls back to the MAC address when they are is behaving correctly.
 	EntitlementID     string  `json:"entitlement_id,omitempty"`
@@ -131,6 +131,7 @@ const sessionCols = `s.id, s.ip::text, s.mac::text, s.state,
          WHEN e.guest_account_id    IS NOT NULL THEN 'account'
          WHEN e.voucher_id          IS NOT NULL THEN 'voucher'
          WHEN e.guest_principal_id  IS NOT NULL THEN 'guest'
+         WHEN e.anonymous_subject_id IS NOT NULL THEN 'open'
          ELSE ''
        END AS subject_kind,
        COALESCE(NULLIF(st.normalized_room_number,''), ga.username) AS subject_label,

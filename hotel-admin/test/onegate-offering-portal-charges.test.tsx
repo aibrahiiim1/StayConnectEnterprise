@@ -11,6 +11,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
+// A site licensed for every module: these tests are about roles, not about which modules a site has.
+vi.mock("@/lib/capabilities", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/capabilities")>();
+  const on = { deployed: true, licensed: true, enabled: true, ready: true, effective: true, manageable: true };
+  const ids = ["hospitality", "paid_access", "card_payment", "room_charge", "email_otp", "sms_otp", "whatsapp_otp", "social_login"];
+  return { ...actual, useCapabilities: () => ({ surfaces: [], modules: Object.fromEntries(ids.map((m) => [m, on])) }) };
+});
+
 vi.mock("@/lib/api", async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);
   return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() } };
@@ -160,7 +168,7 @@ describe("every Hotel charge screen has its menu label as its title", () => {
   it.each([
     ["Charge health", () => <FinancialHealthView />],
     ["Manual review", () => <ManualReviewView />],
-    ["Settlements", () => <SettlementsView />],
+    ["Package payments", () => <SettlementsView />],
     ["Recovery", () => <FinancialRecoveryView />],
   ])("%s", async (title, el) => {
     routes([], {
@@ -177,13 +185,13 @@ describe("every Hotel charge screen has its menu label as its title", () => {
     expect(screen.getByText("Hotel")).toBeInTheDocument();
   });
 
-  it("Settlements offers no refund button, even with a settled charge on screen", async () => {
+  it("Package payments offers no refund button, even with a settled charge on screen", async () => {
     routes([], {
       "/financial-ops/settlements": { settlements: [{ settlement_id: "s1", purchase_id: "p1", method: "ONLINE_PAYMENT",
         status: "SETTLED", purchase_state: "GRANTED", amount_minor: 1000, currency: "USD", currency_exponent: 2 }] },
     });
     render(<SettlementsView />);
-    expect(await screen.findByText("10.00 USD")).toBeInTheDocument();
+    expect((await screen.findAllByText("10.00 USD")).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: /refund/i })).toBeNull();
   });
 });

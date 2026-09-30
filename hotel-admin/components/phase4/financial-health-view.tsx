@@ -53,7 +53,7 @@ const REASON_TEXT: Record<string, string> = {
     "This site is in financial recovery. Money movement is deliberately held until every item in flight has been reconciled.",
   UNKNOWN_OUTCOMES_AWAITING_REVIEW:
     "One or more postings or payments ended UNKNOWN. Nobody knows yet whether the money moved, so nothing is retried automatically.",
-  SETTLEMENTS_AWAITING_REVIEW: "Settlements are waiting on a manual review decision.",
+  SETTLEMENTS_AWAITING_REVIEW: "Some package payments are waiting on a Manual review decision.",
   MANUAL_REVIEW_BACKLOG: "The manual review queue is longer or older than it should be.",
   POSTING_OUTBOX_STALLED: "Postings have been queued longer than expected. The PMS interface may be unreachable.",
   PAYMENTS_STUCK_PENDING: "Payments have been PENDING longer than a provider call should take.",
@@ -221,14 +221,14 @@ export function FinancialHealthView() {
               tone={flag(health.payments_unknown, "err")}
             />
             <StatCard label="Oldest in flight" value={ageText(health.payments_oldest_age_seconds)} icon={<Hourglass />} />
-            <StatCard label="Settlements required" value={health.settlements_required} href="/financial-settlements" />
-            <StatCard label="Settlements in progress" value={health.settlements_in_progress} />
+            <StatCard label="Payments waiting" value={health.settlements_required} href="/financial-settlements" />
+            <StatCard label="Payments in progress" value={health.settlements_in_progress} />
             <StatCard
-              label="Settlements in manual review"
+              label="Payments to review"
               value={health.settlements_manual_review}
               tone={flag(health.settlements_manual_review, "warn")}
             />
-            <StatCard label="Settlements failed" value={health.settlements_failed} tone={flag(health.settlements_failed, "err")} />
+            <StatCard label="Payments failed" value={health.settlements_failed} tone={flag(health.settlements_failed, "err")} />
           </Rail>
 
           <Rail title="Configuration" columns={2}>

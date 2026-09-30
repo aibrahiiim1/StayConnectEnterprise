@@ -61,9 +61,18 @@ func seed(t *testing.T, p *pgxpool.Pool) fx {
 	t.Helper()
 	ctx := context.Background()
 	var f fx
-	if err := p.QueryRow(ctx, `WITH
-	  t AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
-	  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id),
+	// On the full schema stays are a controlled-writer table: the seed opens the 'stay' family in its tx.
+	stx, err := p.Begin(ctx)
+	if err != nil {
+		t.Fatalf("seed begin: %v", err)
+	}
+	defer func() { _ = stx.Rollback(ctx) }()
+	if _, err := stx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('stay')`); err != nil {
+		t.Fatalf("seed open: %v", err)
+	}
+	if err := stx.QueryRow(ctx, `WITH
+	  t AS (INSERT INTO public.tenants(id,slug,name) SELECT g, g::text, 't' FROM gen_random_uuid() g RETURNING id),
+	  si AS (INSERT INTO public.sites(id,tenant_id,code,name) SELECT g, t.id, g::text, 's' FROM t, gen_random_uuid() g RETURNING id, tenant_id),
 	  ia AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)
 	         SELECT gen_random_uuid(), si.tenant_id, si.id,'protel-fias','ACTIVE' FROM si RETURNING id,tenant_id,site_id),
 	  ib AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)
@@ -96,6 +105,9 @@ func seed(t *testing.T, p *pgxpool.Pool) fx {
 		Scan(&f.tenant, &f.site, &f.ifaceA, &f.ifaceB, &f.stayA, &f.stayB, &f.stayA2, &f.device, &f.pkg); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
+	if err := stx.Commit(ctx); err != nil {
+		t.Fatalf("seed commit: %v", err)
+	}
 	if _, err := p.Exec(ctx, `UPDATE iam_v2.internet_packages SET current_revision_id=$1
 		WHERE id=(SELECT package_id FROM iam_v2.internet_package_revisions WHERE id=$1)`, f.pkg); err != nil {
 		t.Fatalf("seed current revision: %v", err)
@@ -113,6 +125,9 @@ func grant(t *testing.T, p *pgxpool.Pool, f fx, stay string) (entitlement, sessi
 		t.Fatalf("begin: %v", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('commerce_intent')`); err != nil {
+		t.Fatalf("open commerce_intent: %v", err)
+	}
 	var purchase string
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.purchases
 		(tenant_id,site_id,package_revision_id,stay_id,trigger,amount_minor,state)
@@ -286,10 +301,10 @@ func TestIntegration_F9_DestinationMustAlreadyExist(t *testing.T) {
 	}
 
 	// A destination that exists but has checked out is refused too: there is nobody there to receive access.
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now()
-		WHERE id=$1`, f.stayB); err != nil {
-		t.Fatalf("check the destination out: %v", err)
-	}
+	// posting_allowed=false in the same UPDATE, exactly as internal/checkout does: the posting_only_in_house
+	// CHECK is evaluated before the AFTER trigger recomputes the permission.
+	stayExec(t, p, `UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false, effective_checkout_at=now()
+		WHERE id=$1`, f.stayB)
 	if _, err := s.Execute(ctx, req(f, f.stayA, f.stayB)); !errors.Is(err, ErrDestinationNotEligible) {
 		t.Fatalf("a transfer onto a departed stay: %v", err)
 	}
@@ -517,8 +532,11 @@ func TestIntegration_F9_AmbiguityIsNotAnAuthorization(t *testing.T) {
 	// Record an AMBIGUOUS resolution naming both stays' guest network. If ambiguity were ever treated as
 	// evidence, THIS is the state that would make an unauthorized transfer look justified.
 	var gn string
-	if err := p.QueryRow(ctx, `INSERT INTO public.guest_networks(id,tenant_id,site_id)
-		VALUES (gen_random_uuid(),$1,$2) RETURNING id::text`, f.tenant, f.site).Scan(&gn); err != nil {
+	if err := p.QueryRow(ctx, `INSERT INTO public.guest_networks
+		(id,tenant_id,site_id,name,parent_interface,bridge_name,gateway_cidr,gateway_ip,subnet_cidr)
+		SELECT g,$1,$2,'net','p'||substr(md5(g::text),1,12),'b'||substr(md5(g::text),1,12),
+		       '10.99.0.1/24','10.99.0.1','10.99.0.0/24' FROM gen_random_uuid() g
+		RETURNING id::text`, f.tenant, f.site).Scan(&gn); err != nil {
 		t.Fatalf("seed network: %v", err)
 	}
 	tx, err := p.Begin(ctx)
@@ -583,5 +601,26 @@ func TestIntegration_F9_PreviewAgreesWithExecution(t *testing.T) {
 	// ...and the execution agrees, which is the property that makes the preview worth showing.
 	if _, err := s.Execute(ctx, req(f, f.stayA, f.stayA2)); !errors.Is(err, ErrSameInterface) {
 		t.Fatalf("execution disagreed with the preview: %v", err)
+	}
+}
+
+// stayExec runs one statement inside the 'stay' controlled-writer scope, as the PMS mirror does. Used only to
+// STAGE a stay state (e.g. a departed destination); the code under test is never run inside it.
+func stayExec(t *testing.T, p *pgxpool.Pool, sql string, args ...any) {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('stay')`); err != nil {
+		t.Fatalf("open stay: %v", err)
+	}
+	if _, err := tx.Exec(ctx, sql, args...); err != nil {
+		t.Fatalf("stay write: %v -- %s", err, sql)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
 	}
 }

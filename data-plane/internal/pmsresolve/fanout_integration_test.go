@@ -44,16 +44,28 @@ func seed(t *testing.T, p *pgxpool.Pool, n int) fixture {
 	ctx := context.Background()
 	var f fixture
 	if err := p.QueryRow(ctx, `WITH
-	  t AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
-	  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id),
-	  gn AS (INSERT INTO public.guest_networks(id,tenant_id,site_id) SELECT gen_random_uuid(), si.tenant_id, si.id FROM si RETURNING id)
+	  t AS (INSERT INTO public.tenants(id,slug,name) SELECT g, g::text, 't' FROM gen_random_uuid() g RETURNING id),
+	  si AS (INSERT INTO public.sites(id,tenant_id,code,name) SELECT g, t.id, g::text, 's' FROM t, gen_random_uuid() g RETURNING id, tenant_id),
+	  gn AS (INSERT INTO public.guest_networks(id,tenant_id,site_id,name,parent_interface,bridge_name,gateway_cidr,gateway_ip,subnet_cidr)
+	         SELECT g, si.tenant_id, si.id, 'gn', 'p'||substr(md5(g::text),1,12), 'b'||substr(md5(g::text),1,12),
+	                '10.9.0.1/24'::inet, '10.9.0.1'::inet, '10.9.0.0/24'::cidr FROM si, gen_random_uuid() g RETURNING id)
 	SELECT (SELECT tenant_id FROM si)::text, (SELECT id FROM si)::text, (SELECT id FROM gn)::text`).
 		Scan(&f.tenant, &f.site, &f.network); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
+	// Stays are a controlled-writer family on the production schema: the seed opens the 'stay' operation in
+	// the same transaction that writes them (postgres no longer owns the opener, so the owner shortcut is gone).
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		t.Fatalf("seed begin: %v", err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('stay')`); err != nil {
+		t.Fatalf("seed open stay operation: %v", err)
+	}
 	for i := 0; i < n; i++ {
 		var iface, stay string
-		if err := p.QueryRow(ctx, `WITH
+		if err := tx.QueryRow(ctx, `WITH
 		  pi AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)
 		         VALUES (gen_random_uuid(),$1,$2,'protel-fias','ACTIVE') RETURNING id),
 		  m AS (INSERT INTO iam_v2.guest_network_pms_map(tenant_id,site_id,guest_network_id,pms_interface_id)
@@ -66,6 +78,9 @@ func seed(t *testing.T, p *pgxpool.Pool, n int) fixture {
 		}
 		f.ifaces = append(f.ifaces, iface)
 		f.stays = append(f.stays, stay)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("seed commit: %v", err)
 	}
 	return f
 }

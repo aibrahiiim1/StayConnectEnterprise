@@ -99,7 +99,6 @@ GRANT SELECT                      ON public.otp_hmac_key_generations TO svc_scd;
 GRANT UPDATE                      ON public.sites                   TO svc_scd; -- mirror upsert ON CONFLICT DO UPDATE (already had S/I/D)
 GRANT SELECT,DELETE               ON public.accounting_records      TO svc_scd; -- cross-tenant detect + purge
 GRANT SELECT,DELETE               ON public.stripe_events           TO svc_scd; -- cross-tenant detect + purge
-GRANT SELECT,DELETE               ON public.stripe_accounts         TO svc_scd; -- cross-tenant detect + purge
 GRANT SELECT,DELETE               ON public.operator_roles          TO svc_scd; -- cross-tenant detect + purge
 GRANT SELECT,DELETE               ON public.operators               TO svc_scd; -- cross-tenant detect + purge
 -- ONE COLUMN, NOT THE TABLE. scd binds the appliance's local operators to the tenant its SIGNED assignment
@@ -147,7 +146,6 @@ GRANT SELECT,INSERT,DELETE        ON public.operator_roles             TO svc_ed
 GRANT SELECT,INSERT,UPDATE        ON public.operators                  TO svc_edged;
 GRANT SELECT,INSERT,UPDATE,DELETE ON public.pms_providers              TO svc_edged;
 GRANT SELECT,INSERT,UPDATE,DELETE ON public.social_oauth_providers     TO svc_edged;
-GRANT SELECT,INSERT,UPDATE,DELETE ON public.stripe_accounts            TO svc_edged;
 -- THE CLOUD TELEMETRY QUEUE IS GONE (migration 0093). public.sync_outbox and public.sync_checkpoints, and
 -- the grants to svc_scd, svc_edged and iam_v2_owner that served them, were removed with it; so were the
 -- command-channel and update-agent ledgers (edge_executed_commands, edge_installed_updates) and svc_scd's
@@ -184,7 +182,7 @@ GRANT SELECT,INSERT        ON public.network_health_checks    TO svc_netd;
 -- Measured on the PRE-LIVE appliance before this grant existed: last_seen_at frozen at 2026-08-22 across
 -- every later netd restart, holding a bridge that no longer exists and missing every bridge that does.
 GRANT SELECT,INSERT,UPDATE ON public.network_interfaces       TO svc_netd;
-GRANT INSERT               ON public.system_network_audit     TO svc_netd; -- append-only
+GRANT SELECT, INSERT       ON public.system_network_audit     TO svc_netd; -- append-only; SELECT for the history screen
 GRANT SELECT               ON public.guest_networks           TO svc_netd; -- read for apply
 GRANT SELECT               ON public.dhcp_pools               TO svc_netd;
 GRANT SELECT               ON public.dhcp_reservations        TO svc_netd;
@@ -209,7 +207,7 @@ BEGIN
       ('svc_edged','guest_networks'),('svc_edged','network_interfaces'),('svc_edged','network_config_revisions'),
       ('svc_edged','network_apply_events'),('svc_edged','network_health_checks'),('svc_edged','notification_providers'),
       ('svc_edged','operator_roles'),('svc_edged','operators'),('svc_edged','pms_providers'),('svc_edged','social_oauth_providers'),
-      ('svc_edged','stripe_accounts'),('svc_edged','tenant_effective_limits'),
+      ('svc_edged','tenant_effective_limits'),
       ('svc_edged','walled_garden_rules'),
       ('svc_acctd','accounting_records'),
       ('svc_netd','network_config_revisions'),('svc_netd','network_apply_events'),('svc_netd','network_health_checks'),
@@ -299,6 +297,7 @@ GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_acctd;
 \ir svc-acctd-iamv2-accounting-grants.sql
 \ir svc-edged-phase2-commerce-grants.sql
 \ir svc-edged-phase345-admin-grants.sql
+\ir svc-payment-least-privilege-grants.sql
 -- svc_pmsd is reconciled here like every other runtime role. It used to be converged nowhere: absent from the
 -- revoke loop above and from this list, so its privileges were whatever the last incremental apply happened to
 -- leave, and the reconcile's own D32 assertion then judged a role it had never converged.
@@ -447,5 +446,30 @@ BEGIN
       'boundary either, so grace policy cannot be published at all';
   END IF;
 END $$;
+
+-- CARD PAYMENT LOGIN ROLES (migration 0096). Each holds exactly one group role and nothing else: svc_payment runs
+-- checkouts and the paid grant as sc_payment_runtime; svc_payment_outcome applies provider-verified outcomes as
+-- sc_payment_outcome. scd opens one pool per role. svc_scd itself stays OUT of both, so the process-wide scd
+-- credential can neither move money nor declare it moved.
+DO $pay$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_payment') AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'sc_payment_runtime') THEN
+    EXECUTE 'GRANT sc_payment_runtime TO svc_payment';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_payment_outcome') AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'sc_payment_outcome') THEN
+    EXECUTE 'GRANT sc_payment_outcome TO svc_payment_outcome';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_posting') AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'sc_posting_runtime') THEN
+    EXECUTE 'GRANT sc_posting_runtime TO svc_posting';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_scd') AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'sc_payment_runtime')
+     AND (pg_has_role('svc_scd', 'sc_payment_runtime', 'MEMBER') OR pg_has_role('svc_scd', 'sc_payment_outcome', 'MEMBER')) THEN
+    RAISE EXCEPTION 'GATE-P BLOCKER: svc_scd must not be a member of a payment role';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_payment') AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'sc_payment_outcome')
+     AND pg_has_role('svc_payment', 'sc_payment_outcome', 'MEMBER') THEN
+    RAISE EXCEPTION 'GATE-P BLOCKER: the payment runtime must not hold the outcome authority';
+  END IF;
+END $pay$;
 
 COMMIT;

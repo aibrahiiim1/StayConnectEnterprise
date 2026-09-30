@@ -20,7 +20,7 @@
 --   payments, settlements, offer_quotes                                     — payment / settlement / quoting
 --   INSERT/UPDATE on pms_interfaces and pms_interface_revisions             — interface AUTHORING is edged's
 -- The connector reads its configuration and cannot author it, and it cannot post a charge, move money or
--- write a usage record. A revision published with folio_identity_strategy=UNSET already makes posting
+-- write a usage record. A revision published with posting_target_model=UNSET already makes posting
 -- impossible in the product; this makes it impossible in the database as well, which is the half that still
 -- holds if the product is wrong.
 
@@ -67,10 +67,7 @@ GRANT SELECT,INSERT,UPDATE ON iam_v2.stay_events                       TO svc_pm
 GRANT SELECT,INSERT,UPDATE ON iam_v2.stays                             TO svc_pmsd;
 -- The Stay's identity rows. Unguarded tables, so the table privilege is the whole boundary.
 GRANT SELECT,INSERT,UPDATE ON iam_v2.stay_guests                       TO svc_pmsd;
-GRANT SELECT,INSERT,UPDATE ON iam_v2.stay_folios                       TO svc_pmsd;
--- folios: INSERT and SELECT only. A folio is created as an IDENTITY for a Stay, never amended by the
--- connector — there is no read-only PMS event that legitimately rewrites one, so no UPDATE.
-GRANT SELECT,INSERT        ON iam_v2.folios                            TO svc_pmsd;
+-- (No folio tables: a room charge targets the reservation, Amendment A1 / migration 0100.)
 
 -- ---------------------------------------------------------------------------
 -- CHECKOUT CONVERSION (GO events only), gated by STAYCONNECT_PHASE3_CHECKOUT_GRACE.
@@ -214,7 +211,7 @@ BEGIN
       JOIN pg_namespace tn ON tn.oid = tc.relnamespace
      WHERE d.deptype IN ('a','i')
        AND tn.nspname = 'iam_v2'
-       AND tc.relname IN ('stay_events','stays','stay_guests','stay_folios','folios',
+       AND tc.relname IN ('stay_events','stays','stay_guests',
                           'pms_interface_runtime','entitlements','entitlement_devices',
                           'entitlement_device_authorizations','entitlement_boundary_watermarks',
                           'purchases','checkout_grace_audit')
@@ -278,3 +275,11 @@ GRANT EXECUTE ON FUNCTION iam_v2.pms_reconciliation_settings_get(uuid, uuid)    
 -- pms_record_resync_coverage above, never by a direct INSERT, so the connector needs no write here.
 GRANT SELECT ON iam_v2.pms_resync_coverage TO svc_pmsd;
 GRANT SELECT ON iam_v2.pms_room_inventory  TO svc_pmsd;
+
+-- ROOM CHARGE ON THE ONE FIAS LINK (migration 0098, decision D45). pmsd carries a posting command only after
+-- this read-only definer confirms a SENDING attempt with the same interface, P# and SHA-256. pmsd holds no
+-- privilege on any posting table: it can ask whether a command is authorised and record nothing.
+GRANT EXECUTE ON FUNCTION iam_v2.p4_posting_command_authorised(uuid, text, text) TO svc_pmsd;
+-- Whether the financial mirror must be proven again by a read-only resync (migration 0103, D48). One boolean;
+-- pmsd adds its own serialization and backoff.
+GRANT EXECUTE ON FUNCTION iam_v2.p4_financial_resync_due(uuid,uuid,uuid) TO svc_pmsd;

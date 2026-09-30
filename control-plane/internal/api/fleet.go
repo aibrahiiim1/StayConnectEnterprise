@@ -22,6 +22,7 @@ type LicenseSummary struct {
 	GraceEndsAt               *time.Time `json:"grace_ends_at"`
 	MaxConcurrentOnlineGuests *int       `json:"max_concurrent_online_guests"`
 	LicenseVersion            *int64     `json:"license_version"`
+	Modules                   []string   `json:"modules"` // null with no licence; [] = core only
 }
 
 // ApplianceRow is the row shape every appliance list returns (§6).
@@ -35,6 +36,7 @@ type ApplianceRow struct {
 	CustomerName *string        `json:"customer_name"`
 	SiteID       *string        `json:"site_id"`
 	SiteName     *string        `json:"site_name"`
+	SiteType     *string        `json:"site_type"` // descriptive only; null when not placed
 	Activation   string         `json:"activation"`
 	Connection   string         `json:"connection"`
 	LastSeenAt   *time.Time     `json:"last_seen_at"`
@@ -48,6 +50,14 @@ type ApplianceRow struct {
 	// customer is no longer in Central.
 	HoldsCustomerID   *string `json:"holds_customer_id"`
 	HoldsCustomerName *string `json:"holds_customer_name"`
+	// OfflineRequestPending: an imported offline activation request is on file and not yet consumed, so an
+	// activation package CAN be generated. Without one the package endpoint refuses, so the console offers it
+	// only when this is true.
+	OfflineRequestPending bool `json:"offline_request_pending"`
+	// ActivatingOn says what an "activating" appliance still lacks, so the console can say it plainly:
+	// "certificate_reissue" (its certificate was revoked for reissue and the appliance has not yet sent the
+	// new CSR), "certificate" (it never held one), "license" (no licence yet). Empty in every other state.
+	ActivatingOn string `json:"activating_on,omitempty"`
 
 	lifecycle          string
 	terminalDelivery   string
@@ -75,14 +85,17 @@ func (b *Base) queryAppliances(ctx context.Context, customerID, applianceID stri
 	rows, err := b.DB.Query(ctx, `
         SELECT a.id::text, a.serial, COALESCE(a.hostname,''), COALESCE(a.model,''), COALESCE(a.version,''),
                COALESCE(a.tenant_id::text,''), COALESCE(t.name,''), COALESCE(a.site_id::text,''), COALESCE(s.name,''),
-               a.lifecycle_state, a.last_seen_at, COALESCE(a.last_public_ip,''),
+               COALESCE(s.site_type,''), a.lifecycle_state, a.last_seen_at, COALESCE(a.last_public_ip,''),
                COALESCE(a.registered_at, a.first_seen_at, a.created_at), a.activated_at,
                EXISTS (SELECT 1 FROM appliance_certificates c WHERE c.appliance_id = a.id AND c.status = 'active'),
                COALESCE(td.delivery_state,''), td.timeout_at, a.replacement_pending,
                (SELECT count(*) FROM appliance_security_alerts x WHERE x.appliance_id = a.id AND NOT x.resolved),
                l.id::text, l.status, l.valid_until, l.grace_period_days, l.offline_grace_days,
-               l.max_concurrent_online_guests, l.license_version,
-               COALESCE(a.held_customer_id::text,''), COALESCE(hc.name,'')
+               l.max_concurrent_online_guests, l.license_version, l.modules,
+               COALESCE(a.held_customer_id::text,''), COALESCE(hc.name,''),
+               EXISTS (SELECT 1 FROM offline_activation_requests o WHERE o.appliance_id = a.id AND o.consumed_at IS NULL),
+               EXISTS (SELECT 1 FROM appliance_certificates c WHERE c.appliance_id = a.id AND c.status = 'revoked'
+                         AND c.revocation_reason LIKE 'reissue:%')
           FROM appliances a
           LEFT JOIN tenants t ON t.id = a.tenant_id
           LEFT JOIN tenants hc ON hc.id = a.held_customer_id
@@ -90,7 +103,7 @@ func (b *Base) queryAppliances(ctx context.Context, customerID, applianceID stri
           LEFT JOIN appliance_terminal_delivery td ON td.appliance_id = a.id
           LEFT JOIN LATERAL (
                 SELECT x.id, x.status, x.valid_until, x.grace_period_days, x.offline_grace_days,
-                       x.max_concurrent_online_guests, x.license_version
+                       x.max_concurrent_online_guests, x.license_version, COALESCE(x.modules, '{}') AS modules
                   FROM licenses x
                  WHERE a.id = ANY(x.appliance_ids) AND x.status IN ('active','suspended','revoked')
                  ORDER BY (x.status IN ('active','suspended')) DESC, x.issued_at DESC
@@ -106,21 +119,24 @@ func (b *Base) queryAppliances(ctx context.Context, customerID, applianceID stri
 	var out []ApplianceRow
 	for rows.Next() {
 		var a ApplianceRow
-		var custID, custName, siteID, siteName, ip, td, heldID, heldName string
-		var hasCert bool
+		var custID, custName, siteID, siteName, siteType, ip, td, heldID, heldName string
+		var licModules []string
+		var hasCert, reissued bool
 		var licID, licStatus *string
 		var licUntil *time.Time
 		var licGrace, licOffline, licCap *int
 		var licVer *int64
 		if err := rows.Scan(&a.ID, &a.Serial, &a.Hostname, &a.Model, &a.Version,
-			&custID, &custName, &siteID, &siteName,
+			&custID, &custName, &siteID, &siteName, &siteType,
 			&a.lifecycle, &a.LastSeenAt, &ip, &a.RegisteredAt, &a.ActivatedAt,
 			&hasCert, &td, &a.terminalDeadline, &a.replacementPending, &a.OpenAlerts,
-			&licID, &licStatus, &licUntil, &licGrace, &licOffline, &licCap, &licVer, &heldID, &heldName); err != nil {
+			&licID, &licStatus, &licUntil, &licGrace, &licOffline, &licCap, &licVer, &licModules, &heldID, &heldName,
+			&a.OfflineRequestPending, &reissued); err != nil {
 			return nil, err
 		}
 		a.HoldsCustomerID, a.HoldsCustomerName = strPtr(heldID), strPtr(heldName)
 		a.CustomerID, a.CustomerName, a.SiteID, a.SiteName = strPtr(custID), strPtr(custName), strPtr(siteID), strPtr(siteName)
+		a.SiteType = strPtr(siteType)
 		a.LastPublicIP = strPtr(ip)
 		a.terminalDelivery = td
 		facts := ApplianceFacts{Lifecycle: a.lifecycle, TerminalDelivery: td, HasActiveCert: hasCert, LastSeenAt: a.LastSeenAt}
@@ -135,10 +151,23 @@ func (b *Base) queryAppliances(ctx context.Context, customerID, applianceID stri
 			facts.License = lf
 			ge := lf.GraceEndsAt()
 			a.License = LicenseSummary{ID: licID, ValidUntil: licUntil, GraceEndsAt: &ge,
-				MaxConcurrentOnlineGuests: licCap, LicenseVersion: licVer}
+				MaxConcurrentOnlineGuests: licCap, LicenseVersion: licVer, Modules: licModules}
+			if a.License.Modules == nil {
+				a.License.Modules = []string{}
+			}
 		}
 		d := DeriveState(facts, now)
 		a.Activation, a.Connection, a.License.State = d.Activation, d.Connection, d.License
+		if a.Activation == ActivationActivating {
+			switch {
+			case !hasCert && reissued:
+				a.ActivatingOn = "certificate_reissue"
+			case !hasCert:
+				a.ActivatingOn = "certificate"
+			default:
+				a.ActivatingOn = "license"
+			}
+		}
 		out = append(out, a)
 	}
 	return out, rows.Err()
@@ -314,6 +343,8 @@ type LicenseRow struct {
 	MaxConcurrentOnlineGuests int        `json:"max_concurrent_online_guests"`
 	LicenseVersion            int64      `json:"license_version"`
 	IssuedAt                  time.Time  `json:"issued_at"`
+	// Modules are the module ids the signed licence authorises; empty = core only (and every legacy row).
+	Modules []string `json:"modules"`
 }
 
 type licenseFilter struct {
@@ -326,7 +357,7 @@ func (b *Base) queryLicenses(ctx context.Context, f licenseFilter) ([]LicenseRow
         SELECT l.id::text, COALESCE(l.appliance_ids[1]::text,''), COALESCE(a.serial,''),
                l.tenant_id::text, COALESCE(t.name,''), l.site_id::text, COALESCE(s.name,''),
                l.status, l.valid_from, l.valid_until, l.grace_period_days, l.offline_grace_days,
-               l.max_concurrent_online_guests, l.license_version, l.issued_at
+               l.max_concurrent_online_guests, l.license_version, l.issued_at, COALESCE(l.modules, '{}')
           FROM licenses l
           LEFT JOIN appliances a ON a.id = l.appliance_ids[1]
           LEFT JOIN tenants    t ON t.id = l.tenant_id
@@ -349,10 +380,13 @@ func (b *Base) queryLicenses(ctx context.Context, f licenseFilter) ([]LicenseRow
 		var offline int
 		if err := rows.Scan(&l.ID, &appID, &serial, &l.CustomerID, &l.CustomerName, &l.SiteID, &l.SiteName,
 			&l.Status, &l.ValidFrom, &l.ValidUntil, &l.GracePeriodDays, &offline,
-			&l.MaxConcurrentOnlineGuests, &l.LicenseVersion, &l.IssuedAt); err != nil {
+			&l.MaxConcurrentOnlineGuests, &l.LicenseVersion, &l.IssuedAt, &l.Modules); err != nil {
 			return nil, err
 		}
 		l.ApplianceID, l.Serial = strPtr(appID), strPtr(serial)
+		if l.Modules == nil {
+			l.Modules = []string{}
+		}
 		lf := LicenseFacts{Status: l.Status, ValidUntil: l.ValidUntil, GracePeriodDays: l.GracePeriodDays, OfflineGraceDays: offline}
 		l.GraceEndsAt = lf.GraceEndsAt()
 		if l.Status == "superseded" {

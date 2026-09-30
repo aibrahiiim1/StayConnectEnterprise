@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // Real HTTP + real PostgreSQL contract tests for the Phase-4 Financial Manual Review surface.
@@ -35,19 +37,30 @@ func (f *apiFixture) seedReviewablePosting(t *testing.T, outcome, asStatus strin
 	ctx := context.Background()
 	uniq := time.Now().UnixNano()
 
-	var revID, planRev, pkgRev, mapID, stayID, folioID, purchaseID, settleID string
+	var revID, planRev, pkgRev, mapID, stayID, purchaseID, settleID string
 	q := func(dst *string, sql string, args ...any) {
 		t.Helper()
 		if err := f.pool.QueryRow(ctx, sql, args...).Scan(dst); err != nil {
 			t.Fatalf("seed (%s): %v", sql[:40], err)
 		}
 	}
+	// qc is q inside the controlled operation a guarded table demands on the full appliance schema.
+	qc := func(family string, dst *string, sql string, args ...any) {
+		t.Helper()
+		if err := controlled(ctx, f.pool, []string{family}, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, sql, args...).Scan(dst)
+		}); err != nil {
+			t.Fatalf("seed (%s): %v", sql[:40], err)
+		}
+	}
+	// The posting targets the reservation (Amendment A1): its g_number is the stay's reservation number.
+	reservation := fmt.Sprintf("R%d", uniq)
 	q(&ifaceID, `INSERT INTO iam_v2.pms_interfaces(tenant_id,site_id,connector_kind)
 		VALUES ($1,$2,'protel-fias') RETURNING id::text`, f.tenant, f.site)
 	q(&revID, `INSERT INTO iam_v2.pms_interface_revisions
-		(tenant_id,site_id,pms_interface_id,revision_no,source_timezone,folio_identity_strategy,config,
+		(tenant_id,site_id,pms_interface_id,revision_no,source_timezone,posting_target_model,config,
 		 financial_base_currency,financial_base_currency_exponent)
-		VALUES ($1,$2,$3,1,'UTC','GLOBALLY_UNIQUE',
+		VALUES ($1,$2,$3,1,'UTC','RESERVATION',
 		 '{"heartbeat_timeout_ms":60000,"feed_freshness_ms":300000,"complete_sync_ms":3600000}','USD',2)
 		RETURNING id::text`, f.tenant, f.site, ifaceID)
 	if _, err := f.pool.Exec(ctx, `UPDATE iam_v2.pms_interfaces SET current_revision_id=$2 WHERE id=$1`,
@@ -72,36 +85,36 @@ func (f *apiFixture) seedReviewablePosting(t *testing.T, outcome, asStatus strin
 	q(&pkgID, `INSERT INTO iam_v2.internet_packages(tenant_id,site_id,code) VALUES ($1,$2,$3)
 		RETURNING id::text`, f.tenant, f.site, fmt.Sprintf("K%d", uniq))
 	q(&pkgRev, `INSERT INTO iam_v2.internet_package_revisions
-		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent)
-		VALUES ($1,$2,$3,1,$4,'GENERAL',1000,'USD',2) RETURNING id::text`, f.tenant, f.site, pkgID, planRev)
+		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent,
+		 settlement_methods)
+		VALUES ($1,$2,$3,1,$4,'GENERAL',1000,'USD',2,'{PMS_POSTING}') RETURNING id::text`, f.tenant, f.site, pkgID, planRev)
 	q(&mapID, `INSERT INTO iam_v2.package_settlement_mappings
 		(tenant_id,site_id,package_revision_id,pms_interface_id,mapping_revision,posting_code)
 		VALUES ($1,$2,$3,$4,1,'WIFI') RETURNING id::text`, f.tenant, f.site, pkgRev, ifaceID)
-	q(&stayID, `INSERT INTO iam_v2.stays
+	// posting_allowed is computed by the database: IN_HOUSE + a reservation + no active block => postable.
+	qc("stay", &stayID, `INSERT INTO iam_v2.stays
 		(tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,
-		 normalized_room_number,status,posting_allowed)
-		VALUES ($1,$2,$3,$4,'S1','1421','IN_HOUSE',true) RETURNING id::text`,
-		f.tenant, f.site, ifaceID, fmt.Sprintf("R%d", uniq))
-	q(&folioID, `INSERT INTO iam_v2.folios(tenant_id,site_id,pms_interface_id,external_folio_id)
-		VALUES ($1,$2,$3,'5') RETURNING id::text`, f.tenant, f.site, ifaceID)
-	q(&purchaseID, `INSERT INTO iam_v2.purchases
+		 normalized_room_number,status)
+		VALUES ($1,$2,$3,$4,'S1','1421','IN_HOUSE') RETURNING id::text`,
+		f.tenant, f.site, ifaceID, reservation)
+	qc("commerce_intent", &purchaseID, `INSERT INTO iam_v2.purchases
 		(tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,settlement_mapping_id,trigger,
 		 amount_minor,currency,currency_exponent,state)
 		VALUES ($1,$2,$3,$4,$5,$6,'VOUCHER_REDEMPTION',1000,'USD',2,'GRANTED') RETURNING id::text`,
 		f.tenant, f.site, pkgRev, ifaceID, stayID, mapID)
-	q(&settleID, `INSERT INTO iam_v2.settlements(tenant_id,site_id,purchase_id,method,status)
+	qc("commerce_intent", &settleID, `INSERT INTO iam_v2.settlements(tenant_id,site_id,purchase_id,method,status)
 		VALUES ($1,$2,$3,'PMS_POSTING','REQUIRED') RETURNING id::text`, f.tenant, f.site, purchaseID)
 	q(&postingID, `INSERT INTO iam_v2.pms_postings
-		(tenant_id,site_id,pms_interface_id,settlement_id,purchase_id,stay_id,folio_id,
+		(tenant_id,site_id,pms_interface_id,settlement_id,purchase_id,stay_id,g_number,
 		 posting_interface_revision_id,posting_type,amount_minor,currency,currency_exponent,idempotency_key)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'CHARGE',1000,'USD',2,$9) RETURNING id::text`,
-		f.tenant, f.site, ifaceID, settleID, purchaseID, stayID, folioID, revID, fmt.Sprintf("idem-%d", uniq))
+		f.tenant, f.site, ifaceID, settleID, purchaseID, stayID, reservation, revID, fmt.Sprintf("idem-%d", uniq))
 	if _, err := f.pool.Exec(ctx, `INSERT INTO iam_v2.posting_attempts
 		(tenant_id,site_id,internal_posting_id,pms_interface_id,attempt_no,p_number,rn,g_number,sent_at,
 		 outcome,pa_as_status,response_at)
-		VALUES ($1,$2,$3,$4,1,$5,'1421','5',now(),$6,$7,now())`,
+		VALUES ($1,$2,$3,$4,1,$5,'1421',$8,now(),$6,$7,now())`,
 		f.tenant, f.site, postingID, ifaceID, fmt.Sprintf("%d", uniq%100000), outcome,
-		nullIfEmpty(asStatus)); err != nil {
+		nullIfEmpty(asStatus), reservation); err != nil {
 		t.Fatalf("seed attempt: %v", err)
 	}
 	return postingID, ifaceID
@@ -381,7 +394,8 @@ func TestIntegrationReviewAPI_CreateReversalIsPassiveAndNonExecutable(t *testing
 	}
 	if _, err := f.pool.Exec(ctx, `INSERT INTO iam_v2.posting_attempts
 		(tenant_id,site_id,internal_posting_id,pms_interface_id,attempt_no,p_number,rn,g_number,sent_at)
-		VALUES ($1,$2,$3,$4,1,'7777','1421','5',now())`, f.tenant, f.site, revID, iface); err == nil {
+		VALUES ($1,$2,$3,$4,1,'7777','1421',
+		        (SELECT g_number FROM iam_v2.pms_postings WHERE id=$3),now())`, f.tenant, f.site, revID, iface); err == nil {
 		t.Fatal("a reversal must never be attempted")
 	}
 	// and the operator surface says so, in words an operator can act on
@@ -518,8 +532,10 @@ func TestIntegrationReviewAPI_DetailExposesEvidenceButNoSecrets(t *testing.T) {
 		t.Fatalf("detail: %d", code)
 	}
 	pinned, _ := body["pinned_evidence"].(map[string]any)
-	for _, k := range []string{"settlement_id", "purchase_id", "stay_id", "folio_id",
-		"posting_interface_revision_id", "idempotency_key", "folio_identity_strategy"} {
+	// Amendment A1: a charge is pinned to the reservation, so the evidence carries g_number and
+	// posting_target_model where it used to carry folio_id and folio_identity_strategy.
+	for _, k := range []string{"settlement_id", "purchase_id", "stay_id", "g_number",
+		"posting_interface_revision_id", "idempotency_key", "posting_target_model"} {
 		if pinned[k] == nil || pinned[k] == "" {
 			t.Fatalf("the pinned evidence must include %s", k)
 		}

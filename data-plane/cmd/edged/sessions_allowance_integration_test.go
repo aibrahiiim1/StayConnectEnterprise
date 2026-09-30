@@ -20,6 +20,8 @@ package main
 import (
 	"context"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // seedAllowanceSession creates a plan revision with planQuota, an entitlement whose own frozen quota is
@@ -53,10 +55,13 @@ func seedAllowanceSession(t *testing.T, f *apiFixture, planQuota *int64, entQuot
 		f.tenant, f.site, pkg, svcRev).Scan(&pkgRev); err != nil {
 		t.Fatalf("seed package revision: %v", err)
 	}
-	if err := f.pool.QueryRow(ctx, `INSERT INTO iam_v2.purchases
+	// purchases are commerce_intent-guarded on the full appliance schema.
+	if err := controlled(ctx, f.pool, []string{"commerce_intent"}, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `INSERT INTO iam_v2.purchases
 		(tenant_id, site_id, package_revision_id, trigger)
 		VALUES ($1,$2,$3,'ADMIN_GRANT') RETURNING id::text`,
-		f.tenant, f.site, pkgRev).Scan(&purchase); err != nil {
+			f.tenant, f.site, pkgRev).Scan(&purchase)
+	}); err != nil {
 		t.Fatalf("seed purchase: %v", err)
 	}
 
@@ -109,6 +114,22 @@ func seedAllowanceSession(t *testing.T, f *apiFixture, planQuota *int64, entQuot
 		VALUES ($1,$2,gen_random_uuid(),$3::macaddr) RETURNING id::text`,
 		f.tenant, f.site, mac).Scan(&device); err != nil {
 		t.Fatalf("seed device: %v", err)
+	}
+	// On the full appliance schema a session is only storable for a device that holds an authorization
+	// binding on its entitlement (the device_auth family); the fixture seeds that binding the way the
+	// product's device authorizer records it.
+	if _, err := f.pool.Exec(ctx, `INSERT INTO iam_v2.entitlement_devices
+		(tenant_id,site_id,entitlement_id,device_id,status,first_authorized,last_authorized)
+		VALUES ($1,$2,$3,$4,'AUTHORIZED',now(),now())`, f.tenant, f.site, ent, device); err != nil {
+		t.Fatalf("seed entitlement device: %v", err)
+	}
+	if err := controlled(ctx, f.pool, []string{"device_auth"}, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO iam_v2.entitlement_device_authorizations
+		(tenant_id,site_id,entitlement_id,device_id,seq,authorized_at)
+		VALUES ($1,$2,$3,$4,1,now())`, f.tenant, f.site, ent, device)
+		return err
+	}); err != nil {
+		t.Fatalf("seed device authorization: %v", err)
 	}
 	if err := f.pool.QueryRow(ctx, `INSERT INTO iam_v2.sessions
 		(tenant_id, site_id, entitlement_id, device_id, ip, mac, state, started, expires_at)

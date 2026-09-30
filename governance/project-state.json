@@ -344,7 +344,7 @@
   "next_authorized_action": "Work normal missions under the PRODUCT-OWNER-LED DELIVERY model D42 (2026-09-26): implement, target-test, deploy completed changes to PRE-LIVE 172.21.60.25 under the standing deployment decision, stop at READY FOR PRODUCT OWNER TESTING, and merge only after explicit Product Owner acceptance (po-merge-approved). The comprehensive validation runs only on 'FULL CHECK THE WHOLE CODE'. No agent requests PRE-LIVE deployment approval again.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D43",
+  "latest_accepted_po_decision": "D48",
   "current_state_facts": {
     "_note": "MACHINE-READABLE CURRENT STATE. Every current-state surface in this repository is validated against these fields by tools/validate-current-state-parity.py, which runs in the Project Governance gate. They exist because prose alone let a contradiction survive a green gate: current_maturity still said an authorization was awaited and iam_v2 was 49/0 while this file already recorded 63 tables and an executed Live Increment 9. A fact that is only asserted in sentences cannot be diffed; a fact recorded here can be.",
     "phase": "7",
@@ -462,7 +462,7 @@
     "rollback_rehearsal_occurred": true,
     "corrected_software_deployed": true,
     "deployed_head_on_appliance": "MIXED -- see deployed_runtime_services; there is no single deployed head",
-    "deployed_head_note": "PRE-LIVE 172.21.60.25, re-read live after the neutral-core deployment (2026-09-27 ~22:43Z UTC). THE APPLIANCE RUNS BINARIES FROM FOUR COMMITS and this field names none. edged, portald and netd run 588f9835 (master, the merge of PR #198); scd, acctd and pmsd run 42675ea2 (the Central-redesign head, on master since PR #194 merged); all six read out of the INSTALLED bytes: vcs.modified=false, -tags=stayconnect_production; /opt/stayconnect/DEPLOYED_BINARIES.{sha256,txt} were rewritten from the installed bytes and `sha256sum -c` reports all six OK. netd's restart left the network untouched: the `nft -s list ruleset` output and `ip -br addr` were byte-identical before and after. The helper binaries keep their own builds: keybootstrap runs d4e1dc76; sitemigrate and svc-run run 29a6b21f. The previous edged, portald and netd are kept as *.bak-pre-588f9835-20260927T224309Z. No migration was applied. WHY THE MIXED STATE IS KEPT: rebuilding unchanged services from a newer head to make this record uniform would ship unrelated changes onto PRE-LIVE.",
+    "deployed_head_note": "PRE-LIVE 172.21.60.25, re-read live after the D48 deployment (2026-09-30 ~15:12Z UTC). THE APPLIANCE RUNS BINARIES FROM FIVE COMMITS OF THE UNMERGED PR #202 and this field names none: scd 442f6e61, edged and pmsd d4a48a5f, portald d5c3e578, netd and acctd 99ba9f10; all read out of the INSTALLED bytes with vcs.modified=false and -tags=stayconnect_production, and /opt/stayconnect/DEPLOYED_BINARIES.{sha256,txt} were rewritten from them (sha256sum -c 6/6 OK). PRE-LIVE is AHEAD of master, as D42 intends. Site migration 0103 was applied through scripts/edge-migrate.sh as iam_v2_owner after a pg_dump backup; Gate-P was reconciled. WHY THE MIXED STATE IS KEPT: rebuilding unchanged services from a newer head to make this record uniform would ship unrelated changes onto PRE-LIVE.",
     "live_increment9_revalidated": true,
     "live_increment9_revalidated_on": "2026-08-11",
     "live_increment9_revalidation_verdicts": {
@@ -856,16 +856,16 @@
     "dhcp_ownership_evidence_monitored_deployed_note": "DEPLOYED AND VERIFIED LIVE 2026-09-01 (T0109). netd health carries an ownership_evidence block filled by a fresh lease read on every request; the operational checker returns OK on the real socket and refuses when the socket is absent; the enforcement-plane gate consults it. Kea's hourly lease-file cleanup, which had failed every hour since 2026-08-28, has run cleanly since the repair with zero PID failures.",
     "hotel_admin_runtime_identity": {
       "_note": "THE UI IS NOT THE BINARIES. deployed_head_on_appliance names the commit whose build produced the nine SERVICE binaries; it says nothing about the Hotel Admin bundle, which is built and shipped separately and is routinely left untouched by a backend deployment. Recording one head for both is how a UI five days older than the backend was reported as current. These fields are read from the bundle's own hotel-admin-release.json on the appliance, never inferred.",
-      "source_commit": "01ad56996b7ec3b37119267a160e0a93d7f3258b",
-      "build_id": "7LDDhxngD-xQSm5aZ2I_I",
-      "release": "20260927-225302",
-      "previous_release": "20260927-224356",
-      "artifact_sha256": "9d9f4c74a52a3f28ad8a0ba3e99f726578d17265f2e1299b4adbec8ab0241e6b",
+      "source_commit": "442f6e614501be7d448b904724c38541bc4141ae",
+      "build_id": "w4DikROhjCcXA75cwjjum",
+      "release": "20260930-200329",
+      "previous_release": "20260930-151201 (d4a48a5f)",
+      "artifact_sha256": "a1a08f1beac02059a205e93be2a70b097aa45afdd7ee29c5ca07194ce05ce449",
       "build_flags": "none -- the release manifest records build_flags {}; the capability contract carries no build flags",
       "contract_version": "1",
-      "deployed_at": "2026-09-27 ~22:53Z UTC (release 20260927-225302), by deploy-hotel-admin.sh package (clean clone of 01ad5699) / install. The neutral-core Admin Console (PR #198, merged as 588f9835) plus the room-sign-in readiness fix 01ad5699, which lands on master with the PR that records this deployment. Release 20260927-224356 (588f9835) was live for ~9 minutes before it and showed a false 'Room sign-in is not working' warning, a defect that predates the mission.",
-      "verified_at": "2026-09-27, read back from the installed release manifest (source_state clean); check-hotel-admin-integrity.sh PASS; exercised in Chrome at https://172.21.60.25 (26/26 checks): sections Overview, Internet offering, Clients, Client Portal, Hotel, Networking, System; Hotel starts PMS connection, Room sign-in; Client networks; Property Management System card; Room sign-in offers exactly the four server-supported choices and no false outage; Usage explorer by access source; no page error or API 5xx.",
-      "rollback": "PRESENT: /opt/stayconnect/hotel-admin.previous -> /opt/stayconnect/releases/hotel-admin/20260927-224356 (588f9835)."
+      "deployed_at": "2026-09-30 ~20:03Z UTC by deploy-hotel-admin.sh package (clean clone of 442f6e61) / install: payment domain validation refuses wildcards.",
+      "verified_at": "2026-09-30, read back from the installed release manifest (source_state clean).",
+      "rollback": "PRESENT: /opt/stayconnect/hotel-admin.previous -> /opt/stayconnect/releases/hotel-admin/20260929-080958 (a878de52)."
     },
     "hotel_admin_deployment_contract": "PERMANENT RULE for every Hotel Admin release. (1) Exactly ONE servable release: /opt/stayconnect/hotel-admin is a symlink to a verified release under the managed releases directory - never a plain directory, which is what an install-by-copying leaves behind and what removes all provenance. (2) Every bundle carries hotel-admin-release.json recording source commit, BUILD_ID, release timestamp, the capability flags and their values, and the artifact checksum; packaging FAILS if the source commit cannot be identified or the contract is not satisfied. (3) Installation verifies the candidate - checksum, manifest, required routes, and that the flags were really inlined - BEFORE switching, and smoke-tests the live endpoint AFTER, proving the served BUILD_ID and that every required operator surface answers; a failure restores the previous verified release. (4) A rollback target must satisfy the same contract: an obsolete UI that would remove PMS, Service Plan or Package management is archive evidence, never an executable rollback, and the previous pointer is CLEARED rather than left aimed at one. (5) Release selection is explicit and provenance-verified - never by mtime, filename or 'latest-looking' directory. (6) Historical releases are retained under the archive directory, unreachable by Caddy, systemd or either pointer.",
     "hotel_admin_operator_endpoint_verified": true,
@@ -925,14 +925,14 @@
     "pms_published_generation_note": "THREE DIFFERENT COUNTERS HAVE ALL BEEN ABBREVIATED 'gen' AND MUST NOT BE CONFLATED. pms_interface_runtime.published_resync_generation is the RESYNC generation, bumped once per resync cycle: 300, read passively 2026-09-16 after the T0149 deployment. pms_interface_runtime.runtime_generation is a monotonic runtime-row counter bumped on every state write, which is why it is orders of magnitude larger: 74452. pms_interface_revisions.revision_no is the pinned Interface REVISION: 3, unchanged. The move followed the pmsd restart the T0149 deployment caused: the connector reconnected and requested its own resync, publishing generation 299 over 464 records at 2026-09-16T14:04:36Z and reaching 300 on the next cycle. No operator command and no configuration change; resync_command_id is NULL. HISTORICAL (do not read as current): 282 belongs to the 2026-09-15 restart, 209 to the migration-0065 closure, and 206-208 to the 2026-09-08T11:45Z restart sequence.",
     "deployed_runtime_head": "MIXED -- see deployed_runtime_services; there is no single deployed head",
     "deployed_runtime_services": {
-      "_note": "Per service: sha256 of the installed binary, the commit its own bytes name, and the build tag. Read back from /opt/stayconnect/bin on the appliance on 2026-09-27 (UTC) after the neutral-core deployment, which replaced edged, portald and netd only. The appliance carries no Go toolchain, so the Go build stamp was read directly out of the artifact with grep -ao on vcs.revision, -tags and vcs.modified -- the same three values `go version -m` prints, taken from the same bytes.",
-      "netd": "f0703d98e59b76d6057c60979ff79391854a20a2d3699b4e91b73d2149c140bb  (588f98359a85, tags=stayconnect_production, vcs.modified=false)",
-      "scd": "fa17a2d7949772f6c99c875be42bd3aa2aca19addea67741b8e9f34278dcba07  (42675ea27f29, tags=stayconnect_production, vcs.modified=false)",
-      "edged": "783fd8ae691816b6e83651267ef7dc7c8e2dee497f66bf345d3c07768448823f  (588f98359a85, tags=stayconnect_production, vcs.modified=false)",
-      "pmsd": "08f1e6c451d156ecdc56605630db98c0098c1285f0aba52747db522eeb3d06fa  (42675ea27f29, tags=stayconnect_production, vcs.modified=false)",
-      "portald": "85bbc616e6d4322dca3a4c1fb403eaac87caeccda81cd924eabbf222f1729a90  (588f98359a85, tags=stayconnect_production, vcs.modified=false)",
-      "acctd": "a0db9e65e40b49c5ec272599a3de7db9b05f58107c262fddfe821a807894034c  (42675ea27f29, tags=stayconnect_production, vcs.modified=false)",
-      "keybootstrap": "609109376d2f375cafa103bdf526a5ad17b24869ed6a7e1be057272229e28787  (d4e1dc769b6f, helper, no build tag, vcs.modified=false; unchanged by this delivery)",
+      "_note": "Per service: sha256 of the installed binary, the commit its own bytes name, and the build tag. Read back from /opt/stayconnect/bin on the appliance on 2026-09-30 (UTC) after the D47 deployment of PR #202 (unmerged). The appliance carries no Go toolchain, so the Go build stamp was read directly out of the artifact with grep -ao on vcs.revision, -tags and vcs.modified.",
+      "netd": "8dd6f4ca63d9375a6db5554aad5fa0e009eed9636fee1f6fa58493e5246636f2  (99ba9f10e005, tags=stayconnect_production, vcs.modified=false)",
+      "scd": "7a134d4581f7aa28cfdb06a1df949ba6b7ddbc10b5cf46926cfc94ffe4c0df54  (442f6e614501, tags=stayconnect_production, vcs.modified=false)",
+      "edged": "6184927a50e9235c2b1feb6dfaa1d4c47027a1e738d822b23eb8e2bb08dc8212  (d4a48a5ff9d3, tags=stayconnect_production, vcs.modified=false)",
+      "pmsd": "7c4ded8745f8fe64a3d3a067aa1d679b3a499d272a8e2f3ab56f53726a12638e  (d4a48a5ff9d3, tags=stayconnect_production, vcs.modified=false)",
+      "portald": "0b6c0718e8f70aeee1ae3d903d86ca5f24f288d6600b4942a8e631627b2656f1  (d5c3e57856c8, tags=stayconnect_production, vcs.modified=false)",
+      "acctd": "a406421276accfe392bb015fd0f246797d9619bf9fce80597b2a219038503d41  (99ba9f10e005, tags=stayconnect_production, vcs.modified=false)",
+      "keybootstrap": "360c414d837d30d7b8ff285802142eaa689c2acf5832929ea2f209dab447a31f  (99ba9f10e005, helper, tags=stayconnect_production, vcs.modified=false; now also creates payment_dek.key and anonymous_access.key)",
       "sitemigrate": "28cb0aff8dc9fb880f6192c06222ebdb4601be5edbd65a5d6c31253affd1039d  (29a6b21fcf69, helper, no build tag, vcs.modified=false; unchanged by this delivery)",
       "svc-run": "5108fa286fa5e052f4cbae33fa1f52f73e8e895d4d0ec62b03edbef4d1a6e0de  (29a6b21fcf69, helper, no build tag, vcs.modified=false; unchanged by this delivery)"
     },
@@ -1003,11 +1003,11 @@
       "lifecycle": "PRE-LIVE remains PRE-LIVE. No Go-Live, no cutover, no production enablement. Go-Live remains NOT AUTHORIZED."
     },
     "netd_runtime_identity": {
-      "_note": "netd runs the final Central-redesign build with every other service; no enforcement code changed in this round.",
+      "_note": "netd was rebuilt with the other services of PR #202 at 99ba9f10; no enforcement code changed in this delivery.",
       "binary": "netd",
-      "source_commit": "42675ea27f295978178dcb248dc1245c9f77a628",
-      "sha256": "73f2831df7c106f45288522847bedb79f73c03090c1c53b8df01f1141acd6454",
-      "verified_at": "2026-09-27, read back from the installed bytes (see deployed_runtime_services)."
+      "source_commit": "99ba9f10e0050f11f6d2c278c1a216d5fb022ef1",
+      "sha256": "8dd6f4ca63d9375a6db5554aad5fa0e009eed9636fee1f6fa58493e5246636f2",
+      "verified_at": "2026-09-28, read back from the installed bytes (see deployed_runtime_services)."
     },
     "factory_clean_first_guest_network": {
       "status": "RESOLVED on master and PROVEN on PRE-LIVE (2026-09-09).",
@@ -1097,8 +1097,8 @@
       "residual_observations": "TWO COSMETIC ITEMS, NEITHER BLOCKING AND NEITHER A REGRESSION. (1) The sidebar's navigation filter has an aria-label but no id or name attribute, which Chrome reports as an autofill advisory; it is accessibly named and reachable. (2) In the package editor the visible caption ('GB per night') and the control's accessible name ('gb-per-night') differ, which is a WCAG 2.5.3 label-in-name mismatch rather than a missing label -- every control IS named. Both are recorded as backlog, not fixed here, because neither blocks the requested outcome and this mission's scope was closed.",
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     },
-    "deployed_runtime_provenance_verified_at": "2026-09-27",
-    "deployed_runtime_provenance_verification": "Verified live on PRE-LIVE 172.21.60.25 on 2026-09-27 (UTC). For each of the six service binaries: sha256 of the installed file, and the vcs.revision, -tags and vcs.modified values read out of that same file. All six carry -tags=stayconnect_production -- the tag that arms the guest-authority lock -- and all six report vcs.modified=false. Source commits: 588f9835 (edged, portald, netd; built with scripts/build-appliance-binaries.sh from a clean clone, sha256 matched between build host and appliance before install) and 42675ea2 (scd, acctd, pmsd); both are on master. On the appliance, `cd /opt/stayconnect && sha256sum -c DEPLOYED_BINARIES.sha256` reports all six OK after the manifest was rewritten from the installed bytes.",
+    "deployed_runtime_provenance_verified_at": "2026-09-30",
+    "deployed_runtime_provenance_verification": "Verified live on PRE-LIVE 172.21.60.25 on 2026-09-30 (UTC). For each service binary: sha256 of the installed file, and the vcs.revision, -tags and vcs.modified values read out of that same file. All carry -tags=stayconnect_production and vcs.modified=false. scd, edged and pmsd were built with scripts/build-appliance-binaries.sh from a clean clone of the pushed branch, sha256 matched between build host and appliance before install. `cd /opt/stayconnect && sha256sum -c DEPLOYED_BINARIES.sha256` reports all six OK.",
     "rollback_artifact_provenance": {
       "audited_at": "2026-09-21",
       "finding": "17 of the 36 retained rollback artifacts in /opt/stayconnect/bin were built WITHOUT -tags stayconnect_production and so carry the development build profile; most carry no vcs stamp either. Four were produced by the guest-pilot mission (the *.bak-untagged files and portald.bak-landingerror) and thirteen predate it, from before scripts/build-appliance-binaries.sh existed. Until this closure every one of them was selectable by an operator typing a suffix, and binary-rollback.sh would have installed it, verified the digest and reported success -- truthfully about identity, and silent about profile.",
@@ -1215,25 +1215,25 @@
     "session_start_check": "None owed by the delivery model. Nothing runs unattended under D42, so there is no nightly verdict to read at session start (tools/nightly-status.py was removed by T0196). A session starts from the state of its own delivery branch and pull request.",
     "central_console_runtime_identity": {
       "_note": "What Central (172.21.96.196) serves as its operator console, read back from /opt/stayconnect/central/DEPLOYED.json and the installed release.",
-      "source_commit": "5c96d410aca446f14c1225eec78be4f619cf8926",
+      "source_commit": "8e4bed4ed984be05fc5c4a842b93e8da02492128",
       "source_state": "clean",
-      "build_id": "0coxG2OynFboI3lxsN3dw",
-      "release": "/opt/stayconnect/releases/cloud-admin/20260927T211352Z",
-      "artifact_sha256": "release onegate-central-5c96d410aca4.tar.gz sha256 32a5654c13e14aceba18126c82983e74af887a8ab4d235983e42fd48eece8ced (central-build.sh, clean clone), deployed with central-deploy.sh",
-      "previous_release": "/opt/stayconnect/releases/cloud-admin/20260927T151634Z (e176e0ea; the rollback target)",
-      "deployed_at": "2026-09-27T21:14Z UTC by central-deploy.sh (industry-neutral terminology, PRs #195 and #196). Central moved to 172.21.96.196 on 2026-09-27 with every key, certificate and the licence database carried over; the identity is unchanged: vendor 2fbdfcbde209ebb5, assignment 027a2c97f6c8fcdb, registry root 84655767f9834fa2, appliance Root CA D2:60:C6:EE:21:EB:D7:79:… .",
-      "verified": "central-deploy.sh smoke PASS (8/8: ctrlapi /readyz loopback and via Caddy with TLS verified, console /login 200 serving BUILD_ID 0coxG2OynFboI3lxsN3dw, /metrics not exposed, appliance mTLS :9443 verifies); /opt/stayconnect/central/DEPLOYED.json names 5c96d410 for ctrlapi and console; the served console bundle says 'Admin Console' and never 'Hotel Admin'."
+      "build_id": "WbZd7-lNXF8HB3xd2PEHX",
+      "release": "/opt/stayconnect/releases/cloud-admin/20260928T235345Z",
+      "artifact_sha256": "release onegate-central-8e4bed4ed984.tar.gz sha256 1235b7d88a2e08e10328aef1991593929fbb6122e526da64f698017383dfb3d2 (central-build.sh, clean clone), deployed with central-deploy.sh",
+      "previous_release": "/opt/stayconnect/releases/cloud-admin/20260928T164442Z (567284c3; the rollback target)",
+      "deployed_at": "2026-09-28T23:53Z UTC by central-deploy.sh (activation state names why an appliance is activating; the offline Activation package only when an offline request exists; whatsapp_otp in the module catalogue).",
+      "verified": "central-deploy.sh smoke PASS 8/8; /opt/stayconnect/central/DEPLOYED.json names 8e4bed4e for ctrlapi and console. Central holds one active certificate and the active v5 licence for the PRE-LIVE appliance and no pending offline request."
     },
     "prelive_guest_access_testing": "ENABLED on PRE-LIVE 172.21.60.25 for Product Owner testing (D43, T0197, 2026-09-26). STAYCONNECT_PHASE2_MASTER=1 and STAYCONNECT_PHASE2_PORTAL=1 in /etc/stayconnect/scd.env and portald.env; rollback copies *.bak-pre-guest-activation-20260926T193029Z (the portald.env copy removed by the retention sweep was reconstructed exactly as *-reconstructed). Live proof 2026-09-26: scripts/guest-access-e2e-test.sh 53/53 -- captive before sign-in, enforced (nft phase3_auth_ipv4) and online (generate_204 = 204, ICMP 1.1.1.1) after activation for all three methods, device limits, joining, reconnect, termination and backend-enforced method switches, with pms_postings, posting_outbox and payment_transactions unchanged. Test state reset afterwards.",
     "central_ctrlapi_runtime_identity": {
       "_note": "The Central API binary on 172.21.96.196, read back from the host.",
-      "sha256": "732d438fe6a46a1e8cbef736ec82280e67ecaab1267c0498e10b499bfb03da21",
-      "source_commit": "5c96d410aca446f14c1225eec78be4f619cf8926",
+      "sha256": "25c9b5bf1438341fd385c20d13116d3c4645e250e202e868ae1053e246feb85d",
+      "source_commit": "8e4bed4ed984be05fc5c4a842b93e8da02492128",
       "vcs_modified": false,
-      "schema": "Central migrations 0001-0048; central-migrate.sh verify: 48 applied, 0 pending, 0 modified (no new migration).",
-      "verified": "Rebuilt from 5c96d410 with no ctrlapi source change since e176e0ea. After the deploy PRE-LIVE adopted the signed trust registry v73 over mTLS (21:14:05Z, one second after the switch) and its licence evaluates Active (valid until 2026-12-01).",
-      "rollback": "central-deploy.sh rollback (proven 2026-09-27). Pre-deploy dump /opt/stayconnect/backups/db/central-20260927T211353Z-pre-5c96d410aca4.dump. The former host 150.0.0.252 is not a rollback target: the new Central has issued licence version 3.",
-      "deployed_at": "2026-09-27T21:14Z UTC by central-deploy.sh."
+      "schema": "Central migrations 0001-0049 (no new Central migration in this round).",
+      "verified": "Deployed with a verified pre-deploy dump; /readyz ready; appliance mTLS :9443 verifies; PRE-LIVE reconnected over mTLS with its reissued certificate.",
+      "rollback": "central-deploy.sh rollback. Pre-deploy dump /opt/stayconnect/backups/db/central-20260928T235345Z-pre-8e4bed4ed984.dump. The former host 150.0.0.252 is not a rollback target.",
+      "deployed_at": "2026-09-28T23:53Z UTC by central-deploy.sh."
     },
     "central_host": {
       "_note": "Where OneGate Central runs. Appliances reach it by name; the address is a property of the host, the name is a property of the fleet.",
@@ -1250,9 +1250,33 @@
       "identifiers_unchanged": "Routes, API paths, JSON fields, database objects, resource/permission/role keys, capability names, translation keys, service and directory names. No migration.",
       "deployed": "PRE-LIVE: edged, portald, netd 588f9835; Admin Console 01ad5699. Central: 5c96d410 (no Central source change since). 2026-09-27.",
       "prelive_site_content": "PRE-LIVE's operator-owned portal help line was changed through the Portal settings API (audited branding.published) from 'Ask reception if you need a code' to 'Please contact the site team if you need an access code.'; no other design field changed."
-    }
+    },
+    "onegate_modules_acquisition": {
+      "decisions": [
+        "D44",
+        "D45",
+        "D46",
+        "D47",
+        "D48"
+      ],
+      "transition": "T0206",
+      "status": "ACCEPTED by the Product Owner on 2026-09-30 (T0206) from the unmerged PR #202; the protected merge follows; the USD 1.00 verification posting has been reversed by Front Office",
+      "pr": 202,
+      "contract": "docs/architecture/ONEGATE_MODULES_AND_ACQUISITION.md",
+      "site_migrations": "0094-0103 applied on PRE-LIVE",
+      "central_migrations": "0049 applied on Central",
+      "prelive_licence": "Central licence for the PRE-LIVE site (Site Type HOTEL, set by the Product Owner): hospitality, paid_access and room_charge licensed and effective; card_payment, email_otp, sms_otp, whatsapp_otp, social_login, white_label and ha not licensed",
+      "prelive_site_type": "HOTEL (set by the Product Owner in Central)",
+      "card_payment_accounts": 0,
+      "open_inputs": "provider credentials for the credential-dependent live tests (senders, Stripe/Paymob sandbox); module licensing of the PRE-LIVE site for the modules to be tested; Product Owner acceptance of PR #202. Deferred, not blocking: public Client Portal domain and trusted certificate (then real social-provider validation)",
+      "identity_methods": "Email/SMS/WhatsApp codes and Google/Facebook/Apple/Microsoft deployed (STAYCONNECT_IAMV2_OTP and _SOCIAL on PRE-LIVE); each offered only when licensed, switched on and a provider is ready",
+      "social_provider_validation": "PENDING -- real Google/Facebook/Apple/Microsoft validation awaits the Product Owner's future public Client Portal domain and publicly trusted certificate decision (deferred 2026-09-29) and the provider credentials; NOT a blocker for PR #202. Portal hostname, Root CA and certificate architecture unchanged."
+    },
+    "room_charge_transport": "D45 with D46, live on PRE-LIVE under D47: the existing single FIAS connection owned by pmsd. The scd posting worker (svc_posting) locks the stay, refreshes RN from the reservation (G#) and records each attempt with sha256 of the exact PS; pmsd (svc_pmsd) re-authorises the command against the database and, inside its single writer before the first byte, against the room its own link last read for that G#; a stale command is NOT_SENT. UNKNOWN is never resent. Transmission needs STAYCONNECT_PHASE4_PMS_TRANSMIT with master and outbox on BOTH scd and pmsd; on PRE-LIVE both are on since 2026-09-30 (D47) and the relay listens on /run/stayconnect-pmsd/pmsd-posting.sock. One controlled real posting has been made (T0204). Financial freshness (D48): feed health plus a successful complete resync within the interface's financial mirror maximum age (PRE-LIVE: 4 hours); pmsd refreshes it at half the bound; a quiet feed is not stale.",
+    "prelive_phase4_flag_posture": "PRE-LIVE 172.21.60.25 since 2026-09-30 (D47): scd runs STAYCONNECT_PHASE4_MASTER, _PAYMENT, _PAYMENT_PROVIDER, _POSTING, _FINANCIAL_REVIEW, _OUTBOX_WORKER and _PMS_TRANSMIT; pmsd runs _MASTER, _OUTBOX_WORKER and _PMS_TRANSMIT; edged runs _MASTER, _POSTING and _FINANCIAL_REVIEW. STAYCONNECT_PAYMENT_LIVE_ALLOWED is set nowhere. Real PMS postings ever: one (T0204, USD 1.00, PA OK). Payment-provider traffic ever: none.",
+    "phase4_flags_off_scope": "phase4_flags_off records the DELIVERED REPOSITORY configuration (no file in the tree enables a Phase-4 flag; scripts/ci/phase4-dark-check.sh asserts it). It is not a statement about the PRE-LIVE environment, whose posture is recorded in prelive_phase4_flag_posture."
   },
-  "latest_transition_id": "T0197",
+  "latest_transition_id": "T0206",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1747,17 +1771,19 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "INDUSTRY_NEUTRAL_TERMINOLOGY",
-    "decision": "Product-Owner terminology decisions of 2026-09-27: an industry-neutral OneGate core (Client, Admin Console, Client Portal, Site, Client networks, Wi-Fi Access) with hospitality grouped as one Hotel module. Binding reference docs/PRODUCT_TERMINOLOGY.md; recorded as current_state_facts.product_terminology.",
-    "decision_note": "Missions authorized merge and PRE-LIVE/Central deployment in advance. No migration, no schema change, no PMS/financial/payment traffic, no networking change, no Go-Live.",
-    "manifest": "docs/manifests/NeutralTerminology-change-manifest.md",
-    "base": "ddcce35a43ef196a175c4ff81790614643ae00ab",
-    "base_note": "Master after the merge of PR #194, immediately before PR #195 began the terminology work.",
-    "head": "d10355d0",
-    "head_note": "The last CONTENT commit of the documentation sweep that closes the terminology work (PRs #195-#199 and the sweep PR); the manifest records base..HEAD at that commit.",
-    "transition": "T0197",
-    "previous_delivery": "T0197 (PRELIVE_GUEST_ACCESS, docs/manifests/GuestAccess-change-manifest.md)",
-    "note": "Terminology deliveries merged as 14855bd2 (#195), 5c96d410 (#196), 5df7c971 (#197), 588f9835 (#198), ac1ce011 (#199), then the current-documentation sweep. No new transition receipt: the work ran under D42's Product-Owner-led model, which records deliveries here rather than per transition."
+    "kind": "SITE_MODULES_ACQUISITION",
+    "decision": "D44 (Site Type, licence v4 modules, Internet Package acquisition: Free, Voucher, Card payment, Room charge) and D45 (Room charge on the existing single FIAS connection; pmsd transport only), both 2026-09-28; D46 (FIAS guest posting targets the reservation, RN + G#, not a folio; Phase-0 Amendment A1), 2026-09-29; D47 (PRE-LIVE is the fully functional acceptance environment; real room-charge posting enabled on PRE-LIVE), 2026-09-30; D48 (room-charge financial freshness is feed health plus a proven mirror age), 2026-09-30.",
+    "decision_note": "Missions authorized implementation, migrations, PRE-LIVE and Central deployment and governance synchronization; they did NOT authorize the merge. Real PMS posting, LIVE provider transactions and Go-Live remain prohibited.",
+    "manifest": "docs/manifests/SiteModulesAcquisition-change-manifest.md",
+    "base": "42823d9dfecd4339ac540d1b5d19ee0bf5df40f4",
+    "base_note": "Master at the merge of PR #201, where delivery/site-modules-acquisition was cut.",
+    "head": "442f6e61",
+    "head_note": "The last CONTENT commit of PR #202 before its governance record; the manifest records base..HEAD including the governance, pack and manifest commits.",
+    "transition": "T0206",
+    "previous_delivery": "INDUSTRY_NEUTRAL_TERMINOLOGY (docs/manifests/NeutralTerminology-change-manifest.md, T0197 lineage)",
+    "pr": 202,
+    "pr_state": "OPEN_UNMERGED -- READY FOR PRODUCT OWNER TESTING; merge only on explicit Product Owner acceptance (po-merge-approved)",
+    "note": "PRE-LIVE and Central run commits of this unmerged PR, as D42 intends; see current_state_facts.onegate_modules_acquisition."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

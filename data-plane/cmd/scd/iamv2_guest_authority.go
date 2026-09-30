@@ -79,7 +79,8 @@ func (s *server) liveEntitlementForContext(ctx context.Context, authContextID st
 	      JOIN iam_v2.entitlements e
 	        ON e.tenant_id = ac.tenant_id AND e.site_id = ac.site_id
 	       AND (e.voucher_id = ac.voucher_id OR e.guest_account_id = ac.guest_account_id
-	            OR e.guest_principal_id = ac.guest_principal_id)
+	            OR e.guest_principal_id = ac.guest_principal_id
+	            OR e.anonymous_subject_id = ac.anonymous_subject_id)
 	     WHERE ac.id = $1 AND ac.tenant_id = $2 AND ac.site_id = $3
 	       AND e.status = 'ACTIVE' AND (e.window_ends_at IS NULL OR e.window_ends_at > now())
 	     LIMIT 1`, authContextID, s.tenID, s.siteID).Scan(&id)

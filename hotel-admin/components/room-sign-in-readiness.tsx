@@ -27,12 +27,14 @@ const capitalise = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
  * Loads the PMS interfaces, their health and the network routing, and returns the readiness verdict.
  * Readiness is ADVISORY: any failure leaves it "unknown", which shows nothing, and never blocks the screen.
  */
-export function useRoomSignInReadiness(): { readiness: RoomSignInReadiness; reload: () => Promise<void> } {
+export function useRoomSignInReadiness(enabled = true): { readiness: RoomSignInReadiness; reload: () => Promise<void> } {
   const [ifaces, setIfaces] = useState<PmsInterface[] | null>(null);
   const [health, setHealth] = useState<PmsInterfaceHealth[] | null>(null);
   const [routes, setRoutes] = useState<PmsGuestNetworkRoute[] | null>(null);
 
   const reload = useCallback(async () => {
+    // Asked only where Room sign-in exists at all: a site without Hospitality never calls the PMS surfaces.
+    if (!enabled) return;
     try {
       const [list, routing] = await Promise.all([
         api.get<{ interfaces?: PmsInterface[] }>("/pms-interfaces"),
@@ -53,7 +55,7 @@ export function useRoomSignInReadiness(): { readiness: RoomSignInReadiness; relo
       setHealth(healths.filter(Boolean) as PmsInterfaceHealth[]);
       setRoutes(routing?.routes ?? []);
     } catch { /* readiness unknown; the notice is simply not shown */ }
-  }, []);
+  }, [enabled]);
   useEffect(() => { reload(); }, [reload]);
 
   const readiness = useMemo(() => roomSignInReadiness(ifaces, health, routes), [ifaces, health, routes]);

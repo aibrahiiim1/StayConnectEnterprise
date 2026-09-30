@@ -92,6 +92,18 @@ export default function NetworkPage() {
   // "Take offline" and "Delete" are STAGED changes: nothing happens to a guest until the configuration is applied.
   // The confirmation says so, because that is the difference between a scary button and a safe one.
   const [confirming, setConfirming] = useState<{ kind: "disable" | "delete"; net: GuestNetwork } | null>(null);
+
+  // BRINGING A DISABLED NETWORK BACK. Staged exactly like taking it offline, and touching nothing else about it:
+  // it goes live again on the next apply. No confirmation, because it removes nothing.
+  async function enableNetwork(net: GuestNetwork) {
+    setActing(net.id);
+    try {
+      await api.post(`/network/guest-networks/${net.id}/enable`);
+      toast.success(`${net.name} is staged to come back online`, "Apply the changes on this screen to bring it online.");
+      reload();
+    } catch (e) { toast.error("Could not enable the network", errMsg(e)); }
+    finally { setActing(null); }
+  }
   const [confirmErr, setConfirmErr] = useState<string | null>(null);
 
   async function applyStagedRemoval() {
@@ -330,6 +342,15 @@ export default function NetworkPage() {
                           onClick={() => { setConfirmErr(null); setConfirming({ kind: "disable", net: n }); }}
                         >
                           <Power /> <span className="hidden sm:inline">Disable</span>
+                        </Button>
+                      )}
+                      {writable && !n.enabled && (
+                        <Button
+                          size="sm" variant="ghost" disabled={acting === n.id}
+                          aria-label={`Enable ${n.name}`}
+                          onClick={() => enableNetwork(n)}
+                        >
+                          <Power /> <span className="hidden sm:inline">Enable</span>
                         </Button>
                       )}
                       {writable && !n.enabled && (

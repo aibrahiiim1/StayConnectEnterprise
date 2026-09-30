@@ -522,8 +522,34 @@ func (s *server) reportsOverview(w http.ResponseWriter, r *http.Request) {
 		out.DNS = s.withResolverHealth(ctx, out.DNS)
 	}
 
-	out.Attention = deriveAttention(attentionInputFrom(out))
+	out.Attention = deriveAttention(s.moduleScopedAttention(ctx, attentionInputFrom(out)))
 	writeJSON(w, http.StatusOK, out)
+}
+
+// moduleScopedAttention removes attention items that belong to a module this site does not have. A site
+// without Hospitality is not told that a PMS connection is not ready for room sign-in; PMS messages or room
+// charges waiting for a decision are still raised while those records exist (history and recovery), because
+// they are real work on real records. Unreadable module state keeps only the core (fail closed).
+func (s *server) moduleScopedAttention(ctx context.Context, in attentionInput) attentionInput {
+	if s.modCache == nil {
+		return in
+	}
+	rep, ok := s.moduleReport(ctx)
+	if !ok {
+		in.PMS, in.PMSReviewCases, in.PostingsReviewOpen = nil, 0, 0
+		return in
+	}
+	hosp, rc := rep.Modules["hospitality"], rep.Modules["room_charge"]
+	if !(hosp.Licensed && hosp.Deployed) {
+		in.PMS = nil
+	}
+	if !hosp.Manageable {
+		in.PMSReviewCases = 0
+	}
+	if !rc.Manageable {
+		in.PostingsReviewOpen = 0
+	}
+	return in
 }
 
 // ---------------------------------------------------------------------------------------------------------

@@ -53,11 +53,22 @@ func seed(t *testing.T, p *pgxpool.Pool) fx {
 	t.Helper()
 	ctx := context.Background()
 	var f fx
-	err := p.QueryRow(ctx, `WITH
-	  t AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
-	  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id),
-	  gn AS (INSERT INTO public.guest_networks(id,tenant_id,site_id)
-	         SELECT gen_random_uuid(), si.tenant_id, si.id FROM si RETURNING id),
+	// On the full schema stays are a controlled-writer table: the seed opens the 'stay' family in its tx.
+	stx, err := p.Begin(ctx)
+	if err != nil {
+		t.Fatalf("seed begin: %v", err)
+	}
+	defer func() { _ = stx.Rollback(ctx) }()
+	if _, err := stx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('stay')`); err != nil {
+		t.Fatalf("seed open: %v", err)
+	}
+	err = stx.QueryRow(ctx, `WITH
+	  t AS (INSERT INTO public.tenants(id,slug,name) SELECT g, g::text, 't' FROM gen_random_uuid() g RETURNING id),
+	  si AS (INSERT INTO public.sites(id,tenant_id,code,name) SELECT g, t.id, g::text, 's' FROM t, gen_random_uuid() g RETURNING id, tenant_id),
+	  gn AS (INSERT INTO public.guest_networks(id,tenant_id,site_id,name,parent_interface,bridge_name,
+	           gateway_cidr,gateway_ip,subnet_cidr)
+	         SELECT g, si.tenant_id, si.id,'net','p'||substr(md5(g::text),1,12),'b'||substr(md5(g::text),1,12),
+	                '10.99.0.1/24','10.99.0.1','10.99.0.0/24' FROM si, gen_random_uuid() g RETURNING id),
 	  pi AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)
 	         SELECT gen_random_uuid(), si.tenant_id, si.id,'protel-fias','ACTIVE' FROM si RETURNING id,tenant_id,site_id),
 	  pr AS (INSERT INTO iam_v2.pms_interface_revisions(id,tenant_id,site_id,pms_interface_id,revision_no,source_timezone,config)
@@ -85,6 +96,9 @@ func seed(t *testing.T, p *pgxpool.Pool) fx {
 		Scan(&f.tenant, &f.site, &f.iface, &f.rev, &f.stay, &f.device, &f.network, &f.pkg)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
+	}
+	if err := stx.Commit(ctx); err != nil {
+		t.Fatalf("seed commit: %v", err)
 	}
 	if _, err := p.Exec(ctx, `UPDATE iam_v2.internet_packages SET current_revision_id=$1
 		WHERE id=(SELECT package_id FROM iam_v2.internet_package_revisions WHERE id=$1)`, f.pkg); err != nil {
@@ -154,7 +168,10 @@ func reLet(t *testing.T, p *pgxpool.Pool, f fx) {
 		WHERE id=$1`, f.stay); err != nil {
 		t.Fatalf("reinstate: %v", err)
 	}
-	if _, err := tx.Exec(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now()
+	// posting_allowed=false in the same UPDATE, exactly as internal/checkout does: the reinstatement made the
+	// stay postable again (computed by the AFTER trigger), and the posting_only_in_house CHECK is evaluated
+	// before that trigger recomputes it for the departure.
+	if _, err := tx.Exec(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false, effective_checkout_at=now()
 		WHERE id=$1`, f.stay); err != nil {
 		t.Fatalf("re-checkout: %v", err)
 	}

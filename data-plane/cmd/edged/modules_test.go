@@ -1,0 +1,162 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+// fakeSCDModules serves /v1/modules on a unix socket, the way scd does, and returns a client for it.
+func fakeSCDModules(t *testing.T, status int, body any) *scdClient {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "og")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "s")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Skipf("unix sockets unavailable: %v", err)
+	}
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/modules" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(body)
+	})}
+	go srv.Serve(ln)
+	t.Cleanup(func() { srv.Close() })
+	return newSCDClient(sock)
+}
+
+func report(mods map[string]moduleState) moduleReport {
+	return moduleReport{LicenseState: "Active", Modules: mods}
+}
+
+func TestModuleGateServesCoreAndManageableOnly(t *testing.T) {
+	s := &server{modCache: &moduleCache{}, scd: fakeSCDModules(t, 200, report(map[string]moduleState{
+		"hospitality":  {ID: "hospitality", Manageable: true, Licensed: true, Deployed: true},
+		"room_charge":  {ID: "room_charge", Manageable: false},
+		"card_payment": {ID: "card_payment", Manageable: false},
+	}))}
+	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
+	for name, want := range map[string]int{
+		"sessions":          204, // core
+		"pms-interfaces":    204, // hospitality manageable
+		"financial-review":  404, // neither financial module manageable
+		"payment-providers": 404,
+	} {
+		rec := httptest.NewRecorder()
+		s.moduleGate(name)(ok).ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+		if rec.Code != want {
+			t.Fatalf("%s: got %d want %d", name, rec.Code, want)
+		}
+	}
+	got, _ := s.filterSurfaces(context.Background(), []string{"sessions", "pms-interfaces", "financial-review"})
+	if len(got) != 2 || got[0] != "sessions" || got[1] != "pms-interfaces" {
+		t.Fatalf("filtered surfaces %v", got)
+	}
+}
+
+func TestModuleGateFailsClosedWhenStateUnreadable(t *testing.T) {
+	s := &server{modCache: &moduleCache{}, scd: fakeSCDModules(t, 500, map[string]string{"error": "x"})}
+	rec := httptest.NewRecorder()
+	s.moduleGate("pms-interfaces")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })).
+		ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("got %d, want 503", rec.Code)
+	}
+	got, _ := s.filterSurfaces(context.Background(), []string{"sessions", "pms-interfaces"})
+	if len(got) != 1 || got[0] != "sessions" {
+		t.Fatalf("unreadable module state must keep only the core: %v", got)
+	}
+}
+
+// Readiness must never hide a management surface: a card module that is licensed but whose provider is down
+// is not effective, yet its screens stay manageable (scd reports manageable=true, effective=false).
+func TestNotReadyStaysManageable(t *testing.T) {
+	s := &server{modCache: &moduleCache{}, scd: fakeSCDModules(t, 200, report(map[string]moduleState{
+		"card_payment": {ID: "card_payment", Manageable: true, Licensed: true, Deployed: true, Effective: false, Reasons: []string{"NOT_READY"}},
+	}))}
+	rec := httptest.NewRecorder()
+	s.moduleGate("payment-providers")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })).
+		ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if rec.Code != 204 {
+		t.Fatalf("got %d", rec.Code)
+	}
+}
+
+// A SITE THAT IS NOT A HOTEL DOES NOT LOOK LIKE ONE -- AND KEEPS ITS HISTORY.
+//
+// Hospitality no longer licensed, but the site ran a PMS (scd reports manageable through its records probe):
+// day-to-day hotel screens (PMS connection, sign-in protection, grace, routing) are gone; stays, PMS activity,
+// sign-in history, reconciliation and alerts stay reachable.
+func TestUnlicensedModuleKeepsOnlyItsHistory(t *testing.T) {
+	s := &server{modCache: &moduleCache{}, scd: fakeSCDModules(t, 200, report(map[string]moduleState{
+		"hospitality": {ID: "hospitality", Deployed: true, Licensed: false, Manageable: true, Reasons: []string{"NOT_LICENSED"}},
+	}))}
+	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
+	for name, want := range map[string]int{
+		"pms-interfaces":            404,
+		"guest-signin-protection":   404,
+		"guest-signin-restrictions": 404,
+		"checkout-grace":            404,
+		"pms-routing":               404,
+		"pms-stays":                 204,
+		"pms-events":                204,
+		"guest-signin-attempts":     204,
+		"pms-reconciliation":        204,
+	} {
+		rec := httptest.NewRecorder()
+		s.moduleGate(name)(ok).ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+		if rec.Code != want {
+			t.Fatalf("%s: got %d want %d", name, rec.Code, want)
+		}
+	}
+}
+
+// THE API REFUSES WHAT THE SCREEN DOES NOT OFFER: a site without Hospitality cannot be given Room sign-in (or
+// any optional method it is not licensed for) by a direct call; switching a method off always works.
+func TestAuthMethodsRefuseSwitchingOnAnUnlicensedMethod(t *testing.T) {
+	s := &server{modCache: &moduleCache{}, scd: fakeSCDModules(t, 200, report(map[string]moduleState{
+		"hospitality":  {ID: "hospitality", Deployed: true, Licensed: false},
+		"social_login": {ID: "social_login", Deployed: true, Licensed: true},
+	}))}
+	ctx := context.Background()
+	on := func(k, v string) map[string]json.RawMessage { return map[string]json.RawMessage{k: json.RawMessage(v)} }
+	if code, _ := s.authMethodModuleRefusal(ctx, on("pms", `{"enabled":true,"mode":"room_any"}`)); code != http.StatusConflict {
+		t.Fatalf("switching Room sign-in on without Hospitality: got %d", code)
+	}
+	if code, _ := s.authMethodModuleRefusal(ctx, on("pms", `{"enabled":false}`)); code != 0 {
+		t.Fatalf("switching it off must always work: got %d", code)
+	}
+	if code, _ := s.authMethodModuleRefusal(ctx, on("email", `{"enabled":true}`)); code != http.StatusConflict {
+		t.Fatalf("email without email_otp: got %d", code)
+	}
+	if code, _ := s.authMethodModuleRefusal(ctx, on("social", `{"google":{"enabled":true}}`)); code != 0 {
+		t.Fatalf("social with social_login licensed: got %d", code)
+	}
+	if code, _ := s.authMethodModuleRefusal(ctx, on("voucher", `{"enabled":true}`)); code != 0 {
+		t.Fatalf("core methods are never refused: got %d", code)
+	}
+}
+
+func TestOverviewAttentionFollowsModules(t *testing.T) {
+	s := &server{modCache: &moduleCache{}, scd: fakeSCDModules(t, 200, report(map[string]moduleState{
+		"hospitality": {ID: "hospitality", Deployed: true, Licensed: false, Manageable: true},
+		"room_charge": {ID: "room_charge", Deployed: true, Licensed: false, Manageable: false},
+	}))}
+	in := attentionInput{PMS: []attentionPMS{{Label: "FIAS", Active: true}}, PMSReviewCases: 2, PostingsReviewOpen: 1}
+	got := s.moduleScopedAttention(context.Background(), in)
+	if got.PMS != nil || got.PMSReviewCases != 2 || got.PostingsReviewOpen != 0 {
+		t.Fatalf("no room-sign-in readiness items without the licence; history work stays: %+v", got)
+	}
+}

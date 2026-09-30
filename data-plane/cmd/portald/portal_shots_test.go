@@ -54,13 +54,10 @@ func TestRenderPortalShots(t *testing.T) {
 		r.Header.Set("Accept-Language", lang)
 		return r
 	}
-	pkgs := []struct {
-		PackageID string         `json:"package_id"`
-		Display   map[string]any `json:"display"`
-	}{
-		{"p1", map[string]any{"name": "Standard", "down_kbps": float64(10000), "time_quota_seconds": float64(86400)}},
-		{"p2", map[string]any{"name": "Premium streaming", "down_kbps": float64(50000), "time_quota_seconds": float64(86400 * 3)}},
-		{"p3", map[string]any{"name": "Express 2 hours", "down_kbps": float64(25000), "time_quota_seconds": float64(7200)}},
+	pkgs := []guestPackage{
+		{PackageID: "p1", Display: map[string]any{"name": "Standard", "down_kbps": float64(10000), "time_quota_seconds": float64(86400)}},
+		{PackageID: "p2", Display: map[string]any{"name": "Premium streaming", "down_kbps": float64(50000), "time_quota_seconds": float64(86400 * 3)}},
+		{PackageID: "p3", Display: map[string]any{"name": "Express 2 hours", "down_kbps": float64(25000), "time_quota_seconds": float64(7200)}},
 	}
 	type variant struct {
 		name   string
@@ -92,7 +89,7 @@ func TestRenderPortalShots(t *testing.T) {
 			h.landing(w, req("/auth/voucher", lang), "Voucher AUTH_DENIED.")
 			write("landingerr-"+v.name+"-"+lang+".html", w.Body.String())
 			w = httptest.NewRecorder()
-			h.renderPackages(w, req("/packages", lang), pkgs)
+			h.renderPackages(w, req("/packages", lang), pkgs, "")
 			write("packages-"+v.name+"-"+lang+".html", w.Body.String())
 			w = httptest.NewRecorder()
 			h.renderGuestError(w, req("/auth/social/callback", lang), http.StatusBadGateway, "errpage.social")
@@ -132,7 +129,7 @@ func TestRenderPortalShots(t *testing.T) {
 		sh.routes().ServeHTTP(w, req("/success?s=abc&t=8100", lang))
 		write("hotelcss-success-"+lang+".html", w.Body.String())
 		w = httptest.NewRecorder()
-		sh.renderPackages(w, req("/packages", lang), pkgs)
+		sh.renderPackages(w, req("/packages", lang), pkgs, "")
 		write("hotelcss-packages-"+lang+".html", w.Body.String())
 
 		// The online page with the (dark) commerce panel switched on.

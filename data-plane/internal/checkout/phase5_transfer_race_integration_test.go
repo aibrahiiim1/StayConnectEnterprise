@@ -33,6 +33,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/transfer"
@@ -43,13 +44,15 @@ import (
 func destination(t *testing.T, p *pgxpool.Pool, f fixture) string {
 	t.Helper()
 	var stay string
-	if err := p.QueryRow(context.Background(), `WITH
+	if err := guarded(p, stayFamily, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `WITH
 	  ib AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)
 	         VALUES (gen_random_uuid(),$1,$2,'protel-fias','ACTIVE') RETURNING id),
 	  sb AS (INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,
 	           external_stay_identity,status,lifecycle_version,last_applied_event_version,normalized_room_number)
 	         SELECT gen_random_uuid(),$1,$2,ib.id,'R2','R2','IN_HOUSE',1,0,'201' FROM ib RETURNING id)
-	SELECT id::text FROM sb`, f.tenant, f.site).Scan(&stay); err != nil {
+	SELECT id::text FROM sb`, f.tenant, f.site).Scan(&stay)
+	}); err != nil {
 		t.Fatalf("seed destination: %v", err)
 	}
 	return stay

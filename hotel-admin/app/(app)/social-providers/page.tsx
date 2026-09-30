@@ -45,13 +45,31 @@ type FormState = {
   client_secret: string;
   redirect_uri: string;
   scopes: string;
+  tenant: string;
+  team_id: string;
+  key_id: string;
   enabled: boolean;
 };
 
 const EMPTY: FormState = {
   provider: "google", display_name: "", client_id: "", client_secret: "",
-  redirect_uri: "", scopes: "", enabled: true,
+  redirect_uri: "", scopes: "", tenant: "", team_id: "", key_id: "", enabled: true,
 };
+
+// What each provider calls its two values, so the form uses the words on the provider's own console.
+const SECRET_LABEL: Record<string, string> = {
+  google: "Client secret", facebook: "App secret", microsoft: "Client secret", apple: "Private key (.p8)",
+};
+const ID_LABEL: Record<string, string> = {
+  google: "Client ID", facebook: "App ID", microsoft: "Application (client) ID", apple: "Services ID",
+};
+
+// Provider-specific, non-secret settings: only the ones this provider uses are sent.
+function providerExtras(f: FormState): Record<string, string> {
+  if (f.provider === "microsoft") return { tenant: f.tenant.trim() };
+  if (f.provider === "apple") return { team_id: f.team_id.trim(), key_id: f.key_id.trim() };
+  return {};
+}
 
 export default function SocialProvidersPage() {
   const toast = useToast();
@@ -90,6 +108,9 @@ export default function SocialProvidersPage() {
       client_secret: "",
       redirect_uri: p.redirect_uri,
       scopes: p.scopes ?? "",
+      tenant: p.tenant ?? "",
+      team_id: p.team_id ?? "",
+      key_id: p.key_id ?? "",
       enabled: p.enabled,
     });
     setEditing(p); setFormErr(null); setMode("edit");
@@ -106,6 +127,7 @@ export default function SocialProvidersPage() {
           client_secret: f.client_secret,
           redirect_uri: f.redirect_uri.trim(),
           scopes: f.scopes.trim() || undefined,
+          ...providerExtras(f),
           enabled: f.enabled,
         });
       } else if (editing) {
@@ -114,6 +136,7 @@ export default function SocialProvidersPage() {
           client_id: f.client_id.trim() || undefined,
           redirect_uri: f.redirect_uri.trim() || undefined,
           scopes: f.scopes,
+          ...providerExtras(f),
           enabled: f.enabled,
         };
         if (f.client_secret) body.client_secret = f.client_secret; // blank keeps the existing secret
@@ -140,7 +163,8 @@ export default function SocialProvidersPage() {
 
   const canSubmit =
     mode === "new"
-      ? f.client_id.trim() !== "" && f.client_secret !== "" && f.redirect_uri.trim() !== ""
+      ? f.client_id.trim() !== "" && f.client_secret !== "" && f.redirect_uri.trim() !== "" &&
+        (f.provider !== "apple" || (f.team_id.trim() !== "" && f.key_id.trim() !== ""))
       : true;
 
   return (
@@ -162,7 +186,9 @@ export default function SocialProvidersPage() {
               <HelpList
                 items={[
                   <>The <strong>client secret</strong> is stored write-only and is never shown again. When editing, leave it blank to keep the one already stored.</>,
-                  <>The <strong>redirect URI</strong> must match the one registered with the provider exactly.</>,
+                  <>The <strong>redirect URI</strong> is the Client Portal&apos;s callback, <code>https://&lt;portal name&gt;/auth/social/callback</code>, and must match the one registered with the provider exactly. The portal name must be one clients&apos; devices reach the portal by.</>,
+                  <><strong>Apple</strong> needs the Services ID, the Team ID, the Key ID and the contents of the .p8 private key; the key is stored write-only.</>,
+                  <><strong>Microsoft</strong> accepts a directory (tenant) ID to admit only that organisation, or <code>common</code>, <code>organizations</code> or <code>consumers</code>.</>,
                   <>The provider of an entry cannot be changed; remove it and add it again instead.</>,
                   <>Whether clients are actually offered a provider is switched on in <strong>Sign-in methods</strong>.</>,
                 ]}
@@ -248,11 +274,11 @@ export default function SocialProvidersPage() {
           <Field label="Name on the portal" hint="Leave empty to use the provider's own name.">
             <Input value={f.display_name} onChange={(e) => set("display_name", e.target.value)} placeholder="Optional" />
           </Field>
-          <Field label="Client ID" required>
+          <Field label={ID_LABEL[f.provider] ?? "Client ID"} required>
             <Input value={f.client_id} onChange={(e) => set("client_id", e.target.value)} required />
           </Field>
           <Field
-            label="Client secret"
+            label={SECRET_LABEL[f.provider] ?? "Client secret"}
             required={mode === "new"}
             hint={mode === "edit" ? "Leave blank to keep the secret already stored." : "Stored write-only — it is never shown again."}
           >
@@ -265,17 +291,32 @@ export default function SocialProvidersPage() {
               placeholder={mode === "edit" ? "Unchanged" : ""}
             />
           </Field>
-          <Field label="Redirect URI" required hint="Must match the one registered with the provider exactly.">
+          <Field label="Redirect URI" required hint="The Client Portal's callback over HTTPS, registered with the provider exactly as typed here.">
             <Input
               value={f.redirect_uri}
               onChange={(e) => set("redirect_uri", e.target.value)}
               required
-              placeholder="https://portal.example.com/callback"
+              placeholder="https://portal.stayconnect.local/auth/social/callback"
             />
           </Field>
           <Field label="Scopes" hint="Space separated.">
             <Input value={f.scopes} onChange={(e) => set("scopes", e.target.value)} placeholder="openid email profile" />
           </Field>
+          {f.provider === "microsoft" && (
+            <Field label="Directory (tenant)" hint="Leave empty for common (any Microsoft account).">
+              <Input value={f.tenant} onChange={(e) => set("tenant", e.target.value)} placeholder="common" />
+            </Field>
+          )}
+          {f.provider === "apple" && (
+            <>
+              <Field label="Team ID" required hint="10 characters, from the Apple Developer account.">
+                <Input value={f.team_id} onChange={(e) => set("team_id", e.target.value)} />
+              </Field>
+              <Field label="Key ID" required hint="The ID of the Sign in with Apple key.">
+                <Input value={f.key_id} onChange={(e) => set("key_id", e.target.value)} />
+              </Field>
+            </>
+          )}
         </div>
         <div className="flex items-center justify-between rounded-md border border-border bg-surface/50 px-3.5 py-2.5">
           <div>

@@ -173,6 +173,48 @@ else
   no "fixture drift: the leaf is itself near expiry, so this case proves nothing"
 fi
 
+# 5. THE CHECK THAT SAID "exit 10" ON PRE-LIVE (2026-09-28). Caddy rotated its intermediate (new key) a day
+#    before the old one expired. The leaf, minted under the OLD intermediate and served with it, was healthy,
+#    yet `check` verified it against the NEW intermediate and reported "not signed by Caddy local CA". The
+#    served certificate must be judged by the chain it is served with, against the unchanged root.
+eval "$(sed -n '/^validate_candidate()/,/^}/p' "$MGR")"
+if type validate_candidate >/dev/null 2>&1; then
+  # Two intermediates named exactly as Caddy names them, with different keys (Caddy's weekly rotation).
+  cadint() { # cadint <file>
+    openssl ecparam -name prime256v1 -genkey -noout -out "$CA/$1.key" 2>/dev/null
+    openssl req -new -key "$CA/$1.key" -out "$CA/$1.csr" -subj "/CN=Caddy Local Authority - ECC Intermediate" 2>/dev/null
+    printf 'basicConstraints=critical,CA:TRUE
+keyUsage=critical,keyCertSign
+' > "$WORK/$1.ext"
+    openssl x509 -req -in "$CA/$1.csr" -CA "$CA/root.crt" -CAkey "$CA/root.key" -CAcreateserial       -out "$CA/$1.crt" -days 7 -extfile "$WORK/$1.ext" 2>/dev/null
+  }
+  cadint old-caddy-int; cadint new-caddy-int
+  openssl ecparam -name prime256v1 -genkey -noout -out "$WORK/served.key" 2>/dev/null
+  openssl req -new -key "$WORK/served.key" -out "$WORK/served.csr" -subj "/CN=hotel.stayconnect.local" 2>/dev/null
+  printf 'basicConstraints=critical,CA:FALSE
+subjectAltName=DNS:hotel.stayconnect.local,IP:172.21.60.25
+extendedKeyUsage=serverAuth
+' > "$WORK/served.ext"
+  openssl x509 -req -in "$WORK/served.csr" -CA "$CA/old-caddy-int.crt" -CAkey "$CA/old-caddy-int.key" -CAcreateserial     -out "$WORK/served.crt" -days 730 -extfile "$WORK/served.ext" 2>/dev/null
+  cat "$WORK/served.crt" "$CA/old-caddy-int.crt" > "$WORK/served.fullchain"
+  cp "$CA/new-caddy-int.crt" "$CA/intermediate.crt"   # Caddy's storage now holds the NEW intermediate
+  DNS_SAN="hotel.stayconnect.local"; MIN_FRESH_DAYS=180
+  cert_sans(){ openssl x509 -in "$1" -noout -ext subjectAltName 2>/dev/null | tr ',' '\n' | sed -n 's/.*\(DNS:[^ ]*\|IP Address:[0-9.]*\).*/\1/p' | sed 's/IP Address:/IP:/' | tr -d ' ' | sort; }
+  want_sans(){ printf 'DNS:%s\nIP:%s\n' "$DNS_SAN" "$1" | sort; }
+  if vr="$(validate_candidate "$WORK/served.key" "$WORK/served.crt" "$WORK/served.fullchain" 172.21.60.25 served)" && [ -z "$vr" ]; then
+    ok "a healthy leaf served with the previous intermediate passes the served-chain check after Caddy rotates"
+  else
+    no "a healthy served certificate was reported invalid after an intermediate rotation" "$vr"
+  fi
+  if vr="$(validate_candidate "$WORK/served.key" "$WORK/served.crt" "$WORK/served.fullchain" 172.21.60.25)"; [ -n "$vr" ]; then
+    ok "a freshly minted CANDIDATE must still chain through the CURRENT intermediate (${vr})"
+  else
+    no "candidate validation no longer insists on the current intermediate"
+  fi
+else
+  no "the manager exposes no validate_candidate to test"
+fi
+
 echo "============================================================"
 if [ "$fail" = "0" ]; then
   echo "HOTEL_ADMIN_CERT_SELFTEST = PASS ($pass cases)"

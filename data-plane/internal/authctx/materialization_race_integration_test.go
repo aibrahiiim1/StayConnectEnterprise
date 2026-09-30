@@ -48,6 +48,9 @@ func admitPending(t *testing.T, s fixture, kind string, gen int64) {
 		s.tenant, s.site, s.iface); err != nil {
 		t.Fatalf("admission runtime lock: %v", err)
 	}
+	if err := openOps(ctx, tx, "stay"); err != nil { // stay_events is a controlled-writer family
+		t.Fatalf("admission open stay operation: %v", err)
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.stay_events
 		(id, tenant_id, site_id, pms_interface_id, external_event_identity, event_type, received_at,
 		 sequence_version, normalization_version, clock_suspect, payload, processing_status,
@@ -159,7 +162,7 @@ func TestIntegration_Materialization_TerminalRowsDoNotBlock(t *testing.T) {
 			// Terminal states have their own guards: APPLIED demands a resolved same-interface stay_id and
 			// MANUAL_REVIEW a bounded review_code. Satisfying them is the point — these are real terminal
 			// rows, not a status string forced onto the column.
-			if _, err := p.Exec(ctx,
+			if _, err := gexec(ctx, p, "stay",
 				`UPDATE iam_v2.stay_events
 				    SET processing_status=$2, processed_at=now(),
 				        stay_id = CASE WHEN $2='APPLIED' THEN $3::uuid ELSE stay_id END,
@@ -303,8 +306,16 @@ func TestIntegration_Materialization_NoDeadlockUnderConcurrency(t *testing.T) {
 }
 
 // LEAST PRIVILEGE. The readiness term reads iam_v2.stay_events from inside p3_feed_authorizes, and
-// internal/authctx takes a FOR UPDATE on iam_v2.pms_interface_runtime. Both must already be within svc_scd's
-// existing grants: this change must widen nothing.
+// internal/authctx locks iam_v2.pms_interface_runtime. Both must already be within svc_scd's existing
+// grants: this change must widen nothing.
+//
+// PRODUCTION TRUTH (converted when the suite moved onto the full Gate-P schema). The historical scratch
+// fixture asserted that svc_scd held direct SELECT on iam_v2.stay_events and iam_v2.pms_interface_runtime.
+// Production Gate-P (deploy/gatep/svc-scd-iamv2-guest-auth-grants.sql) grants neither: the readiness term is
+// evaluated by iam_v2.p3_feed_authorizes and the linearization lock is taken by
+// iam_v2.lock_pms_interface_runtime (migration 0058), both SECURITY DEFINER functions owned by iam_v2_owner
+// with EXECUTE granted to svc_scd. That is strictly narrower than the old posture, so the assertion is now:
+// svc_scd can EXECUTE both definer functions, and holds NO direct privilege on either table.
 func TestIntegration_Materialization_NoPrivilegeWidening(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -317,18 +328,36 @@ func TestIntegration_Materialization_NoPrivilegeWidening(t *testing.T) {
 	if !exists {
 		t.Skip("svc_scd is not provisioned in this disposable database; Gate-P asserts this in production")
 	}
-	for _, c := range []struct{ obj, priv string }{
-		{"iam_v2.stay_events", "SELECT"},
-		{"iam_v2.pms_interface_runtime", "SELECT"},
+	for _, fn := range []string{
+		"iam_v2.p3_feed_authorizes(uuid,uuid,uuid,uuid,timestamptz)",
+		"iam_v2.lock_pms_interface_runtime(uuid,uuid,uuid)",
 	} {
-		var ok bool
-		if err := p.QueryRow(ctx, `SELECT has_table_privilege('svc_scd', $1, $2)`, c.obj, c.priv).Scan(&ok); err != nil {
-			t.Fatal(err)
+		var exec, secdef bool
+		var owner string
+		if err := p.QueryRow(ctx, `SELECT has_function_privilege('svc_scd', $1::regprocedure, 'EXECUTE'),
+		        p.prosecdef, pg_get_userbyid(p.proowner)
+		   FROM pg_proc p WHERE p.oid = $1::regprocedure`, fn).Scan(&exec, &secdef, &owner); err != nil {
+			t.Fatalf("%s: %v", fn, err)
 		}
-		if !ok {
-			t.Fatalf("svc_scd lacks %s on %s, so this change would require widening privilege. It must not: "+
-				"the readiness term and the linearization lock were chosen to fit inside existing grants",
-				c.priv, c.obj)
+		if !exec {
+			t.Fatalf("svc_scd lacks EXECUTE on %s, so the readiness term / linearization lock would require widening "+
+				"privilege. It must not: they were chosen to fit inside existing grants", fn)
+		}
+		if !secdef || owner != "iam_v2_owner" {
+			t.Fatalf("%s must be SECURITY DEFINER owned by iam_v2_owner (secdef=%v owner=%s): otherwise svc_scd "+
+				"would need direct table privilege", fn, secdef, owner)
+		}
+	}
+	for _, obj := range []string{"iam_v2.stay_events", "iam_v2.pms_interface_runtime"} {
+		for _, priv := range []string{"SELECT", "INSERT", "UPDATE", "DELETE"} {
+			var ok bool
+			if err := p.QueryRow(ctx, `SELECT has_table_privilege('svc_scd', $1, $2)`, obj, priv).Scan(&ok); err != nil {
+				t.Fatal(err)
+			}
+			if ok {
+				t.Fatalf("svc_scd holds %s on %s: the guest-auth path was widened beyond Gate-P's definer-function "+
+					"grants (deploy/gatep/svc-scd-iamv2-guest-auth-grants.sql)", priv, obj)
+			}
 		}
 	}
 }

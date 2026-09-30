@@ -207,7 +207,7 @@ export type Voucher = {
 // SubjectKind — the four things an Entitlement can belong to, which is therefore the four things a session can
 // belong to. The database guarantees exactly one (iam_v2 ent_one_subject), so this is a closed set rather than a
 // convention. An empty string means the session's entitlement could not be read, not that it has no subject.
-export type SubjectKind = "room" | "account" | "voucher" | "guest" | "";
+export type SubjectKind = "room" | "account" | "voucher" | "guest" | "open" | "";
 
 export type Session = {
   id: string; tenant_id: string; site_id: string; appliance_id: string;
@@ -282,7 +282,25 @@ export type Stay = {
 
 export type StayDetail = Stay & {
   occupant_list: { display_name?: string | null; is_primary: boolean }[];
-  folios: { external_folio_id: string; folio_kind: string; status: string; is_default_posting_target: boolean }[];
+  // Room charge blocks on this stay, active first, then the most recent cleared ones (Phase-0 Amendment A1).
+  // There are no folios: a room charge targets the reservation (room number + reservation number).
+  posting_blocks?: StayPostingBlock[];
+  // A room charge for this stay is pending, being sent or under review (only one may exist at a time).
+  room_charge_open?: boolean;
+};
+
+/** One reasoned stop on room charging for a stay. Only ADMIN_BLOCK is an operator's to set or clear. */
+export type StayPostingBlock = {
+  reason: "PMS_NO_POST" | "PMS_DATA_SUSPECT" | "POSTING_UNRESOLVED" | "ADMIN_BLOCK" | string;
+  source: "PMS_ANSWER" | "POSTING_LEDGER" | "OPERATOR" | string;
+  pa_as_status?: string | null;
+  note?: string | null;
+  created_at: string;
+  created_by?: string | null; // operator e-mail (administrative blocks)
+  cleared_at?: string | null;
+  cleared_by_source?: string | null;
+  cleared_by?: string | null; // operator e-mail (administrative blocks)
+  cleared_reason?: string | null;
 };
 
 export type StayEvent = {
@@ -589,6 +607,9 @@ export type SocialOAuthProvider = {
   client_id: string;
   redirect_uri: string;
   scopes?: string;
+  tenant?: string;   // Microsoft: directory (tenant) ID, or common / organizations / consumers
+  team_id?: string;  // Apple: Team ID
+  key_id?: string;   // Apple: Key ID of the .p8 key
   last_success_at?: string;
   last_error?: string;
   last_error_at?: string;
@@ -599,11 +620,12 @@ export type SocialOAuthProvider = {
 export type NotificationProvider = {
   id: string;
   tenant_id: string;
-  channel: "email" | "sms";
-  kind: "stub" | "sendgrid" | "ses" | "twilio";
+  channel: "email" | "sms" | "whatsapp";
+  kind: "stub" | "sendgrid" | "ses" | "twilio" | "meta_whatsapp" | "twilio_whatsapp";
   enabled: boolean;
   display_name?: string;
-  api_user?: string;       // Twilio account SID — not a secret
+  api_user?: string;       // Twilio account SID / Meta phone number ID — not a secret
+  extra?: { template_name?: string; language?: string; content_sid?: string } | null; // WhatsApp template, not secret
   from_address?: string;
   from_name?: string;
   region?: string;
@@ -633,7 +655,7 @@ export type AuditEntry = {
 export type ActivationState = "not_registered" | "waiting" | "activating" | "activated" | "retired";
 export type LicenseState =
   | "none" | "active" | "expiring" | "grace" | "expired" | "suspended" | "revoked" | "wrong_hardware";
-export type CentralLinkState = "connected" | "unreachable" | "not_configured";
+export type CentralLinkState = "connected" | "unreachable" | "credential_refused" | "not_configured";
 
 export type CentralStatus = {
   activation: ActivationState;
@@ -1149,7 +1171,7 @@ export type PmsInterface = {
 };
 
 export type PmsRevision = {
-  id: string; revision_no: number; source_timezone: string; folio_identity_strategy: string;
+  id: string; revision_no: number; source_timezone: string; posting_target_model: string;
   normalization_version: number; source_fingerprint?: string;
   // already redacted by edged; the client never un-redacts anything
   config: Record<string, unknown>;
@@ -1243,6 +1265,11 @@ export type FinancialSettlement = {
   amount_minor: number;
   currency: string;
   currency_exponent: number;
+  // Context for an operator: the package, when it was taken, and how the client got access.
+  package_name?: string | null;
+  at?: string | null;
+  source?: "ROOM" | "VOUCHER" | "ACCOUNT" | "OPEN" | "" | null;
+  room?: string | null;
 };
 
 export type FinancialPayment = {
@@ -1353,6 +1380,8 @@ export type ReviewAttempt = {
   pa_as_status: string | null;
   sent_at: string;
   response_at: string | null;
+  // Why the appliance wrote nothing, when outcome is NOT_SENT (e.g. ROOM_CHANGED).
+  not_sent_reason?: string | null;
 };
 
 export type ReviewPostingDetail = {
@@ -1361,9 +1390,11 @@ export type ReviewPostingDetail = {
     settlement_id: string;
     purchase_id: string;
     stay_id: string | null;
-    folio_id: string | null;
+    /** The reservation number (G#) the charge was pinned to at purchase. It never changes. */
+    g_number: string | null;
+    posting_interface_revision_id?: string;
     connector_kind: string;
-    folio_identity_strategy: string;
+    posting_target_model: string;
     interface_lifecycle_state: string;
     settlement_status: string;
     purchase_state: string;

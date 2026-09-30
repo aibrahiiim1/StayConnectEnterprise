@@ -73,6 +73,11 @@ type Document struct {
 	ExpiresAt      int64  `json:"expires_at"` // 0 = no expiry (revision-governed)
 	SignerKeyID    string `json:"signer_key_id"`
 	Signature      string `json:"signature"`
+	// SiteType is descriptive site metadata owned by Central (HOTEL, CAFE, …).
+	// It authorises nothing. It is the LAST signed field and omitempty, so a
+	// document without it signs byte-identically to the pre-site-type layout.
+	// Unknown values are carried as-is (forward compatibility).
+	SiteType string `json:"site_type,omitempty"`
 }
 
 // signView is the signature-free canonical projection. Field ORDER and JSON
@@ -91,12 +96,14 @@ type signView struct {
 	IssuedAt       int64  `json:"issued_at"`
 	ExpiresAt      int64  `json:"expires_at"`
 	SignerKeyID    string `json:"signer_key_id"`
+	SiteType       string `json:"site_type,omitempty"`
 }
 
 func signingBytes(d *Document) []byte {
 	b, _ := json.Marshal(signView{
 		d.AssignmentID, d.ApplianceID, d.IdentityKeyFpr, d.Serial, d.TenantID, d.SiteID,
 		d.TenantName, d.SiteName, d.Version, d.State, d.IssuedAt, d.ExpiresAt, d.SignerKeyID,
+		d.SiteType,
 	})
 	return b
 }

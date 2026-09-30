@@ -150,10 +150,12 @@ func TestIntegration_Phase3Auth_CheckedOutStayIsRefusedWhileOffline(t *testing.T
 	defer f.startEnforcementOwner(t)()
 
 	takeInterfaceOffline(t, f, "DIAL_FAILED")
-	if _, err := f.pool.Exec(context.Background(),
+	if _, err := controlledExec(context.Background(), f.pool, "stay",
 		// effective_checkout_at is required by stays_checkedout_needs_boundary: a checked-out Stay must carry
 		// the boundary that Checkout-Grace is measured from, so there is no such thing as a checkout without one.
-		`UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now() WHERE id=$1`,
+		// posting_allowed=false in the same statement, exactly as internal/checkout does: the
+		// posting_only_in_house CHECK is evaluated before the AFTER trigger that recomputes it.
+		`UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false, effective_checkout_at=now() WHERE id=$1`,
 		f.stay); err != nil {
 		t.Fatalf("check the stay out: %v", err)
 	}

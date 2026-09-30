@@ -15,8 +15,15 @@ import Link from "next/link";
 import { Info } from "lucide-react";
 import { Card, CardBody } from "@/components/ui/card";
 import { HelpSection, HelpTip } from "@/components/help";
+import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 
 export function SurfaceNotEnabled({ label }: { label: string }) {
+  // WHAT IS UNAFFECTED, in this site's terms. The PMS connection is named only where hospitality is licensed:
+  // reassuring an office that its PMS is fine tells it the product thinks it is a hotel.
+  const hospitality = moduleLicensed(useCapabilities(), "hospitality");
+  const unaffected = hospitality
+    ? "client internet, sign-in, the PMS connection, sessions and accounting"
+    : "client internet, sign-in, sessions and accounting";
   return (
     <div className="mx-auto w-full max-w-3xl">
       <Card>
@@ -33,8 +40,8 @@ export function SurfaceNotEnabled({ label }: { label: string }) {
                   <HelpSection title="Why this screen is empty">
                     <p>
                       The feature exists in OneGate but is not switched on for this site, so there is nothing
-                      here to show or to fix. None of client internet, sign-in, the PMS connection, sessions or
-                      accounting depends on this screen.
+                      here to show or to fix. None of {unaffected.replace(/ and accounting$/, " or accounting")}{" "}
+                      depends on this screen.
                     </p>
                   </HelpSection>
                   <HelpSection title="Turning it on">
@@ -47,8 +54,8 @@ export function SurfaceNotEnabled({ label }: { label: string }) {
               </div>
               <p className="text-sm font-medium">Not enabled on this appliance</p>
               <p className="text-sm text-muted-foreground">
-                This is a configuration of the appliance, not a fault. Client internet, sign-in, the PMS connection,
-                sessions and accounting are unaffected.
+                This is a configuration of the appliance, not a fault.{" "}
+                {unaffected.charAt(0).toUpperCase() + unaffected.slice(1)} are unaffected.
               </p>
             </div>
           </div>

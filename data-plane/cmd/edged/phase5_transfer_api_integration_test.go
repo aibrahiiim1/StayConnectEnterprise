@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 func newTransferAPI(t *testing.T, roles ...string) *apiFixture {
@@ -51,7 +52,9 @@ func seedTransfer(t *testing.T, f *apiFixture) xferFx {
 	ctx := context.Background()
 	var x xferFx
 	var pkg string
-	if err := f.pool.QueryRow(ctx, `WITH
+	// stays are stay-family-guarded on the full appliance schema, so the seed opens that operation.
+	if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `WITH
 	  ia AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)
 	         VALUES (gen_random_uuid(),$1,$2,'protel-fias','ACTIVE') RETURNING id),
 	  ib AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)
@@ -77,7 +80,8 @@ func seedTransfer(t *testing.T, f *apiFixture) xferFx {
 	          SELECT gen_random_uuid(),$1,$2,ip.id,1,spr.id,'CHECKOUT_GRACE',0,ARRAY['NOT_REQUIRED']::text[]
 	            FROM ip, spr RETURNING id)
 	SELECT (SELECT id FROM sa)::text,(SELECT id FROM sb)::text,(SELECT id FROM sa2)::text,(SELECT id FROM ipr)::text`,
-		f.tenant, f.site).Scan(&x.stayA, &x.stayB, &x.stayA2, &pkg); err != nil {
+			f.tenant, f.site).Scan(&x.stayA, &x.stayB, &x.stayA2, &pkg)
+	}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	if _, err := f.pool.Exec(ctx, `UPDATE iam_v2.internet_packages SET current_revision_id=$1
@@ -89,6 +93,9 @@ func seedTransfer(t *testing.T, f *apiFixture) xferFx {
 		t.Fatalf("begin: %v", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('commerce_intent')`); err != nil {
+		t.Fatalf("open commerce_intent: %v", err)
+	}
 	var purchase string
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.purchases
 		(tenant_id,site_id,package_revision_id,stay_id,trigger,amount_minor,state)
@@ -232,7 +239,7 @@ func TestIntegration_TransferAPI_ExecuteMovesAccessAndAudits(t *testing.T) {
 	ctx := context.Background()
 	var action, payload string
 	if err := f.pool.QueryRow(ctx,
-		`SELECT action, payload::text FROM public.audit_log WHERE target_id=$1 ORDER BY id DESC LIMIT 1`,
+		`SELECT action, payload::text FROM public.audit_log WHERE target_id=$1 ORDER BY ts DESC LIMIT 1`,
 		x.stayA).Scan(&action, &payload); err != nil {
 		t.Fatalf("audit: %v", err)
 	}

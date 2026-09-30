@@ -113,7 +113,7 @@ func TestSubjectColumnsMatchTheEntitlementSubject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), "num_nonnulls(stay_id, guest_account_id, voucher_id, guest_principal_id) = 1") {
+	if !strings.Contains(string(b), "num_nonnulls(stay_id, guest_account_id, voucher_id, guest_principal_id, anonymous_subject_id) = 1") {
 		t.Fatal("ent_one_subject changed; the access-source types must be revisited")
 	}
 	var keys []string
@@ -121,7 +121,7 @@ func TestSubjectColumnsMatchTheEntitlementSubject(t *testing.T) {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	if strings.Join(keys, ",") != "account,stay,voucher" {
+	if strings.Join(keys, ",") != "account,open,stay,voucher" {
 		t.Fatalf("source types: %v", keys)
 	}
 }

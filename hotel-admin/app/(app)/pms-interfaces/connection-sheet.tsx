@@ -571,7 +571,11 @@ function ChangeSummary({ rev, prev, provider }: { rev: PmsRevision; prev?: PmsRe
       : "The recorded PMS message format changed");
   }
   if (prev.normalization_version !== rev.normalization_version) internal.push("The message-handling version changed");
-  if (prev.folio_identity_strategy !== rev.folio_identity_strategy) internal.push("The folio matching strategy changed");
+  if (prev.posting_target_model !== rev.posting_target_model) {
+    internal.push(rev.posting_target_model === "RESERVATION"
+      ? "Room charge was approved: charges now target the guest's reservation (room + reservation number)"
+      : "The room charge posting target changed");
+  }
   return (
     <div className="text-sm">
       <p className="font-medium">The settings are identical to version {prev.revision_no}.</p>

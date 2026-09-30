@@ -77,6 +77,23 @@ func main() {
 	}
 	log.Printf("keybootstrap: sign-in attempt sealing key ready at %s", attemptsDEKPath)
 
+	// 2c) Card payment key. It seals provider credentials (API keys) in iam_v2.payment_provider_secret_generations.
+	// Its absence only makes card payment "not ready" -- scd keeps serving every other client -- and runtime is
+	// load-only for the same reason as the keys above: a key minted at runtime would orphan every sealed row.
+	paymentKeyPath := filepath.Join(secretsDir, "payment_dek.key")
+	if _, err := localkeys.CreateKeyIfAbsent(paymentKeyPath); err != nil {
+		log.Fatalf("keybootstrap: payment key: %v", err)
+	}
+	log.Printf("keybootstrap: card payment sealing key ready at %s", paymentKeyPath)
+
+	// 2d) Anonymous-access key: keys the HMACs of the resume tokens and recovery codes of clients who choose a
+	// package without signing in. Without it open selection is unavailable; nothing else is affected.
+	anonPath := filepath.Join(secretsDir, "anonymous_access.key")
+	if _, err := localkeys.CreateKeyIfAbsent(anonPath); err != nil {
+		log.Fatalf("keybootstrap: anonymous-access key: %v", err)
+	}
+	log.Printf("keybootstrap: anonymous-access key ready at %s", anonPath)
+
 	// 3) OTP generation-1 key + DB lifecycle metadata, validated together.
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {

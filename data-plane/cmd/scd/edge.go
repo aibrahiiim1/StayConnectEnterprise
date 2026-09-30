@@ -70,6 +70,14 @@ func (s *server) licenseRefusal(feature string) map[string]any {
 			"license_state": string(s.lic.State()),
 		}
 	}
+	// The Hotel module must also be enabled by the site and deployed; a licence alone never executes it.
+	if feature == licstate.FeatPMS && s.modules != nil && !s.moduleEffective(context.Background(), lic.ModuleHospitality) {
+		return map[string]any{
+			"error":         "module_not_enabled",
+			"feature":       feature,
+			"license_state": string(s.lic.State()),
+		}
+	}
 	return nil
 }
 
@@ -225,6 +233,11 @@ func (s *server) reconcileWalledGarden(ctx context.Context) (int, error) {
 	// Resolve domains (best effort, short timeout each). DNS answers churn;
 	// re-resolution every reconcile pass keeps the set fresh enough for
 	// login/payment endpoints, which is the walled garden's purpose.
+	// Card payment's hosted-page domains (least privilege: only while card payment is licensed, enabled and
+	// deployed, only the providers in use, plus the site's bounded extra list).
+	for _, d := range s.paymentGardenDomains(ctx) {
+		domains = append(domains, domain{d})
+	}
 	resolver := &net.Resolver{}
 	for _, d := range domains {
 		rctx, cancel := context.WithTimeout(ctx, 3*time.Second)
@@ -284,10 +297,31 @@ func (s *server) applyLicenseToMethods(cfg *tenantcfg.AuthMethods) {
 	if !s.lic.FeatureEnabled(licstate.FeatSMSOTP) {
 		cfg.SMS = nil
 	}
+	if !s.lic.FeatureEnabled(licstate.FeatWhatsAppOTP) {
+		cfg.WhatsApp = nil
+	}
 	if !s.lic.FeatureEnabled(licstate.FeatSocialLogin) {
 		cfg.Social = nil
 	}
-	if !s.lic.FeatureEnabled(licstate.FeatPMS) {
+	// Licensed is not enough: the deployed guest authority must accept that kind of identity, or a client who
+	// verifies a code or a social account would be refused after doing everything right.
+	if s.modules != nil {
+		if !s.ceiling.ModuleDeployed(lic.ModuleEmailOTP) {
+			cfg.Email = nil
+		}
+		if !s.ceiling.ModuleDeployed(lic.ModuleSMSOTP) {
+			cfg.SMS = nil
+		}
+		if !s.ceiling.ModuleDeployed(lic.ModuleWhatsAppOTP) {
+			cfg.WhatsApp = nil
+		}
+		if !s.ceiling.ModuleDeployed(lic.ModuleSocialLogin) {
+			cfg.Social = nil
+		}
+	}
+	// Room sign-in is part of the Hotel module: licensed is not enough, the site must have it enabled and the
+	// software deployed (the four-gate resolver decides).
+	if !s.lic.FeatureEnabled(licstate.FeatPMS) || (s.modules != nil && !s.moduleEffective(context.Background(), lic.ModuleHospitality)) {
 		cfg.PMS = nil
 	}
 }

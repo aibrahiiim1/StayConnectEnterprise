@@ -51,6 +51,7 @@ func (s *server) vouchersRoutes() http.Handler {
 	r.Get("/{id}/history", s.voucherHistory)
 	r.Post("/issue", s.issueVouchers)
 	r.Post("/{id}/revoke", s.revokeVoucher)
+	r.Post("/batches/{id}/revoke", s.revokeVoucherBatch)
 	return r
 }
 
@@ -89,6 +90,9 @@ func (s *server) listGrantablePackageRevisions(w http.ResponseWriter, r *http.Re
 	      JOIN iam_v2.internet_package_revisions r
 	        ON r.tenant_id = p.tenant_id AND r.site_id = p.site_id AND r.id = p.current_revision_id
 	     WHERE p.tenant_id = $1 AND p.site_id = $2 AND p.active AND NOT p.is_system
+	       -- Only packages acquirable by Voucher: the issuance gate (0095) refuses any other, so offering
+	       -- one in the picker would be offering a refusal.
+	       AND 'PREPAID' = ANY (r.settlement_methods)
 	     ORDER BY p.code`, s.tenantID, s.siteID)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "query_failed", "the package list could not be read")
@@ -843,4 +847,46 @@ func nullIfBlank(v string) any {
 		return nil
 	}
 	return strings.TrimSpace(v)
+}
+
+// revokeVoucherBatch cancels every UNUSED card of one batch (a lost or stolen stack). Step-up and a bounded
+// reason, recorded once for the batch; already-redeemed cards are not touched.
+func (s *server) revokeVoucherBatch(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Password string `json:"password"`
+		Reason   string `json:"reason"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid", "malformed request")
+		return
+	}
+	if !validReason(in.Reason) {
+		jsonErr(w, http.StatusBadRequest, "reason_required", "a bounded reason (4-500 characters) is required")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if !uuidRe.MatchString(id) {
+		jsonErr(w, http.StatusBadRequest, "invalid", "invalid batch id")
+		return
+	}
+	actor, ok := s.stepUpActor(w, r, in.Password)
+	if !ok {
+		return
+	}
+	label := actor
+	if sess := sessFrom(r.Context()); sess != nil && sess.Email != "" {
+		label = sess.Email
+	}
+	st, resp, err := s.scd.call(r.Context(), http.MethodPost, "/v1/voucher-batches/"+id+"/revoke",
+		map[string]any{"operator_id": actor, "operator_label": label, "reason": in.Reason})
+	if err != nil {
+		jsonErr(w, http.StatusBadGateway, "scd_unreachable", err.Error())
+		return
+	}
+	if st == http.StatusOK {
+		s.audit(r, "voucher_batch.revoked", "voucher_batch", id, map[string]any{"reason": in.Reason})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(st)
+	_, _ = w.Write(resp)
 }

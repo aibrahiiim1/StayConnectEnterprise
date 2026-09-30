@@ -1,0 +1,4 @@
+commit d856b58ab36610714a51b2f393964ff4ffb10d5d
+Date:   Wed Sep 30 23:06:07 2026 +0300
+
+    Governance: T0206, PR #202 accepted by the Product Owner; Front Office reversal completed; merge follows

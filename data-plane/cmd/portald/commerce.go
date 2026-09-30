@@ -31,6 +31,9 @@ type commerceSession struct {
 	deviceID       string
 	guestNetworkID string
 	expiry         time.Time
+	// returnCode is shown once on the package page to a client who chose open selection and got a new
+	// anonymous subject; it is cleared after it has been rendered.
+	returnCode string
 }
 
 // commerceSessionStore maps an opaque cookie token to a trusted commerceSession. The browser only ever

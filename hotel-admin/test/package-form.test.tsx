@@ -5,8 +5,9 @@
 // underneath stays invisible. An earlier version hid the plan itself and silently authored plan revisions
 // from this screen, which let a package change technical settings belonging to a plan other packages share.
 //
-// The older properties are unchanged and still guarded: no PMS-dependent eligibility rules, no
-// price/settlement/tax field, deterministic tier order, and no revision id anywhere in the normal flow.
+// The older properties are unchanged and still guarded: deterministic tier order and no revision id anywhere
+// in the normal flow. The price section replaced "free-only by construction"; its own properties are in
+// package-acquisition.test.tsx, and here a new package is still Free unless the operator says otherwise.
 
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
@@ -112,7 +113,8 @@ describe("PackageForm", () => {
   });
 
   it("the eligibility rule-type dropdown offers ONLY implemented types and NO PMS types", () => {
-    render(<PackageForm mode="add" plans={plans} onSave={() => {}} />);
+    render(<PackageForm mode="add" plans={plans} onSave={() => {}}
+      modules={{ modules: { hospitality: { id: "hospitality", label: "Hospitality", licensed: true, enabled: true, ready: true, readiness: [], reasons: [] } as never } }} />);
     fireEvent.click(screen.getByText("Add condition"));
     const typeSelect = screen.getByTestId("rule-type-0") as HTMLSelectElement;
     const offered = Array.from(typeSelect.options).map((o) => o.value);
@@ -120,11 +122,31 @@ describe("PackageForm", () => {
     for (const pms of FORBIDDEN_RULE_TYPES) expect(offered).not.toContain(pms);
   });
 
-  it("has NO price / settlement / PMS / tax input anywhere (free-only by construction)", () => {
-    render(<PackageForm mode="add" plans={plans} onSave={() => {}} />);
-    for (const forbidden of [/price/i, /settlement/i, /\bpms\b/i, /\btax\b/i, /amount/i, /currency/i]) {
-      expect(screen.queryByLabelText(forbidden)).toBeNull();
-    }
+  // A SITE WITHOUT HOSPITALITY IS NOT OFFERED HOTEL CONDITIONS OR A PER-NIGHT ALLOWANCE.
+  it("without Hospitality: no hotel conditions and no per-night allowance", () => {
+    render(<PackageForm mode="add" plans={plans} onSave={() => {}} modules={{ modules: {} }} />);
+    fireEvent.click(screen.getByText("Add condition"));
+    const offered = Array.from((screen.getByTestId("rule-type-0") as HTMLSelectElement).options).map((o) => o.value);
+    expect(offered).not.toContain("STAY_LENGTH");
+    expect(offered).not.toContain("ROOM_TYPE");
+    expect(screen.queryByRole("group", { name: "Hotel (PMS stay)" })).toBeNull();
+    const modes = Array.from((screen.getByTestId("allocation-mode") as HTMLSelectElement).options).map((o) => o.value);
+    expect(modes).not.toContain("PER_STAY_NIGHT");
+  });
+
+  it("a new package starts Free, and saving it untouched publishes a Free package", () => {
+    const onSave = vi.fn();
+    render(<PackageForm mode="add" plans={plans} onSave={onSave} />);
+    // No Paid access here, so there is no price to set.
+    expect(screen.queryByLabelText("Price")).toBeNull();
+    expect((screen.getByTestId("method-check-NOT_REQUIRED") as HTMLInputElement).checked).toBe(true);
+    fireEvent.change(screen.getByTestId("code"), { target: { value: "X" } });
+    fireEvent.change(screen.getByTestId("service-plan"), { target: { value: "plan-gold" } });
+    fireEvent.click(screen.getByRole("button", { name: /add package/i }));
+    const payload = onSave.mock.calls[0][0].payload;
+    expect(payload.price_minor).toBe(0);
+    expect(payload.acquisition_methods).toEqual(["NOT_REQUIRED"]);
+    expect(payload).not.toHaveProperty("room_charge_mappings");
   });
 
   it("carries the existing rules and tiers through a save unchanged", () => {
@@ -142,6 +164,8 @@ describe("PackageForm", () => {
       { type: "AUTH_METHOD", value: { methods: ["pms", "voucher"] } },
     ]);
     expect(payload.grant_tiers.map((t: { order: number }) => t.order)).toEqual([5, 10]);
-    expect(JSON.stringify(payload).toLowerCase()).not.toMatch(/price|settlement|pms_|tax|currency/);
+    // A package loaded with no price section is Free, and is saved as Free.
+    expect(payload.acquisition_methods).toEqual(["NOT_REQUIRED"]);
+    expect(payload.price_minor).toBe(0);
   });
 });

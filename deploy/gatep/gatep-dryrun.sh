@@ -141,7 +141,7 @@ done
 echo "=== svc_scd cross-tenant reconciliation grants (reconcileTenantOwnership / mirror seed) ==="
 # Regression guard for the 2026-07-18 live-cutover gap: scd's every-boot hasForeignTenantData()
 # SELECTs across these tables and the purge DELETEs them; the mirror seed UPDATEs sites.
-for t in accounting_records stripe_events payments voucher_batches stripe_accounts operator_roles operators; do
+for t in accounting_records stripe_events payments voucher_batches operator_roles operators; do
   sd=$(q "select has_table_privilege('svc_scd','public.$t','SELECT')::text||has_table_privilege('svc_scd','public.$t','DELETE')::text")
   [ "$sd" = "truetrue" ] && ok "svc_scd SELECT+DELETE $t (cross-tenant detect+purge)" || bad "svc_scd $t detect+purge grant = $sd"
 done

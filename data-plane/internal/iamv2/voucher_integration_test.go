@@ -48,8 +48,9 @@ func seedVoucherChain(t *testing.T, db *pgxpool.Pool) {
 		`INSERT INTO iam_v2.service_plan_revisions(id,tenant_id,site_id,service_plan_id,revision_no,name,max_concurrent_devices,time_accounting_mode,data_quota_bytes)
 		 VALUES ('bbbb0000-0000-0000-0000-0000000000d1',$1,$2,'bbbb0000-0000-0000-0000-000000000001',1,'plan',2,'VALIDITY_WINDOW',1000000)`,
 		`INSERT INTO iam_v2.internet_packages(id,tenant_id,site_id,code) VALUES ('cccc0000-0000-0000-0000-000000000001',$1,$2,'PKG1')`,
-		`INSERT INTO iam_v2.internet_package_revisions(id,tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent)
-		 VALUES ('cccc0000-0000-0000-0000-0000000000d1',$1,$2,'cccc0000-0000-0000-0000-000000000001',1,'bbbb0000-0000-0000-0000-0000000000d1','GENERAL',100,'USD',2)`,
+		`INSERT INTO iam_v2.internet_package_revisions(id,tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent,settlement_methods)
+		 VALUES ('cccc0000-0000-0000-0000-0000000000d1',$1,$2,'cccc0000-0000-0000-0000-000000000001',1,'bbbb0000-0000-0000-0000-0000000000d1','GENERAL',100,'USD',2,'{PREPAID}')`,
+		`UPDATE iam_v2.internet_packages SET current_revision_id='cccc0000-0000-0000-0000-0000000000d1' WHERE id='cccc0000-0000-0000-0000-000000000001' AND tenant_id=$1 AND site_id=$2`,
 		`INSERT INTO iam_v2.voucher_code_key_generations(id,tenant_id,site_id,generation_no,hmac_key_ciphertext,aead_params,encryption_key_id)
 		 VALUES ('ffff0000-0000-0000-0000-000000000001',$1,$2,1,'\x00','{}','0a000000-0000-0000-0000-000000000001')`,
 	}

@@ -84,6 +84,9 @@ type server struct {
 	// surfaces records every resource mountResource actually mounted on THIS appliance, so the admin can ask
 	// rather than infer it from build-time flags. See capabilities.go.
 	surfaces *mountedSurfaces
+	// modCache holds scd's module resolver answer for a few seconds (modules.go). Always set in main; nil
+	// only in focused unit tests that assemble a server by hand.
+	modCache *moduleCache
 
 	// Phase 2 DARK Hotel-Admin commerce. commerce is ALWAYS constructed but holds a nil repository while
 	// the master flag is OFF (zero Phase-2 SQL); commerceCfg gates whether the admin routes are mounted.
@@ -202,6 +205,7 @@ func main() {
 		siteID:   c.SiteID,
 		secure:   c.CookieSecure,
 		surfaces: newMountedSurfaces(),
+		modCache: &moduleCache{},
 	}
 
 	// Phase 2 DARK Hotel-Admin commerce. Config from env (all flags default OFF); nil repository while the
@@ -385,6 +389,9 @@ func main() {
 			r.With(s.requireRole("network", permWrite)).Post("/hotel-admin-cert/rotate", s.hotelAdminCertRotate)
 
 			mountResource(r, s, "operators", s.operatorsRoutes)
+			// MODULES: what the licence authorises, what this site has switched on, and why anything is not
+			// available. Always mounted: it is how an operator learns what the site may use.
+			mountResource(r, s, "modules", s.modulesRoutes)
 			// guest-access-plans, voucher-batches and vouchers are REMOVED. They were the operator surface
 			// over public.ticket_templates, public.voucher_batches and public.vouchers -- the superseded
 			// commerce and credential domain. The current surface is "commercial-packages" below: service
@@ -407,7 +414,10 @@ func main() {
 			// payments is REMOVED. It was a read-only list over public.payments, a Stripe-session record
 			// keyed to a superseded voucher and access plan. The current financial surface is
 			// "financial-ops" below, over the Phase-4 iam_v2 payment transactions and settlements.
-			mountResource(r, s, "stripe-accounts", s.stripeAccountsRoutes)
+			// stripe-accounts is REMOVED (migration 0096). It stored provider secrets in clear text and was read by
+			// nothing. Card payment accounts live under "payment-providers": site-local, secrets sealed and
+			// write-only, served by scd which owns the key.
+			mountResource(r, s, "payment-providers", s.paymentProvidersRoutes)
 			mountResource(r, s, "notification-providers", s.notificationProvidersRoutes)
 			mountResource(r, s, "social-providers", s.socialProvidersRoutes)
 			// Phase 2 (DARK): the commercial-packages admin resource is mounted ONLY when the admin
@@ -437,6 +447,8 @@ func main() {
 				mountResource(r, s, "pms-interfaces", s.pmsInterfacesRoutes)
 				// The connector catalogue the connection form is built from. Guarded by the pms-interfaces key.
 				r.With(s.resourcePermission("pms-interfaces")).Get("/pms-providers", s.listPMSProviders)
+				// Room charge: approving a FIAS interface financially. Module-gated on room_charge (modules.go).
+				mountResource(r, s, "pms-financial-onboarding", s.pmsFinancialOnboardingRoutes)
 				mountResource(r, s, "pms-routing", s.pmsRoutingRoutes)
 				mountResource(r, s, "pms-source-conflicts", s.pmsSourceConflictsRoutes)
 				// Unresolved departures as CASES. Read is wide because "which guests does the PMS and the
@@ -538,6 +550,8 @@ func mountResource(r chi.Router, s *server, name string, routes func() http.Hand
 	s.surfaces.add(name)
 	r.Route("/"+name, func(r chi.Router) {
 		r.Use(s.resourcePermission(name))
+		// Module-owned surfaces follow the licence and the site's choice (modules.go); core ones pass through.
+		r.Use(s.moduleGate(name))
 		r.Mount("/", routes())
 	})
 }

@@ -27,7 +27,9 @@ const plans: PlanOption[] = [
 ];
 
 function openForm() {
-  return render(<PackageForm mode="add" plans={plans} onSave={() => {}} />);
+  // A hotel: the per-night allowance is offered with Hospitality.
+  return render(<PackageForm mode="add" plans={plans} onSave={() => {}}
+    modules={{ modules: { hospitality: { id: "hospitality", label: "Hospitality", licensed: true, enabled: true, ready: true, readiness: [], reasons: [] } as never } }} />);
 }
 const setMode = (m: string) => fireEvent.change(screen.getByTestId("allocation-mode"), { target: { value: m } });
 const setPlan = (p: string) => fireEvent.change(screen.getByTestId("service-plan"), { target: { value: p } });

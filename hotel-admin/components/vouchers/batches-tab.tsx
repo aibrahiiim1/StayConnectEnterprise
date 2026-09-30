@@ -8,7 +8,7 @@
 // from the server's aggregate, and the export dialog states exactly how many codes it will recover.
 
 import * as React from "react";
-import { Download, Layers, List } from "lucide-react";
+import { Ban, Download, Layers, List } from "lucide-react";
 import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,12 +36,15 @@ const PAGE = 25;
 
 export function BatchesTab({
   canRevealCodes,
+  canCancel = false,
   reloadKey,
   onViewCards,
   hotelName,
   focusBatch,
 }: {
   canRevealCodes: boolean;
+  /** Cancelling the unused cards of a batch is a vouchers WRITE (step-up and a reason on the server). */
+  canCancel?: boolean;
   reloadKey: number;
   onViewCards: (batchId: string) => void;
   hotelName?: string;
@@ -158,6 +161,7 @@ export function BatchesTab({
           onViewCards(id);
         }}
         onExported={load}
+        canCancel={canCancel}
         hotelName={hotelName}
       />
     </div>
@@ -170,6 +174,7 @@ function BatchSheet({
   canRevealCodes,
   onViewCards,
   onExported,
+  canCancel,
   hotelName,
 }: {
   batch: VoucherBatch | null;
@@ -177,6 +182,7 @@ function BatchSheet({
   canRevealCodes: boolean;
   onViewCards: (id: string) => void;
   onExported: () => void;
+  canCancel: boolean;
   hotelName?: string;
 }) {
   return (
@@ -197,6 +203,7 @@ function BatchSheet({
             canRevealCodes={canRevealCodes}
             onViewCards={onViewCards}
             onExported={onExported}
+            canCancel={canCancel}
             hotelName={hotelName}
           />
         )}
@@ -210,15 +217,42 @@ function BatchDetail({
   canRevealCodes,
   onViewCards,
   onExported,
+  canCancel,
   hotelName,
 }: {
   batch: VoucherBatch;
   canRevealCodes: boolean;
   onViewCards: (id: string) => void;
   onExported: () => void;
+  canCancel: boolean;
   hotelName?: string;
 }) {
   const toast = useToast();
+  // CANCELLING A BATCH: every card not used yet stops working, at once and for good. Cards already used keep
+  // the access they granted -- ending that is an action on the client's access, not on the card. Republishing
+  // or deactivating the package never does this; only this explicit, recorded action does.
+  const [cancelling, setCancelling] = React.useState(false);
+  const [cancelErr, setCancelErr] = React.useState<unknown>(null);
+
+  async function doCancel({ reason, password }: { reason: string; password: string }) {
+    const bad = reasonProblem(reason);
+    if (bad) return setCancelErr(new Error(bad));
+    setBusy(true);
+    setCancelErr(null);
+    try {
+      const out = await api.post<{ revoked: number }>(`/vouchers/batches/${batch.batch_id}/revoke`, { password, reason });
+      setCancelling(false);
+      toast.success(
+        `${out.revoked.toLocaleString()} card${out.revoked === 1 ? "" : "s"} cancelled`,
+        "The cancellation was recorded with your name and reason.",
+      );
+      onExported();
+    } catch (e) {
+      setCancelErr(stepUpError(e, "No cards were cancelled."));
+    } finally {
+      setBusy(false);
+    }
+  }
   const [confirming, setConfirming] = React.useState(false);
   const [scope, setScope] = React.useState<"all" | "unused">("all");
   const [busy, setBusy] = React.useState(false);
@@ -314,7 +348,39 @@ function BatchDetail({
             <Download /> Export codes
           </Button>
         )}
+        {canCancel && batch.unused > 0 && (
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={() => {
+              setCancelErr(null);
+              setCancelling(true);
+            }}
+          >
+            <Ban /> Cancel unused cards
+          </Button>
+        )}
       </SheetFooter>
+
+      <ConfirmDialog
+        open={cancelling}
+        onOpenChange={(v) => !v && setCancelling(false)}
+        title="Cancel the unused cards of this batch"
+        description={`${batch.unused.toLocaleString()} card${batch.unused === 1 ? "" : "s"} not used yet will stop working immediately. This cannot be undone.`}
+        confirmLabel={`Cancel ${batch.unused.toLocaleString()} card${batch.unused === 1 ? "" : "s"}`}
+        confirmVariant="danger"
+        busy={busy}
+        error={cancelErr}
+        requireReason
+        reasonLabel="Reason (recorded)"
+        reasonPlaceholder="The printed stack was lost"
+        requirePassword
+        consequences={[
+          "Cards not used yet are refused at sign-in from now on.",
+          "Cards already used keep the access they granted.",
+        ]}
+        onConfirm={doCancel}
+      />
 
       <ConfirmDialog
         open={confirming}

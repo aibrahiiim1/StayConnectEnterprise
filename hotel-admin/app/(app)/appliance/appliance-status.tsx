@@ -153,6 +153,14 @@ export function centralWords(c: CentralStatus["central"]): { title: string; tone
         tone: "warn",
         line: "Clients are not affected: this appliance signs clients in by itself. Licence renewals wait until the connection returns.",
       };
+    case "credential_refused":
+      // Central answers, but refuses this appliance's certificate (after "Reissue certificate" in Central). The
+      // appliance requests a new certificate by itself; this is not a network problem.
+      return {
+        title: "Renewing its certificate",
+        tone: "warn",
+        line: "OneGate Central is answering but no longer accepts this appliance's certificate, usually after a certificate reissue in Central. The appliance is requesting a new one by itself. Clients are not affected.",
+      };
     case "not_configured":
       return { title: "Not configured", tone: "default", line: "No OneGate Central address is set on this appliance." };
     default:

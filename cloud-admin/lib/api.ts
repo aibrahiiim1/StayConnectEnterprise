@@ -154,6 +154,8 @@ export type Site = {
   name: string;
   timezone: string;
   country?: string | null;
+  /** Descriptive only (lib/site-types.ts); "UNSPECIFIED" when nobody classified the site. Grants nothing. */
+  site_type?: string;
   status: "active" | "archived" | string;
   appliances: number;
 };
@@ -165,6 +167,8 @@ export type ApplianceLicense = {
   grace_ends_at?: string | null;
   max_concurrent_online_guests?: number | null;
   license_version?: number | null;
+  /** Module ids the current license authorises; [] = core only; null with no license. */
+  modules?: string[] | null;
 };
 
 export type ApplianceRow = {
@@ -177,6 +181,7 @@ export type ApplianceRow = {
   customer_name?: string | null;
   site_id?: string | null;
   site_name?: string | null;
+  site_type?: string | null;
   activation: Activation;
   connection: Connection;
   last_seen_at?: string | null;
@@ -189,6 +194,10 @@ export type ApplianceRow = {
    *  for that customer. The name is null when that customer is no longer in Central. */
   holds_customer_id?: string | null;
   holds_customer_name?: string | null;
+  /** An imported offline activation request is on file and unconsumed: an activation package can be generated. */
+  offline_request_pending?: boolean;
+  /** What an "activating" appliance still lacks: certificate_reissue | certificate | license. */
+  activating_on?: "certificate_reissue" | "certificate" | "license" | string;
 };
 
 export type LicenseRow = {
@@ -208,6 +217,8 @@ export type LicenseRow = {
   max_concurrent_online_guests?: number | null;
   license_version?: number | null;
   issued_at?: string | null;
+  /** Module ids the license authorises; [] = core only. */
+  modules?: string[];
 };
 
 export type ActivityEvent = {
@@ -249,6 +260,8 @@ export type LicenseTerms = {
   valid_days?: number;
   valid_until?: string;
   grace_period_days: number;
+  /** Module ids (GET /cloud/v1/modules). [] = core only. */
+  modules: string[];
 };
 
 export type AuditEntry = {

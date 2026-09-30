@@ -69,6 +69,10 @@ func TestIntegrationDefinerAbuse_TheRuntimeDefinerSurfaceIsExactlyWhatWeThinkItI
 		// Reviewed (0023). Read-only: it returns a bigint and writes nothing.
 		"iam_v2.p4_current_restore_generation(uuid,uuid)": true,
 		"iam_v2.begin_controlled_operation(text)":         true,
+		// Reviewed (0096). Read-only: the default account's identifiers and mode (never a credential), and
+		// the site's two card-payment timing settings. Neither writes anything.
+		"iam_v2.p4_resolve_payment_account_v2(uuid,uuid)": true,
+		"iam_v2.card_payment_settings_get(uuid,uuid)":     true,
 	}
 	for _, sig := range got {
 		if !want[sig] {

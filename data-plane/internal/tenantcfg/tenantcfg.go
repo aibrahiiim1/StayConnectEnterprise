@@ -19,6 +19,9 @@ type AuthMethods struct {
 	Voucher *AuthMethod `json:"voucher,omitempty"`
 	Email   *AuthMethod `json:"email,omitempty"`
 	SMS     *AuthMethod `json:"sms,omitempty"`
+	// WhatsApp is a one-time code delivered as a WhatsApp authentication-template message. It is a separate
+	// channel from SMS (its own licence module, whatsapp_otp, and its own provider), never an SMS variant.
+	WhatsApp *AuthMethod `json:"whatsapp,omitempty"`
 	// Social is keyed by provider name (e.g. "google", "apple"). Each entry
 	// has its own enabled flag + template_id so providers can be turned on
 	// independently and route to different ticket templates if desired.
@@ -27,6 +30,9 @@ type AuthMethods struct {
 	// GuestAccount is the username/password method. Basic-access (never license-
 	// gated); shown on the portal only when enabled.
 	GuestAccount *AuthMethod `json:"guest_account,omitempty"`
+	// Open is "Clients may choose a package without signing in" (core, default off). The entitlement subject
+	// is an opaque anonymous access subject, never the device.
+	Open *AuthMethod `json:"open,omitempty"`
 }
 
 // PMSConfig configures the room-number-based guest auth flow. See migration

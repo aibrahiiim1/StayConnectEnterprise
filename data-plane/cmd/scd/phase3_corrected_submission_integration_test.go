@@ -259,7 +259,7 @@ func TestIntegration_Phase3Auth_ConfinedToTheTenantSiteAndMappedInterface(t *tes
 
 	// (a) ANOTHER TENANT, complete with its own site, interface and network.
 	other := newAuthFixture(t)
-	if _, err := other.pool.Exec(ctx,
+	if _, err := controlledExec(ctx, other.pool, "stay",
 		`UPDATE iam_v2.stays SET normalized_room_number='777' WHERE tenant_id=$1 AND site_id=$2 AND id=$3`,
 		other.tenant, other.site, other.stay); err != nil {
 		t.Fatalf("seed the other tenant's decoy room: %v", err)
@@ -268,8 +268,8 @@ func TestIntegration_Phase3Auth_ConfinedToTheTenantSiteAndMappedInterface(t *tes
 	// (b) ANOTHER SITE under THIS tenant, and (c) another ACTIVE interface under this tenant AND site that is
 	// simply not mapped to this guest's network. Both hold room 777 with the same surname as the real stay,
 	// so the only difference between them and a match is scope.
-	if _, err := f.pool.Exec(ctx, `WITH
-	  si AS (INSERT INTO public.sites(id,tenant_id) VALUES (gen_random_uuid(),$1) RETURNING id,tenant_id),
+	if _, err := controlledExec(ctx, f.pool, "stay", `WITH
+	  si AS (INSERT INTO public.sites(id,tenant_id,code,name) SELECT g, $1, g::text, 's' FROM gen_random_uuid() g RETURNING id,tenant_id),
 	  pi AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)
 	         SELECT gen_random_uuid(), si.tenant_id, si.id,'protel-fias','ACTIVE' FROM si RETURNING id,tenant_id,site_id),
 	  st AS (INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,
@@ -281,7 +281,7 @@ func TestIntegration_Phase3Auth_ConfinedToTheTenantSiteAndMappedInterface(t *tes
 	SELECT st.tenant_id, st.site_id, st.pms_interface_id, st.id,'OKONKWO',true FROM st`, f.tenant); err != nil {
 		t.Fatalf("seed the other-site decoy: %v", err)
 	}
-	if _, err := f.pool.Exec(ctx, `WITH
+	if _, err := controlledExec(ctx, f.pool, "stay", `WITH
 	  pi AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)
 	         VALUES (gen_random_uuid(),$1,$2,'protel-fias','ACTIVE') RETURNING id),
 	  st AS (INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,

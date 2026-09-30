@@ -175,6 +175,8 @@ type reviewAttempt struct {
 	PAStatus   *string `json:"pa_as_status"`
 	SentAt     string  `json:"sent_at"`
 	ResponseAt *string `json:"response_at"`
+	// NotSentReason is pmsd's bounded reason when the attempt was NOT_SENT (e.g. ROOM_CHANGED).
+	NotSentReason *string `json:"not_sent_reason,omitempty"`
 }
 
 type reviewHistoryEntry struct {
@@ -197,23 +199,23 @@ func (s *server) getReviewPosting(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	var (
-		q                                     reviewQueueRow
-		hasUnknown, retryConsumed             bool
-		unknownCount, attemptCount            int64
-		freshness, retryAuthNo, reversalID    *string
-		settlementID, purchaseID, stayID      string
-		folioID, revisionID, idempotencyKey   string
-		interfaceKind, folioStrategy, ifState string
-		settlementStatus, purchaseState       string
-		escalations                           int
+		q                                   reviewQueueRow
+		hasUnknown, retryConsumed           bool
+		unknownCount, attemptCount          int64
+		freshness, retryAuthNo, reversalID  *string
+		settlementID, purchaseID, stayID    string
+		gNumber, revisionID, idempotencyKey string
+		interfaceKind, targetModel, ifState string
+		settlementStatus, purchaseState     string
+		escalations                         int
 	)
 	err := s.db.QueryRow(ctx, `SELECT `+reviewQueueCols+`,
 		coalesce(p.has_unknown_history,false), coalesce(p.retry_authorization_consumed,false),
 		coalesce(p.unknown_attempt_count,0), coalesce(p.attempt_count,0), p.freshness_block,
 		p.retry_authorized_attempt_no::text, rs.reversal_posting_id::text, coalesce(p.escalation_count,0),
 		o.settlement_id::text, o.purchase_id::text, coalesce(o.stay_id::text,''),
-		coalesce(o.folio_id::text,''), o.posting_interface_revision_id::text, o.idempotency_key,
-		i.connector_kind, rev.folio_identity_strategy, i.lifecycle_state,
+		o.g_number, o.posting_interface_revision_id::text, o.idempotency_key,
+		i.connector_kind, rev.posting_target_model, i.lifecycle_state,
 		se.status, pu.state
 		FROM iam_v2.posting_execution_state p
 		JOIN iam_v2.pms_postings o ON o.id = p.posting_id
@@ -228,8 +230,8 @@ func (s *server) getReviewPosting(w http.ResponseWriter, r *http.Request) {
 			&q.TerminalAction, &q.AwaitingReview, &q.CreatedAt,
 			&hasUnknown, &retryConsumed, &unknownCount, &attemptCount, &freshness,
 			&retryAuthNo, &reversalID, &escalations,
-			&settlementID, &purchaseID, &stayID, &folioID, &revisionID, &idempotencyKey,
-			&interfaceKind, &folioStrategy, &ifState, &settlementStatus, &purchaseState)
+			&settlementID, &purchaseID, &stayID, &gNumber, &revisionID, &idempotencyKey,
+			&interfaceKind, &targetModel, &ifState, &settlementStatus, &purchaseState)
 	if errors.Is(err, pgx.ErrNoRows) {
 		jsonErr(w, http.StatusNotFound, "not_found", "no such posting in this site")
 		return
@@ -241,7 +243,8 @@ func (s *server) getReviewPosting(w http.ResponseWriter, r *http.Request) {
 
 	attempts := []reviewAttempt{}
 	arows, err := s.db.Query(ctx, `SELECT attempt_no, p_number, rn, g_number, outcome, pa_as_status,
-		sent_at::text, response_at::text FROM iam_v2.posting_attempts
+		sent_at::text, response_at::text,
+		CASE WHEN outcome = 'NOT_SENT' THEN iam_v2.p4_attempt_not_sent_reason(id) END FROM iam_v2.posting_attempts
 		WHERE internal_posting_id=$1 AND tenant_id=$2 AND site_id=$3 ORDER BY attempt_no`,
 		id, s.tenantID, s.siteID)
 	if err == nil {
@@ -249,7 +252,7 @@ func (s *server) getReviewPosting(w http.ResponseWriter, r *http.Request) {
 		for arows.Next() {
 			var a reviewAttempt
 			if err := arows.Scan(&a.AttemptNo, &a.PNumber, &a.RN, &a.GNumber, &a.Outcome, &a.PAStatus,
-				&a.SentAt, &a.ResponseAt); err == nil {
+				&a.SentAt, &a.ResponseAt, &a.NotSentReason); err == nil {
 				attempts = append(attempts, a)
 			}
 		}
@@ -275,9 +278,9 @@ func (s *server) getReviewPosting(w http.ResponseWriter, r *http.Request) {
 		// whether money moved needs to see what it was attached to, not the current state of the world.
 		"pinned_evidence": map[string]any{
 			"settlement_id": settlementID, "purchase_id": purchaseID, "stay_id": stayID,
-			"folio_id": folioID, "posting_interface_revision_id": revisionID,
+			"g_number": gNumber, "posting_interface_revision_id": revisionID,
 			"idempotency_key": idempotencyKey, "connector_kind": interfaceKind,
-			"folio_identity_strategy": folioStrategy, "interface_lifecycle_state": ifState,
+			"posting_target_model": targetModel, "interface_lifecycle_state": ifState,
 			"settlement_status": settlementStatus, "purchase_state": purchaseState,
 		},
 		"attempts": attempts,
@@ -401,8 +404,17 @@ func (s *server) postReviewAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The decision and its consequence commit together: a terminal decision on a room-charge posting moves
+	// the settlement (CONFIRM_POSTED settles and grants, ABANDON fails it, RETRY requeues the one authorised
+	// attempt) in the same transaction as the ledger row, so neither can exist without the other.
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "the decision could not be recorded")
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
 	var actionID string
-	err := s.db.QueryRow(ctx,
+	err = tx.QueryRow(ctx,
 		`SELECT iam_v2.record_posting_review_action($1,$2,$3,$4,$5::jsonb,$6,$7)::text`,
 		id, in.Action, sess.OperatorID, reason, evidence,
 		in.ExpectedVersion, in.ReversalAmountMinor).Scan(&actionID)
@@ -411,10 +423,22 @@ func (s *server) postReviewAction(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, code, msg, reviewErrorMessage(err))
 		return
 	}
+	var applied string
+	if err := tx.QueryRow(ctx, `SELECT iam_v2.p4_posting_review_apply($1::uuid,$2::uuid,$3::uuid)`,
+		s.tenantID, s.siteID, id).Scan(&applied); err != nil {
+		code, msg := classifyReviewError(err)
+		jsonErr(w, code, msg, reviewErrorMessage(err))
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "the decision could not be recorded")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"action_id": actionID,
 		"action":    in.Action,
 		"actor":     sess.OperatorID,
+		"applied":   applied,
 	})
 }
 

@@ -55,12 +55,12 @@ func (f *apiFixture) setHeartbeatTimeout(t *testing.T, iface string, ms int) str
 	var rev string
 	if err := f.pool.QueryRow(ctx, `
 		INSERT INTO iam_v2.pms_interface_revisions
-		  (id,tenant_id,site_id,pms_interface_id,revision_no,source_timezone,folio_identity_strategy,
+		  (id,tenant_id,site_id,pms_interface_id,revision_no,source_timezone,posting_target_model,
 		   config,normalization_version)
 		SELECT gen_random_uuid(),$1,$2,$3::uuid,
 		       COALESCE((SELECT max(revision_no) FROM iam_v2.pms_interface_revisions
 		                  WHERE pms_interface_id=$3::uuid),0)+1,
-		       'Europe/Berlin','UNIQUE_PER_STAY',
+		       'Europe/Berlin','RESERVATION',
 		       jsonb_build_object('host','pms.local','heartbeat_timeout_ms',$4::int),1
 		RETURNING id::text`, f.tenant, f.site, iface, ms).Scan(&rev); err != nil {
 		t.Fatalf("author revision with heartbeat_timeout_ms=%d: %v", ms, err)

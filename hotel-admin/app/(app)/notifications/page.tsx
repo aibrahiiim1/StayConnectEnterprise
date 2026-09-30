@@ -1,6 +1,8 @@
 "use client";
 
-// EMAIL & SMS — how the appliance sends a guest a one-time code.
+// EMAIL, SMS & WHATSAPP — how the appliance sends a guest a one-time code. WhatsApp is its own channel with its
+// own services, never a kind of SMS. A channel is offered for a new sender only when its sign-in module is
+// licensed here; an existing sender stays listed so it can be edited or removed.
 //
 // Same treatment as the other provider screens: Add and Edit are dialogs instead of cards stacked above the
 // table, the native confirm() on delete is a real confirmation that says what stops working, and a blank API key
@@ -28,10 +30,14 @@ import { canWrite } from "@/lib/roles";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { formatRelative } from "@/lib/utils";
+import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 
-const KINDS: Record<string, string[]> = {
+type Channel = "email" | "sms" | "whatsapp";
+
+const KINDS: Record<Channel, string[]> = {
   email: ["stub", "sendgrid", "ses"],
   sms: ["stub", "twilio"],
+  whatsapp: ["stub", "meta_whatsapp", "twilio_whatsapp"],
 };
 
 const KIND_LABELS: Record<string, string> = {
@@ -39,7 +45,12 @@ const KIND_LABELS: Record<string, string> = {
   sendgrid: "SendGrid",
   ses: "Amazon SES",
   twilio: "Twilio",
+  meta_whatsapp: "Meta WhatsApp Cloud API",
+  twilio_whatsapp: "Twilio WhatsApp",
 };
+
+const CHANNEL_LABELS: Record<Channel, string> = { email: "Email", sms: "Text message", whatsapp: "WhatsApp" };
+const CHANNEL_MODULE: Record<Channel, string> = { email: "email_otp", sms: "sms_otp", whatsapp: "whatsapp_otp" };
 
 function health(n: NotificationProvider): { tone: "ok" | "err" | "default"; label: string; detail?: string } {
   if (n.last_error_at && (!n.last_success_at || n.last_error_at > n.last_success_at)) {
@@ -52,20 +63,29 @@ function health(n: NotificationProvider): { tone: "ok" | "err" | "default"; labe
 }
 
 type FormState = {
-  channel: "email" | "sms";
+  channel: Channel;
   kind: string;
   display_name: string;
   api_key: string;
   api_user: string;
   from_address: string;
   from_name: string;
+  template_name: string;
+  language: string;
+  content_sid: string;
   enabled: boolean;
 };
 
 const EMPTY: FormState = {
   channel: "email", kind: "sendgrid", display_name: "", api_key: "", api_user: "",
-  from_address: "", from_name: "", enabled: true,
+  from_address: "", from_name: "", template_name: "", language: "", content_sid: "", enabled: true,
 };
+
+// The non-secret WhatsApp template settings, sent only for a WhatsApp sender (an empty value removes one).
+function extraOf(f: FormState): Record<string, string> | undefined {
+  if (f.channel !== "whatsapp") return undefined;
+  return { template_name: f.template_name.trim(), language: f.language.trim(), content_sid: f.content_sid.trim() };
+}
 
 export default function NotificationsPage() {
   const toast = useToast();
@@ -81,6 +101,9 @@ export default function NotificationsPage() {
   const [deleting, setDeleting] = useState<NotificationProvider | null>(null);
 
   const writable = roles !== null && canWrite("notification-providers", roles);
+  const caps = useCapabilities();
+  // Channels a NEW sender may use: those whose sign-in module is licensed here.
+  const channels = (Object.keys(KINDS) as Channel[]).filter((c) => moduleLicensed(caps, CHANNEL_MODULE[c]));
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((p) => ({ ...p, [k]: v }));
 
   async function load() {
@@ -92,7 +115,11 @@ export default function NotificationsPage() {
     api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
   }, []);
 
-  function openNew() { setF(EMPTY); setEditing(null); setFormErr(null); setMode("new"); }
+  function openNew() {
+    const first = channels[0] ?? "email";
+    setF({ ...EMPTY, channel: first, kind: KINDS[first][1] ?? KINDS[first][0] });
+    setEditing(null); setFormErr(null); setMode("new");
+  }
   function openEdit(n: NotificationProvider) {
     setF({
       channel: n.channel,
@@ -102,6 +129,9 @@ export default function NotificationsPage() {
       api_user: n.api_user ?? "",
       from_address: n.from_address ?? "",
       from_name: n.from_name ?? "",
+      template_name: n.extra?.template_name ?? "",
+      language: n.extra?.language ?? "",
+      content_sid: n.extra?.content_sid ?? "",
       enabled: n.enabled,
     });
     setEditing(n); setFormErr(null); setMode("edit");
@@ -119,6 +149,7 @@ export default function NotificationsPage() {
           api_user: f.api_user.trim() || undefined,
           from_address: f.from_address.trim() || undefined,
           from_name: f.from_name.trim() || undefined,
+          extra: extraOf(f),
           enabled: f.enabled,
         });
       } else if (editing) {
@@ -129,6 +160,8 @@ export default function NotificationsPage() {
           from_name: f.from_name,
           enabled: f.enabled,
         };
+        const extra = extraOf(f);
+        if (extra) body.extra = extra;
         if (f.api_key) body.api_key = f.api_key; // blank keeps the existing secret
         await api.patch(`/notification-providers/${editing.id}`, body);
       }
@@ -153,8 +186,8 @@ export default function NotificationsPage() {
 
   // Changing channel invalidates the kind, so it follows rather than being left pointing at an SMS provider for
   // an email channel.
-  function setChannel(channel: "email" | "sms") {
-    setF((p) => ({ ...p, channel, kind: KINDS[channel][channel === "email" ? 1 : 1] ?? KINDS[channel][0] }));
+  function setChannel(channel: Channel) {
+    setF((p) => ({ ...p, channel, kind: KINDS[channel][1] ?? KINDS[channel][0] }));
   }
 
   return (
@@ -162,13 +195,13 @@ export default function NotificationsPage() {
       <PageHeader
         icon={<MessageSquare />}
         eyebrow="Client Portal"
-        title="Email & SMS"
+        title={channels.includes("whatsapp") ? "Email, SMS & WhatsApp" : "Email & SMS"}
         description="Without a working sender, sign-in methods that need a code cannot be used."
         help={
           <>
             <HelpSection title="What a sender does">
               <p>
-                How the appliance delivers one-time sign-in codes to clients, by email or text message. Without a
+                How the appliance delivers one-time sign-in codes to clients, by email, text message or WhatsApp. Without a
                 working sender, any sign-in method that needs a code cannot be used. Room numbers, vouchers and
                 accounts do not need one.
               </p>
@@ -179,13 +212,14 @@ export default function NotificationsPage() {
                   <>Credentials come from the sending service&apos;s own console.</>,
                   <>The key is stored write-only and is never shown again. When editing, leave it blank to keep the one already stored.</>,
                   <>The channel and service of a sender cannot be changed; remove it and add it again instead.</>,
-                  <>Whether clients are offered email or SMS codes is switched on in <strong>Sign-in methods</strong>.</>,
+                  <>Whether clients are offered email, SMS or WhatsApp codes is switched on in <strong>Sign-in methods</strong>.</>,
+                  <>A WhatsApp sender needs an approved <strong>authentication template</strong> from Meta (template name and language) or Twilio (content SID); codes are sent only through that template.</>,
                 ]}
               />
             </HelpSection>
           </>
         }
-        actions={writable && <Button onClick={openNew}><Plus /> Add sender</Button>}
+        actions={writable && channels.length > 0 && <Button onClick={openNew}><Plus /> Add sender</Button>}
       />
 
       {roles !== null && !writable && <ReadOnlyNotice>Your role can see the senders but not change them.</ReadOnlyNotice>}
@@ -200,7 +234,7 @@ export default function NotificationsPage() {
               icon={<Send />}
               title="No sender is configured"
               hint="Clients cannot be sent an emailed or texted code until one is. Room numbers, vouchers and accounts do not need this."
-              action={writable ? <Button onClick={openNew}><Plus /> Add a sender</Button> : undefined}
+              action={writable && channels.length > 0 ? <Button onClick={openNew}><Plus /> Add a sender</Button> : undefined}
             />
           ) : (
             <Table>
@@ -213,9 +247,9 @@ export default function NotificationsPage() {
                   return (
                     <TR key={n.id}>
                       <TD>
-                        <div className="font-medium">{n.display_name || (n.channel === "email" ? "Email" : "SMS")}</div>
+                        <div className="font-medium">{n.display_name || CHANNEL_LABELS[n.channel] || n.channel}</div>
                         <div className="text-xs text-muted-foreground">
-                          {n.channel === "email" ? "Email" : "Text message"}
+                          {CHANNEL_LABELS[n.channel] ?? n.channel}
                         </div>
                       </TD>
                       <TD className="text-sm">{KIND_LABELS[n.kind] ?? n.kind}</TD>
@@ -270,9 +304,8 @@ export default function NotificationsPage() {
           {mode === "new" ? (
             <>
               <Field label="Channel">
-                <Select value={f.channel} onChange={(e) => setChannel(e.target.value as "email" | "sms")}>
-                  <option value="email">Email</option>
-                  <option value="sms">Text message</option>
+                <Select value={f.channel} onChange={(e) => setChannel(e.target.value as Channel)}>
+                  {channels.map((c) => <option key={c} value={c}>{CHANNEL_LABELS[c]}</option>)}
                 </Select>
               </Field>
               <Field label="Service">
@@ -284,7 +317,7 @@ export default function NotificationsPage() {
           ) : (
             <Field label="Channel and service" hint="These cannot be changed; remove and re-add instead.">
               <div className="flex h-9 items-center rounded-md border border-border bg-surface px-3 text-sm">
-                {f.channel === "email" ? "Email" : "Text message"} · {KIND_LABELS[f.kind] ?? f.kind}
+                {CHANNEL_LABELS[f.channel] ?? f.channel} · {KIND_LABELS[f.kind] ?? f.kind}
               </div>
             </Field>
           )}
@@ -292,8 +325,8 @@ export default function NotificationsPage() {
             <Input value={f.display_name} onChange={(e) => set("display_name", e.target.value)} placeholder="Optional" />
           </Field>
           <Field
-            label="API key"
-            hint={mode === "edit" ? "Leave blank to keep the key already stored." : "From the service's console."}
+            label={f.kind === "meta_whatsapp" ? "Access token" : f.kind === "twilio_whatsapp" || f.kind === "twilio" ? "Auth token" : "API key"}
+            hint={mode === "edit" ? "Leave blank to keep the one already stored." : "From the service's console. Stored write-only."}
           >
             <Input
               type="password"
@@ -304,8 +337,9 @@ export default function NotificationsPage() {
             />
           </Field>
           <Field
-            label={f.channel === "sms" ? "Account SID" : "API user"}
-            hint={f.channel === "sms" ? "Twilio's account SID. Not a secret." : "Only some services need this."}
+            label={f.kind === "meta_whatsapp" ? "Phone number ID" : f.channel === "email" ? "API user" : "Account SID"}
+            hint={f.kind === "meta_whatsapp" ? "The WhatsApp Business phone number ID (digits). Not a secret."
+              : f.channel === "email" ? "Only some services need this." : "Twilio's account SID. Not a secret."}
           >
             <Input value={f.api_user} onChange={(e) => set("api_user", e.target.value)} placeholder="Optional" />
           </Field>
@@ -323,6 +357,26 @@ export default function NotificationsPage() {
                 <Input value={f.from_name} onChange={(e) => set("from_name", e.target.value)} placeholder="Wi-Fi Access" />
               </Field>
             </>
+          )}
+          {f.kind === "twilio_whatsapp" && (
+            <Field label="WhatsApp sender number" hint="The approved WhatsApp sender, with the country code.">
+              <Input value={f.from_address} onChange={(e) => set("from_address", e.target.value)} placeholder="+14155238886" dir="ltr" />
+            </Field>
+          )}
+          {f.kind === "meta_whatsapp" && (
+            <>
+              <Field label="Template name" hint="The approved authentication template that carries the code.">
+                <Input value={f.template_name} onChange={(e) => set("template_name", e.target.value)} placeholder="sign_in_code" />
+              </Field>
+              <Field label="Template language" hint="The template's language code, for example en or en_US.">
+                <Input value={f.language} onChange={(e) => set("language", e.target.value)} placeholder="en" />
+              </Field>
+            </>
+          )}
+          {f.kind === "twilio_whatsapp" && (
+            <Field label="Content SID" hint="The approved authentication template (starts with HX).">
+              <Input value={f.content_sid} onChange={(e) => set("content_sid", e.target.value)} placeholder="HX…" />
+            </Field>
           )}
         </div>
         <div className="flex items-center justify-between rounded-md border border-border bg-surface/50 px-3.5 py-2.5">
@@ -342,7 +396,7 @@ export default function NotificationsPage() {
         title="Remove this sender?"
         description={
           deleting
-            ? `Codes will no longer be sent by ${deleting.display_name || (deleting.channel === "email" ? "email" : "text message")}. Any sign-in method that depends on it will stop working for clients until another sender is configured.`
+            ? `Codes will no longer be sent by ${deleting.display_name || (CHANNEL_LABELS[deleting.channel] ?? deleting.channel).toLowerCase()}. Any sign-in method that depends on it will stop working for clients until another sender is configured.`
             : undefined
         }
         confirmLabel="Remove"

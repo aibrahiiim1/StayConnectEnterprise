@@ -43,6 +43,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/stayconnect/enterprise/data-plane/internal/codegen"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/localkeys"
@@ -227,16 +228,29 @@ func (s *server) issueVouchersIAMv2(w http.ResponseWriter, r *http.Request) {
 	// system could issue was an orphan: there was no way to say "cancel the cards we printed on Tuesday" or
 	// "export that batch", because there were no batches -- only rows. An export selection and a bulk recall
 	// both need this, so issuance mints it here rather than leaving the column to a later feature.
+	//
+	// ATOMIC: the batch row and every voucher commit together or not at all, so a failure part-way leaves
+	// no printed-but-partial batch. The issuance gate (0095) refuses, inside the same transaction, a package
+	// that is inactive, not acquirable by Voucher, or not on its current revision.
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		httpErr(w, http.StatusInternalServerError, "issuance could not start")
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
 	var batchID string
-	if err := s.db.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&batchID); err != nil {
-		httpErr(w, http.StatusInternalServerError, "batch id allocation failed")
+	if err := tx.QueryRow(ctx, `
+	    INSERT INTO iam_v2.voucher_batches (tenant_id, site_id, package_revision_id, label)
+	    VALUES ($1, $2, $3, $4) RETURNING id::text`,
+		s.tenID, s.siteID, in.PackageRevisionID, nullIfEmpty(in.Note)).Scan(&batchID); err != nil {
+		httpErr(w, http.StatusInternalServerError, "batch could not be recorded")
 		return
 	}
 	for _, code := range codes {
 		// The row id is generated up front because the code ciphertext's AAD binds it: the ciphertext
 		// cannot be moved to another voucher row and still open.
 		var vid string
-		if err := s.db.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&vid); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&vid); err != nil {
 			httpErr(w, http.StatusInternalServerError, "id allocation failed")
 			return
 		}
@@ -246,7 +260,7 @@ func (s *server) issueVouchersIAMv2(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		idx := iamv2.VoucherCodeHMAC(hmacKey, s.tenID, s.siteID, code)
-		if _, err := s.db.Exec(ctx, `
+		if _, err := tx.Exec(ctx, `
 		    INSERT INTO iam_v2.vouchers
 		           (id, tenant_id, site_id, package_revision_id, code_hmac, code_ciphertext, code_nonce,
 		            code_key_generation_id, code_last4, notes, batch_id, issued_by,
@@ -255,9 +269,17 @@ func (s *server) issueVouchersIAMv2(w http.ResponseWriter, r *http.Request) {
 			vid, s.tenID, s.siteID, in.PackageRevisionID, idx, ct, nonce, genID,
 			iamv2.Last4(code), nullIfEmpty(in.Note), batchID, strings.TrimSpace(in.IssuedBy),
 			validFrom, validUntil); err != nil {
+			if isVoucherIssuanceRefusal(err) {
+				httpErr(w, http.StatusConflict, voucherIssuanceRefusal(err))
+				return
+			}
 			httpErr(w, http.StatusInternalServerError, "voucher insert failed")
 			return
 		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		httpErr(w, http.StatusInternalServerError, "issuance could not be committed")
+		return
 	}
 	// The audit records how many were issued, against which revision, and in which format -- NEVER a code,
 	// not even its last4 in bulk, because a batch log line is not the audited reveal action. The format is
@@ -312,4 +334,53 @@ func nullIfEmpty(s string) any {
 		return nil
 	}
 	return s
+}
+
+func isVoucherIssuanceRefusal(err error) bool {
+	m := err.Error()
+	for _, k := range []string{"VOUCHER_NOT_ACCEPTED", "VOUCHER_PACKAGE_INACTIVE", "VOUCHER_REVISION_NOT_CURRENT", "VOUCHER_PACKAGE_UNKNOWN"} {
+		if strings.Contains(m, k) {
+			return true
+		}
+	}
+	return false
+}
+
+// voucherIssuanceRefusal turns the issuance gate's refusal into the operator's sentence.
+func voucherIssuanceRefusal(err error) string {
+	m := err.Error()
+	switch {
+	case strings.Contains(m, "VOUCHER_NOT_ACCEPTED"):
+		return "This package is not acquirable by Voucher. Edit the package and tick Voucher first."
+	case strings.Contains(m, "VOUCHER_PACKAGE_INACTIVE"):
+		return "This package is inactive. Vouchers already issued keep working; new ones cannot be issued."
+	case strings.Contains(m, "VOUCHER_REVISION_NOT_CURRENT"):
+		return "That is not the package's current version. Issue against the current one."
+	}
+	return "Vouchers cannot be issued for this package."
+}
+
+// revokeVoucherBatch ends every UNUSED voucher of one batch, with the operator and reason recorded once in
+// iam_v2.voucher_revocations. Redeemed vouchers are untouched: their access is an entitlement.
+func (s *server) revokeVoucherBatch(w http.ResponseWriter, r *http.Request) {
+	var in voucherActor
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		httpErr(w, http.StatusBadRequest, "bad body")
+		return
+	}
+	if err := in.validate(true); err != nil {
+		httpErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	id := chi.URLParam(r, "id")
+	var n int
+	if err := s.db.QueryRow(r.Context(),
+		`SELECT iam_v2.voucher_batch_revoke($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5)`,
+		s.tenID, s.siteID, id, in.OperatorID, strings.TrimSpace(in.Reason)).Scan(&n); err != nil {
+		httpErr(w, http.StatusBadRequest, "batch revoke refused")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"batch_id": id, "revoked": n})
 }

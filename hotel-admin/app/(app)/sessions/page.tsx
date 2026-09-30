@@ -41,7 +41,8 @@ import { formatBytes, formatRelative, formatDate, errMsg } from "@/lib/utils";
 import {
   identifySession, methodLabel, stateWords, endReasonWords, speedPair,
 } from "@/lib/session-words";
-import { Users, Monitor, ArrowDownUp, Hotel, KeyRound, Ticket, UserCircle, Power } from "lucide-react";
+import { moduleHasHistory, moduleLicensed, useCapabilities } from "@/lib/capabilities";
+import { Users, Monitor, ArrowDownUp, Hotel, KeyRound, Ticket, UserCircle, Power, PackageOpen } from "lucide-react";
 
 type Tab = "active" | "recent";
 
@@ -52,6 +53,7 @@ const KIND_ICON = {
   account: KeyRound,
   voucher: Ticket,
   guest: UserCircle,
+  open: PackageOpen,
   "": Monitor,
 } as const;
 
@@ -175,6 +177,17 @@ export default function SessionsPage() {
     return c;
   }, [rows]);
 
+  // WHICH SIGN-IN TYPES THIS SITE CAN HAVE. Rooms are a Hotel idea: they are offered as a filter, a search
+  // term and a word in the help only where hospitality is licensed or has left records -- or where a room
+  // session is actually in the list, because a filter must never hide rows that exist. Email / social follows
+  // the identity modules the same way. Unknown module state hides both (fail closed); the rows themselves are
+  // data and always shown as they are.
+  const caps = useCapabilities();
+  const rooms = moduleHasHistory(caps, "hospitality") || (kindCounts.room ?? 0) > 0;
+  const identity = ["email_otp", "sms_otp", "whatsapp_otp", "social_login"].some((m) => moduleLicensed(caps, m))
+    || (kindCounts.guest ?? 0) > 0;
+  const grantedTo = rooms ? "one room, account or voucher" : "one account or voucher";
+
   return (
     <PageShell width="wide">
       <PageHeader
@@ -187,13 +200,13 @@ export default function SessionsPage() {
             <HelpSection title="Sessions, devices and clients">
               <p>
                 A session is one device; a client may have several. A client is counted by what the internet was
-                granted to &mdash; one room, account or voucher &mdash; so a family with four devices is one client.
+                granted to &mdash; {grantedTo} &mdash; so a family with four devices is one client.
               </p>
             </HelpSection>
             <HelpSection title="On this page">
               <HelpList items={[
                 <><strong>Online now</strong> refreshes every 10 seconds; <strong>Recent</strong> also includes sessions that have ended.</>,
-                "Search by room, name, username, IP or MAC, or filter by how the client signed in.",
+                `Search by ${rooms ? "room, " : ""}name, username, IP or MAC, or filter by how the client signed in.`,
                 "Open a session for its details, or disconnect a device. A disconnected client can sign in again.",
               ]} />
             </HelpSection>
@@ -240,8 +253,8 @@ export default function SessionsPage() {
           icon={<Users />}
           explain={
             <Explain>
-              Counted by what the internet was granted to — one room, account or voucher — so a family with four
-              devices is one client.
+              Counted by what the internet was granted to — {grantedTo} — so a family with four devices is one
+              client.
             </Explain>
           }
         />
@@ -268,7 +281,7 @@ export default function SessionsPage() {
             <SearchInput
               value={query}
               onChange={setQuery}
-              placeholder="Room, name, username, IP or MAC…"
+              placeholder={rooms ? "Room, name, username, IP or MAC…" : "Name, username, IP or MAC…"}
               label="Search sessions"
               className="sm:max-w-xs"
             />
@@ -280,10 +293,11 @@ export default function SessionsPage() {
                 className="w-full sm:w-52"
               >
                 <option value="">All sign-in types</option>
-                <option value="room">Room ({kindCounts.room ?? 0})</option>
+                {rooms && <option value="room">Room ({kindCounts.room ?? 0})</option>}
                 <option value="account">Account ({kindCounts.account ?? 0})</option>
                 <option value="voucher">Voucher ({kindCounts.voucher ?? 0})</option>
-                <option value="guest">Email / social ({kindCounts.guest ?? 0})</option>
+                {identity && <option value="guest">Email / social ({kindCounts.guest ?? 0})</option>}
+                <option value="open">Without sign-in ({kindCounts.open ?? 0})</option>
               </Select>
               {(query || kind) && (
                 <Button variant="ghost" size="sm" onClick={() => { setQuery(""); setKind(""); }}>

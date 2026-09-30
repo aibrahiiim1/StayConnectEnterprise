@@ -195,17 +195,28 @@ type stayOccupant struct {
 	IsPrimary bool    `json:"is_primary"`
 }
 
-type stayFolio struct {
-	ExternalID string `json:"external_folio_id"`
-	Kind       string `json:"folio_kind"`
-	Status     string `json:"status"`
-	IsDefault  bool   `json:"is_default_posting_target"`
+// stayPostingBlock is one reasoned stop on room charging for the stay (Phase-0 Amendment A1), active or
+// cleared. There are no folios: a room charge targets the reservation.
+type stayPostingBlock struct {
+	Reason          string     `json:"reason"`
+	Source          string     `json:"source"`
+	PAStatus        *string    `json:"pa_as_status,omitempty"`
+	Note            *string    `json:"note,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	CreatedBy       *string    `json:"created_by,omitempty"` // operator e-mail, ADMIN_BLOCK only
+	ClearedAt       *time.Time `json:"cleared_at,omitempty"`
+	ClearedBySource *string    `json:"cleared_by_source,omitempty"`
+	ClearedBy       *string    `json:"cleared_by,omitempty"` // operator e-mail, ADMIN_BLOCK only
+	ClearedReason   *string    `json:"cleared_reason,omitempty"`
 }
 
 type stayDetail struct {
 	stayRow
-	Occupants []stayOccupant `json:"occupant_list"`
-	Folios    []stayFolio    `json:"folios"`
+	Occupants     []stayOccupant     `json:"occupant_list"`
+	PostingBlocks []stayPostingBlock `json:"posting_blocks"`
+	// RoomChargeOpen: a room charge for this stay is pending, being sent or under review. Only one may exist at
+	// a time (Phase-0 Amendment A1), so a new one is not offered until it concludes.
+	RoomChargeOpen bool `json:"room_charge_open"`
 }
 
 func (s *server) getStay(w http.ResponseWriter, r *http.Request) {
@@ -235,19 +246,25 @@ func (s *server) getStay(w http.ResponseWriter, r *http.Request) {
 		}
 		rows.Close()
 	}
-	d.Folios = []stayFolio{}
-	frows, err := s.db.Query(ctx, `SELECT f.external_folio_id, f.folio_kind, f.status, sf.is_default_posting_target
-		FROM iam_v2.stay_folios sf JOIN iam_v2.folios f ON f.id=sf.folio_id
-		WHERE sf.stay_id=$1 ORDER BY sf.is_default_posting_target DESC, f.external_folio_id`, id)
+	d.PostingBlocks = []stayPostingBlock{}
+	brows, err := s.db.Query(ctx, `SELECT b.reason, b.source, b.pa_as_status, b.note, b.created_at, oc.email,
+		       b.cleared_at, b.cleared_by_source, ox.email, b.cleared_reason
+		  FROM iam_v2.stay_posting_blocks b
+		  LEFT JOIN public.operators oc ON oc.id = b.created_by
+		  LEFT JOIN public.operators ox ON ox.id = b.cleared_by
+		 WHERE b.stay_id=$1 AND b.tenant_id=$2
+		 ORDER BY (b.cleared_at IS NULL) DESC, b.created_at DESC LIMIT 20`, id, s.tenantID)
 	if err == nil {
-		for frows.Next() {
-			var f stayFolio
-			if frows.Scan(&f.ExternalID, &f.Kind, &f.Status, &f.IsDefault) == nil {
-				d.Folios = append(d.Folios, f)
+		for brows.Next() {
+			var b stayPostingBlock
+			if brows.Scan(&b.Reason, &b.Source, &b.PAStatus, &b.Note, &b.CreatedAt, &b.CreatedBy,
+				&b.ClearedAt, &b.ClearedBySource, &b.ClearedBy, &b.ClearedReason) == nil {
+				d.PostingBlocks = append(d.PostingBlocks, b)
 			}
 		}
-		frows.Close()
+		brows.Close()
 	}
+	_ = s.db.QueryRow(ctx, `SELECT iam_v2.p4_stay_room_charge_open($1::uuid)`, id).Scan(&d.RoomChargeOpen)
 	writeJSON(w, http.StatusOK, d)
 }
 

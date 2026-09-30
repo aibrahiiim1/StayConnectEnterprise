@@ -75,8 +75,20 @@ func (m *mountedSurfaces) list() []string {
 // the role matrix on top of this list. Returning the same answer to every authenticated operator keeps this
 // endpoint a statement of fact rather than a second, parallel authorisation model that could disagree with
 // the first one.
+//
+// MODULE-OWNED SURFACES are reported only while they may be served (modules.go surfaceServed): a day-to-day
+// surface while its module is LICENSED; a history/recovery surface while the module is licensed or still
+// holds records. If the module state cannot be read they
+// are all omitted: the navigation then shows only the core, which fails closed. "modules" carries the full
+// state for the Modules and Payment methods screens; it is null when unreadable.
 func (s *server) capabilities(w http.ResponseWriter, r *http.Request) {
+	surfaces, rep := s.filterSurfaces(r.Context(), s.surfaces.list())
+	var mods any
+	if rep != nil {
+		mods = rep.Modules
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"surfaces": s.surfaces.list(),
+		"surfaces": surfaces,
+		"modules":  mods,
 	})
 }

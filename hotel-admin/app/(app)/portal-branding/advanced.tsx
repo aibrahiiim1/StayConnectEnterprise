@@ -2,7 +2,8 @@
 
 // ADVANCED HTML & CSS — the escape hatch, with the server's own verdict beside it.
 //
-// This is the page guests type their room number, surname and voucher codes into. Styling and markup are
+// This is the page clients type their sign-in details into -- voucher codes and passwords, and room numbers
+// and surnames where hospitality is licensed. Styling and markup are
 // welcome; anything that could run, load from elsewhere or re-target the sign-in forms is not. The editor does
 // not guess at those rules: it sends the text to /portal-branding/validate and shows what the portal would
 // remove -- "removed the onerror attribute on <img>" -- while the operator is still looking at it, and offers
@@ -16,7 +17,7 @@ import { Callout } from "@/components/ui/error-banner";
 import { CodeEditor } from "@/components/ui/code-editor";
 import { CheckCircle2, ShieldCheck, Wand2 } from "lucide-react";
 import { LIMITS, type DesignIssue } from "@/lib/api/portal-design";
-import { Design } from "./strings";
+import { Design, collectedDetails } from "./strings";
 
 const CSS_EXAMPLE = `/* Your rules take precedence over the portal's own styling. */
 .card { box-shadow: 0 20px 60px rgba(0, 0, 0, .25); }
@@ -27,7 +28,7 @@ const HTML_EXAMPLE = `<section class="notices">
   <ul><li>Help desk 08:00–20:00</li><li>Printers on the ground floor</li></ul>
 </section>`;
 
-export function AdvancedSection({ d, set, writable, issues, sanitized, checking, needsPassword }: {
+export function AdvancedSection({ d, set, writable, issues, sanitized, checking, needsPassword, hospitality = false }: {
   d: Design;
   set: <K extends keyof Design>(k: K, v: Design[K]) => void;
   writable: boolean;
@@ -35,10 +36,12 @@ export function AdvancedSection({ d, set, writable, issues, sanitized, checking,
   sanitized: { custom_css: string; custom_html: string } | null;
   checking: boolean;
   needsPassword: boolean;
+  /** Whether room numbers are among what the page collects (hospitality licensed). */
+  hospitality?: boolean;
 }) {
   return (
     <div className="space-y-5">
-      <Callout tone="warning" title="This page collects clients' room numbers and voucher codes">
+      <Callout tone="warning" title={`This page collects clients' ${collectedDetails(hospitality)}`}>
         Styling and markup are accepted. <strong>Scripts, event handlers, frames, forms, external stylesheets,
         &lt;base&gt;, &lt;meta&gt; and @import are not</strong> — anything that could run or send a client&apos;s
         details elsewhere. The portal applies the same rules again before any client receives the page, and the

@@ -87,6 +87,11 @@ type Document struct {
 	LicenseVersion            int64  `json:"license_version,omitempty"`
 	SupersedesLicenseID       string `json:"supersedes_license_id,omitempty"`
 
+	// Schema v4 — module authorisation. Modules is the SOLE commercial
+	// authority of a v4 licence; Features is emitted only as a compatibility
+	// projection computed by ProjectFeatures and is never read as authority.
+	Modules Modules `json:"modules"`
+
 	// SchemaVersion allows future payload evolution; verifiers reject
 	// versions they do not understand rather than misreading fields.
 	SchemaVersion int `json:"schema_version"`
@@ -95,7 +100,7 @@ type Document struct {
 // CurrentSchemaVersion is the version new licenses are issued with. Verifiers
 // accept MinSchemaVersion..CurrentSchemaVersion so an appliance holding a v1
 // license keeps working across the upgrade.
-const CurrentSchemaVersion = 3
+const CurrentSchemaVersion = 4
 const MinSchemaVersion = 1
 
 // EffectiveGraceDays is the grace window applied after ValidUntil. The simple
@@ -228,6 +233,16 @@ func (d *Document) Validate() error {
 	}
 	if d.Status != DocActive && d.Status != DocSuspended {
 		return fmt.Errorf("unknown status %q", d.Status)
+	}
+	if d.SchemaVersion >= 4 {
+		if d.Modules == nil {
+			return fmt.Errorf("schema v4 requires modules")
+		}
+		// Features must be exactly the projection of modules: a v4 document
+		// can never carry an independent feature authority.
+		if d.Features != ProjectFeatures(d.Modules) {
+			return fmt.Errorf("features disagree with the modules projection")
+		}
 	}
 	return nil
 }

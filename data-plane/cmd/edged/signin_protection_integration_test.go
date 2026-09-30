@@ -549,7 +549,7 @@ func TestIntegration_Protection_TheReleaseIsRecordedAgainstTheOperator(t *testin
 	var actor, payload string
 	if err := f.pool.QueryRow(context.Background(), `
 		SELECT COALESCE(actor_id,''), payload::text FROM public.audit_log
-		 WHERE action='guest_signin_restriction.release' ORDER BY created_at DESC LIMIT 1`).
+		 WHERE action='guest_signin_restriction.release' ORDER BY ts DESC LIMIT 1`).
 		Scan(&actor, &payload); err != nil {
 		t.Fatalf("the release was not audited: %v", err)
 	}
@@ -763,7 +763,7 @@ func TestIntegration_Protection_EveryPolicyChangeRecordsWhoAndFromWhat(t *testin
 	var payload string
 	if err := f.pool.QueryRow(context.Background(), `
 		SELECT payload::text FROM public.audit_log
-		 WHERE action='guest_signin_protection.update' ORDER BY created_at DESC LIMIT 1`).Scan(&payload); err != nil {
+		 WHERE action='guest_signin_protection.update' ORDER BY ts DESC LIMIT 1`).Scan(&payload); err != nil {
 		t.Fatalf("the policy change was not audited: %v", err)
 	}
 	for _, want := range []string{"previous", "new", "config_version"} {

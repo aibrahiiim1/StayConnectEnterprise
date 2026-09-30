@@ -110,7 +110,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
       setNote("Recorded. Nothing was re-sent.");
       await load();
     } catch (e: any) {
-      setErr(e?.message ?? "Could not record that decision");
+      setErr(recoveryWords(e, "Could not record that decision"));
     } finally {
       setBusy(null);
     }
@@ -128,7 +128,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
       setNote("Financial recovery released. Money movement has resumed.");
       await load();
     } catch (e: any) {
-      setErr(e?.message ?? "Could not release recovery");
+      setErr(recoveryWords(e, "Could not release recovery"));
     } finally {
       setBusy(null);
     }
@@ -157,7 +157,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
       );
       await load();
     } catch (e: any) {
-      setErr(e?.message ?? "Could not authorize that retry");
+      setErr(recoveryWords(e, "Could not authorize that retry"));
     } finally {
       setBusy(null);
     }
@@ -450,4 +450,22 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
       )}
     </PageShell>
   );
+}
+
+// The database refuses a recovery decision with a fixed code; the operator reads a sentence. Unknown codes fall
+// back to the server's message, which is never empty of meaning.
+const RECOVERY_CODE_WORDS: [string, string][] = [
+  ["RECOVERY_NOT_ACTIVE", "This site is not in financial recovery, so there is nothing to release."],
+  ["RECOVERY_HOLD_UNKNOWN", "That held item no longer exists. Refresh the list."],
+  ["RECOVERY_HOLD_ALREADY_RESOLVED", "Someone has already recorded a decision for that item. Refresh the list."],
+  ["RECOVERY_NOTE_REQUIRED", "Write how you established this: the note is part of the permanent record."],
+  ["RECOVERY_RESOLUTION_INVALID", "Choose what you established about this item."],
+  ["REVIEW_REASON_REQUIRED", "Give the reason for authorising the retry (at least 10 characters)."],
+  ["REVIEW_POSTING_UNKNOWN", "That room charge no longer exists. Refresh the list."],
+];
+
+export function recoveryWords(e: any, fallback: string): string {
+  const msg: string = e?.message ?? "";
+  for (const [code, words] of RECOVERY_CODE_WORDS) if (msg.includes(code)) return words;
+  return msg || fallback;
 }

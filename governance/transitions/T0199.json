@@ -1,0 +1,46 @@
+{
+  "transition_id": "T0199",
+  "seq": 199,
+  "timestamp": "2026-09-29T03:05:00+03:00",
+  "timestamp_derivation": "Written after the PRE-LIVE and Central deployments of the PR #202 corrections were read back and verified, and before the commit that introduces this receipt.",
+  "record_type": "SITE_MODULES_PRODUCT_OWNER_FINDINGS_CORRECTED_READY_FOR_PRODUCT_OWNER_TESTING",
+  "authorisation": "Product-Owner mission of 2026-09-29: continue PR #202, correct every PRE-LIVE testing finding and complete the optional sign-in methods end to end; implementation, tests, migrations if required, PRE-LIVE and Central deployment, verification and governance synchronization authorised; merge NOT authorised.",
+  "decision": "D45",
+  "decisions_recorded": [],
+  "delivered": [
+    "Central activation: an appliance whose certificate Central revoked for reissue now reconciles by itself (scd submits a CSR over the signed HTTPS ingress, Central auto-issues on the activated appliance); Central names why an appliance is still activating (certificate_reissue / certificate / license) and offers the offline Activation package only when an unconsumed offline request exists.",
+    "Reachability: a 401/403 from Central after a recent success is reported as credential_refused ('Renewing its certificate') and triggers the reconcile, instead of 'Temporarily unreachable'; real faults are still reported.",
+    "Hotel Admin TLS check: validates the served chain against the unchanged root (Caddy rotates its 7-day intermediate); the page shows the reason ('INVALID: ...' / 'OK (renewal due: ...)') instead of the exit code. Root CA and trust roots untouched.",
+    "Module visibility: without a module the day-to-day Admin Console shows none of its concepts (Overview, Sign-in methods, Payment methods, package editor, Portal Settings strings and previews, sessions, usage, activity, allowed sites, client accounts, diagnostics); pages do not call module-owned APIs for an absent module; history and recovery stay reachable where records exist; edged refuses to switch on a sign-in method whose module is not licensed and deployed.",
+    "Optional sign-in methods: Email, SMS and WhatsApp one-time codes and Google, Facebook, Apple and Microsoft social sign-in, each offered only when licence, deployment ceiling (IAM-v2 OTP/SOCIAL), local switch and provider readiness allow; WhatsApp is its own channel and licence module (whatsapp_otp, migration 0099 plus owner script), Meta Cloud API and Twilio via approved authentication templates; secrets write-only and never logged."
+  ],
+  "verification": "Go: license, control-plane api/licensing, data-plane edged, scd, portald, social, socialloader, whatsapp, notifyloader, licstate, modules, deployment, appliancecert. Admin Console vitest 54 files / 626 tests and tsc; Central console vitest 10 files / 143 tests. phase4-dark-check PASS, validate-migration-grant-durability PASS, FACTORY_CLEAN_BASELINE PASS through 0099. Live on PRE-LIVE: scd reissued its revoked certificate at startup and Central/appliance both report connected and activated; hotel-admin-cert-manager check OK; scripts/guest-access-e2e-test.sh 43/43 on the site's current licence (no optional module: Room sign-in refused as it must be). Central central-deploy.sh smoke PASS 8/8.",
+  "deployment_provenance": "PRE-LIVE 172.21.60.25: scd, edged, portald and the Admin Console 588616a4; pmsd db05d7ba; netd, acctd and keybootstrap 99ba9f10; site migrations through 0099 (owner script applied, Gate-P reconciled); scd.env adds STAYCONNECT_IAMV2_OTP and STAYCONNECT_IAMV2_SOCIAL. Central 172.21.96.196: ctrlapi and console 8e4bed4e (no Central migration). Every value read back from the installed artifacts.",
+  "financial_traffic": "NONE. The harness asserted pms_postings, posting_outbox and payment_transactions unchanged (0/0/0). STAYCONNECT_PHASE4_PMS_TRANSMIT and STAYCONNECT_PAYMENT_LIVE_ALLOWED are set nowhere.",
+  "open_inputs": [
+    "Provider credentials for the credential-dependent live tests: an email/SMS/WhatsApp sender (Meta or Twilio with an approved authentication template) and Google/Facebook/Apple/Microsoft applications; Stripe and/or Paymob sandbox keys.",
+    "Central operator (Product Owner): licence the modules to be tested on the PRE-LIVE site (it is currently Site Type CAFE with no optional module licensed).",
+    "Product Owner acceptance of PR #202 before any merge."
+  ],
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0198."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. The PR #202 corrections are delivered to PRE-LIVE for Product Owner testing on the unmerged PR. PRE-LIVE remains PRE-LIVE."
+  },
+  "state_note": "No phase, activity or acceptance state changes. The delivery is READY FOR PRODUCT OWNER TESTING, not merged and not closed.",
+  "base": "42823d9dfecd4339ac540d1b5d19ee0bf5df40f4",
+  "base_note": "Master at the time the branch was cut (the merge of PR #201).",
+  "head": "8e4bed4e",
+  "head_note": "PR #202's last content commit before this governance record.",
+  "previous_delivery": "T0198",
+  "go_live": "NOT authorised. Real PMS posting and LIVE provider transactions remain prohibited."
+}

@@ -35,7 +35,10 @@ import { decideSave, saveOutcomeMessage } from "@/lib/package-save";
 import { formatSpeed, formatData, formatDuration, formatDevices, DEVICE_LIMIT_POLICIES } from "@/lib/units";
 import { allocationFromPolicy, stayLengthWarnings, readStayLength, type PackageStayRange } from "@/lib/stay-packages";
 import { formatDate } from "@/lib/utils";
-import { rulesToForm, tiersToForm, durationToForm, toLocalInput, type PackageCurrent } from "./form-mapping";
+import {
+  rulesToForm, tiersToForm, durationToForm, toLocalInput, acquisitionToForm, type PackageCurrent,
+} from "./form-mapping";
+import { describePublishRefusal, type ModulesReport, type RoomChargeInterface } from "@/lib/commerce-form";
 
 type PlanSummary = PlanOption & { used_by_active_packages?: number };
 type Chip = "active" | "disabled" | "all";
@@ -69,6 +72,33 @@ export function PackagesTab({
   const [disabling, setDisabling] = useState<PackageSummary | null>(null);
   const [deleting, setDeleting] = useState<PackageSummary | null>(null);
   const [actionErr, setActionErr] = useState<unknown>(null);
+  // WHAT THE PRICE SECTION MAY OFFER: the site's module state and the PMS interfaces room charge can be mapped
+  // to. Read each time the form opens, because an operator may have just switched a module on in another tab.
+  // null = loading; "error" = could not be read, which the form treats as not selectable (fail closed).
+  const [modules, setModules] = useState<ModulesReport | "error" | null>(null);
+  const [roomIfaces, setRoomIfaces] = useState<RoomChargeInterface[] | "error" | null>(null);
+  const formOpen = adding || editing !== null;
+  useEffect(() => {
+    if (!formOpen) return;
+    let live = true;
+    setModules(null); setRoomIfaces(null);
+    // The PMS interfaces room charge can map to are asked for only when Room charge is licensed: a site
+    // without it never calls the room-charge surface.
+    api.get<ModulesReport>("/modules")
+      .then((m) => {
+        if (!live) return;
+        setModules(m ?? {});
+        if (m?.modules?.room_charge?.licensed) {
+          api.get<{ interfaces?: RoomChargeInterface[] | null }>("/pms-financial-onboarding")
+            .then((r) => { if (live) setRoomIfaces(r?.interfaces ?? []); })
+            .catch(() => { if (live) setRoomIfaces("error"); });
+        } else {
+          setRoomIfaces([]);
+        }
+      })
+      .catch(() => { if (live) { setModules("error"); setRoomIfaces([]); } });
+    return () => { live = false; };
+  }, [formOpen]);
 
   const load = useCallback(async () => {
     try {
@@ -162,6 +192,8 @@ export function PackagesTab({
         visibleUntil: toLocalInput(cur.visible_until),
         // Loaded, not defaulted: an edit meant only to rename must not flatten a per-night allowance.
         allocation: allocationFromPolicy(cur.data_allocation_policy),
+        // Loaded, not defaulted, for the same reason: a rename must not make a priced package free.
+        acquisition: acquisitionToForm(cur),
       });
       setAdding(false);
     } catch (e) { if (!guard(e)) setErr((e as Error)?.message ?? "Could not open this package"); }
@@ -193,7 +225,14 @@ export function PackagesTab({
       setNotice(msg);
       toast.success(mode === "add" ? "Package added" : "Package saved", msg);
       await load();
-    } catch (e) { if (!guard(e)) setFormErr(e); }
+    } catch (e) {
+      if (guard(e)) return;
+      // A refusal of the price section arrives as "invalid_currency: …"; it is shown naming the part of the
+      // form it concerns. A module refusal (409 module_not_enabled) already reads as a sentence and is shown
+      // as the server wrote it, like every other refusal.
+      const readable = e instanceof Error ? describePublishRefusal(e.message) : null;
+      setFormErr(readable ?? e);
+    }
     finally { setBusy(false); }
   }
 
@@ -442,7 +481,8 @@ export function PackagesTab({
           </DialogHeader>
           <DialogBody className="space-y-4">
             <ErrorBanner err={formErr} />
-            <PackageForm mode="add" plans={plans} busy={busy} onSave={(v) => save(v, "add")} onCancel={() => setAdding(false)} />
+            <PackageForm mode="add" plans={plans} busy={busy} onSave={(v) => save(v, "add")} onCancel={() => setAdding(false)}
+              modules={modules} roomChargeInterfaces={roomIfaces} />
           </DialogBody>
         </DialogContent>
       </Dialog>
@@ -460,7 +500,7 @@ export function PackagesTab({
             <ErrorBanner err={formErr} />
             {editing && (
               <PackageForm mode="edit" initial={editing} plans={plans} busy={busy} onSave={(v) => save(v, "edit")}
-                onCancel={() => setEditing(null)} />
+                onCancel={() => setEditing(null)} modules={modules} roomChargeInterfaces={roomIfaces} />
             )}
           </DialogBody>
         </DialogContent>

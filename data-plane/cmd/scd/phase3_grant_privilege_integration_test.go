@@ -243,3 +243,62 @@ func TestIntegration_Phase3Grant_FullChainAsServiceRole(t *testing.T) {
 		t.Fatal("a successful grant left the Auth Context unconsumed, so the proof was never spent")
 	}
 }
+
+// ROOM CHARGE IS DECIDED UNDER THE REAL ROLE. On PRE-LIVE, with posting switched on, no room guest was ever
+// offered Room charge: the applicability statement read pms_interface_runtime (through an invoker function) as
+// svc_scd, which may not read it, and the resulting "permission denied" became "not applicable". Asserted three
+// ways, because the full statement short-circuits on any fixture that is not fully onboarded:
+//   - svc_scd can ask the narrow freshness reader (migration 0101);
+//   - svc_scd still cannot call the invoker function directly -- the reason the reader exists;
+//   - the applicability statement asks only the reader.
+func TestIntegration_Phase3Grant_RoomChargeApplicabilityRunsAsServiceRole(t *testing.T) {
+	f := newProdAuthFixture(t)
+	requireServiceRole(t, f, "svc_scd")
+	p3 := f.serviceRolePhase3(t)
+	ctx := context.Background()
+	var fresh bool
+	if err := p3.srv.db.QueryRow(ctx, `SELECT iam_v2.p4_room_charge_interface_fresh($1,$2,$3)`,
+		f.tenant, f.site, f.iface).Scan(&fresh); err != nil {
+		t.Fatalf("svc_scd cannot ask whether the interface is fresh for room charge: %v", err)
+	}
+	var block string
+	err := p3.srv.db.QueryRow(ctx, `SELECT iam_v2.p4_interface_freshness_block($1,$2,$3,$4,now())`,
+		f.tenant, f.site, f.iface, f.revision).Scan(&block)
+	if err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("svc_scd read the feed health directly (err=%v); the Gate-P rule is that it may not", err)
+	}
+	if strings.Contains(roomChargeApplicableSQL, "p4_interface_freshness_block") ||
+		strings.Contains(roomChargeApplicableSQL, "pms_interface_runtime") ||
+		!strings.Contains(roomChargeApplicableSQL, "p4_room_charge_interface_fresh") {
+		t.Fatal("the room-charge applicability statement reads feed health svc_scd may not read")
+	}
+	var ok bool
+	if err := p3.srv.db.QueryRow(ctx, roomChargeApplicableSQL,
+		f.tenant, f.site, f.iface, f.stay, "USD", 2, f.priced).Scan(&ok); err != nil {
+		t.Fatalf("the room-charge applicability statement fails as svc_scd: %v", err)
+	}
+}
+
+// A ROOM SIGN-IN RECORDS WHERE THE DEVICE WAS SEEN, as svc_scd. Activation admits a device only on a network it
+// has appeared on; a paid room charge activates its session later, from the portal's status page, and on
+// PRE-LIVE the device was refused as DEVICE_IDENTITY_MISMATCH after the charge had posted because nothing had
+// recorded the appearance.
+func TestIntegration_Phase3Grant_RoomSignInRecordsTheDeviceAppearance(t *testing.T) {
+	f := newProdAuthFixture(t)
+	requireServiceRole(t, f, "svc_scd")
+	p3 := f.serviceRolePhase3(t)
+	_, res := post(t, p3.resolveHandler,
+		f.resolveBody("412", "Okonkwo", "", "00000065-0000-4000-8000-000000000000"))
+	if res.Outcome != outcomeVerified {
+		t.Fatalf("resolve: %+v", res)
+	}
+	var n int
+	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM iam_v2.device_network_appearances a
+		JOIN iam_v2.devices d ON d.id = a.device_id
+		WHERE d.mac = $1::macaddr AND a.guest_network_id = $2::uuid`, f.net.mac, f.network).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("the signed-in device has %d appearance(s) on its guest network, want 1", n)
+	}
+}

@@ -1,0 +1,46 @@
+{
+  "transition_id": "T0205",
+  "seq": 205,
+  "timestamp": "2026-09-30T19:08:27+03:00",
+  "timestamp_derivation": "Written after the PRE-LIVE deployment and the live verification were read back, and before the commit that introduces this receipt.",
+  "record_type": "ROOM_CHARGE_FINANCIAL_FRESHNESS_REDESIGNED_READY_FOR_PRODUCT_OWNER_TESTING",
+  "authorisation": "Product-Owner approval of 2026-09-30 (D48), with the correction that only a successful complete resync proves the mirror age. NOT the merge of PR #202 and NOT Go-Live.",
+  "decision": "D48",
+  "decisions_recorded": [
+    "D48"
+  ],
+  "delivered": [
+    "Migration 0103: p4_interface_freshness_block no longer requires a live event within feed_freshness_ms; it requires CONNECTED, the PMS heartbeat within heartbeat_timeout_ms (5-minute default when unstated), CONTINUOUS, IN_SYNC, no part-published generation, the pinned revision, and a successful complete resync within the financial mirror maximum age (FINANCIAL_MIRROR_STALE).",
+    "The financial mirror maximum age: per-interface setting, default 4 hours, 1-24 hours, audited definer with reason and active operator, append-only change log; Room charge page 'Guest list proof' card and a site-admin step-up dialog.",
+    "pmsd: p4_financial_resync_due at half the bound; at most one question a minute, never while a resync is outstanding, 10/20/40-minute backoff, an unanswered request released after 5 minutes.",
+    "Phase-4 harness now runs the A1 and D48 room-charge suites on the worker's and pmsd's own logins."
+  ],
+  "verification": "Six-stage scenario suite (offer, posting creation, worker claim, abort-before-send, attempt creation, pmsd pre-wire authorisation) in ten states: healthy quiet feed beyond 15 minutes (fresh), live event on an unproven mirror, failed resync past the 4-hour bound, custom bound, heartbeat stale, disconnected, GAP_DETECTED, resync in progress, part-published generation, revision mismatch -- all six stages agree; fails under the 0012 rule. pmsd scheduler and adapter tests; setting validation, step-up and audit, also as svc_edged. phase-4, pmsd, phase-5 and prod-privilege harnesses PASS; FACTORY_CLEAN_BASELINE PASS through 0103; Admin Console 647/647 and tsc. PRE-LIVE: migration 0103 applied after a pg_dump; with the financial mirror maximum age set to 1 hour for the check, pmsd requested exactly one read-only full resync at 15:42:47Z (30 minutes after the last complete resync) and it completed; the limit was then set to 4 hours through the same audited, step-up path (both changes in the append-only log); at 16:07:56Z the feed had been silent for 15 min 18 s and room charge read fresh at the offer; the guest-access harness passed 47/47 with Room charge offered; the Room charge page shows the Guest list proof card; no real charge was made in this round.",
+  "real_pms_posting": "None in this round. Postings ever on PRE-LIVE: one (T0204).",
+  "deployment_provenance": "PRE-LIVE 172.21.60.25: pmsd, edged and the Admin Console d4a48a5f (release 20260930-151201); scd 80b44c0e; portald d5c3e578; netd and acctd 99ba9f10; site migrations through 0103 (pg_dump before). DEPLOYED_BINARIES.{sha256,txt} rewritten from the installed bytes (6/6 OK).",
+  "open_inputs": [
+    "Product Owner acceptance of PR #202 before any merge.",
+    "Front Office reversal of the USD 1.00 verification charge (P# 1, T0204)."
+  ],
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0204."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. PRE-LIVE remains PRE-LIVE; Go-Live is not authorised."
+  },
+  "state_note": "No phase, activity or acceptance state changes. The delivery is READY FOR PRODUCT OWNER TESTING, not merged and not closed.",
+  "base": "42823d9dfecd4339ac540d1b5d19ee0bf5df40f4",
+  "base_note": "Master at the time the branch was cut (the merge of PR #201).",
+  "head": "63d5f974",
+  "head_note": "PR #202's last content commit before this governance record.",
+  "previous_delivery": "T0204",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

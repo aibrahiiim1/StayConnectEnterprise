@@ -36,16 +36,18 @@ const PRELIVE_SURFACES = [
   "guest-signin-attempts", "pms-interfaces", "pms-routing", "pms-source-conflicts", "operational-alerts",
 ];
 
-function mockCaps(surfaces: string[]) {
+function mockCaps(surfaces: string[], modules: Record<string, unknown> | null = null) {
   get.mockImplementation((p: string) => {
-    if (p === "/capabilities") return Promise.resolve({ surfaces });
+    if (p === "/capabilities") return Promise.resolve({ surfaces, modules });
     return Promise.resolve({});
   });
 }
 
+const HOTEL = { hospitality: { deployed: true, licensed: true, enabled: true, ready: true, effective: true, manageable: true } };
+
 describe("navigation follows the appliance, not the build", () => {
   it("hides destinations this appliance does not serve", async () => {
-    mockCaps(PRELIVE_SURFACES);
+    mockCaps(PRELIVE_SURFACES, HOTEL);
     const { Nav } = await import("@/components/nav");
     render(<Nav email="a@b.c" roles={["site_admin"]} onLogout={() => {}} />);
 
@@ -67,13 +69,26 @@ describe("navigation follows the appliance, not the build", () => {
   });
 
   it("shows everything when the appliance serves everything", async () => {
-    mockCaps([...PRELIVE_SURFACES, "guest-device-self-service", "post-stay-profiles", "stay-transfers", "financial-review"]);
+    mockCaps([...PRELIVE_SURFACES, "guest-device-self-service", "post-stay-profiles", "stay-transfers", "financial-review"], HOTEL);
     const { Nav } = await import("@/components/nav");
     render(<Nav email="a@b.c" roles={["site_admin"]} onLogout={() => {}} />);
     const hrefs = () =>
       Array.from(document.querySelectorAll("a[href]")).map((a) => a.getAttribute("href"));
     await waitFor(() => expect(hrefs()).toContain("/post-stay"));
     expect(hrefs()).toContain("/financial-health");
+  });
+
+  // A café that was once a hotel still has stays and PMS history served, but its menu is not a hotel's.
+  it("without Hospitality licensed there is no Hotel section, even where hotel records are served", async () => {
+    mockCaps(PRELIVE_SURFACES, { hospitality: { deployed: true, licensed: false, enabled: true, ready: true, effective: false, manageable: true } });
+    const { Nav } = await import("@/components/nav");
+    render(<Nav email="a@b.c" roles={["site_admin"]} onLogout={() => {}} />);
+    const hrefs = () => Array.from(document.querySelectorAll("a[href]")).map((a) => a.getAttribute("href"));
+    await waitFor(() => expect(hrefs()).toContain("/sessions"));
+    for (const h of ["/stays", "/stay-events", "/pms-resolutions", "/guest-signin-attempts", "/pms-interfaces", "/room-sign-in"]) {
+      expect(hrefs()).not.toContain(h);
+    }
+    expect(document.body.textContent).not.toMatch(/Hotel/);
   });
 
   it("fails open when the appliance cannot say", async () => {
@@ -91,6 +106,8 @@ describe("navigation follows the appliance, not the build", () => {
 
 describe("a destination that is not enabled explains itself", () => {
   it("says so, says what is unaffected, and does not look like a fault", async () => {
+    // An appliance with no optional module reported: the screen asks, and must not name a PMS.
+    get.mockResolvedValue({ surfaces: PRELIVE_SURFACES });
     const { SurfaceNotEnabled } = await import("@/components/surface-not-enabled");
     render(<SurfaceNotEnabled label="Charge health" />);
 
@@ -98,9 +115,19 @@ describe("a destination that is not enabled explains itself", () => {
     expect(screen.getByRole("heading", { name: "Charge health" })).toBeTruthy();
     expect(screen.getByText("Not enabled on this appliance")).toBeTruthy();
     expect(screen.getByText(/configuration of the appliance, not a fault/)).toBeTruthy();
-    // The question behind every unexpected screen in an admin.
-    expect(screen.getByText(/Client internet, sign-in, the PMS connection, sessions and accounting are unaffected/)).toBeTruthy();
+    // The question behind every unexpected screen in an admin -- answered without a PMS the site does not have.
+    expect(screen.getByText(/Client internet, sign-in, sessions and accounting are unaffected/)).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/PMS/);
     // And a way out, rather than a dead end.
     expect(screen.getByRole("link", { name: /Back to the dashboard/ })).toBeTruthy();
+  });
+
+  it("names the PMS connection among what is unaffected only where hospitality is licensed", async () => {
+    const on = { deployed: true, licensed: true, enabled: true, ready: true, effective: true, manageable: true };
+    get.mockImplementation((p: string) =>
+      Promise.resolve(p === "/capabilities" ? { surfaces: PRELIVE_SURFACES, modules: { hospitality: on } } : {}));
+    const { SurfaceNotEnabled } = await import("@/components/surface-not-enabled");
+    render(<SurfaceNotEnabled label="Charge health" />);
+    expect(await screen.findByText(/Client internet, sign-in, the PMS connection, sessions and accounting are unaffected/)).toBeTruthy();
   });
 });

@@ -48,6 +48,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { refreshingClass } from "@/components/ui/patterns";
 import { formatBytes, quotaPercent, endReasonWords } from "@/lib/bytes";
 import { cn, formatDate } from "@/lib/utils";
+import { moduleHasHistory, useCapabilities } from "@/lib/capabilities";
 
 type Totals = { bytes_down: number; bytes_up: number; bytes_total: number; sessions: number; devices: number };
 type StayRow = {
@@ -70,7 +71,7 @@ type DeviceDetail = {
 };
 
 /** The access-source types edged serves: GET /usage/sources?type=… and /usage/sources/{type}/{id}. */
-type SourceType = "account" | "voucher" | "stay";
+type SourceType = "account" | "voucher" | "stay" | "open";
 type SourceRow = {
   source_type: SourceType; source_id: string;
   account_username?: string;
@@ -92,6 +93,8 @@ const SOURCE_LABEL: Record<SourceType, string> = {
   account: "Client account",
   voucher: "Voucher",
   stay: "Hotel room/stay",
+  // A package chosen without signing in: an anonymous access subject, known only by its reference.
+  open: "Without sign-in",
 };
 
 const SEARCH_HINT: Record<TypeFilter, { label: string; placeholder: string }> = {
@@ -102,6 +105,13 @@ const SEARCH_HINT: Record<TypeFilter, { label: string; placeholder: string }> = 
   account: { label: "Client account username", placeholder: "Username, e.g. alex.morgan" },
   voucher: { label: "Voucher card reference", placeholder: "Card reference — the first characters are enough" },
   stay: { label: "Room number or reservation", placeholder: "Room number or reservation" },
+  open: { label: "Access reference", placeholder: "Access reference — the first characters are enough" },
+};
+
+/** The "All" search where rooms do not exist here: the same search, without inviting a room number. */
+const SEARCH_HINT_NO_ROOMS = {
+  label: "Username or card reference",
+  placeholder: "Username or card reference — or leave empty for the heaviest users",
 };
 
 // The stay lifecycle in the words Stays uses.
@@ -132,6 +142,7 @@ function sourceTitle(s: SourceRow): string {
     case "stay": return s.room ? `Room ${s.room}` : "Stay";
     case "account": return s.account_username || "Client account";
     case "voucher": return `Card ${shortRef(s.source_id)}`;
+    case "open": return `Access ${shortRef(s.source_id)}`;
   }
 }
 
@@ -211,7 +222,12 @@ export default function UsageExplorerPage() {
 
   const src = source?.source;
   const isStay = src?.source_type === "stay";
-  const hint = SEARCH_HINT[typeFilter];
+  // HOTEL ROOM/STAY IS A HOSPITALITY SOURCE. The type filter, the room/reservation search hint and the help
+  // that describes it appear only where hospitality is licensed or has left records to trace -- usage history
+  // stays reachable after a licence lapses. A stay row that the server returns is data and is shown regardless.
+  const caps = useCapabilities();
+  const stays = moduleHasHistory(caps, "hospitality");
+  const hint = typeFilter === "all" && !stays ? SEARCH_HINT_NO_ROOMS : SEARCH_HINT[typeFilter];
 
   return (
     <PageShell>
@@ -224,7 +240,9 @@ export default function UsageExplorerPage() {
           <>
             <HelpSection title="Two ways in">
               <HelpList items={[
-                <><strong>By access source</strong> &mdash; for &ldquo;My access stopped and I never got what I was given.&rdquo; An access source is whatever granted the access: a <strong>client account</strong>, a <strong>voucher</strong>, or a <strong>Hotel room/stay</strong>. Filter by type and search by username, card reference, room number or reservation &mdash; or leave the search empty for the heaviest users.</>,
+                <><strong>By access source</strong> &mdash; for &ldquo;My access stopped and I never got what I was given.&rdquo; An access source is whatever granted the access: {stays
+                  ? <>a <strong>client account</strong>, a <strong>voucher</strong>, or a <strong>Hotel room/stay</strong>. Filter by type and search by username, card reference, room number or reservation</>
+                  : <>a <strong>client account</strong> or a <strong>voucher</strong>. Filter by type and search by username or card reference</>} &mdash; or leave the search empty for the heaviest users.</>,
                 <><strong>By device</strong> &mdash; for &ldquo;Something on our network downloaded 40 GB last night.&rdquo; Paste the device&rsquo;s MAC address.</>,
               ]} />
             </HelpSection>
@@ -232,7 +250,9 @@ export default function UsageExplorerPage() {
               <HelpList items={[
                 <><strong>Client account</strong> &mdash; its username, as on Client accounts.</>,
                 <><strong>Voucher</strong> &mdash; its card reference, as on the voucher&rsquo;s card details. The code itself is never shown here.</>,
-                <><strong>Hotel room/stay</strong> &mdash; the room with its PMS connection, the reservation, and arrival and departure.</>,
+                ...(stays
+                  ? [<><strong>Hotel room/stay</strong> &mdash; the room with its PMS connection, the reservation, and arrival and departure.</>]
+                  : []),
               ]} />
               <p>
                 Email, phone and social sign-ins are not listed as sources. The devices that used them still appear
@@ -249,8 +269,8 @@ export default function UsageExplorerPage() {
             </HelpSection>
             <HelpSection title="A device is not a person">
               <p>
-                A device address identifies a piece of equipment. The device view shows what it used and which stays
-                it was connected under &mdash; it does not tell you who was holding it.
+                A device address identifies a piece of equipment. The device view shows what it used and which
+                {stays ? " stays" : " access"} it was connected under &mdash; it does not tell you who was holding it.
               </p>
             </HelpSection>
           </>
@@ -281,7 +301,8 @@ export default function UsageExplorerPage() {
                     { value: "all", label: "All" },
                     { value: "account", label: SOURCE_LABEL.account },
                     { value: "voucher", label: SOURCE_LABEL.voucher },
-                    { value: "stay", label: SOURCE_LABEL.stay },
+                    ...(stays ? [{ value: "stay" as const, label: SOURCE_LABEL.stay }] : []),
+                    { value: "open", label: SOURCE_LABEL.open },
                   ]}
                 />
                 <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); search(); }}>
@@ -386,6 +407,11 @@ export default function UsageExplorerPage() {
                     {src.source_type === "voucher" && (
                       <div className="flex items-center gap-1.5 text-caption text-muted-foreground">
                         Card reference <MonoId value={src.source_id} title="Card reference" />
+                      </div>
+                    )}
+                    {src.source_type === "open" && (
+                      <div className="flex items-center gap-1.5 text-caption text-muted-foreground">
+                        Access reference <MonoId value={src.source_id} title="Access reference" />
                       </div>
                     )}
                   </div>

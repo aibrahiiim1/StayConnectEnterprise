@@ -38,7 +38,8 @@ import { Skeleton, Switch } from "@/components/ui/misc";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
-import { Ticket, Hotel, KeyRound, Mail, MessageSquare, Users, ArrowUpRight, LogIn } from "lucide-react";
+import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
+import { Ticket, Hotel, KeyRound, Mail, MessageSquare, Users, ArrowUpRight, LogIn, PackageOpen, Smartphone } from "lucide-react";
 
 // The auth_methods document. Only the keys this screen owns are typed; everything else is preserved
 // untouched by the server's merge, so an unknown future method cannot be deleted by saving here.
@@ -47,8 +48,12 @@ type PMSMethod = { enabled?: boolean; mode?: string; provider?: string; template
 type AuthMethods = {
   voucher?: Method;
   guest_account?: Method;
+  // Open package selection: the client picks an Internet package without any credential (Free or Card
+  // payment). The access is held by an anonymous access subject, never by the device's MAC address.
+  open?: Method;
   email?: Method;
   sms?: Method;
+  whatsapp?: Method;
   social?: Record<string, Method>;
   pms?: PMSMethod;
 };
@@ -73,6 +78,17 @@ export default function SignInMethodsPage() {
   const writable = roles === null ? false : canWrite("auth-methods", roles);
   const mayChangeProtection = roles === null ? false : canWrite("guest-signin-protection", roles);
 
+  // WHICH OPTIONAL METHODS EXIST HERE AT ALL. An optional method is shown only when its module is licensed on
+  // this appliance -- not merely because code for it exists -- and nothing is fetched for a module that is
+  // absent. Unknown module state hides every optional method (fail closed).
+  const caps = useCapabilities();
+  const hospitality = moduleLicensed(caps, "hospitality");
+  const emailMod = moduleLicensed(caps, "email_otp");
+  const smsMod = moduleLicensed(caps, "sms_otp");
+  const whatsappMod = moduleLicensed(caps, "whatsapp_otp");
+  const socialMod = moduleLicensed(caps, "social_login");
+  const cardMod = moduleLicensed(caps, "card_payment");
+
   const [cfg, setCfg] = useState<AuthMethods | null>(null);
   const [notify, setNotify] = useState<NotifyProvider[]>([]);
   const [social, setSocial] = useState<SocialProvider[]>([]);
@@ -80,7 +96,7 @@ export default function SignInMethodsPage() {
   const [busy, setBusy] = useState<string | null>(null);
   // Whether Room sign-in can serve a guest right now. Only a one-line warning is shown here — the detail is on
   // Hotel → Room sign-in — but an operator switching the method on during an outage must not miss it.
-  const { readiness: pmsReadiness } = useRoomSignInReadiness();
+  const { readiness: pmsReadiness } = useRoomSignInReadiness(hospitality);
 
   const load = useCallback(async () => {
     setErr(null);
@@ -91,16 +107,21 @@ export default function SignInMethodsPage() {
       setErr(e);
       setCfg({});
     }
-    // Provider readiness is advisory: a failure here must not stop the methods themselves being managed.
-    try {
-      const n = await api.get<ListResp<NotifyProvider>>("/notification-providers");
-      setNotify(n.data ?? []);
-    } catch { /* readiness unknown; rendered as such */ }
-    try {
-      const s = await api.get<ListResp<SocialProvider>>("/social-providers");
-      setSocial(s.data ?? []);
-    } catch { /* readiness unknown; rendered as such */ }
-  }, []);
+    // Provider readiness is advisory: a failure here must not stop the methods themselves being managed. It is
+    // asked only for modules this site has.
+    if (emailMod || smsMod || whatsappMod) {
+      try {
+        const n = await api.get<ListResp<NotifyProvider>>("/notification-providers");
+        setNotify(n.data ?? []);
+      } catch { /* readiness unknown; rendered as such */ }
+    }
+    if (socialMod) {
+      try {
+        const s = await api.get<ListResp<SocialProvider>>("/social-providers");
+        setSocial(s.data ?? []);
+      } catch { /* readiness unknown; rendered as such */ }
+    }
+  }, [emailMod, smsMod, whatsappMod, socialMod]);
   useEffect(() => { load(); }, [load]);
 
   // A PATCH carrying only the key being changed. The server merges per top-level key, so this screen can
@@ -119,6 +140,7 @@ export default function SignInMethodsPage() {
 
   const emailReady = useMemo(() => notify.some((p) => p.channel === "email" && p.enabled), [notify]);
   const smsReady = useMemo(() => notify.some((p) => p.channel === "sms" && p.enabled), [notify]);
+  const whatsappReady = useMemo(() => notify.some((p) => p.channel === "whatsapp" && p.enabled), [notify]);
   const socialReady = useMemo(() => social.filter((p) => p.enabled).map((p) => p.provider), [social]);
 
   const header = (
@@ -140,18 +162,24 @@ export default function SignInMethodsPage() {
               items={[
                 <><strong>Voucher code</strong> — the client types a code from a printed or emailed voucher. Vouchers are managed under Vouchers.</>,
                 <><strong>Client account</strong> — a username and password issued to the client, managed under Client accounts.</>,
-                <><strong>Room sign-in</strong> — the client enters their room number and one detail from their booking. OneGate checks it against the property management system for the network they are on; the client never chooses a system, and no booking details are shown back to them. Which detail is asked for is set in Room sign-in, and which system a network uses in PMS routing — both under Hotel.</>,
-                <><strong>Email code</strong> and <strong>SMS code</strong> — the client receives a one-time code. Each is available only once a sender exists and is switched on under Email &amp; SMS.</>,
-                <><strong>Social login</strong> — the client signs in with an existing account such as Google. Each provider is offered individually, because each needs its own credentials; providers are set up under Social login.</>,
+                <><strong>Choose a package without signing in</strong> — the client chooses a package with no credential. Only packages the client can actually get are listed. A client who returns later resumes the same access with the recovery code shown after they connect.</>,
+                ...(hospitality ? [<><strong>Room sign-in</strong> — the client enters their room number and one detail from their booking. OneGate checks it against the property management system for the network they are on; the client never chooses a system, and no booking details are shown back to them. Which detail is asked for is set in Room sign-in, and which system a network uses in PMS routing — both under Hotel.</>] : []),
+                ...(emailMod ? [<><strong>Email code</strong> — the client receives a one-time code by email. Available once an email sender exists and is switched on under Email &amp; SMS.</>] : []),
+                ...(smsMod ? [<><strong>SMS code</strong> — the client receives a one-time code by text message. Available once a text-message sender exists and is switched on under Email &amp; SMS.</>] : []),
+                ...(whatsappMod ? [<><strong>WhatsApp code</strong> — the client receives a one-time code on WhatsApp. Available once a WhatsApp sender exists and is switched on under Email &amp; SMS.</>] : []),
+                ...(socialMod ? [<><strong>Social login</strong> — the client signs in with an existing Google, Apple, Facebook or Microsoft account. Each provider is offered individually, because each needs its own credentials; providers are set up under Social login.</>] : []),
               ]}
             />
+            <p className="text-muted-foreground">Methods that belong to a module this site is not licensed for are not shown.</p>
           </HelpSection>
+          {hospitality && (
           <HelpSection title="Client sign-in protection">
             <p>
               After too many incorrect sign-in details from the same device, that device is asked to wait before it
               can try again. The card at the bottom decides how strict that is; it is always on.
             </p>
           </HelpSection>
+          )}
         </>
       }
     />
@@ -205,6 +233,22 @@ export default function SignInMethodsPage() {
           manageLabel="Client accounts"
         />
 
+        <MethodCard
+          icon={<PackageOpen />}
+          title="Choose a package without signing in"
+          description={cardMod
+            ? "The client picks a Free package, or pays by card, with no code, account or sign-in. A returning client resumes with a recovery code shown on screen."
+            : "The client picks a Free package with no code, account or sign-in. A returning client resumes with a recovery code shown on screen."}
+          enabled={!!cfg.open?.enabled}
+          busy={busy === "Open package selection"}
+          writable={writable}
+          onToggle={(v) => save({ open: { ...(cfg.open ?? {}), enabled: v } }, "Open package selection")}
+          manageHref="/payment-methods"
+          manageLabel="Payment methods"
+        />
+
+        {hospitality && (
+          <>
         {/* Room sign-in spans the row so the grid of single methods below it stays even. */}
         <Card className="flex flex-col md:col-span-2">
           <CardHeader className="items-start border-b-0 pb-2">
@@ -237,7 +281,10 @@ export default function SignInMethodsPage() {
             </Link>
           </CardBody>
         </Card>
+          </>
+        )}
 
+        {emailMod && (
         <MethodCard
           icon={<Mail />}
           title="Email code"
@@ -251,7 +298,9 @@ export default function SignInMethodsPage() {
           manageHref="/notifications"
           manageLabel="Email & SMS"
         />
+        )}
 
+        {smsMod && (
         <MethodCard
           icon={<MessageSquare />}
           title="SMS code"
@@ -265,7 +314,25 @@ export default function SignInMethodsPage() {
           manageHref="/notifications"
           manageLabel="Email & SMS"
         />
+        )}
 
+        {whatsappMod && (
+          <MethodCard
+            icon={<Smartphone />}
+            title="WhatsApp code"
+            description="The client receives a one-time code on WhatsApp for their phone number."
+            enabled={!!cfg.whatsapp?.enabled}
+            busy={busy === "WhatsApp code"}
+            writable={writable}
+            onToggle={(v) => save({ whatsapp: { ...(cfg.whatsapp ?? {}), enabled: v } }, "WhatsApp code")}
+            ready={whatsappReady}
+            notReadyReason="Not available until a WhatsApp sender exists and is switched on, so codes cannot be sent yet."
+            manageHref="/notifications"
+            manageLabel="Email & SMS"
+          />
+        )}
+
+        {socialMod && (
         <Card className="md:col-span-2">
           <CardHeader className="items-start">
             <div className="min-w-0 space-y-1">
@@ -315,11 +382,14 @@ export default function SignInMethodsPage() {
             )}
           </CardBody>
         </Card>
+        )}
       </div>
 
       {/* The numbers are about guests signing in, and this is the screen an operator is already on when they
           decide that five attempts is too few for their property. */}
-      <GuestSignInProtectionCard canWrite={mayChangeProtection} />
+      {/* Sign-in protection counts wrong ROOM details (it is enforced on Room sign-in only), so it belongs to
+          Hospitality and is neither shown nor asked for on a site without it. */}
+      {hospitality && <GuestSignInProtectionCard canWrite={mayChangeProtection} />}
     </PageShell>
   );
 }

@@ -80,9 +80,9 @@ var pmsAllowedKinds = func() map[string]bool {
 }()
 
 const (
-	// folioStrategyUnset is the fail-closed default: while a revision carries it, PMS financial posting is
-	// impossible by construction.
-	folioStrategyUnset = "UNSET"
+	// postingTargetUnset is the fail-closed default: while a revision carries it, PMS financial posting is
+	// impossible by construction (Phase-0 Amendment A1). Only financial onboarding records RESERVATION.
+	postingTargetUnset = "UNSET"
 	// credentialModeNone matches the supported connector: the FIAS link carries no transport authentication.
 	credentialModeNone = "NONE"
 	// canonicalNormalizationVersion is the normalisation contract THIS BUILD implements. It changes when the
@@ -90,9 +90,9 @@ const (
 	canonicalNormalizationVersion = 1
 )
 
-// folioIdentityStrategies and credentialModes were the validation allowlists for two fields this path no
-// longer accepts from the caller. The schema still permits all four folio strategies and both credential
-// modes — a future revision authored by a different, deliberate path may use them — but neither is a choice
+// The posting target and the credential mode are two fields this path no longer accepts from the caller.
+// The schema permits RESERVATION (recorded only by financial onboarding) and both credential modes — a
+// revision authored by a different, deliberate path may use them — but neither is a choice
 // an operator makes on this form, so the allowlists here would only describe options nothing can select.
 // The constants above carry the single value each field is now written with, and the reasons are recorded
 // at the point of enforcement in validateRevisionConfig.
@@ -160,20 +160,20 @@ func allowedKindList() string {
 type authorRevisionReq struct {
 	// Endpoint is the address the connector dials: host:port. This is the field whose absence from the UI
 	// made the whole screen unusable.
-	Endpoint              string `json:"endpoint"`
-	SourceTimezone        string `json:"source_timezone"`
-	FolioIdentityStrategy string `json:"folio_identity_strategy"`
-	NormalizationVersion  int    `json:"normalization_version"`
-	CredentialMode        string `json:"credential_mode"`
-	ReadOnly              *bool  `json:"read_only"`
-	ResyncSupported       *bool  `json:"resync_supported"`
-	DialTimeoutMS         int64  `json:"dial_timeout_ms"`
-	ReadTimeoutMS         int64  `json:"read_timeout_ms"`
-	WriteTimeoutMS        int64  `json:"write_timeout_ms"`
-	HeartbeatIntervalMS   int64  `json:"heartbeat_interval_ms"`
-	HeartbeatTimeoutMS    int64  `json:"heartbeat_timeout_ms"`
-	FeedFreshnessMS       int64  `json:"feed_freshness_ms"`
-	CompleteSyncMS        int64  `json:"complete_sync_ms"`
+	Endpoint             string `json:"endpoint"`
+	SourceTimezone       string `json:"source_timezone"`
+	PostingTargetModel   string `json:"posting_target_model"`
+	NormalizationVersion int    `json:"normalization_version"`
+	CredentialMode       string `json:"credential_mode"`
+	ReadOnly             *bool  `json:"read_only"`
+	ResyncSupported      *bool  `json:"resync_supported"`
+	DialTimeoutMS        int64  `json:"dial_timeout_ms"`
+	ReadTimeoutMS        int64  `json:"read_timeout_ms"`
+	WriteTimeoutMS       int64  `json:"write_timeout_ms"`
+	HeartbeatIntervalMS  int64  `json:"heartbeat_interval_ms"`
+	HeartbeatTimeoutMS   int64  `json:"heartbeat_timeout_ms"`
+	FeedFreshnessMS      int64  `json:"feed_freshness_ms"`
+	CompleteSyncMS       int64  `json:"complete_sync_ms"`
 	// MaxAuthCacheAgeSeconds is the operator's override for how long PMS-derived Stay evidence may still
 	// authorise a Room sign-in. Absent, the bound is one complete_sync_ms cadence plus the heartbeat
 	// allowance, which is also what limits authentication while the transport is down (D39). This is the
@@ -385,21 +385,21 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 	if cur == "" {
 		err = tx.QueryRow(ctx, `
 		    INSERT INTO iam_v2.pms_interface_revisions
-		      (tenant_id, site_id, pms_interface_id, revision_no, source_timezone, folio_identity_strategy,
+		      (tenant_id, site_id, pms_interface_id, revision_no, source_timezone, posting_target_model,
 		       config, normalization_version, source_fingerprint)
 		    VALUES ($1,$2,$3,`+revNoExpr+`,$4,$5,$6::jsonb,$7,$8)
 		    RETURNING id::text, revision_no`,
-			s.tenantID, s.siteID, id, in.SourceTimezone, in.FolioIdentityStrategy, string(raw),
+			s.tenantID, s.siteID, id, in.SourceTimezone, in.PostingTargetModel, string(raw),
 			in.NormalizationVersion, fingerprint).Scan(&revID, &revNo)
 	} else {
 		err = tx.QueryRow(ctx, `
 		    INSERT INTO iam_v2.pms_interface_revisions
-		      (tenant_id, site_id, pms_interface_id, revision_no, source_timezone, folio_identity_strategy,
+		      (tenant_id, site_id, pms_interface_id, revision_no, source_timezone, posting_target_model,
 		       config, normalization_version, financial_base_currency, financial_base_currency_exponent,
 		       source_fingerprint)
 		    VALUES ($1,$2,$3,`+revNoExpr+`,$4,$5,$6::jsonb,$7,$8,$9,$10)
 		    RETURNING id::text, revision_no`,
-			s.tenantID, s.siteID, id, in.SourceTimezone, in.FolioIdentityStrategy, string(raw),
+			s.tenantID, s.siteID, id, in.SourceTimezone, in.PostingTargetModel, string(raw),
 			in.NormalizationVersion, cur, in.FinancialCurrencyExp, fingerprint).Scan(&revID, &revNo)
 		if isUndefinedColumn(err) {
 			jsonErr(w, http.StatusBadRequest, "validation",
@@ -441,12 +441,12 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 }
 
 // validateRESTRevision validates a REST connector's revision request. Top-level source_timezone and
-// max_auth_cache_age_seconds are honoured when provider_config does not carry them; folio identity stays
+// max_auth_cache_age_seconds are honoured when provider_config does not carry them; the posting target stays
 // UNSET and no financial currency is accepted (financial posting exists only on the FIAS path).
 func validateRESTRevision(prov pmsprovider.Provider, in *authorRevisionReq) (pmsprovider.RESTConfig, *pmsprovider.ValidationError) {
-	if s := strings.TrimSpace(in.FolioIdentityStrategy); s != "" && s != folioStrategyUnset {
-		return pmsprovider.RESTConfig{}, &pmsprovider.ValidationError{Code: "validation", Field: "folio_identity_strategy",
-			Message: "folio_identity_strategy must be " + folioStrategyUnset + " for a revision authored here"}
+	if s := strings.TrimSpace(in.PostingTargetModel); s != "" && s != postingTargetUnset {
+		return pmsprovider.RESTConfig{}, &pmsprovider.ValidationError{Code: "validation", Field: "posting_target_model",
+			Message: "posting_target_model must be " + postingTargetUnset + " for a revision authored here"}
 	}
 	if strings.TrimSpace(in.FinancialBaseCurrency) != "" || in.FinancialCurrencyExp != nil {
 		return pmsprovider.RESTConfig{}, &pmsprovider.ValidationError{Code: "validation", Field: "financial_base_currency",
@@ -460,7 +460,7 @@ func validateRESTRevision(prov pmsprovider.Provider, in *authorRevisionReq) (pms
 	if verr != nil {
 		return pmsprovider.RESTConfig{}, verr
 	}
-	in.FolioIdentityStrategy = folioStrategyUnset
+	in.PostingTargetModel = postingTargetUnset
 	in.NormalizationVersion = canonicalNormalizationVersion
 	in.SourceTimezone = rc.SourceTimezone
 	in.CredentialMode = pmsprovider.CredentialAuthKey
@@ -574,22 +574,18 @@ func validateRevisionConfig(in *authorRevisionReq) (map[string]any, error) {
 	}
 	// A NEW REVISION STARTS AT UNSET, AND THE OPERATOR DOES NOT CHOOSE OTHERWISE HERE.
 	//
-	// folio_identity_strategy decides how a folio number is interpreted across a stay, and getting it wrong
-	// is how one guest's charges reach another guest's folio. It is a FINANCIAL determination that has to be
-	// established by observing how the property's PMS actually reuses folio numbers — the Phase-0 contract
-	// makes UNSET the fail-closed default precisely so that posting is impossible until somebody has done
-	// that work and recorded a concrete strategy deliberately.
-	//
-	// The form used to offer all four values in a dropdown, which invited picking one that looked plausible.
-	// Silently accepting GLOBALLY_UNIQUE from a form is not a configuration choice, it is a financial
-	// assertion nobody verified, so this path now accepts only UNSET and says why.
-	if strings.TrimSpace(in.FolioIdentityStrategy) == "" {
-		in.FolioIdentityStrategy = folioStrategyUnset
+	// posting_target_model decides what a room charge targets. RESERVATION (RN + G#) is a FINANCIAL
+	// determination: it needs the vendor's confirmation that the interface's reservation numbers are unique and
+	// never reused, and it is recorded by financial onboarding (Phase-0 Amendment A1). UNSET is the fail-closed
+	// default precisely so that posting is impossible until that has been done deliberately, so this path
+	// accepts only UNSET and says why.
+	if strings.TrimSpace(in.PostingTargetModel) == "" {
+		in.PostingTargetModel = postingTargetUnset
 	}
-	if in.FolioIdentityStrategy != folioStrategyUnset {
+	if in.PostingTargetModel != postingTargetUnset {
 		return nil, fmt.Errorf(
-			"folio_identity_strategy must be %s for a revision authored here: a concrete strategy is a "+
-				"financial determination made from observed PMS behaviour, not a form choice", folioStrategyUnset)
+			"posting_target_model must be %s for a revision authored here: the posting target is recorded only by "+
+				"financial onboarding, with the vendor's confirmation, never by a form", postingTargetUnset)
 	}
 
 	// IMPLEMENTATION-CONTROLLED, NOT OPERATOR-CONTROLLED.

@@ -15,7 +15,10 @@ const (
 	ErrRepo   Code = "repository"
 
 	// ---- fail-closed creation gate (all of these happen BEFORE any side effect) ----
-	ErrFolioStrategyUnset  Code = "folio_strategy_unset"
+	// ErrPostingTargetUnset: the pinned interface revision's posting_target_model is UNSET (Amendment A1).
+	ErrPostingTargetUnset  Code = "posting_target_unset"
+	ErrReservationMismatch Code = "reservation_mismatch"
+	ErrStayChargeOpen      Code = "stay_room_charge_unresolved"
 	ErrRNMissing           Code = "rn_missing"
 	ErrGNumberMissing      Code = "g_number_missing"
 	ErrRNNotWireSafe       Code = "rn_not_wire_safe"
@@ -47,6 +50,9 @@ const (
 	ErrReviewConflict   Code = "review_conflict"
 	ErrReviewStale      Code = "review_version_stale"
 	ErrWireFieldInvalid Code = "wire_field_invalid"
+	// ErrTransportUnavailable: the hand-off to pmsd (decision D45) did not produce a matched PA. Whether that
+	// means "not sent" or UNKNOWN is carried by ErrNotTransmitted / ErrTransmittedNoAnswer, never by this code.
+	ErrTransportUnavailable Code = "transport_unavailable"
 )
 
 // Error is a deterministic typed error. Msg must never contain secrets, card data, guest PII or amounts.

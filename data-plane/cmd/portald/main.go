@@ -474,6 +474,7 @@ func (h *handler) routes() http.Handler {
 	r.Post("/auth/otp/verify", h.authOTPVerify)
 	r.Get("/auth/social/start", h.socialStart)
 	r.Get("/auth/social/callback", h.socialCallback)
+	r.Post("/auth/social/callback", h.socialCallback) // Sign in with Apple: response_mode=form_post
 	r.Get("/api/oauth/stub/authorize", h.stubAuthorize)
 	r.Post("/api/oauth/stub/authorize-confirm", h.stubAuthorizeConfirm)
 	// The legacy /auth/pms/verify hop is REMOVED; /auth/pms/phase3 below is the current PMS guest flow.
@@ -523,6 +524,10 @@ func (h *handler) routes() http.Handler {
 	// Package selection: reachable only with a valid commerce session, which only IAM-v2 auth issues.
 	r.Get("/packages", h.packagesPage)
 	r.Post("/packages/acquire", h.acquirePackage)
+	// Open package selection and the card payment return (acquisition.go).
+	r.Post("/auth/open", h.authOpen)
+	r.Get("/pay/return", h.payReturn)
+	r.Get("/api/pay/status", h.payStatusAPI)
 	r.Get("/success", h.success)
 	r.Post("/logout", h.logout)
 	r.Get("/status", h.status)

@@ -91,15 +91,15 @@ func (b *AssignmentBase) IssueTx(ctx context.Context, tx pgx.Tx, applianceID, st
 	if err := tx.QueryRow(ctx, `SELECT state FROM assignment_signing_keys WHERE key_id=$1`, signerKeyID).Scan(&st); err == nil && !assignment.CanSign(st) {
 		return nil, fmt.Errorf("refusing to sign: assignment key %s is %s and may not sign new assignments", signerKeyID, st)
 	}
-	var tenantID, siteID, serial, pubB64, tenantName, siteName string
+	var tenantID, siteID, serial, pubB64, tenantName, siteName, siteType string
 	err := tx.QueryRow(ctx, `
         SELECT COALESCE(a.tenant_id::text,''), COALESCE(a.site_id::text,''),
                COALESCE(a.serial,''), COALESCE(a.public_key,''),
-               COALESCE(t.name,''), COALESCE(s.name,'')
+               COALESCE(t.name,''), COALESCE(s.name,''), COALESCE(s.site_type,'UNSPECIFIED')
           FROM appliances a
           LEFT JOIN tenants t ON t.id = a.tenant_id
           LEFT JOIN sites   s ON s.id = a.site_id
-         WHERE a.id = $1`, applianceID).Scan(&tenantID, &siteID, &serial, &pubB64, &tenantName, &siteName)
+         WHERE a.id = $1`, applianceID).Scan(&tenantID, &siteID, &serial, &pubB64, &tenantName, &siteName, &siteType)
 	if err != nil {
 		return nil, fmt.Errorf("appliance lookup: %w", err)
 	}
@@ -130,6 +130,9 @@ func (b *AssignmentBase) IssueTx(ctx context.Context, tx pgx.Tx, applianceID, st
 	}
 	if assignment.Grants(state) {
 		doc.TenantID, doc.SiteID, doc.TenantName, doc.SiteName = tenantID, siteID, tenantName, siteName
+		// Descriptive only, and signed exactly like the names. UNSPECIFIED is sent as empty so an untyped
+		// site's document stays byte-identical to the pre-site-type layout.
+		doc.SiteType = assignmentSiteType(siteType)
 	}
 	assignment.Sign(b.SignKey, doc)
 
