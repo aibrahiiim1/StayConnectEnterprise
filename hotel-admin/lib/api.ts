@@ -45,7 +45,10 @@ async function request<T>(
 }
 
 export const api = {
-  get:   <T>(path: string)                => request<T>("GET", path),
+  // headers: for a value that must not travel in the URL (edged logs request lines) -- e.g. a stay search,
+  // which is often a guest's name.
+  get:   <T>(path: string, headers?: Record<string, string>) =>
+    request<T>("GET", path, undefined, headers ? { headers } : undefined),
   post:  <T>(path: string, body?: any)    => request<T>("POST", path, body),
   put:   <T>(path: string, body?: any)    => request<T>("PUT", path, body),
   patch: <T>(path: string, body?: any)    => request<T>("PATCH", path, body),
@@ -264,8 +267,8 @@ export type Stay = {
   posting_block_reason?: string | null; posting_permission_source?: string | null;
   // When the PMS last confirmed this occupancy — the evidence guest sign-in is judged against.
   occupancy_evidence_at?: string | null;
-  // Hotel attributes the schema carries. Present only when the connector sends them; the Protel FIAS feed
-  // does not, so these are absent on that interface rather than blank.
+  // Hotel attributes. VIP and travel agent arrive from Protel FIAS through this property's mapped fields (A1 VIP
+  // flag, A0 travel agent); room type and rate plan only where a connector sends them. Absent = not stated.
   vip?: boolean | null; room_type?: string | null; rate_plan?: string | null; travel_agent?: string | null;
 
   // WHICH INTERNET THIS ROOM HAS. The live entitlement's package and the service plan behind it — absent when
@@ -279,6 +282,18 @@ export type Stay = {
   access_max_devices?: number | null;
   access_active_devices?: number;
 };
+
+/** One page of stays, with totals over EVERY stay that matches (not just this page). */
+export type StaysPage = {
+  data: Stay[];
+  meta: { has_more: boolean };
+  page: number;
+  page_size: number;
+  summary: { total: number; with_internet: number; devices_online: number; arriving: number; vip: number };
+};
+
+/** A travel agent the PMS has named on a stay, for the package editor's picker. */
+export type TravelAgent = { name: string; in_house: number; stays: number };
 
 export type StayDetail = Stay & {
   occupant_list: { display_name?: string | null; is_primary: boolean }[];

@@ -72,6 +72,9 @@ type payload struct {
 	// Sharers is the OPTIONAL full occupancy list. Sharers are ordinary and legal (several occupants share one
 	// Stay); when the connector reports none, the event's own name fields describe the single primary guest.
 	Sharers []Sharer `json:"sharers"`
+	// Guest attributes (FIAS property-mapped A0/A1). Absent = not stated = leave the stay's value alone.
+	TravelAgent *string `json:"travel_agent"`
+	VIP         *bool   `json:"vip"`
 }
 
 // ProcessNext claims and processes ONE pending consumable inbox event for the scope in a single transaction.
@@ -146,6 +149,7 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 		EventIdentity: identity, EventType: EventType(eventType),
 		Reservation: pl.Reservation, Room: pl.Room, LastName: pl.LastName, FirstName: pl.FirstName,
 		Folio: pl.Folio, ArrivalRaw: pl.ArrivalRaw, DepartureRaw: pl.Departure, Sharers: pl.Sharers,
+		TravelAgent: pl.TravelAgent, VIP: pl.VIP,
 	}
 
 	// a payload that contradicts itself (the same occupant twice, or two occupants both claiming to be the
@@ -286,6 +290,9 @@ func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, e
 		if stayID, err = createStay(ctx, tx, tenant, site, iface, ev); err != nil {
 			return "", "", "", err
 		}
+		if err = applyGuestAttributes(ctx, tx, stayID, ev); err != nil {
+			return "", "", "", err
+		}
 		if _, aerr := applyOccupancyFacts(ctx, tx, tenant, site, iface, stayID, ev); aerr != nil {
 			return "", "", "", aerr
 		}
@@ -301,6 +308,9 @@ func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, e
 			WHERE id=$1`, cur.ID, d.NewStatus, parseYYMMDD(ev.ArrivalRaw), parseYYMMDD(ev.DepartureRaw)); err != nil {
 			return "", "", "", err
 		}
+		if err = applyGuestAttributes(ctx, tx, cur.ID, ev); err != nil {
+			return "", "", "", err
+		}
 		if _, aerr := applyOccupancyFacts(ctx, tx, tenant, site, iface, cur.ID, ev); aerr != nil {
 			return "", "", "", aerr
 		}
@@ -311,6 +321,10 @@ func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, e
 
 	case OpRoomMove:
 		if _, err = tx.Exec(ctx, `UPDATE iam_v2.stays SET normalized_room_number=NULLIF($2,'') WHERE id=$1`, cur.ID, namenorm.Room(ev.Room)); err != nil {
+			return "", "", "", err
+		}
+		// A room move is a GC like any other: a VIP or travel-agent change carried on it must not be lost.
+		if err = applyGuestAttributes(ctx, tx, cur.ID, ev); err != nil {
 			return "", "", "", err
 		}
 		// A room move is the PMS saying where this guest is NOW, so it refreshes occupancy like an arrival.
@@ -335,6 +349,9 @@ func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, e
 			effective_checkout_at=NULL WHERE id=$1`, cur.ID); err != nil {
 			return "", "", "", err
 		}
+		if err = applyGuestAttributes(ctx, tx, cur.ID, ev); err != nil {
+			return "", "", "", err
+		}
 		if serr := stampOccupancyEvidence(ctx, tx, cur.ID, occ); serr != nil {
 			return "", "", "", serr
 		}
@@ -350,6 +367,29 @@ func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, e
 	default: // OpManualReview
 		return "", "MANUAL_REVIEW", d.ReviewCode, nil
 	}
+}
+
+// applyGuestAttributes writes the guest attributes the record STATED -- VIP and travel agent -- and leaves the
+// stay's values alone for anything it did not. A stated empty travel agent clears it (the PMS removed the
+// agent); VIP is always a stated yes or no when present. These are what package rules for VIP guests and for
+// a travel agent's guests are judged against.
+func applyGuestAttributes(ctx context.Context, tx pgx.Tx, stayID string, ev InboxEvent) error {
+	if ev.TravelAgent == nil && ev.VIP == nil {
+		return nil
+	}
+	var agent any
+	if ev.TravelAgent != nil {
+		agent = *ev.TravelAgent
+	}
+	var vip any
+	if ev.VIP != nil {
+		vip = *ev.VIP
+	}
+	_, err := tx.Exec(ctx, `UPDATE iam_v2.stays SET
+		travel_agent = CASE WHEN $2::text IS NULL THEN travel_agent ELSE NULLIF($2::text,'') END,
+		vip = COALESCE($3::bool, vip)
+		WHERE id=$1`, stayID, agent, vip)
+	return err
 }
 
 // createStay inserts the Stay (IN_HOUSE, lifecycle_version 1). Its occupancy facts (the primary guest or the

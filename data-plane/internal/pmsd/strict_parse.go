@@ -173,7 +173,29 @@ const (
 	fcFolio       = "FO"
 	fcArrival     = "GA"
 	fcDeparture   = "GD"
+	// Property-mapped user-defined fields (Protel FIAS configuration of this property, GI and GC alike):
+	// A0 carries the travel agent (Protel AG), A1 the VIP flag (Protel VP). They are ATTRIBUTES, not identity
+	// or evidence: an unusable one is dropped as "not stated" rather than faulting the feed (see below).
+	fcTravelAgent = "A0"
+	fcVIP         = "A1"
 )
+
+// maxTravelAgentLen / maxVIPFlagLen bound the attribute fields. A longer value is not truncated: it is dropped
+// as not stated, exactly like a duplicated one.
+const (
+	maxTravelAgentLen = 128
+	maxVIPFlagLen     = 32
+)
+
+// vipFromFlag reads Protel's VP flag. An empty flag, or an explicit no, is "not VIP"; any other value -- a
+// yes, or a VIP code such as V1 -- is VIP.
+func vipFromFlag(v string) bool {
+	switch strings.ToUpper(strings.TrimSpace(v)) {
+	case "", "0", "N", "NO", "F", "FALSE":
+		return false
+	}
+	return true
+}
 
 // typedDomainFields is the at-most-once typed projection of a domain ParsedRecord.
 type typedDomainFields struct {
@@ -184,6 +206,9 @@ type typedDomainFields struct {
 	Folio       string
 	Arrival     string
 	Departure   string
+	// nil = the record did not state it (or stated it unusably); never "false"/"".
+	TravelAgent *string
+	VIP         *bool
 }
 
 // extractTypedDomainFields projects a strict domain ParsedRecord (GI/GC/GO) onto the typed model, FAILING
@@ -194,6 +219,7 @@ type typedDomainFields struct {
 func extractTypedDomainFields(pr ParsedRecord) (typedDomainFields, error) {
 	var f typedDomainFields
 	counts := map[string]int{}
+	attrs := map[string][]string{}
 	for _, p := range pr.Fields {
 		switch p.Code {
 		case fcRoom:
@@ -210,6 +236,9 @@ func extractTypedDomainFields(pr ParsedRecord) (typedDomainFields, error) {
 			f.Arrival = p.Value
 		case fcDeparture:
 			f.Departure = p.Value
+		case fcTravelAgent, fcVIP:
+			attrs[p.Code] = append(attrs[p.Code], p.Value)
+			continue // attributes: never counted for ambiguity, never a reason to fault the feed
 		default:
 			continue // unknown well-formed code: fingerprint-only, not counted for ambiguity
 		}
@@ -243,6 +272,18 @@ func extractTypedDomainFields(pr ParsedRecord) (typedDomainFields, error) {
 		if counts[code] > 1 {
 			return typedDomainFields{}, ErrRecordMalformed
 		}
+	}
+	// GUEST ATTRIBUTES ARE BEST-EFFORT, NOT CONTINUITY. A travel agent or VIP flag that is duplicated, overlong
+	// or carries control bytes is simply not stated: the stay keeps what it had, and the record -- whose
+	// identity and dates are fine -- is still applied. Faulting the feed over a marketing attribute would stop
+	// every guest's sign-in to protect a package rule.
+	if v := attrs[fcTravelAgent]; len(v) == 1 && len(v[0]) <= maxTravelAgentLen && !hasControlBytes(v[0]) {
+		ta := strings.TrimSpace(v[0])
+		f.TravelAgent = &ta
+	}
+	if v := attrs[fcVIP]; len(v) == 1 && len(v[0]) <= maxVIPFlagLen && !hasControlBytes(v[0]) {
+		vip := vipFromFlag(v[0])
+		f.VIP = &vip
 	}
 	return f, nil
 }

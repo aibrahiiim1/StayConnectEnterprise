@@ -129,6 +129,9 @@ func (e Event) Validate() error {
 			return ErrEventInvalid
 		}
 	}
+	if e.TravelAgent != nil && (len(*e.TravelAgent) > maxTravelAgentLen || hasControlBytes(*e.TravelAgent)) {
+		return ErrEventInvalid
+	}
 	if e.NormalizedAt.IsZero() {
 		return ErrEventInvalid
 	}
@@ -170,7 +173,8 @@ func (e Event) Validate() error {
 		}
 	} else {
 		// control observations must NOT carry guest fields (they are not guest events)
-		if e.ReservationRef != "" || e.RoomNumber != "" || e.FolioRef != "" || e.GuestLastName != "" || e.GuestFirstName != "" {
+		if e.ReservationRef != "" || e.RoomNumber != "" || e.FolioRef != "" || e.GuestLastName != "" || e.GuestFirstName != "" ||
+			e.TravelAgent != nil || e.VIP != nil {
 			return ErrEventInvalid
 		}
 	}
@@ -296,12 +300,17 @@ func eventPayloadJSON(ev Event) []byte {
 		Candidate   string `json:"stay_resolution_candidate,omitempty"`
 		// omitempty: absent unless a connector reported occupants, so FIAS payloads are unchanged.
 		Sharers []EventSharer `json:"sharers,omitempty"`
+		// Pointers with omitempty: absent when the record did not state them, so a record without them
+		// persists byte-identical to before, and a stated "" (no travel agent) survives as "".
+		TravelAgent *string `json:"travel_agent,omitempty"`
+		VIP         *bool   `json:"vip,omitempty"`
 	}{
 		Reservation: ev.ReservationRef, Room: ev.RoomNumber,
 		LastName: ev.GuestLastName, FirstName: ev.GuestFirstName,
 		Folio: ev.FolioRef, ArrivalRaw: ev.ArrivalRaw, Departure: ev.DepartureRaw,
-		Candidate: ev.StayResolutionCandidate,
-		Sharers:   ev.Sharers,
+		Candidate:   ev.StayResolutionCandidate,
+		Sharers:     ev.Sharers,
+		TravelAgent: ev.TravelAgent, VIP: ev.VIP,
 	}
 	b, err := json.Marshal(p)
 	if err != nil {

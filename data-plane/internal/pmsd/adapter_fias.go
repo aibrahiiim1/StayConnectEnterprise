@@ -533,6 +533,8 @@ func (a *fiasAdapter) toEvent(body string) (Event, error) {
 		FolioRef:                tf.Folio,
 		GuestLastName:           tf.LastName,
 		GuestFirstName:          tf.FirstName,
+		TravelAgent:             tf.TravelAgent,
+		VIP:                     tf.VIP,
 		ArrivalRaw:              tf.Arrival,
 		DepartureRaw:            tf.Departure,
 		// GI/GC/GO carry no verified FIAS event timestamp -> PMSEvent* left unavailable (never substitute GA).

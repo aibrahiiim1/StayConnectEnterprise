@@ -32,7 +32,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { api, ListResp, Stay, StayDetail, StayPostingBlock } from "@/lib/api";
+import { api, Stay, StayDetail, StayPostingBlock, StaysPage as StaysPageResp } from "@/lib/api";
 import { useOperatorRoles } from "@/lib/whoami-context";
 import { moduleLicensed, surfaceAvailable, useCapabilities } from "@/lib/capabilities";
 import {
@@ -52,9 +52,10 @@ import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { DetailDialog } from "@/components/ui/dialog";
 import { Explain } from "@/components/ui/tooltip";
 import { DList, Metric, SkeletonRows } from "@/components/ui/misc";
+import { Pagination, SearchInput } from "@/components/ui/data";
 import { formatDate, formatRelative } from "@/lib/utils";
 import { speedPair } from "@/lib/session-words";
-import { Search, Hotel, Wifi, LogIn, LogOut, Ban, Undo2 } from "lucide-react";
+import { Hotel, Wifi, LogIn, LogOut, Ban, Undo2, Star } from "lucide-react";
 
 // Operator wording for the lifecycle. The wire values are unchanged; nobody outside the domain should have
 // to read SCREAMING_SNAKE to find out whether a guest is in the building.
@@ -71,6 +72,8 @@ const STATUSES = ["", "IN_HOUSE", "RESERVED", "CHECKED_OUT", "POST_STAY_ACTIVE",
 const toneFor = (status: string) =>
   status === "IN_HOUSE" ? "info" : status === "CHECKED_OUT" ? "default" : "warn";
 
+const PAGE_SIZES = [25, 50, 100, 200];
+
 const label = (s: string) => STATUS_LABELS[s] ?? s.replace(/_/g, " ").toLowerCase();
 
 /** A date the operator reads, not an ISO timestamp. Arrival/departure are dates in the PMS, not instants. */
@@ -84,7 +87,11 @@ function shortDate(v?: string | null): string {
 export default function StaysPage() {
   const [status, setStatus] = useState("IN_HOUSE"); // the question an operator asks by default
   const [q, setQ] = useState("");
+  const [vipOnly, setVipOnly] = useState(false);
+  const [pageSize, setPageSize] = useState(PAGE_SIZES[1]);
+  const [offset, setOffset] = useState(0);
   const [rows, setRows] = useState<Stay[] | null>(null);
+  const [resp, setResp] = useState<StaysPageResp | null>(null);
   const [detail, setDetail] = useState<StayDetail | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
@@ -101,44 +108,51 @@ export default function StaysPage() {
   const [blockBusy, setBlockBusy] = useState(false);
   const [blockErr, setBlockErr] = useState<string | null>(null);
 
+  // A new question starts at its first page.
+  useEffect(() => { setOffset(0); }, [status, q, vipOnly, pageSize]);
+
+  // PAGED AND SEARCHED ON THE SERVER. The list used to stop at 200 rows and search only those in the browser,
+  // so a property with 400 rooms in house saw half of them and its counters counted that half. The search text
+  // goes in a header, not the URL: it is often a guest's name, and edged logs request lines.
   const load = useCallback(async () => {
     setRows(null);
     setErr(null);
     try {
-      const query = status ? "?status=" + encodeURIComponent(status) : "";
-      const r = await api.get<ListResp<Stay>>("/pms-stays" + query);
+      const params = new URLSearchParams();
+      if (status) params.set("status", status);
+      if (vipOnly) params.set("vip", "true");
+      params.set("page", String(Math.floor(offset / pageSize) + 1));
+      params.set("page_size", String(pageSize));
+      const needle = q.trim();
+      const r = await api.get<StaysPageResp>(
+        "/pms-stays?" + params.toString(),
+        needle ? { "X-Stay-Search": needle } : undefined,
+      );
+      setResp(r);
       setRows(r.data ?? []);
     } catch (e) {
       setErr(e);
+      setResp(null);
       setRows([]);
     }
-  }, [status]);
+  }, [status, vipOnly, offset, pageSize, q]);
 
   useEffect(() => { void load(); }, [load]);
 
-  // Client-side, over the page already loaded. The list is capped server-side at 200 rows, so this is a
-  // filter over what is on screen rather than a search of the whole property — worth being honest about in
-  // the empty state below.
-  const filtered = useMemo(() => {
-    if (!rows) return null;
-    const needle = q.trim().toLowerCase();
-    if (!needle) return rows;
-    return rows.filter((s) =>
-      (s.room ?? "").toLowerCase().includes(needle) ||
-      (s.primary_guest ?? "").toLowerCase().includes(needle) ||
-      (s.access_package_name ?? "").toLowerCase().includes(needle) ||
-      s.external_reservation_id.toLowerCase().includes(needle));
-  }, [rows, q]);
+  const filtered = rows;
 
+  // Totals over EVERY stay that matches, from the server -- not over the page on screen.
   const summary = useMemo(() => {
+    const s = resp?.summary;
     const list = rows ?? [];
     return {
-      total: list.length,
-      withInternet: list.filter((s) => s.access_status).length,
-      online: list.reduce((a, s) => a + (s.access_active_devices ?? 0), 0),
-      arriving: list.filter((s) => s.status === "RESERVED").length,
+      total: s?.total ?? list.length,
+      withInternet: s?.with_internet ?? list.filter((r) => r.access_status).length,
+      online: s?.devices_online ?? list.reduce((a, r) => a + (r.access_active_devices ?? 0), 0),
+      arriving: s?.arriving ?? list.filter((r) => r.status === "RESERVED").length,
+      vip: s?.vip ?? list.filter((r) => r.vip).length,
     };
-  }, [rows]);
+  }, [resp, rows]);
 
   async function open(id: string) {
     setErr(null); setDetailBusy(true);
@@ -195,8 +209,18 @@ export default function StaysPage() {
               </p>
               <p>A stay&rsquo;s details show how many of the allowed devices are online right now.</p>
             </HelpSection>
-            <HelpSection title="Search">
-              <p>Search runs in your browser over the most recent 200 stays for the selected status.</p>
+            <HelpSection title="Search and pages">
+              <p>
+                Search covers every stay for the selected status &mdash; room, reservation, guest name, travel agent
+                or internet package &mdash; not only the page on screen. The counters above the list count every
+                matching stay.
+              </p>
+            </HelpSection>
+            <HelpSection title="VIP and travel agent">
+              <p>
+                Both come from the PMS with each guest record. Internet packages can be limited to VIP guests or to
+                the guests of chosen travel agents.
+              </p>
             </HelpSection>
           </>
         }
@@ -227,13 +251,13 @@ export default function StaysPage() {
           label="Devices online"
           value={rows ? summary.online.toLocaleString() : "—"}
           href="/sessions"
-          hint="Across the stays listed here"
+          hint="Across every matching stay"
         />
         <StatCard
-          label="Arriving"
-          value={rows ? summary.arriving.toLocaleString() : "—"}
-          icon={<LogIn />}
-          hint="Reserved, not yet checked in"
+          label="VIP guests"
+          value={rows ? summary.vip.toLocaleString() : "—"}
+          icon={<Star />}
+          hint="Marked VIP by the PMS"
         />
       </div>
 
@@ -250,16 +274,14 @@ export default function StaysPage() {
       <Card>
         <CardBody className="border-b border-border py-3">
           <Toolbar>
-            <div className="relative w-full max-w-xs">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                aria-label="Search stays"
-                placeholder="Room, guest, reservation or package…"
-                className="pl-8"
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-              />
-            </div>
+            <SearchInput
+              label="Search stays"
+              placeholder="Room, guest, reservation, travel agent or package…"
+              className="w-full max-w-xs"
+              value={q}
+              onChange={setQ}
+              delay={300}
+            />
             <Select
               aria-label="Filter by status"
               value={status}
@@ -269,6 +291,23 @@ export default function StaysPage() {
               {STATUSES.map((s) => (
                 <option key={s || "all"} value={s}>{s === "" ? "All stays" : label(s)}</option>
               ))}
+            </Select>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={vipOnly}
+                onChange={(e) => setVipOnly(e.target.checked)}
+                className="size-4 accent-primary"
+              />
+              VIP only
+            </label>
+            <Select
+              aria-label="Stays per page"
+              value={String(pageSize)}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              className="w-32"
+            >
+              {PAGE_SIZES.map((n) => <option key={n} value={n}>{n} per page</option>)}
             </Select>
           </Toolbar>
         </CardBody>
@@ -280,8 +319,8 @@ export default function StaysPage() {
             <EmptyState
               icon={<Hotel />}
               title={q ? "No stays match that search" : "No stays to show"}
-              hint={q
-                ? "Search covers the most recent 200 stays for the selected status."
+              hint={q || vipOnly
+                ? "Nothing matches across all stays for the selected status."
                 : "Nothing has arrived from the property management system for this filter yet. If you expect guests here, check the PMS connection."}
             />
           ) : (
@@ -313,6 +352,9 @@ export default function StaysPage() {
                       <div>{s.primary_guest ?? <span className="text-muted-foreground">Not provided</span>}</div>
                       {s.occupants > 1 && (
                         <div className="text-xs text-muted-foreground">+{s.occupants - 1} sharing</div>
+                      )}
+                      {s.travel_agent && (
+                        <div className="text-xs text-muted-foreground">Agent: {s.travel_agent}</div>
                       )}
                     </TD>
                     <TD className="whitespace-nowrap text-sm">
@@ -352,6 +394,17 @@ export default function StaysPage() {
             </Table>
           )}
         </CardBody>
+        {filtered && filtered.length > 0 && (
+          <CardBody className="border-t border-border py-3">
+            <Pagination
+              offset={offset}
+              limit={pageSize}
+              shown={filtered.length}
+              total={resp?.summary?.total ?? null}
+              onChange={setOffset}
+            />
+          </CardBody>
+        )}
       </Card>
 
       <DetailDialog

@@ -57,8 +57,10 @@ func BuildLD(dateYYMMDD, timeHHMMSS, ifcName, version string) string {
 // BuildLRs are the read-only record subscriptions (GI/GC/GO).
 func BuildLRs() []string {
 	return []string{
-		"LR|RIGI|FLRNG#GNGFGAGD|",
-		"LR|RIGC|FLRNG#GNGFGAGD|",
+		// A0 and A1 are this property's user-defined fields: Protel maps its travel agent (AG) to A0 and its
+		// VIP flag (VP) to A1, on both GI and GC. They are guest attributes, never identity.
+		"LR|RIGI|FLRNG#GNGFGAGDA0A1|",
+		"LR|RIGC|FLRNG#GNGFGAGDA0A1|",
 		"LR|RIGO|FLRNG#|",
 	}
 }
