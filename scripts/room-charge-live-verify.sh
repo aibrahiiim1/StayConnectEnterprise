@@ -60,8 +60,7 @@ if [ -n "$STAYID" ]; then
   [ -n "$STAY" ] || { echo "REFUSED: stay $STAYID is not an in-house, postable stay in room $ROOM"; exit 1; }
 else
 STAY=$($PSQL "SELECT s.id FROM iam_v2.stays s WHERE s.status='IN_HOUSE' AND s.posting_allowed AND s.normalized_room_number='$ROOM' AND EXISTS (SELECT 1 FROM iam_v2.stay_guests g WHERE g.stay_id=s.id AND g.last_name_norm=upper('$ACCT')) AND NOT EXISTS (SELECT 1 FROM iam_v2.stay_guests g WHERE g.stay_id=s.id AND g.last_name_norm<>upper('$ACCT')) LIMIT 2")
-[ "$(printf '%s
-' "$STAY" | grep -c .)" = 1 ] || { echo "REFUSED: room $ROOM does not hold exactly one in-house, postable stay of account $ACCT"; exit 1; }
+[ "$(printf '%s\n' "$STAY" | grep -c .)" = 1 ] || { echo "REFUSED: room $ROOM does not hold exactly one in-house, postable stay of account $ACCT"; exit 1; }
 fi
 RES=$($PSQL "SELECT external_reservation_id FROM iam_v2.stays WHERE id='$STAY'")
 REV=$($PSQL "SELECT p.current_revision_id FROM iam_v2.internet_packages p JOIN iam_v2.internet_package_revisions r ON r.id=p.current_revision_id WHERE p.active AND p.code='$PKG' AND 'PMS_POSTING'=ANY(r.settlement_methods)")
