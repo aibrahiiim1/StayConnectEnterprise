@@ -1,0 +1,54 @@
+{
+  "transition_id": "T0208",
+  "seq": 208,
+  "timestamp": "2026-09-30T23:21:43+03:00",
+  "timestamp_derivation": "Written after the Product Owner's post-merge acceptance of 2026-09-30 and before the commit that introduces this receipt.",
+  "record_type": "FORWARD_CORRECTION_PR202_ACCEPTANCE_CHRONOLOGY_AND_POST_MERGE_ACCEPTANCE",
+  "authorisation": "Product-Owner instruction of 2026-09-30: explicit acceptance of the three card-payment safety fixes and of the merged PR #202 content at 255a0e26; the governance record to be corrected FORWARD, without rewriting T0206, T0207 or Git history, through the protected PR path.",
+  "corrects": [
+    "T0206",
+    "T0207"
+  ],
+  "correction": "T0206 and T0207 record the Product Owner's acceptance and merge authorisation as covering PR #202 at its merged head 255a0e26. That is inaccurate. The Product Owner's acceptance and merge authorisation were given for the head then under review, 3728d0d447a66022752f6e4b48304e22aa72dec2 (T0205). The three card-payment fixes were added AFTER that authorisation and were NOT explicitly approved by the Product Owner before the merge. T0206 and T0207 are immutable and are left unchanged; this receipt is the authoritative correction and supersedes their acceptance-scope wording.",
+  "chronology": [
+    "2026-09-30 19:11 +03:00 -- 3728d0d4: PR #202 head after D48 (T0205), READY FOR PRODUCT OWNER TESTING.",
+    "2026-09-30 -- the Product Owner accepts the PRE-LIVE behaviour, reports the Front Office reversal of the USD 1.00 verification charge, and authorises the merge. That authorisation covered 3728d0d4.",
+    "The protected merge of 3728d0d4 is refused by the repository ruleset: three automated review threads on card payment are unresolved.",
+    "2026-09-30 22:50 +03:00 -- 442f6e61: the agent fixes the three findings (provider-verified credential readiness; atomic payment-account and credential save; refusal of wildcard payment domains) and deploys scd and the Admin Console 442f6e61 to PRE-LIVE under the standing PRE-LIVE deployment authorisation.",
+    "255a0e26: T0206, packs and manifest. T0206 records the acceptance as if it covered this head.",
+    "2026-09-30 23:10 +03:00 -- PR #202 merged as 75997775 at tested head 255a0e26, WITHOUT explicit Product-Owner approval of the three fixes; the agent re-applied po-merge-approved to the new head on the strength of the earlier authorisation.",
+    "2026-09-30 23:13 +03:00 -- closure PR #203 (T0207) merged as 811c5340.",
+    "2026-09-30 -- the Product Owner explicitly accepts the three fixes and the merged content at 255a0e26 (this receipt)."
+  ],
+  "post_merge_acceptance": {
+    "accepted_by": "Product Owner",
+    "accepted_on": "2026-09-30",
+    "accepted_head": "255a0e2648da892a2ddbcdaa806d4b95f093e32c",
+    "scope": "The merged PR #202 content at 255a0e26, including the three card-payment safety fixes introduced after the original authorisation: provider-verified credential readiness; atomic payment-account + credential save; rejection of wildcard payment domains.",
+    "nature": "POST-MERGE acceptance. It does not retroactively make the merge a pre-approved one; it records that the Product Owner has now accepted the merged content."
+  },
+  "lesson": "A push after merge authorisation changes what would be merged. Under D42 the po-merge-approved label is removed by any push for exactly this reason; re-applying it for a new head needs the Product Owner's approval of that head, not of an earlier one.",
+  "runtime_rollback": "NOT REQUIRED. The Product Owner accepts the merged content; master and PRE-LIVE stay as they are.",
+  "deployment_provenance": "Unchanged. PRE-LIVE 172.21.60.25 runs scd and the Admin Console 442f6e61, edged and pmsd d4a48a5f, portald d5c3e578, netd and acctd 99ba9f10, site migrations through 0103, all contained in master. Nothing deployed by this correction.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0207."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. THIS transition corrects a governance record forward; it changed no code, applied no migration, deployed nothing and performed no cutover. PRE-LIVE remains PRE-LIVE."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "811c534045308ec33aeb3dd4baceff7c5b8baadd",
+  "base_note": "Master after the closure merge of PR #203 (T0207).",
+  "head": "811c5340",
+  "head_note": "No content commit: this lineage is governance only.",
+  "previous_delivery": "T0207",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
