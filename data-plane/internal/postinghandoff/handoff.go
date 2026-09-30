@@ -28,8 +28,12 @@ import (
 	"time"
 )
 
-// DefaultSocket is where pmsd listens. The directory is root-only (0700 /run/stayconnect) and the socket 0600.
-const DefaultSocket = "/run/stayconnect/pmsd-posting.sock"
+// DefaultSocket is where pmsd listens: its own runtime directory (RuntimeDirectory=stayconnect-pmsd, 0750, owned
+// by the pmsd service user) -- the only place the shipped unit (User=stayconnect-pmsd, ProtectSystem=strict) can
+// create a socket. The socket is 0600 and owned by pmsd; scd, which runs as root, is the only other process that
+// can connect. (The former default, /run/stayconnect, is root-owned and read-only to pmsd, so an installed
+// appliance could never open the posting relay.)
+const DefaultSocket = "/run/stayconnect-pmsd/pmsd-posting.sock"
 
 // EnvSocket overrides DefaultSocket on BOTH sides (tests and non-default layouts).
 const EnvSocket = "STAYCONNECT_POSTING_HANDOFF_SOCKET"

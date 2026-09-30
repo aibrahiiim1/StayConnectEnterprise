@@ -281,7 +281,7 @@ scd posting worker (svc_posting, internal/posting)          pmsd (svc_pmsd)     
   lock the stay; re-read it by G#: same reservation, IN_HOUSE, not blocked, current room (A1), currency, freshness
   (a stay no longer postable ends the charge here: ABORTED, definitely not posted)
   allocate P#, build PS, record attempt SENDING + sha256(PS)
-  commit  ──── immutable command ────►  root-only unix socket /run/stayconnect/pmsd-posting.sock
+  commit  ──── immutable command ────►  unix socket /run/stayconnect-pmsd/pmsd-posting.sock (0600, pmsd-owned; scd connects as root)
                                           own flags on? (MASTER + OUTBOX_WORKER + PMS_TRANSMIT)
                                           shape: PS only, bounded, wire-safe, P# = command P#, hash
                                           DB: p4_posting_command_authorised(iface, P#, sha256)
