@@ -17,17 +17,18 @@
 # left for Manual review, exactly as the product does.
 set -uo pipefail
 
-ROOM=""; ACCT=""; PKG=""; OK_REAL=0
+ROOM=""; ACCT=""; STAYID=""; PKG=""; OK_REAL=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --room) ROOM="$2"; shift 2;;
     --account-name) ACCT="$2"; shift 2;;
+    --stay-id) STAYID="$2"; shift 2;;
     --package-code) PKG="$2"; shift 2;;
     --i-authorise-a-real-charge) OK_REAL=1; shift;;
     *) echo "unknown argument: $1" >&2; exit 2;;
   esac
 done
-[ -n "$ROOM" ] && [ -n "$ACCT" ] && [ -n "$PKG" ] || { echo "usage: --room ROOM --account-name NAME --package-code CODE --i-authorise-a-real-charge" >&2; exit 2; }
+[ -n "$ROOM" ] && { [ -n "$ACCT" ] || [ -n "$STAYID" ]; } && [ -n "$PKG" ] || { echo "usage: --room ROOM (--account-name NAME | --stay-id UUID) --package-code CODE --i-authorise-a-real-charge" >&2; exit 2; }
 [ "$OK_REAL" = 1 ] || { echo "REFUSED: this posts a real charge; pass --i-authorise-a-real-charge" >&2; exit 2; }
 
 R='--resolve hotel.stayconnect.local:443:127.0.0.1'
@@ -53,8 +54,15 @@ trap cleanup EXIT
 
 # A ROOM CODE IS NOT AN ACCOUNT. A house room code such as PASS also carries real walk-in customers' reservations,
 # so the stay must ALSO be held by the named house account alone, and be the only such stay.
+if [ -n "$STAYID" ]; then
+  # A guest reservation the Product Owner named: identified by the stay id, so no name travels on a command line.
+  STAY=$($PSQL "SELECT s.id FROM iam_v2.stays s WHERE s.id='$STAYID'::uuid AND s.status='IN_HOUSE' AND s.posting_allowed AND s.normalized_room_number='$ROOM'")
+  [ -n "$STAY" ] || { echo "REFUSED: stay $STAYID is not an in-house, postable stay in room $ROOM"; exit 1; }
+else
 STAY=$($PSQL "SELECT s.id FROM iam_v2.stays s WHERE s.status='IN_HOUSE' AND s.posting_allowed AND s.normalized_room_number='$ROOM' AND EXISTS (SELECT 1 FROM iam_v2.stay_guests g WHERE g.stay_id=s.id AND g.last_name_norm=upper('$ACCT')) AND NOT EXISTS (SELECT 1 FROM iam_v2.stay_guests g WHERE g.stay_id=s.id AND g.last_name_norm<>upper('$ACCT')) LIMIT 2")
-[ "$(printf '%s\n' "$STAY" | grep -c .)" = 1 ] || { echo "REFUSED: room $ROOM does not hold exactly one in-house, postable stay of account $ACCT"; exit 1; }
+[ "$(printf '%s
+' "$STAY" | grep -c .)" = 1 ] || { echo "REFUSED: room $ROOM does not hold exactly one in-house, postable stay of account $ACCT"; exit 1; }
+fi
 RES=$($PSQL "SELECT external_reservation_id FROM iam_v2.stays WHERE id='$STAY'")
 REV=$($PSQL "SELECT p.current_revision_id FROM iam_v2.internet_packages p JOIN iam_v2.internet_package_revisions r ON r.id=p.current_revision_id WHERE p.active AND p.code='$PKG' AND 'PMS_POSTING'=ANY(r.settlement_methods)")
 [ -n "$REV" ] || { echo "REFUSED: package $PKG is not an active room-charge package"; exit 1; }
