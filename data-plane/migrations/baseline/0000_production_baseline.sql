@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0102, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0103, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -3532,6 +3532,19 @@ END $$;
 
 
 --
+-- Name: p4_financial_mirror_max_age_seconds(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_financial_mirror_max_age_seconds(p_tenant uuid, p_site uuid, p_iface uuid) RETURNS integer
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE((SELECT s.mirror_max_age_seconds FROM iam_v2.pms_interface_financial_settings s
+                    WHERE s.tenant_id = p_tenant AND s.site_id = p_site AND s.pms_interface_id = p_iface), 14400);
+$$;
+
+
+--
 -- Name: p4_financial_recovery_active(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -3542,6 +3555,28 @@ CREATE FUNCTION iam_v2.p4_financial_recovery_active(p_tenant uuid, p_site uuid) 
   SELECT EXISTS (SELECT 1 FROM iam_v2.financial_epochs
                   WHERE tenant_id = p_tenant AND site_id = p_site AND released_at IS NULL
                     AND reason IN ('RESTORE_DETECTED','OPERATOR_DECLARED'));
+$$;
+
+
+--
+-- Name: p4_financial_resync_due(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_financial_resync_due(p_tenant uuid, p_site uuid, p_iface uuid) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE((
+    SELECT rt.transport_status = 'CONNECTED'
+       AND rt.sync_status = 'IN_SYNC'
+       AND rt.resync_started_at IS NULL
+       AND rt.published_resync_generation = rt.resync_generation_seq
+       AND rt.last_complete_sync_at IS NOT NULL
+       AND rt.last_complete_sync_at < now() - make_interval(secs =>
+             iam_v2.p4_financial_mirror_max_age_seconds(p_tenant, p_site, p_iface) / 2.0)
+       AND COALESCE((SELECT r.ready FROM iam_v2.pms_interface_financially_ready(p_tenant, p_site, p_iface) r), false)
+      FROM iam_v2.pms_interface_runtime rt
+     WHERE rt.tenant_id = p_tenant AND rt.site_id = p_site AND rt.pms_interface_id = p_iface), false);
 $$;
 
 
@@ -3795,7 +3830,7 @@ CREATE FUNCTION iam_v2.p4_interface_freshness_block(p_tenant uuid, p_site uuid, 
     LANGUAGE plpgsql STABLE
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
-DECLARE r record; hb_ms bigint; fresh_ms bigint; sync_ms bigint;
+DECLARE r record; hb_ms bigint; sync_ms bigint; v_age integer;
 BEGIN
   SELECT * INTO r FROM iam_v2.pms_interface_runtime
    WHERE tenant_id = p_tenant AND site_id = p_site AND pms_interface_id = p_interface;
@@ -3803,31 +3838,32 @@ BEGIN
     RETURN 'RUNTIME_UNKNOWN';           -- no runtime state at all: fail closed, never assume healthy
   END IF;
 
-  SELECT (config->>'heartbeat_timeout_ms')::bigint, (config->>'feed_freshness_ms')::bigint,
-         (config->>'complete_sync_ms')::bigint
-    INTO hb_ms, fresh_ms, sync_ms
+  SELECT (config->>'heartbeat_timeout_ms')::bigint, (config->>'complete_sync_ms')::bigint
+    INTO hb_ms, sync_ms
     FROM iam_v2.pms_interface_revisions
    WHERE tenant_id = p_tenant AND site_id = p_site AND pms_interface_id = p_interface AND id = p_revision;
 
-  -- axis 1: transport
+  -- axis 1: transport -- connected, and Protel's own link-alive recently observed
   IF r.transport_status <> 'CONNECTED' THEN RETURN 'TRANSPORT_' || r.transport_status; END IF;
-  IF hb_ms IS NOT NULL AND (r.last_heartbeat_at IS NULL
-       OR r.last_heartbeat_at < p_at - make_interval(secs => hb_ms / 1000.0)) THEN
+  IF r.last_heartbeat_at IS NULL
+     OR r.last_heartbeat_at < p_at - make_interval(secs => COALESCE(hb_ms, 300000) / 1000.0) THEN
     RETURN 'TRANSPORT_HEARTBEAT_STALE';
   END IF;
 
-  -- axis 2: feed continuity
+  -- axis 2: continuity -- no detected gap. Silence from a healthy feed is NOT a gap.
   IF r.continuity_status <> 'CONTINUOUS' THEN RETURN 'CONTINUITY_' || r.continuity_status; END IF;
-  IF fresh_ms IS NOT NULL AND (r.last_valid_event_at IS NULL
-       OR r.last_valid_event_at < p_at - make_interval(secs => fresh_ms / 1000.0)) THEN
-    RETURN 'CONTINUITY_FEED_STALE';
-  END IF;
 
   -- axis 3: complete sync
   IF r.sync_status <> 'IN_SYNC' THEN RETURN 'SYNC_' || r.sync_status; END IF;
   IF sync_ms IS NOT NULL AND (r.last_complete_sync_at IS NULL
        OR r.last_complete_sync_at < p_at - make_interval(secs => sync_ms / 1000.0)) THEN
     RETURN 'SYNC_STALE';
+  END IF;
+
+  -- axis 3b: the financial mirror age, proven only by a successful COMPLETE resync (a live event does not reset it)
+  v_age := iam_v2.p4_financial_mirror_max_age_seconds(p_tenant, p_site, p_interface);
+  IF r.last_complete_sync_at IS NULL OR r.last_complete_sync_at < p_at - make_interval(secs => v_age) THEN
+    RETURN 'FINANCIAL_MIRROR_STALE';
   END IF;
 
   -- axis 4: pin coherence
@@ -5118,6 +5154,42 @@ CREATE FUNCTION iam_v2.p4_room_charge_interface_fresh(p_tenant uuid, p_site uuid
                   WHERE i.tenant_id = p_tenant AND i.site_id = p_site AND i.id = p_iface
                     AND iam_v2.p4_interface_freshness_block(p_tenant, p_site, p_iface, i.current_revision_id, now()) IS NULL);
 $$;
+
+
+--
+-- Name: p4_set_financial_mirror_max_age(uuid, uuid, uuid, integer, text, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_set_financial_mirror_max_age(p_tenant uuid, p_site uuid, p_iface uuid, p_seconds integer, p_reason text, p_actor uuid) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_status text; v_old integer;
+BEGIN
+  IF p_seconds IS NULL OR p_seconds < 3600 OR p_seconds > 86400 THEN
+    RAISE EXCEPTION 'MIRROR_AGE_OUT_OF_RANGE: the financial mirror maximum age is between 1 and 24 hours'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_reason IS NULL OR length(btrim(p_reason)) < 4 OR length(p_reason) > 500 THEN
+    RAISE EXCEPTION 'MIRROR_AGE_REASON: a reason is required' USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT status INTO v_status FROM public.operators WHERE id = p_actor AND tenant_id = p_tenant;
+  IF v_status IS DISTINCT FROM 'active' THEN
+    RAISE EXCEPTION 'MIRROR_AGE_ACTOR: an active operator of this tenant is required' USING ERRCODE = 'check_violation';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM iam_v2.pms_interfaces WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_iface) THEN
+    RAISE EXCEPTION 'MIRROR_AGE_INTERFACE: no such interface at this site' USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT mirror_max_age_seconds INTO v_old FROM iam_v2.pms_interface_financial_settings WHERE pms_interface_id = p_iface;
+  INSERT INTO iam_v2.pms_interface_financial_settings (tenant_id, site_id, pms_interface_id, mirror_max_age_seconds, updated_at, updated_by)
+  VALUES (p_tenant, p_site, p_iface, p_seconds, now(), p_actor)
+  ON CONFLICT (pms_interface_id) DO UPDATE SET mirror_max_age_seconds = EXCLUDED.mirror_max_age_seconds,
+    updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by;
+  INSERT INTO iam_v2.pms_interface_financial_setting_changes
+    (tenant_id, site_id, pms_interface_id, setting, old_value, new_value, reason, changed_by)
+  VALUES (p_tenant, p_site, p_iface, 'mirror_max_age_seconds', v_old, p_seconds, btrim(p_reason), p_actor);
+  RETURN p_seconds;
+END $$;
 
 
 --
@@ -10300,6 +10372,41 @@ CREATE TABLE iam_v2.pms_financial_onboardings (
 
 
 --
+-- Name: pms_interface_financial_setting_changes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.pms_interface_financial_setting_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    pms_interface_id uuid NOT NULL,
+    setting text NOT NULL,
+    old_value integer,
+    new_value integer NOT NULL,
+    reason text NOT NULL,
+    changed_by uuid NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pms_interface_financial_setting_changes_reason_check CHECK (((length(btrim(reason)) >= 4) AND (length(btrim(reason)) <= 500))),
+    CONSTRAINT pms_interface_financial_setting_changes_setting_check CHECK ((setting = 'mirror_max_age_seconds'::text))
+);
+
+
+--
+-- Name: pms_interface_financial_settings; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.pms_interface_financial_settings (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    pms_interface_id uuid NOT NULL,
+    mirror_max_age_seconds integer NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_by uuid NOT NULL,
+    CONSTRAINT pms_interface_financial_settings_mirror_max_age_seconds_check CHECK (((mirror_max_age_seconds >= 3600) AND (mirror_max_age_seconds <= 86400)))
+);
+
+
+--
 -- Name: pms_interface_pnumber_seq; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -13591,6 +13698,22 @@ ALTER TABLE ONLY iam_v2.pms_financial_onboardings
 
 
 --
+-- Name: pms_interface_financial_setting_changes pms_interface_financial_setting_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.pms_interface_financial_setting_changes
+    ADD CONSTRAINT pms_interface_financial_setting_changes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: pms_interface_financial_settings pms_interface_financial_settings_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.pms_interface_financial_settings
+    ADD CONSTRAINT pms_interface_financial_settings_pkey PRIMARY KEY (pms_interface_id);
+
+
+--
 -- Name: pms_interface_pnumber_seq pms_interface_pnumber_seq_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -14897,6 +15020,13 @@ CREATE INDEX pms_financial_onboardings_iface ON iam_v2.pms_financial_onboardings
 
 
 --
+-- Name: pms_interface_financial_setting_changes_iface; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX pms_interface_financial_setting_changes_iface ON iam_v2.pms_interface_financial_setting_changes USING btree (pms_interface_id, changed_at DESC);
+
+
+--
 -- Name: pms_roster_recon_runs_recent_idx; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
@@ -16164,6 +16294,13 @@ CREATE TRIGGER pms_financial_onboardings_append_only BEFORE DELETE OR UPDATE ON 
 
 
 --
+-- Name: pms_interface_financial_setting_changes pms_interface_financial_setting_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER pms_interface_financial_setting_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.pms_interface_financial_setting_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.p4_append_only_refuse();
+
+
+--
 -- Name: pms_reconciliation_settings_changes pms_reconciliation_settings_changes_no_update; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
@@ -16856,6 +16993,22 @@ ALTER TABLE ONLY iam_v2.pms_case_resolutions
 
 ALTER TABLE ONLY iam_v2.pms_connection_settings
     ADD CONSTRAINT pms_connection_settings_iface_fk FOREIGN KEY (pms_interface_id) REFERENCES iam_v2.pms_interfaces(id) ON DELETE CASCADE;
+
+
+--
+-- Name: pms_interface_financial_setting_changes pms_interface_financial_setting_changes_pms_interface_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.pms_interface_financial_setting_changes
+    ADD CONSTRAINT pms_interface_financial_setting_changes_pms_interface_id_fkey FOREIGN KEY (pms_interface_id) REFERENCES iam_v2.pms_interfaces(id) ON DELETE CASCADE;
+
+
+--
+-- Name: pms_interface_financial_settings pms_interface_financial_settings_pms_interface_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.pms_interface_financial_settings
+    ADD CONSTRAINT pms_interface_financial_settings_pms_interface_id_fkey FOREIGN KEY (pms_interface_id) REFERENCES iam_v2.pms_interfaces(id) ON DELETE CASCADE;
 
 
 --
@@ -18121,6 +18274,15 @@ REVOKE ALL ON FUNCTION iam_v2.p4_entitlement_grant_kernel_v2(p_tenant uuid, p_si
 
 
 --
+-- Name: FUNCTION p4_financial_mirror_max_age_seconds(p_tenant uuid, p_site uuid, p_iface uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_financial_mirror_max_age_seconds(p_tenant uuid, p_site uuid, p_iface uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p4_financial_mirror_max_age_seconds(p_tenant uuid, p_site uuid, p_iface uuid) TO sc_posting_runtime;
+GRANT ALL ON FUNCTION iam_v2.p4_financial_mirror_max_age_seconds(p_tenant uuid, p_site uuid, p_iface uuid) TO svc_edged;
+
+
+--
 -- Name: FUNCTION p4_financial_recovery_active(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -18128,6 +18290,14 @@ REVOKE ALL ON FUNCTION iam_v2.p4_financial_recovery_active(p_tenant uuid, p_site
 GRANT ALL ON FUNCTION iam_v2.p4_financial_recovery_active(p_tenant uuid, p_site uuid) TO sc_payment_runtime;
 GRANT ALL ON FUNCTION iam_v2.p4_financial_recovery_active(p_tenant uuid, p_site uuid) TO sc_financial_operator;
 GRANT ALL ON FUNCTION iam_v2.p4_financial_recovery_active(p_tenant uuid, p_site uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION p4_financial_resync_due(p_tenant uuid, p_site uuid, p_iface uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_financial_resync_due(p_tenant uuid, p_site uuid, p_iface uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p4_financial_resync_due(p_tenant uuid, p_site uuid, p_iface uuid) TO svc_pmsd;
 
 
 --
@@ -18368,6 +18538,14 @@ GRANT ALL ON FUNCTION iam_v2.p4_room_charge_has_records(p_tenant uuid, p_site uu
 
 REVOKE ALL ON FUNCTION iam_v2.p4_room_charge_interface_fresh(p_tenant uuid, p_site uuid, p_iface uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.p4_room_charge_interface_fresh(p_tenant uuid, p_site uuid, p_iface uuid) TO svc_scd;
+
+
+--
+-- Name: FUNCTION p4_set_financial_mirror_max_age(p_tenant uuid, p_site uuid, p_iface uuid, p_seconds integer, p_reason text, p_actor uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_set_financial_mirror_max_age(p_tenant uuid, p_site uuid, p_iface uuid, p_seconds integer, p_reason text, p_actor uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p4_set_financial_mirror_max_age(p_tenant uuid, p_site uuid, p_iface uuid, p_seconds integer, p_reason text, p_actor uuid) TO svc_edged;
 
 
 --
@@ -19514,6 +19692,20 @@ GRANT SELECT ON TABLE iam_v2.pms_connection_settings_changes TO svc_edged;
 --
 
 GRANT SELECT ON TABLE iam_v2.pms_financial_onboardings TO svc_edged;
+
+
+--
+-- Name: TABLE pms_interface_financial_setting_changes; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.pms_interface_financial_setting_changes TO svc_edged;
+
+
+--
+-- Name: TABLE pms_interface_financial_settings; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.pms_interface_financial_settings TO svc_edged;
 
 
 --

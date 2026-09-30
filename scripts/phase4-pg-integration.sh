@@ -115,6 +115,9 @@ run_step "posting core"            "${GO[@]}" -run IntegrationPosting ./internal
 # The real boundary (D45): engine -> unix socket -> pmsd relay -> FIAS adapter -> fake PMS, with the worker and
 # pmsd on their own Gate-P service roles (ROOMCHARGE_*_DSN above).
 run_step "room charge hand-off"    "${GO[@]}" -run TestHandoff_ ./internal/posting/ "$@"
+# Amendment A1 (D46) and financial freshness (D48): the room-move races, answer meanings, blocks, and all six
+# room-charge stages agreeing on freshness -- on the worker's and pmsd's own logins.
+run_step "room charge A1 + D48"   "${GO[@]}" -run "TestA1_|TestD48_|TestRoomCharge" ./internal/posting/ "$@"
 run_step "review + finops API"     "${GO[@]}" -run "IntegrationReviewAPI|IntegrationFinOpsAPI|IntegrationZeroAttemptAPI" ./cmd/edged/ "$@"
 run_step "payment runtime"         "${GO[@]}" -run IntegrationPayment ./internal/payment/ "$@"
 # Narrowed to the free GRANT path deliberately: TestC2RollbackAtEveryBoundary seeds a fixed device MAC and

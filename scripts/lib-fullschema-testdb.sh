@@ -21,7 +21,7 @@
 # (transient; the only retryable case).
 
 FULLSCHEMA_IMAGE="${FULLSCHEMA_IMAGE:-timescale/timescaledb:2.16.1-pg16}"
-FULLSCHEMA_BASELINE_TOP="${FULLSCHEMA_BASELINE_TOP:-0102}"
+FULLSCHEMA_BASELINE_TOP="${FULLSCHEMA_BASELINE_TOP:-0103}"
 
 fullschema_psql() { # <container> <db> [psql args...]  -- stdin is the script
   local c="$1" db="$2"; shift 2
