@@ -1265,6 +1265,11 @@ export type FinancialSettlement = {
   amount_minor: number;
   currency: string;
   currency_exponent: number;
+  // Context for an operator: the package, when it was taken, and how the client got access.
+  package_name?: string | null;
+  at?: string | null;
+  source?: "ROOM" | "VOUCHER" | "ACCOUNT" | "OPEN" | "" | null;
+  room?: string | null;
 };
 
 export type FinancialPayment = {

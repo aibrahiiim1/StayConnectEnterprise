@@ -141,7 +141,7 @@ const SECTIONS: Section[] = [
       { href: "/room-charge",           label: "Room charge",   icon: BedSingle, resource: "pms-financial-onboarding", keywords: "charge to room reservation folio posting fias onboarding approve currency answer meanings hotel" },
       { href: "/financial-health",      label: "Charge health", icon: HeartPulse, resource: "financial-review", keywords: "charges posting queue outbox money hotel" },
       { href: "/financial-review",      label: "Manual review", icon: ClipboardCheck, resource: "financial-review", keywords: "charges failed posting decide hotel" },
-      { href: "/financial-settlements", label: "Settlements",   icon: Receipt, resource: "financial-review", keywords: "charges payment room charge card hotel" },
+      { href: "/financial-settlements", label: "Package payments", icon: Receipt, resource: "financial-review", keywords: "settlements charges payment room charge card voucher free hotel" },
       { href: "/financial-recovery",    label: "Recovery",      icon: LifeBuoy, resource: "financial-review", keywords: "charges held restore epoch hotel" },
       { href: "/pms-routing",          label: "PMS routing",          icon: Route, resource: "pms-routing", keywords: "network routing which pms per network vlan mapping hotel" },
       // RECONCILIATION IS NOT DAY-TO-DAY WORK. Both reconciliation screens are diagnostics with no action on

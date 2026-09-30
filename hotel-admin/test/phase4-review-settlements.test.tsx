@@ -179,10 +179,20 @@ describe("manual review", () => {
 });
 
 const SETTLEMENTS = {
-  settlements: [{
-    settlement_id: "s1", purchase_id: "pu1", method: "ONLINE_PAYMENT", status: "SETTLED",
-    purchase_state: "GRANTED", amount_minor: 1000, currency: "USD", currency_exponent: 2,
-  }],
+  settlements: [
+    { settlement_id: "s1", purchase_id: "pu1", method: "ONLINE_PAYMENT", status: "SETTLED",
+      purchase_state: "GRANTED", amount_minor: 1000, currency: "USD", currency_exponent: 2,
+      package_name: "One Day Package", at: "2026-09-30T07:47:42Z", source: "ROOM", room: "14340" },
+    { settlement_id: "s2", purchase_id: "pu2", method: "PMS_POSTING", status: "MANUAL_REVIEW",
+      purchase_state: "AWAITING_SETTLEMENT", amount_minor: 100, currency: "USD", currency_exponent: 2,
+      package_name: "One Day Package", at: "2026-09-30T08:00:00Z", source: "ROOM", room: "205" },
+    { settlement_id: "s3", purchase_id: "pu3", method: "NOT_REQUIRED", status: "NOT_REQUIRED",
+      purchase_state: "GRANTED", amount_minor: 0, currency: "USD", currency_exponent: 2,
+      package_name: "Free Internet Package", at: "2026-09-29T19:28:21Z", source: "ACCOUNT", room: null },
+    { settlement_id: "s4", purchase_id: "pu4", method: "PREPAID", status: "SETTLED",
+      purchase_state: "GRANTED", amount_minor: 0, currency: "USD", currency_exponent: 2,
+      package_name: "Free Internet Package", at: "2026-09-29T18:00:00Z", source: "VOUCHER", room: null },
+  ],
 };
 const SETTLEMENT_DETAIL = {
   settlement: SETTLEMENTS.settlements[0],
@@ -191,35 +201,59 @@ const SETTLEMENT_DETAIL = {
   available_actions: [],
   note: "Refund and chargeback initiation are NOT available from this surface in Phase 4.",
 };
+const REVIEW_DETAIL = { ...SETTLEMENT_DETAIL, settlement: SETTLEMENTS.settlements[1], payments: [] };
 
-describe("settlement browser", () => {
-  it("shows the charge and offers no refund affordance", async () => {
+describe("package payments", () => {
+  it("says in words who got which package, how it was paid and whether it needs attention", async () => {
+    route({ "/financial-ops/settlements": SETTLEMENTS });
+    render(<SettlementsView />);
+    expect(await screen.findByText("Room 14340")).toBeInTheDocument();
+    expect(screen.getByText("Paid")).toBeInTheDocument();
+    expect(screen.getByText("Needs review")).toBeInTheDocument();
+    expect(screen.getByText("Free — nothing to pay")).toBeInTheDocument();
+    expect(screen.getByText("Paid by voucher")).toBeInTheDocument();
+    expect(screen.getByText("Client account")).toBeInTheDocument();
+    // no raw backend code is the answer on screen
+    for (const code of ["NOT_REQUIRED", "PMS_POSTING", "MANUAL_REVIEW", "ONLINE_PAYMENT", "PREPAID"]) {
+      expect(document.body.textContent).not.toContain(code);
+    }
+  });
+
+  it("narrows to what needs attention", async () => {
+    route({ "/financial-ops/settlements": SETTLEMENTS });
+    render(<SettlementsView />);
+    await screen.findByText("Room 14340");
+    await userEvent.click(within(screen.getByRole("radiogroup", { name: /^show$/i })).getByRole("radio", { name: /needs attention/i }));
+    expect(screen.getByText("Room 205")).toBeInTheDocument();
+    expect(screen.queryByText("Room 14340")).not.toBeInTheDocument();
+    expect(screen.queryByText("Client account")).not.toBeInTheDocument();
+  });
+
+  it("shows the card payment and offers no refund affordance", async () => {
     route({ "/financial-ops/settlements": SETTLEMENTS, "/financial-ops/settlements/s1": SETTLEMENT_DETAIL });
     render(<SettlementsView />);
-    await userEvent.click(await screen.findByRole("button", { name: /open/i }));
+    const buttons = await screen.findAllByRole("button", { name: /details of/i });
+    await userEvent.click(buttons[0]);
     expect(await screen.findByText("Captured")).toBeInTheDocument();
     for (const forbidden of [/refund/i, /chargeback/i, /reverse/i, /charge again/i]) {
       expect(screen.queryByRole("button", { name: forbidden })).not.toBeInTheDocument();
     }
-    expect(screen.getByText(/not available from this surface/i)).toBeInTheDocument();
+    expect(screen.getByText(/refunds are not made from OneGate/i)).toBeInTheDocument();
   });
 
-  it("filters by status through the API rather than in the browser", async () => {
-    route({
-      "/financial-ops/settlements": SETTLEMENTS,
-      "/financial-ops/settlements?status=MANUAL_REVIEW": { settlements: [] },
-    });
+  it("sends a payment that needs review to Manual review", async () => {
+    route({ "/financial-ops/settlements": SETTLEMENTS, "/financial-ops/settlements/s2": REVIEW_DETAIL });
     render(<SettlementsView />);
-    // the status appears in the badge AND in the filter chips, so wait for either
-    await screen.findAllByText("Settled");
-    await userEvent.click(within(screen.getByRole("radiogroup", { name: /^status$/i })).getByRole("radio", { name: "Manual review" }));
-    expect(await screen.findByText(/no settlements match/i)).toBeInTheDocument();
+    const buttons = await screen.findAllByRole("button", { name: /details of/i });
+    await userEvent.click(buttons[1]);
+    expect(await screen.findByRole("link", { name: /decide it on manual review/i })).toHaveAttribute("href", "/financial-review");
   });
 
   it("never names a payment provider as live or supported", async () => {
     route({ "/financial-ops/settlements": SETTLEMENTS, "/financial-ops/settlements/s1": SETTLEMENT_DETAIL });
     render(<SettlementsView />);
-    await userEvent.click(await screen.findByRole("button", { name: /open/i }));
+    const buttons = await screen.findAllByRole("button", { name: /details of/i });
+    await userEvent.click(buttons[0]);
     await screen.findByText("Captured");
     const body = document.body.textContent ?? "";
     for (const name of ["Stripe", "Adyen", "Checkout.com", "PayPal", "Braintree"]) {

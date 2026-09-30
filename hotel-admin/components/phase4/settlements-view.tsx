@@ -1,52 +1,110 @@
 "use client";
 
-// Phase 4 (DARK) — Settlements: browser and detail.
+// PACKAGE PAYMENTS (formerly "Settlements").
 //
-// The question this screen answers is "was this guest actually charged, and what has been given back". So
-// the list is filterable by status and the detail shows the charge together with every refund or chargeback
-// that followed it.
+// The question this screen answers is the one a front-office manager actually asks: "who got which package,
+// when, how was it paid for, and does anything need my attention?" Every Internet package a client receives
+// creates one payment record here -- a free package, a voucher, a card payment or a room charge -- and this
+// screen says, in words, whether that payment is complete.
 //
-// WHAT IT DOES NOT OFFER, deliberately. There is no refund button. The backend can record a refund and its
-// tests exercise one, but no provider adapter exists and no operator-initiated refund flow is authorized --
-// so a button here would imply a capability that is not there, and an operator who pressed it would be
-// entitled to believe money had moved. The screen renders its affordances from the API's own
-// available_actions list rather than deciding for itself, which is what keeps this true as the backend
-// changes.
+// The backend codes (NOT_REQUIRED, PREPAID, ONLINE_PAYMENT, PMS_POSTING; REQUIRED, IN_PROGRESS, SETTLED,
+// MANUAL_REVIEW, FAILED, REVERSED ...) are never shown as the answer; they are turned into one sentence per row.
+//
+// WHAT IT DOES NOT OFFER, deliberately. There is no refund button. The backend can record a refund raised by the
+// provider, but no operator-initiated refund flow is authorized, so a button here would imply money can be moved
+// from this screen. The detail renders its affordances from the API's own available_actions list. A payment that
+// needs a decision is decided on Manual review, and the detail links there.
 
-import { useCallback, useEffect, useState } from "react";
-import { Receipt } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { AlertTriangle, ArrowUpRight, BedDouble, CreditCard, Gift, Receipt, Ticket } from "lucide-react";
 import { api, FinancialPayment, FinancialSettlement, surfaceUnavailableMessage } from "@/lib/api";
+import { formatDate } from "@/lib/utils";
 import { Card, CardBody } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
-import { PageHeader, PageShell } from "@/components/ui/page";
+import { PageHeader, PageShell, StatCard } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { FilterChips, KeyValueGrid } from "@/components/ui/data";
 import { Skeleton, SkeletonRows } from "@/components/ui/misc";
 import { Sheet, SheetBody, SheetContent, SheetFooter, SheetHeader, SheetSection } from "@/components/ui/sheet";
 import { humanize, money } from "./format";
 
-const STATUS_TONE = (s: string) =>
-  s === "SETTLED"
-    ? "ok"
-    : s === "FAILED" || s === "MANUAL_REVIEW"
-      ? "err"
-      : s === "REVERSED" || s === "PARTIALLY_REVERSED"
-        ? "warn"
-        : "info";
+type Tone = "ok" | "warn" | "err" | "info" | "default";
 
-const STATUSES = [
-  "REQUIRED",
-  "IN_PROGRESS",
-  "SETTLED",
-  "MANUAL_REVIEW",
-  "FAILED",
-  "PARTIALLY_REVERSED",
-  "REVERSED",
-];
+/** How the package was paid for, in words. */
+export const PAID_BY: Record<string, string> = {
+  NOT_REQUIRED: "Free",
+  PREPAID: "Voucher",
+  ONLINE_PAYMENT: "Card payment",
+  PMS_POSTING: "Room charge",
+  MANUAL_APPROVAL: "Manual approval",
+};
+
+/** Where the client's access came from. */
+function sourceWords(r: FinancialSettlement): string {
+  switch (r.source) {
+    case "ROOM": return r.room ? `Room ${r.room}` : "Room sign-in";
+    case "VOUCHER": return "Voucher";
+    case "ACCOUNT": return "Client account";
+    case "OPEN": return "Chose a package without signing in";
+    default: return "—";
+  }
+}
+
+/** One plain-language state per payment: what an operator needs to know, and its tone. */
+export function paymentState(method: string, status: string): { label: string; tone: Tone; explain: string } {
+  if (method === "NOT_REQUIRED" || status === "NOT_REQUIRED") {
+    return { label: "Free — nothing to pay", tone: "default", explain: "The package is free, so there was nothing to collect." };
+  }
+  switch (status) {
+    case "SETTLED":
+      return method === "PREPAID"
+        ? { label: "Paid by voucher", tone: "ok", explain: "A voucher paid for this package. The voucher is now used up." }
+        : method === "PMS_POSTING"
+          ? { label: "Charged to the room", tone: "ok", explain: "The PMS confirmed the charge on the guest's reservation." }
+          : { label: "Paid", tone: "ok", explain: "The payment provider confirmed the payment." };
+    case "REQUIRED":
+      return { label: "Waiting for payment", tone: "info", explain: "The client chose the package but has not paid yet. No access is given until they do." };
+    case "IN_PROGRESS":
+      return method === "PMS_POSTING"
+        ? { label: "Being sent to the PMS", tone: "info", explain: "The room charge is on its way to the PMS. Access is given once the PMS confirms it." }
+        : { label: "Payment in progress", tone: "info", explain: "The client is paying on the provider's page. Access is given once the provider confirms it." };
+    case "MANUAL_REVIEW":
+      return { label: "Needs review", tone: "err", explain: "It is not certain whether the client was charged. A person must check and decide on Manual review." };
+    case "FAILED":
+      return { label: "Not paid", tone: "err", explain: "The payment did not go through. The client was not charged and received no access from it." };
+    case "PARTIALLY_REVERSED":
+      return { label: "Partly refunded", tone: "warn", explain: "Part of the payment was given back by the provider." };
+    case "REVERSED":
+      return { label: "Refunded", tone: "warn", explain: "The payment was given back by the provider." };
+    default:
+      return { label: humanize(status), tone: "default", explain: "" };
+  }
+}
+
+const ACCESS_WORDS: Record<string, string> = {
+  GRANTED: "Access given",
+  AWAITING_SETTLEMENT: "Waiting for payment",
+  PENDING: "Waiting",
+  FAILED: "No access given",
+  CANCELLED: "Cancelled",
+};
+
+type View = "" | "attention" | "paid" | "voucher" | "free";
+
+function inView(r: FinancialSettlement, v: View): boolean {
+  switch (v) {
+    case "attention": return ["MANUAL_REVIEW", "FAILED", "REQUIRED", "IN_PROGRESS"].includes(r.status) && r.method !== "NOT_REQUIRED";
+    case "paid": return r.method === "ONLINE_PAYMENT" || r.method === "PMS_POSTING";
+    case "voucher": return r.method === "PREPAID";
+    case "free": return r.method === "NOT_REQUIRED";
+    default: return true;
+  }
+}
 
 type Detail = {
   settlement: FinancialSettlement;
@@ -57,26 +115,23 @@ type Detail = {
 
 export function SettlementsView() {
   const [rows, setRows] = useState<FinancialSettlement[] | null>(null);
-  const [status, setStatus] = useState("");
+  const [view, setView] = useState<View>("");
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [detailErr, setDetailErr] = useState<string | null>(null);
 
-  const load = useCallback(async (st: string) => {
+  const load = useCallback(async () => {
     try {
-      const qs = st ? `?status=${encodeURIComponent(st)}` : "";
-      const r = await api.get<{ settlements: FinancialSettlement[] }>(`/financial-ops/settlements${qs}`);
+      const r = await api.get<{ settlements: FinancialSettlement[] }>("/financial-ops/settlements");
       setRows(r.settlements ?? []);
       setErr(null);
     } catch (e: any) {
-      setErr(surfaceUnavailableMessage(e, "Settlements"));
+      setErr(surfaceUnavailableMessage(e, "Package payments"));
     }
   }, []);
 
-  useEffect(() => {
-    void load(status);
-  }, [load, status]);
+  useEffect(() => { void load(); }, [load]);
 
   async function open(id: string) {
     setSelected(id);
@@ -85,34 +140,63 @@ export function SettlementsView() {
     try {
       setDetail(await api.get(`/financial-ops/settlements/${id}`));
     } catch (e: any) {
-      setDetailErr(e?.message ?? "Could not load that settlement");
+      setDetailErr(e?.message ?? "Could not load that payment");
     }
   }
 
+  const counts = useMemo(() => {
+    const c = { attention: 0, paid: 0, voucher: 0, free: 0, all: rows?.length ?? 0 };
+    for (const r of rows ?? []) {
+      if (inView(r, "attention")) c.attention++;
+      if (inView(r, "paid")) c.paid++;
+      if (inView(r, "voucher")) c.voucher++;
+      if (inView(r, "free")) c.free++;
+    }
+    return c;
+  }, [rows]);
+
+  const collected = useMemo(() => {
+    const by = new Map<string, { minor: number; exp: number }>();
+    for (const r of rows ?? []) {
+      if (r.status !== "SETTLED" || !(r.method === "ONLINE_PAYMENT" || r.method === "PMS_POSTING")) continue;
+      const cur = by.get(r.currency) ?? { minor: 0, exp: r.currency_exponent };
+      cur.minor += r.amount_minor;
+      by.set(r.currency, cur);
+    }
+    return [...by.entries()].map(([c, v]) => money(v.minor, c, v.exp)).join(" · ") || "0.00";
+  }, [rows]);
+
+  const visible = (rows ?? []).filter((r) => inView(r, view));
   const s = detail?.settlement;
+  const state = s ? paymentState(s.method, s.status) : null;
 
   return (
     <PageShell>
       <PageHeader
         icon={<Receipt />}
         eyebrow="Hotel"
-        title="Settlements"
-        description="Whether a guest was actually charged for internet, and what has been given back since."
+        title="Package payments"
+        description="Every Internet package a client received, how it was paid for, and whether anything needs your attention."
         help={
           <>
-            <HelpSection title="What a settlement is">
+            <HelpSection title="What this page shows">
               <p>
-                A settlement records whether a guest was actually charged for internet, and what has been given back
-                since. Open one to see the charge and everything that followed it.
+                Each time a client gets an Internet package, one line appears here. It says which package, when, where
+                the client came from (a room, a voucher, a client account) and how it was paid for: free, voucher, card
+                payment or room charge.
               </p>
             </HelpSection>
-            <HelpSection title="Using the list">
+            <HelpSection title="What you may need to do">
               <HelpList
                 items={[
-                  <>Filter by status to narrow the list. The newest 200 are shown.</>,
-                  <>Where a settlement offers no action, its detail says why.</>,
+                  <><strong>Needs review</strong> — it is not certain whether the client was charged. Decide it on Manual review.</>,
+                  <><strong>Not paid</strong> — the payment failed; the client was not charged and got no access from it. Nothing to do unless the client asks.</>,
+                  <>Everything else is for information. Free and voucher lines never need action.</>,
                 ]}
               />
+            </HelpSection>
+            <HelpSection title="Refunds">
+              <p>There is no refund button. A refund made by the card provider is recorded here automatically.</p>
             </HelpSection>
           </>
         }
@@ -120,55 +204,92 @@ export function SettlementsView() {
 
       <ErrorBanner err={err} className="mb-0" />
 
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          label="Needs your attention"
+          value={rows ? counts.attention.toLocaleString() : "—"}
+          icon={<AlertTriangle />}
+          tone={counts.attention > 0 ? "err" : "ok"}
+          hint={counts.attention > 0 ? "Payments waiting, in progress, failed or to review" : "Nothing to do"}
+        />
+        <StatCard
+          label="Collected (card and room charge)"
+          value={rows ? collected : "—"}
+          icon={<CreditCard />}
+          hint={`${counts.paid.toLocaleString()} paid package${counts.paid === 1 ? "" : "s"}`}
+        />
+        <StatCard label="Vouchers used" value={rows ? counts.voucher.toLocaleString() : "—"} icon={<Ticket />} />
+        <StatCard label="Free packages" value={rows ? counts.free.toLocaleString() : "—"} icon={<Gift />} />
+      </div>
+
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
-          <FilterChips
-            label="Status"
-            value={status}
-            onChange={setStatus}
-            options={[{ value: "", label: "All" }, ...STATUSES.map((v) => ({ value: v, label: humanize(v) }))]}
+          <FilterChips<View>
+            label="Show"
+            value={view}
+            onChange={setView}
+            options={[
+              { value: "", label: "All", count: counts.all },
+              { value: "attention", label: "Needs attention", count: counts.attention, tone: counts.attention ? "err" : undefined },
+              { value: "paid", label: "Card and room charge", count: counts.paid },
+              { value: "voucher", label: "Voucher", count: counts.voucher },
+              { value: "free", label: "Free", count: counts.free },
+            ]}
           />
-          {rows && <p className="text-xs text-muted-foreground tabular">{rows.length} shown (newest 200)</p>}
+          {rows && <p className="text-xs text-muted-foreground tabular">Newest first · last 200</p>}
         </div>
         <CardBody className="p-0">
           {!rows ? (
-            err ? null : <SkeletonRows rows={4} cols={5} />
-          ) : rows.length === 0 ? (
+            err ? null : <SkeletonRows rows={4} cols={6} />
+          ) : visible.length === 0 ? (
             <EmptyState
               icon={<Receipt />}
-              title="No settlements match"
-              hint="Try a different status, or clear the filter."
-              action={status ? <Button variant="secondary" size="sm" onClick={() => setStatus("")}>Show all</Button> : undefined}
+              title={rows.length === 0 ? "No package has been given yet" : "Nothing here"}
+              hint={rows.length === 0
+                ? "A line appears here each time a client receives an Internet package."
+                : view === "attention" ? "No payment needs your attention." : "Choose another view, or show all."}
+              action={view ? <Button variant="secondary" size="sm" onClick={() => setView("")}>Show all</Button> : undefined}
             />
           ) : (
             <Table>
               <THead>
                 <TR>
-                  <TH>Amount</TH>
-                  <TH className="hidden sm:table-cell">Method</TH>
-                  <TH>Settlement</TH>
-                  <TH className="hidden md:table-cell">Purchase</TH>
-                  <TH>
-                    <span className="sr-only">Actions</span>
-                  </TH>
+                  <TH>When</TH>
+                  <TH>Package</TH>
+                  <TH className="hidden md:table-cell">Client</TH>
+                  <TH className="hidden sm:table-cell">Paid by</TH>
+                  <TH className="text-right">Amount</TH>
+                  <TH>Payment</TH>
+                  <TH><span className="sr-only">Details</span></TH>
                 </TR>
               </THead>
               <TBody>
-                {rows.map((r) => (
-                  <TR key={r.settlement_id}>
-                    <TD className="font-medium tabular">{money(r.amount_minor, r.currency, r.currency_exponent)}</TD>
-                    <TD className="hidden sm:table-cell">{humanize(r.method)}</TD>
-                    <TD>
-                      <Badge tone={STATUS_TONE(r.status)} dot>{humanize(r.status)}</Badge>
-                    </TD>
-                    <TD className="hidden text-muted-foreground md:table-cell">{humanize(r.purchase_state)}</TD>
-                    <TD className="text-right">
-                      <Button size="sm" variant="secondary" onClick={() => void open(r.settlement_id)}>
-                        Open
-                      </Button>
-                    </TD>
-                  </TR>
-                ))}
+                {visible.map((r) => {
+                  const st = paymentState(r.method, r.status);
+                  return (
+                    <TR key={r.settlement_id}>
+                      <TD className="whitespace-nowrap text-xs text-muted-foreground">{r.at ? formatDate(r.at) : "—"}</TD>
+                      <TD className="font-medium">{r.package_name || "—"}</TD>
+                      <TD className="hidden md:table-cell">
+                        <span className="inline-flex items-center gap-1.5">
+                          {r.source === "ROOM" && <BedDouble className="size-3.5 text-muted-foreground" aria-hidden />}
+                          {sourceWords(r)}
+                        </span>
+                      </TD>
+                      <TD className="hidden sm:table-cell">{PAID_BY[r.method] ?? humanize(r.method)}</TD>
+                      <TD className="text-right tabular">
+                        {r.method === "NOT_REQUIRED" ? "—" : money(r.amount_minor, r.currency, r.currency_exponent)}
+                      </TD>
+                      <TD><Badge tone={st.tone} dot>{st.label}</Badge></TD>
+                      <TD className="text-right">
+                        <Button size="sm" variant="ghost" onClick={() => void open(r.settlement_id)}
+                          aria-label={`Details of ${r.package_name || "this payment"}`}>
+                          Details
+                        </Button>
+                      </TD>
+                    </TR>
+                  );
+                })}
               </TBody>
             </Table>
           )}
@@ -179,77 +300,82 @@ export function SettlementsView() {
         <SheetContent width="md">
           <SheetHeader
             icon={<Receipt />}
-            eyebrow="Settlement"
-            title={s ? money(s.amount_minor, s.currency, s.currency_exponent) : "Settlement"}
-            description="The charge and everything that followed it."
-            badges={s ? <Badge tone={STATUS_TONE(s.status)} dot>{humanize(s.status)}</Badge> : undefined}
+            eyebrow="Package payment"
+            title={s ? (s.package_name || "Package") : "Package payment"}
+            description={s ? `${PAID_BY[s.method] ?? humanize(s.method)}${s.at ? ` · ${formatDate(s.at)}` : ""}` : undefined}
+            badges={state ? <Badge tone={state.tone} dot>{state.label}</Badge> : undefined}
           />
           <SheetBody>
             <ErrorBanner err={detailErr} className="mb-0" />
-            {!detail ? (
+            {!detail || !s || !state ? (
               detailErr ? null : (
                 <div className="space-y-3" aria-busy="true">
-                  <span className="sr-only">Loading the settlement</span>
+                  <span className="sr-only">Loading the payment</span>
                   <Skeleton className="h-20 w-full" />
                   <Skeleton className="h-28 w-full" />
                 </div>
               )
             ) : (
               <>
+                <SheetSection title="What happened">
+                  <p className="text-sm">{state.explain}</p>
+                  {s.status === "MANUAL_REVIEW" && (
+                    <Link href="/financial-review" className="mt-2 inline-flex items-center gap-1 text-sm text-primary underline-offset-4 hover:underline">
+                      Decide it on Manual review <ArrowUpRight className="size-3.5" aria-hidden />
+                    </Link>
+                  )}
+                </SheetSection>
                 <SheetSection title="Details">
                   <KeyValueGrid
                     items={[
-                      { label: "Amount", value: money(detail.settlement.amount_minor, detail.settlement.currency, detail.settlement.currency_exponent) },
-                      { label: "Method", value: humanize(detail.settlement.method) },
-                      { label: "Settlement", value: humanize(detail.settlement.status) },
-                      { label: "Purchase", value: humanize(detail.settlement.purchase_state) },
+                      { label: "Package", value: s.package_name || "—" },
+                      { label: "Client", value: sourceWords(s) },
+                      { label: "Paid by", value: PAID_BY[s.method] ?? humanize(s.method) },
+                      { label: "Amount", value: s.method === "NOT_REQUIRED" ? "Free" : money(s.amount_minor, s.currency, s.currency_exponent) },
+                      { label: "Access", value: ACCESS_WORDS[s.purchase_state] ?? humanize(s.purchase_state) },
+                      { label: "When", value: s.at ? formatDate(s.at) : "—" },
                     ]}
                   />
                 </SheetSection>
-                <SheetSection title="Payment history">
-                  {detail.payments.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No payment has been attempted against this settlement.</p>
-                  ) : (
-                    <div className="overflow-hidden rounded-md border border-border">
-                      <Table>
-                        <THead>
-                          <TR>
-                            <TH>Type</TH>
-                            <TH>Amount</TH>
-                            <TH>Status</TH>
-                            <TH>Provider</TH>
-                          </TR>
-                        </THead>
-                        <TBody>
-                          {detail.payments.map((p) => (
-                            <TR key={p.payment_id}>
-                              <TD>{humanize(p.transaction_type)}</TD>
-                              <TD className="tabular">{money(p.amount_minor, p.currency, p.currency_exponent)}</TD>
-                              <TD>
-                                <Badge tone={p.status === "CAPTURED" ? "ok" : p.status === "UNKNOWN" ? "err" : "info"}>
-                                  {humanize(p.status)}
-                                </Badge>
-                              </TD>
-                              <TD className="text-muted-foreground">{p.provider}</TD>
-                            </TR>
-                          ))}
-                        </TBody>
-                      </Table>
-                    </div>
-                  )}
-                </SheetSection>
-                <p className="text-sm text-muted-foreground">
-                  {detail.available_actions.length === 0
-                    ? detail.note
-                    : `Available actions: ${detail.available_actions.join(", ")}`}
-                </p>
+                {(s.method === "ONLINE_PAYMENT" || detail.payments.length > 0) && (
+                  <SheetSection title="Card payment history">
+                    {detail.payments.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No card payment has been started for this package.</p>
+                    ) : (
+                      <div className="overflow-hidden rounded-md border border-border">
+                        <Table>
+                          <THead>
+                            <TR><TH>Step</TH><TH>Amount</TH><TH>Result</TH></TR>
+                          </THead>
+                          <TBody>
+                            {detail.payments.map((p) => (
+                              <TR key={p.payment_id}>
+                                <TD>{humanize(p.transaction_type)}</TD>
+                                <TD className="tabular">{money(p.amount_minor, p.currency, p.currency_exponent)}</TD>
+                                <TD>
+                                  <Badge tone={p.status === "CAPTURED" ? "ok" : p.status === "UNKNOWN" ? "err" : "info"}>
+                                    {humanize(p.status)}
+                                  </Badge>
+                                </TD>
+                              </TR>
+                            ))}
+                          </TBody>
+                        </Table>
+                      </div>
+                    )}
+                  </SheetSection>
+                )}
+                {detail.available_actions.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Nothing can be changed from here. Refunds are not made from OneGate; a refund made by the card
+                    provider appears here automatically.
+                  </p>
+                )}
               </>
             )}
           </SheetBody>
           <SheetFooter>
-            <Button variant="ghost" onClick={() => { setSelected(null); setDetail(null); }}>
-              Close
-            </Button>
+            <Button variant="ghost" onClick={() => { setSelected(null); setDetail(null); }}>Close</Button>
           </SheetFooter>
         </SheetContent>
       </Sheet>

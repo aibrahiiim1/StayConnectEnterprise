@@ -168,7 +168,7 @@ describe("every Hotel charge screen has its menu label as its title", () => {
   it.each([
     ["Charge health", () => <FinancialHealthView />],
     ["Manual review", () => <ManualReviewView />],
-    ["Settlements", () => <SettlementsView />],
+    ["Package payments", () => <SettlementsView />],
     ["Recovery", () => <FinancialRecoveryView />],
   ])("%s", async (title, el) => {
     routes([], {
@@ -185,13 +185,13 @@ describe("every Hotel charge screen has its menu label as its title", () => {
     expect(screen.getByText("Hotel")).toBeInTheDocument();
   });
 
-  it("Settlements offers no refund button, even with a settled charge on screen", async () => {
+  it("Package payments offers no refund button, even with a settled charge on screen", async () => {
     routes([], {
       "/financial-ops/settlements": { settlements: [{ settlement_id: "s1", purchase_id: "p1", method: "ONLINE_PAYMENT",
         status: "SETTLED", purchase_state: "GRANTED", amount_minor: 1000, currency: "USD", currency_exponent: 2 }] },
     });
     render(<SettlementsView />);
-    expect(await screen.findByText("10.00 USD")).toBeInTheDocument();
+    expect((await screen.findAllByText("10.00 USD")).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: /refund/i })).toBeNull();
   });
 });
