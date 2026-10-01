@@ -45,7 +45,7 @@ function pageOf(page: number, size: number, total: number) {
     meta: { has_more: from + n < total },
     authority: "iam_v2",
     page, page_size: size,
-    summary: { total, enabled: total - 3, disabled: 3, locked: 2, devices_online: 11 },
+    summary: { total, enabled: total - 3, disabled: 3, devices_online: 11 },
   };
 }
 
@@ -119,10 +119,10 @@ describe("Client accounts — server paging", () => {
     expect(await screen.findByText("Showing 1–50 of 130")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: /Next/ }));
     await screen.findByText("Showing 51–100 of 130");
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Filter by status" }), "locked");
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Filter by status" }), "disabled");
     await waitFor(() => {
       const [path] = accountCalls().at(-1)!;
-      expect(path).toContain("status=locked");
+      expect(path).toContain("status=disabled");
       expect(path).toContain("page=1");
     });
   });

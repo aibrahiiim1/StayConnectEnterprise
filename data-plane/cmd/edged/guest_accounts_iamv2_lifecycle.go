@@ -73,7 +73,6 @@ type iamv2Account struct {
 	ValidUntil  *time.Time `json:"valid_until,omitempty"`
 	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
 	LoginCount  int64      `json:"login_count"`
-	LockedUntil *time.Time `json:"locked_until,omitempty"`
 	CreatedAt   *time.Time `json:"created_at,omitempty"`
 	// Live device count for this account, from IAM-v2 session state.
 	ActiveDevices int `json:"active_devices"`
@@ -81,13 +80,32 @@ type iamv2Account struct {
 	Authority string `json:"authority"`
 }
 
+// THERE IS NO ACCOUNT LOCKOUT ON THIS SURFACE, AND THERE NEVER WAS ONE.
+//
+// iam_v2.guest_access_accounts carries failed_attempts and locked_until, and the authenticator honours
+// locked_until if it is ever set (internal/iamv2/adapters.go denies with reason "locked"). Nothing in the
+// product sets either of them. The accepted protection against repeated failed sign-ins is DEVICE-BASED —
+// site_guest_signin_protection, guest_signin_restrictions and sign_in_attempts (migration 0068), served by
+// resources_signin_protection.go — which restricts the DEVICE that is guessing, not the account it is guessing
+// at.
+//
+// So locked_until was a column that could only ever read NULL, and this API reported it: a "Locked out"
+// counter that was structurally zero, a status=locked filter that could only return nothing, and a row badge
+// that could never appear. An always-zero counter is worse than no counter, because an operator reads "0
+// locked out" as a measurement and concludes nobody is being locked out — which is true of the account model
+// and tells them nothing about the devices that ARE being restricted.
+//
+// The projection therefore does not carry it. The COLUMNS STAY: the authenticator reads them and would honour
+// a value, so dropping them would remove a working deny path to tidy a display field. What is removed is the
+// claim that this screen measures something.
+//
 // iamv2AccountCols is the projection shared by list, get and patch so the three cannot drift apart.
 const iamv2AccountCols = `id, username, display_name, notes, enabled,
-                valid_from, valid_until, last_login_at, login_count, locked_until, created_at`
+                valid_from, valid_until, last_login_at, login_count, created_at`
 
 func scanIAMv2Account(row interface{ Scan(...any) error }, a *iamv2Account) error {
 	if err := row.Scan(&a.ID, &a.Username, &a.DisplayName, &a.Notes, &a.Enabled,
-		&a.ValidFrom, &a.ValidUntil, &a.LastLoginAt, &a.LoginCount, &a.LockedUntil, &a.CreatedAt); err != nil {
+		&a.ValidFrom, &a.ValidUntil, &a.LastLoginAt, &a.LoginCount, &a.CreatedAt); err != nil {
 		return err
 	}
 	a.Authority = "iam_v2"
@@ -110,11 +128,12 @@ const (
 	accountSearchMaxLen     = 100
 )
 
+// accountsSummary counts only what this domain can actually answer for. There is deliberately no "locked"
+// count: see the note on iamv2AccountCols.
 type accountsSummary struct {
 	Total         int `json:"total"`
 	Enabled       int `json:"enabled"`
 	Disabled      int `json:"disabled"`
-	Locked        int `json:"locked"`
 	DevicesOnline int `json:"devices_online"`
 }
 
@@ -127,12 +146,11 @@ const accountFrom = `FROM iam_v2.guest_access_accounts a
 	        JOIN iam_v2.entitlements e ON e.id = s.entitlement_id
 	       WHERE e.guest_account_id = a.id AND s.ended IS NULL) dev ON true`
 
-// accountFilter: $1 tenant, $2 site, $3 status (enabled|disabled|locked), $4 search pattern.
+// accountFilter: $1 tenant, $2 site, $3 status (enabled|disabled), $4 search pattern.
 const accountFilter = `WHERE a.tenant_id=$1 AND a.site_id=$2
 	  AND ($3::text IS NULL
 	       OR ($3 = 'enabled'  AND a.enabled)
-	       OR ($3 = 'disabled' AND NOT a.enabled)
-	       OR ($3 = 'locked'   AND a.locked_until > now()))
+	       OR ($3 = 'disabled' AND NOT a.enabled))
 	  AND ($4::text IS NULL OR a.username ILIKE $4 OR a.display_name ILIKE $4)`
 
 func (s *server) listGuestAccountsIAMv2(w http.ResponseWriter, r *http.Request) {
@@ -148,10 +166,13 @@ func (s *server) listGuestAccountsIAMv2(w http.ResponseWriter, r *http.Request) 
 	var statusArg any
 	switch v := qv.Get("status"); v {
 	case "":
-	case "enabled", "disabled", "locked":
+	case "enabled", "disabled":
 		statusArg = v
 	default:
-		jsonErr(w, http.StatusBadRequest, "bad_request", "status must be enabled, disabled or locked")
+		// "locked" is refused rather than quietly accepted and answered with an empty page: a filter that
+		// always matches nothing reads as "no account is locked out", which is a measurement this domain
+		// cannot make. Repeated-failure protection is per DEVICE (migration 0068).
+		jsonErr(w, http.StatusBadRequest, "bad_request", "status must be enabled or disabled")
 		return
 	}
 	page, size := 1, accountsPageSizeDefault
@@ -191,10 +212,9 @@ func (s *server) listGuestAccountsIAMv2(w http.ResponseWriter, r *http.Request) 
 	if err := s.db.QueryRow(ctx, `SELECT count(*)::int,
 	           count(*) FILTER (WHERE a.enabled)::int,
 	           count(*) FILTER (WHERE NOT a.enabled)::int,
-	           count(*) FILTER (WHERE a.locked_until > now())::int,
 	           COALESCE(sum(dev.active_devices), 0)::int
 	      `+accountFrom+`
-	      `+accountFilter, args...).Scan(&sum.Total, &sum.Enabled, &sum.Disabled, &sum.Locked,
+	      `+accountFilter, args...).Scan(&sum.Total, &sum.Enabled, &sum.Disabled,
 		&sum.DevicesOnline); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "list failed")
 		return
@@ -203,7 +223,7 @@ func (s *server) listGuestAccountsIAMv2(w http.ResponseWriter, r *http.Request) 
 	// NEWEST FIRST. Accounts created before migration 0104 have no creation time and sort after every dated
 	// one, by username; id breaks the last tie so a page boundary is stable.
 	rows, err := s.db.Query(ctx, `SELECT a.id, a.username, a.display_name, a.notes, a.enabled,
-	           a.valid_from, a.valid_until, a.last_login_at, a.login_count, a.locked_until, a.created_at,
+	           a.valid_from, a.valid_until, a.last_login_at, a.login_count, a.created_at,
 	           COALESCE(dev.active_devices, 0)
 	      `+accountFrom+`
 	      `+accountFilter+`
@@ -218,7 +238,7 @@ func (s *server) listGuestAccountsIAMv2(w http.ResponseWriter, r *http.Request) 
 	for rows.Next() {
 		var a iamv2Account
 		if err := rows.Scan(&a.ID, &a.Username, &a.DisplayName, &a.Notes, &a.Enabled,
-			&a.ValidFrom, &a.ValidUntil, &a.LastLoginAt, &a.LoginCount, &a.LockedUntil, &a.CreatedAt,
+			&a.ValidFrom, &a.ValidUntil, &a.LastLoginAt, &a.LoginCount, &a.CreatedAt,
 			&a.ActiveDevices); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "list failed")
 			return
@@ -337,6 +357,13 @@ func (s *server) setGuestAccountPasswordIAMv2(w http.ResponseWriter, r *http.Req
 	var in struct {
 		Password string `json:"password"`
 		Generate bool   `json:"generate,omitempty"`
+		// DISCONNECT THIS ACCOUNT'S DEVICES NOW, the checkbox on the Set-password dialog.
+		//
+		// The field was missing, and decodeJSON uses DisallowUnknownFields, so the Admin Console's
+		// set-password call — which always sends disconnect_sessions, true or false — was answered
+		// 400 "bad body". Setting a client account's password from the Admin Console did not work at
+		// all; the defect was not that a ticked box was ignored.
+		DisconnectSessions bool `json:"disconnect_sessions,omitempty"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
@@ -361,30 +388,188 @@ func (s *server) setGuestAccountPasswordIAMv2(w http.ResponseWriter, r *http.Req
 		jsonErr(w, http.StatusInternalServerError, "internal", "hash failed")
 		return
 	}
-	// A password reset also clears the lockout counters: an operator resetting a password is resolving the
-	// situation that caused the lockout, and leaving the account locked would make the reset appear to fail.
+	// The account must exist BEFORE anything is disconnected, so a disconnect can never run for an id the
+	// password update would then refuse.
 	var username string
+	if err := s.db.QueryRow(ctx, `SELECT username FROM iam_v2.guest_access_accounts
+	     WHERE id=$1 AND tenant_id=$2 AND site_id=$3`, id, s.tenantID, s.siteID).Scan(&username); err != nil {
+		jsonErr(w, http.StatusNotFound, "not_found", "account not found")
+		return
+	}
+
+	// THE DISCONNECT RUNS BEFORE THE PASSWORD CHANGE, and that ordering is deliberate.
+	//
+	// endAccountSessions refuses up front — before it ends anything — in the two cases it cannot honour
+	// (no enforcement channel, a live session with no address). Refusing first means a refusal leaves the
+	// password UNCHANGED and every device still online, which is a state the operator can retry from. The
+	// other order would reset the password, then refuse, and the dialog's own promise ("the old one stops
+	// working immediately") would already be half-done.
+	out := map[string]any{"status": "password_set"}
+	if in.DisconnectSessions {
+		res, st, code, msg := s.endAccountSessions(r, ctx, id, username)
+		if st != 0 {
+			jsonErr(w, st, code, msg)
+			return
+		}
+		out["disconnected_sessions"] = res.Ended
+		if res.Failed > 0 {
+			out["disconnect_failures"] = res.Failed
+		}
+	}
+
 	if err := s.db.QueryRow(ctx, `
 	    UPDATE iam_v2.guest_access_accounts
 	       SET password_hash=$4, failed_attempts=0, locked_until=NULL
 	     WHERE id=$1 AND tenant_id=$2 AND site_id=$3 RETURNING username`,
 		id, s.tenantID, s.siteID, hash).Scan(&username); err != nil {
-		jsonErr(w, http.StatusNotFound, "not_found", "account not found")
+		jsonErr(w, http.StatusInternalServerError, "internal", "password not set")
 		return
 	}
+	// failed_attempts and locked_until are reset defensively, not because anything sets them: nothing in the
+	// product does (see the note on iamv2AccountCols). The authenticator would honour a locked_until that
+	// somehow existed, so clearing it here cannot leave an operator with an account they reset and still
+	// cannot use.
+	//
 	// NEVER the password or the hash.
 	s.audit(r, "guest_account.password_set", "guest_account", id,
 		map[string]any{"username": username, "authority": "iam_v2"})
-	out := map[string]any{"status": "password_set"}
 	if generated {
 		out["generated_password"] = in.Password
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
-// disconnectGuestAccountSessionsIAMv2 ends the account's live IAM-v2 sessions. It deliberately does NOT
-// touch public.sessions: for an IAM-v2-authoritative account there is nothing of its own in the legacy
-// session table, and reaching into it would be the bridge this trial exists to avoid.
+// ---------------------------------------------------------------------------------------------------------
+// ENDING ONE CLIENT ACCOUNT'S LIVE SESSIONS.
+//
+// WHAT THIS DOES AND, MORE IMPORTANTLY, WHAT IT MUST NOT DO. It ends the account's LIVE SESSIONS. It does not
+// touch the Entitlement (not its status, not its expiry), it does not touch consumed_data_bytes or
+// consumed_online_seconds, and it writes no history. The guest signs in again with the new password and
+// resumes on the SAME Entitlement with the SAME remaining allowance — which is what the dialog promises
+// ("The account still works, so they can sign in again") and the reason a disconnect is not a revocation.
+//
+// IT GOES THROUGH scd, the one operator session-termination path, exactly as resources_sessions.go's
+// per-session Disconnect does: POST /v1/sessions/revoke {ip, reason:"admin"}. scd owns nftables and tc, so it
+// is the only component that can actually take the device off the network; it denies the address on the
+// device's bridge, deletes its shaping class, and only then ends the session row (state='ended', ended,
+// end_reason). edged never writes that row itself.
+//
+// The superseded implementation was a single UPDATE from edged that set `ended` and `end_reason =
+// 'admin_disconnect'` and left `state` at 'active'. Three things were wrong with it at once: the device kept
+// its nftables authorization and its traffic (nothing had told scd), the session stayed 'active' so every
+// state-filtered view still counted it, and 'admin_disconnect' is not in the end-reason vocabulary the rest of
+// the system uses. It reported a number of "disconnected sessions" that described rows it had edited, not
+// devices that had lost access.
+//
+// THE COUNT IS MEASURED, NOT ASSUMED. The number returned is how many of this account's sessions are
+// 'ended' AFTER the revocations, read back from the database. A revoke that scd refuses, or that leaves the
+// row untouched, is counted as a failure rather than quietly folded into the success total.
+type accountDisconnectResult struct {
+	Ended  int
+	Failed int
+}
+
+// liveAccountSession is one live session of a client account with the address enforcement is keyed on.
+type liveAccountSession struct {
+	id string
+	ip string
+}
+
+// endAccountSessions ends every live session of ONE client account, scoped to this tenant, this site and this
+// account. A non-zero HTTP status is a REFUSAL, and a refusal is always issued before anything is ended.
+func (s *server) endAccountSessions(r *http.Request, ctx contextT, accountID, username string) (
+	accountDisconnectResult, int, string, string) {
+	var res accountDisconnectResult
+
+	// SCOPED THREE WAYS. The entitlement join is what links a session to an account (an Entitlement has
+	// exactly one subject, by the ent_one_subject constraint), and tenant_id/site_id are compared on BOTH
+	// sides so a session can never be reached through an Entitlement of another site.
+	rows, err := s.db.Query(ctx, `
+	    SELECT s.id::text, COALESCE(host(s.ip), '')
+	      FROM iam_v2.sessions s
+	      JOIN iam_v2.entitlements e
+	        ON e.tenant_id = s.tenant_id AND e.site_id = s.site_id AND e.id = s.entitlement_id
+	     WHERE s.tenant_id = $1 AND s.site_id = $2 AND e.guest_account_id = $3
+	       AND s.ended IS NULL AND s.state IN ('active','PENDING_ENFORCEMENT')
+	     ORDER BY s.started`, s.tenantID, s.siteID, accountID)
+	if err != nil {
+		return res, http.StatusInternalServerError, "internal", "could not read this account's sessions"
+	}
+	var live []liveAccountSession
+	for rows.Next() {
+		var ls liveAccountSession
+		if err := rows.Scan(&ls.id, &ls.ip); err != nil {
+			rows.Close()
+			return res, http.StatusInternalServerError, "internal", "could not read this account's sessions"
+		}
+		live = append(live, ls)
+	}
+	rows.Close()
+	if rows.Err() != nil {
+		return res, http.StatusInternalServerError, "internal", "could not read this account's sessions"
+	}
+	if len(live) == 0 {
+		// A NO-OP IS A SUCCESS WITH A COUNT OF ZERO, not a refusal. Nothing is audited for a disconnect that
+		// disconnected nothing.
+		return res, 0, "", ""
+	}
+
+	// REFUSAL 1: no enforcement channel. Without scd nothing can be taken off the network, and ending the
+	// rows alone would be exactly the lie this replaces.
+	if s.scd == nil {
+		return res, http.StatusServiceUnavailable, "enforcement_unavailable",
+			"this appliance cannot withdraw network access right now, so no device was disconnected"
+	}
+	// REFUSAL 2: a live session with no recorded address. Enforcement is keyed on the address, so there is no
+	// honest way to disconnect it from here.
+	noAddr := 0
+	for _, ls := range live {
+		if ls.ip == "" {
+			noAddr++
+		}
+	}
+	if noAddr > 0 {
+		return res, http.StatusConflict, "conflict", fmt.Sprintf(
+			"%d of this account's live sessions have no recorded address, so their network access cannot be "+
+				"withdrawn from here. Nothing was disconnected; end them from Active sessions.", noAddr)
+	}
+
+	// One revoke per ADDRESS: scd revokes by address, and two sessions on one address would otherwise be
+	// revoked twice, the second call reporting a failure for a device that is already off.
+	seen := map[string]bool{}
+	for _, ls := range live {
+		if seen[ls.ip] {
+			continue
+		}
+		seen[ls.ip] = true
+		// The verdict is deliberately not branched on. A device scd could not take off the network is a
+		// reported FAILURE, not a reason to leave the account's other devices online, and whether it came
+		// off is measured from the session rows below rather than taken from this answer.
+		_, _, _ = s.scd.call(r.Context(), http.MethodPost, "/v1/sessions/revoke",
+			map[string]string{"ip": ls.ip, "reason": "admin"})
+	}
+
+	// READ BACK what actually ended, over exactly the sessions this call set out to end.
+	ids := make([]string, 0, len(live))
+	for _, ls := range live {
+		ids = append(ids, ls.id)
+	}
+	if err := s.db.QueryRow(ctx, `SELECT count(*)::int FROM iam_v2.sessions
+	     WHERE tenant_id=$1 AND site_id=$2 AND id = ANY($3::uuid[]) AND state='ended'`,
+		s.tenantID, s.siteID, ids).Scan(&res.Ended); err != nil {
+		return res, http.StatusInternalServerError, "internal",
+			"the devices were asked to disconnect but the result could not be confirmed"
+	}
+	res.Failed = len(live) - res.Ended
+
+	s.audit(r, "guest_account.sessions_disconnected", "guest_account", accountID, map[string]any{
+		"username": username, "authority": "iam_v2",
+		"disconnected_sessions": res.Ended, "failed_sessions": res.Failed,
+	})
+	return res, 0, "", ""
+}
+
+// disconnectGuestAccountSessionsIAMv2 is the row action: end this account's live sessions and nothing else.
 func (s *server) disconnectGuestAccountSessionsIAMv2(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	ctx, cancel := dbCtx(r)
@@ -395,20 +580,16 @@ func (s *server) disconnectGuestAccountSessionsIAMv2(w http.ResponseWriter, r *h
 		jsonErr(w, http.StatusNotFound, "not_found", "account not found")
 		return
 	}
-	var n int64
-	tag, err := s.db.Exec(ctx, `
-	    UPDATE iam_v2.sessions s
-	       SET ended = now(), end_reason = 'admin_disconnect'
-	      FROM iam_v2.entitlements e
-	     WHERE e.id = s.entitlement_id AND e.guest_account_id = $1 AND s.ended IS NULL`, id)
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "internal", "disconnect failed")
+	res, st, code, msg := s.endAccountSessions(r, ctx, id, username)
+	if st != 0 {
+		jsonErr(w, st, code, msg)
 		return
 	}
-	n = tag.RowsAffected()
-	s.audit(r, "guest_account.sessions_disconnected", "guest_account", id,
-		map[string]any{"username": username, "disconnected_sessions": n, "authority": "iam_v2"})
-	writeJSON(w, http.StatusOK, map[string]any{"status": "disconnected", "disconnected_sessions": n})
+	out := map[string]any{"status": "disconnected", "disconnected_sessions": res.Ended}
+	if res.Failed > 0 {
+		out["disconnect_failures"] = res.Failed
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *server) deleteGuestAccountIAMv2(w http.ResponseWriter, r *http.Request) {
