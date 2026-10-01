@@ -102,7 +102,10 @@ func seedGuestNetwork(t *testing.T, p *pgxpool.Pool, tenant, site, name, subnet 
 }
 
 type apiFixture struct {
-	srv      *httptest.Server
+	srv *httptest.Server
+	// svr is the server the routes are mounted on. Exposed so a test can supply a collaborator main.go would
+	// wire at startup -- the scd unix-socket client, for the one operator action that must reach enforcement.
+	svr      *server
 	pool     *pgxpool.Pool
 	tenant   string
 	site     string
@@ -194,6 +197,7 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 	// rather than about the product.
 	s.commerceRepo = iamv2.NewPgCommerceAdminRepository(p)
 	// the Phase-3 admin surface is mounted explicitly below; this fixture exercises the routes themselves.
+	f.svr = s
 	f.sessTok = s.sessions.create(&session{OperatorID: f.operator, Email: "op@test.local", Roles: roles})
 
 	r := chi.NewRouter()

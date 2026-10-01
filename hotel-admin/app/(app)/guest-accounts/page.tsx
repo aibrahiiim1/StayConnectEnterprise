@@ -31,11 +31,17 @@ import { useOperatorRoles } from "@/lib/whoami-context";
 import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 
 const PAGE_SIZES = [25, 50, 100, 200];
+// THERE IS NO "Locked out" FILTER, AND THERE IS NO "Locked out" COUNT.
+//
+// Both used to be here, reading iam_v2.guest_access_accounts.locked_until. Nothing in the product ever sets
+// that column — protection against repeated failed sign-ins is per DEVICE (Client sign-in protection) — so the
+// card always read 0 and the filter could only ever return an empty page. An operator reads "0 locked out" as a
+// measurement and concludes nobody is being locked out, which says nothing at all about the devices that ARE
+// being restricted. The screen now points at the place that measures it instead of inventing a number.
 const STATUS_FILTERS: { value: string; label: string }[] = [
   { value: "", label: "All accounts" },
   { value: "enabled", label: "Can sign in" },
   { value: "disabled", label: "Disabled" },
-  { value: "locked", label: "Locked out" },
 ];
 
 function weakPassword(pw: string): boolean {
@@ -226,10 +232,23 @@ export default function GuestAccountsPage() {
       const uname = pwFor.username;
       setPwFor(null);
       if (shown) setReveal({ username: uname, password: shown });
+      // WHAT THE TOAST MAY CLAIM is what the appliance confirmed. `disconnected_sessions` is the number of
+      // sessions actually ended; a count of 0 with the box ticked means there was nothing online, and is said
+      // so rather than left out. Devices the appliance could not take off the network are reported separately,
+      // because a partial disconnect announced as a success is the defect this replaces.
+      const ended = resp.disconnected_sessions;
       toast.success(
         `Password updated for ${uname}.`,
-        resp.disconnected_sessions ? `${resp.disconnected_sessions} session(s) disconnected.` : undefined,
+        disconnect
+          ? ended === 1 ? "1 device disconnected." : `${ended ?? 0} devices disconnected.`
+          : undefined,
       );
+      if (resp.disconnect_failures) {
+        toast.error(
+          `${resp.disconnect_failures} device${resp.disconnect_failures === 1 ? "" : "s"} could not be disconnected.`,
+          "The new password is set. End those sessions from Active sessions.",
+        );
+      }
       load();
     } catch (e: any) {
       setFormErr(e instanceof ApiError ? (e.body?.message ?? e.message) : (e?.message ?? "Reset failed"));
@@ -249,8 +268,16 @@ export default function GuestAccountsPage() {
     if (!disconnecting) return;
     setBusy(true); setActionErr(null);
     try {
-      const r = await api.post<{ disconnected_sessions: number }>(`/guest-accounts/${disconnecting.id}/disconnect`);
+      const r = await api.post<{ disconnected_sessions: number; disconnect_failures?: number }>(
+        `/guest-accounts/${disconnecting.id}/disconnect`,
+      );
       toast.success(`${r.disconnected_sessions} device${r.disconnected_sessions === 1 ? "" : "s"} disconnected.`);
+      if (r.disconnect_failures) {
+        toast.error(
+          `${r.disconnect_failures} device${r.disconnect_failures === 1 ? "" : "s"} could not be disconnected.`,
+          "End those sessions from Active sessions.",
+        );
+      }
       setDisconnecting(null);
       load();
     } catch (e) { setActionErr(e); }
@@ -269,8 +296,6 @@ export default function GuestAccountsPage() {
     finally { setBusy(false); }
   }
 
-  const locked = (a: GuestAccount) => a.locked_until && new Date(a.locked_until) > new Date();
-
   // Totals over EVERY account that matches, from the server -- not over the page on screen.
   const totals = useMemo(() => {
     const sm = resp?.summary;
@@ -279,7 +304,6 @@ export default function GuestAccountsPage() {
       all: sm?.total ?? list.length,
       enabled: sm?.enabled ?? list.filter((a) => a.enabled).length,
       online: sm?.devices_online ?? list.reduce((n, a) => n + (a.active_devices ?? 0), 0),
-      locked: sm?.locked ?? list.filter((a) => locked(a)).length,
     };
   }, [resp, rows]);
   const searching = q.trim() !== "" || status !== "";
@@ -308,7 +332,7 @@ export default function GuestAccountsPage() {
               <HelpList items={[
                 "Accounts can only be used while username-and-password sign-in is offered on the Client Portal.",
                 "A password is shown once, when it is set. It cannot be looked up again; if it is lost, set a new one.",
-                "An account is locked out after too many failed sign-in attempts.",
+                "Repeated failed sign-ins restrict the DEVICE that is guessing, not the account. See Client sign-in protection under Sign-in methods.",
                 "Disable an account to stop it being used for now; that can be reversed. Deleting cannot.",
               ]} />
             </HelpSection>
@@ -328,19 +352,13 @@ export default function GuestAccountsPage() {
       {roles !== null && !mayWrite && <ReadOnlyNotice />}
       <ErrorBanner err={err} />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label="Accounts" value={rows ? totals.all.toLocaleString() : "—"} icon={<Users />} tone="primary" />
         <StatCard label="Able to sign in" value={rows ? totals.enabled.toLocaleString() : "—"} />
         <StatCard
           label="Devices online"
           value={rows ? totals.online.toLocaleString() : "—"}
           href="/sessions"
-        />
-        <StatCard
-          label="Locked out"
-          value={rows ? totals.locked.toLocaleString() : "—"}
-          tone={totals.locked > 0 ? "warn" : "default"}
-          hint={totals.locked > 0 ? "Too many failed sign-in attempts" : "No account is locked"}
         />
       </div>
 
@@ -470,11 +488,6 @@ export default function GuestAccountsPage() {
                       <Badge tone={a.enabled ? "ok" : "err"} dot>
                         {a.enabled ? "Can sign in" : "Disabled"}
                       </Badge>
-                      {locked(a) && (
-                        <div className="mt-0.5">
-                          <Badge tone="warn">Locked until {formatRelative(a.locked_until)}</Badge>
-                        </div>
-                      )}
                     </TD>
                     <TD className="hidden text-sm text-muted-foreground md:table-cell">
                       {a.valid_until ? formatRelative(a.valid_until) : "No end date"}
@@ -768,7 +781,9 @@ function PasswordForm({ onSubmit, busy, onCancel }: { onSubmit: (e: React.FormEv
         <span>
           Disconnect this account&rsquo;s devices now
           <span className="block text-xs text-muted-foreground">
-            Without this, devices already online stay connected on the old password until their access ends.
+            Ends the sessions that are online now, so they have to sign in again with the new password. What they
+            bought is untouched &mdash; the same package and the same remaining allowance carry on. Without this,
+            devices already online stay connected on the old password until their access ends.
           </span>
         </span>
       </label>

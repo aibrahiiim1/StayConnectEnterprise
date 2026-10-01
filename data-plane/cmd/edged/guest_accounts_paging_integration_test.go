@@ -170,7 +170,9 @@ func TestIntegration_GeneratedPasswordFollowsTheFormat(t *testing.T) {
 func TestIntegration_GuestAccounts_PagedNewestFirstWithTotalsOverEveryMatch(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
-	// 115 accounts with creation times (acct-001 oldest), 10 from before 0104 with none, three disabled, two locked.
+	// 115 accounts with creation times (acct-001 oldest), 10 from before 0104 with none, three disabled. Two carry
+	// a locked_until value, which the summary must NOT count: nothing in the product sets that column and an
+	// always-zero "locked out" counter was a measurement the domain cannot make (guest_account_disconnect_integration_test.go).
 	if _, err := f.pool.Exec(ctx, `INSERT INTO iam_v2.guest_access_accounts
 		  (tenant_id, site_id, username, password_hash, display_name, enabled, created_at, locked_until)
 		SELECT $1, $2, 'acct-' || lpad(i::text, 3, '0'), 'x', 'Guest ' || i, i % 40 <> 0,
@@ -194,8 +196,11 @@ func TestIntegration_GuestAccounts_PagedNewestFirstWithTotalsOverEveryMatch(t *t
 		}
 		sum := body["summary"].(map[string]any)
 		if sum["total"] != float64(125) || sum["disabled"] != float64(2) || sum["enabled"] != float64(123) ||
-			sum["locked"] != float64(2) || sum["devices_online"] != float64(0) {
+			sum["devices_online"] != float64(0) {
 			t.Fatalf("summary = %v", sum)
+		}
+		if _, present := sum["locked"]; present {
+			t.Fatalf("the summary reports an account lockout count: %v", sum)
 		}
 		if body["authority"] != "iam_v2" || body["page"] != float64(page) || body["page_size"] != float64(50) {
 			t.Fatalf("envelope = %v", body)
@@ -236,8 +241,8 @@ func TestIntegration_GuestAccounts_PagedNewestFirstWithTotalsOverEveryMatch(t *t
 	if st, body = f.getAccounts(t, "?status=disabled", ""); st != 200 || len(body["data"].([]any)) != 2 {
 		t.Fatalf("disabled filter = %d %v", st, body)
 	}
-	if st, body = f.getAccounts(t, "?status=locked", ""); st != 200 || len(body["data"].([]any)) != 2 {
-		t.Fatalf("locked filter = %d %v", st, body)
+	if st, body = f.getAccounts(t, "?status=locked", ""); st != 400 {
+		t.Fatalf("locked filter = %d %v (it can only ever match nothing)", st, body)
 	}
 	if st, _ = f.getAccounts(t, "?status=bogus", ""); st != 400 {
 		t.Fatalf("unknown status = %d", st)
