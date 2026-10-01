@@ -109,8 +109,8 @@ for f in "$TDIR"/T*.json; do
   # introduced the REAL receipt of that id -- otherwise every copy would look uncommitted and go unchecked.
   src="$f"
   [ "$TDIR" = "governance/transitions" ] || src="governance/transitions/$id.json"
-  add="$(git log --diff-filter=A --format='%cI' -- "$src" 2>/dev/null | tail -1)"
-  addc="$(git log --diff-filter=A --format='%H' -- "$src" 2>/dev/null | tail -1)"
+  first="$(git log --diff-filter=A --format='%H %cI' -- "$src" 2>/dev/null | tail -1)"
+  addc="${first%% *}"; add="${first#* }"; [ -n "$first" ] || { addc=""; add=""; }
   if [ -z "$add" ]; then
     # Not yet committed: this is the receipt being written right now, and it will be checked on the next run.
     echo "  note: $id is not yet committed; its introducing commit does not exist yet"
