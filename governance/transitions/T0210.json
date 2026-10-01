@@ -1,0 +1,41 @@
+{
+  "transition_id": "T0210",
+  "seq": 210,
+  "timestamp": "2026-10-01T12:56:41+03:00",
+  "timestamp_derivation": "Written after GitHub merged PR #206 (e62765af, committer date 2026-10-01T12:55:28+03:00) and before the commit that introduces this receipt.",
+  "record_type": "MASTER_GATES_REPAIR_MERGED_TO_MASTER",
+  "authorisation": "Product-Owner mission of 2026-10-01: restore master to a fully green authoritative baseline before merging PR #205, through a separate protected PR.",
+  "merge": {
+    "pull_request": 206,
+    "merge_commit": "e62765afcdbef3a8f49d72ee20ee155a6ae4402e",
+    "merged_at": "2026-10-01T09:55:29Z",
+    "parents": [
+      "614cfdf1a683d585e1f85bcf57cc136987670c8d",
+      "ecd683d3c9a8c9160d1a0c6050d39cbe74de06a8"
+    ],
+    "tested_head": "ecd683d3c9a8c9160d1a0c6050d39cbe74de06a8",
+    "merge_introduced_no_content": "The tree of master at e62765af is identical to the tree of the tested head ecd683d3.",
+    "how": "D42 protected path: the three automated review threads fixed (a51f7458) and resolved; the four comprehensive gates green on the exact head (governance, phase3-full-software-gate, phase4-financial-core-gate and phase5-post-stay-transfer-gate all success); po-merge-approved applied; po-merge-authorization passed; merge commit through the REST API with the head SHA pinned."
+  },
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0209."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. A merge of tests, a validator and governance; nothing deployed. PRE-LIVE remains PRE-LIVE."
+  },
+  "state_note": "No phase, activity or acceptance state changes.",
+  "base": "e62765afcdbef3a8f49d72ee20ee155a6ae4402e",
+  "base_note": "Master after the merge of PR #206.",
+  "head": "e62765af",
+  "head_note": "No content commit: governance only.",
+  "previous_delivery": "T0209",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

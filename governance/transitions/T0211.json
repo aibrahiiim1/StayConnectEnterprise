@@ -1,0 +1,48 @@
+{
+  "transition_id": "T0211",
+  "seq": 211,
+  "timestamp": "2026-10-01T12:56:41+03:00",
+  "timestamp_derivation": "Written after PR #205 was brought up to date with the repaired master and before the commit that introduces this receipt.",
+  "record_type": "STAYS_PAGING_AND_GUEST_ATTRIBUTES_ACCEPTED_MERGE_AUTHORISED",
+  "authorisation": "Product-Owner missions of 2026-10-01 on PR #205, its acceptance at 6a403326, the instruction to fix the remaining review finding and merge without re-approval, and the instruction to restore master to green first (PR #206, T0209/T0210).",
+  "renumbering_note": "This receipt re-records the PR #205 acceptance that the branch first drafted as T0209. That draft never reached master; master's T0209 is the repair's forward correction (PR #206). Nothing on master was rewritten.",
+  "decision": "none (product delivery; no new PO decision recorded)",
+  "decisions_recorded": [],
+  "acceptance": {
+    "accepted_by": "Product Owner",
+    "accepted_on": "2026-10-01",
+    "accepted_head": "6a403326ea4205b54577db3ed640edbe6459d608",
+    "after_acceptance": "Review fix 6151e690 (only the latest Stays query may answer) under the Product Owner's 'fix and merge without re-approval'; documentation ba0d2e6a; merged up to the repaired master."
+  },
+  "delivered": [
+    "Stays: server-side paging and search over every stay (the list had stopped at 200 of 403 in-house stays); totals over every matching stay; VIP only filter; travel agent per row; search text in the X-Stay-Search header; only the latest query may answer.",
+    "VIP and travel agent from Protel FIAS A0/A1 (the property's FidServ user-defined fields GIA0/GCA0 -> AG, GIA1/GCA1 -> VP); best-effort attributes; the stay engine writes only what a record states.",
+    "FIAS link description restored to the Phase-0 verified LD|..|IFPB|V#1.13|RT4| (pms.VerifiedLD).",
+    "Package editor travel-agent picker; a name with a comma stays one agent."
+  ],
+  "verification": "pmsd/pms/iamv2 unit tests; pmsd-pg-integration rc=0; Admin Console vitest 162/162 and tsc; PRE-LIVE: A0/A1 on every GI since 2026-10-01 04:29Z (aggregates), 103 VIP and 412 with an agent across 29 agents, API filters, read-only browser checks, guest-access harness 47/47 with postings unchanged. The four comprehensive gates are run on this delivery's exact head before merge.",
+  "deployment_provenance": "PRE-LIVE 172.21.60.25: edged 25f9d03b, pmsd 6a403326, Admin Console 6151e690 (release 20261001-050328); scd 442f6e61; portald d5c3e578; netd and acctd 99ba9f10. No migration.",
+  "real_pms_posting": "None.",
+  "merge": "Follows this receipt through the protected path; recorded by the closure receipt.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0210."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. PRE-LIVE remains PRE-LIVE; Go-Live is not authorised."
+  },
+  "state_note": "No phase, activity or acceptance state changes.",
+  "base": "e62765afcdbef3a8f49d72ee20ee155a6ae4402e",
+  "base_note": "Master after the merge of PR #206, which this branch now contains.",
+  "head": "ba0d2e6a",
+  "head_note": "PR #205's last content commit (documentation sync).",
+  "previous_delivery": "T0210",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
