@@ -1,5 +1,6 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 import { portalHTML, shippedWording } from "./portal-page";
+import { installCapabilities } from "./capabilities";
 
 // PORTAL SETTINGS, IN A BROWSER.
 //
@@ -63,6 +64,13 @@ async function installBackend(page: Page) {
       return route.fulfill(json(200, { saved: true }));
     }
     if (path === "/portal-branding/preview") return route.fulfill(json(200, { html: PORTAL_HTML }));
+    // The preview shows the site's OWN sign-in methods (edged's /auth-methods), each optional one only while its
+    // module is licensed. This site offers Room sign-in, vouchers and personal accounts.
+    if (path === "/auth-methods")
+      return route.fulfill(json(200, {
+        pms: { enabled: true, mode: "ROOM_AND_LAST_NAME" }, phase3_pms: true,
+        voucher: { enabled: true }, guest_account: { enabled: true },
+      }));
     if (path === "/portal-branding/languages") return route.fulfill(json(200, shippedWording()));
     if (path === "/portal-assets" && method === "POST")
       return route.fulfill(json(200, { name: "aaaa1111bbbb2222.png", url: "/assets/aaaa1111bbbb2222.png", size_bytes: PNG.length }));
@@ -70,6 +78,7 @@ async function installBackend(page: Page) {
     if (path.endsWith("/raw")) return route.fulfill({ status: 200, contentType: "image/png", body: PNG });
     return route.fulfill(json(200, { data: [], meta: { has_more: false } }));
   });
+  await installCapabilities(page); // a fully licensed hotel appliance (e2e/capabilities.ts)
 }
 
 const preview = (page: Page) => page.frameLocator('iframe[title^="Client Portal"]');

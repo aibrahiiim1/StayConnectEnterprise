@@ -117,6 +117,56 @@ else
   esac
 fi
 
+# 6-8. FORWARD CORRECTION OF A LATE RECEIPT IS EXACT, OR IT IS NOTHING. T0199 is a real receipt written under
+#    the rule and introduced 654s before the time it records. With no correction it must fail; with a later
+#    receipt that names it and states exactly what the repository measures it passes as "corrected forward";
+#    with a correction whose figures do not match it must still fail.
+T199ADD="$(git log --diff-filter=A --format='%H' -- governance/transitions/T0199.json | tail -1)"
+T199TS="$("$PY3" -c "import json,io;print(json.load(io.open('governance/transitions/T0199.json',encoding='utf-8'))['timestamp'])")"
+corr_receipt(){ # corr_receipt <file> <late_by>
+  "$PY3" - "$1" "$T199TS" "$T199ADD" "$2" <<'PY'
+import io, json, sys
+io.open(sys.argv[1], "w", encoding="utf-8", newline=chr(10)).write(json.dumps({
+    "transition_id": "T9100", "seq": 9100, "timestamp": "2099-01-01T00:00:00Z",
+    "record_type": "SELFTEST_TIMESTAMP_CORRECTION",
+    "timestamp_corrections": [{"transition_id": "T0199", "recorded_timestamp": sys.argv[2],
+                               "introducing_commit": sys.argv[3], "late_by_seconds": int(sys.argv[4])}],
+}, indent=2) + chr(10))
+PY
+}
+mkdir -p "$W/late"
+cp governance/transitions/T0199.json "$W/late/T0199.json"
+if run_ungrandfathered "$W/late"; then
+  no "a late receipt with no correction is refused" "T0199 passed with nothing correcting it"
+else
+  case "$OUT" in
+    *"T0199 records"*"654s AFTER"*) ok "a late receipt with no correction is refused, stating the exact 654s" ;;
+    *) no "a late receipt with no correction is refused" "wrong wording: $OUT" ;;
+  esac
+fi
+mkdir -p "$W/corrected"
+cp governance/transitions/T0199.json "$W/corrected/T0199.json"
+corr_receipt "$W/corrected/T9100.json" 654
+if run_ungrandfathered "$W/corrected"; then
+  case "$OUT" in
+    *"corrected forward: T0199 is 654s later"*"corrected forward by T9100"*) ok "an exact forward correction is accepted and printed with its lateness and its corrector" ;;
+    *) no "an exact forward correction is visible" "accepted silently: $OUT" ;;
+  esac
+else
+  no "an exact forward correction is accepted" "$OUT"
+fi
+mkdir -p "$W/mismatch"
+cp governance/transitions/T0199.json "$W/mismatch/T0199.json"
+corr_receipt "$W/mismatch/T9100.json" 600
+if run_ungrandfathered "$W/mismatch"; then
+  no "a correction whose figures do not match is refused" "a 600s correction excused a 654s receipt"
+else
+  case "$OUT" in
+    *"does not match"*) ok "a correction whose figures do not match the measurement is refused" ;;
+    *) no "a mismatched correction is refused" "wrong wording: $OUT" ;;
+  esac
+fi
+
 echo "------------------------------------------------------------"
 echo "MERGE_RECEIPT_TIMES_SELFTEST pass=$pass fail=$fail"
 [ "$fail" -eq 0 ] || exit 1

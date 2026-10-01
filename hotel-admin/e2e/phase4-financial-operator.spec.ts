@@ -1,4 +1,5 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
+import { installCapabilities } from "./capabilities";
 
 // Browser-level E2E for the Phase-4 (DARK) financial operator surface. edged is fully mocked at the network
 // layer -- no real backend, no database, no production data, no PMS and no payment provider. The Next server
@@ -135,6 +136,7 @@ async function installBackend(
         return json({ error: "not_found" }, 404);
     }
   });
+  await installCapabilities(page); // a fully licensed hotel appliance (e2e/capabilities.ts)
 }
 
 test.describe("Phase 4 financial operator surface", () => {
@@ -366,11 +368,13 @@ test.describe("Phase 4 financial operator surface", () => {
   test("the settlement browser shows the charge and offers no refund", async ({ page }) => {
     await installBackend(page, []);
     await page.goto("/financial-settlements");
-    await page.getByRole("button", { name: /^open$/i }).first().click();
-    await expect(page.getByText("CAPTURED")).toBeVisible();
+    // The Package payments redesign (93a56f34) names each row's button after the package ("Details of ...") and
+    // shows payment statuses in words; what the screen must never offer is unchanged.
+    await page.getByRole("button", { name: /^details of/i }).first().click();
+    await expect(page.getByText(/^captured$/i)).toBeVisible();
     for (const forbidden of [/refund/i, /chargeback/i, /reverse/i]) {
       await expect(page.getByRole("button", { name: forbidden })).toHaveCount(0);
     }
-    await expect(page.getByText(/not available from this surface/i)).toBeVisible();
+    await expect(page.getByText(/refunds are not made from onegate/i)).toBeVisible();
   });
 });

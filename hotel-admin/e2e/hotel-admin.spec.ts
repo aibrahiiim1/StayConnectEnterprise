@@ -1,4 +1,5 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
+import { installCapabilities } from "./capabilities";
 
 // The edged backend is fully mocked at the network layer; no real backend / DB / production data.
 // The Next app under test was built with NEXT_PUBLIC_PHASE2_ADMIN=1 (flag-ON profile) — a TEST-only
@@ -111,6 +112,7 @@ async function installBackend(page: Page, opts: {
 
     return route.fulfill(json(200, list([])));
   });
+  await installCapabilities(page); // a fully licensed hotel appliance (e2e/capabilities.ts)
 }
 
 test("nav shows Internet packages (flag-ON build) and lists packages", async ({ page }) => {
@@ -174,8 +176,13 @@ test("internet packages: publish via the plan selector, then step-up deactivate"
   await page.locator('form button[type="submit"]').click();
   await expect.poll(() => mutations.find((m) => m.path.endsWith("/commercial-packages") && m.method === "POST")).toBeTruthy();
   const pkgReq = mutations.find((m) => m.path.endsWith("/commercial-packages") && m.method === "POST")!;
+  // FREE, AND SAID SO. Since D44 a package states its price and how it is acquired: a free package is priced 0
+  // and acquired ONLY through NOT_REQUIRED (Free). It must still carry no PMS, tax or settlement mapping.
+  const pkgBody = pkgReq.body as { price_minor?: number; acquisition_methods?: string[] };
+  expect(pkgBody.price_minor).toBe(0);
+  expect(pkgBody.acquisition_methods).toEqual(["NOT_REQUIRED"]);
   const pkgJson = JSON.stringify(pkgReq.body).toLowerCase();
-  expect(pkgJson).not.toMatch(/price|settlement|pms|tax|currency/); // free-only, no PMS
+  expect(pkgJson).not.toMatch(/pms|tax|settlement|posting|room_charge|online_payment|prepaid/); // free-only, no PMS
   expect((pkgReq.body as { service_plan_revision_id: string }).service_plan_revision_id).toBe("rev-gold");
   // ADD asks for a NEW package: a taken code is refused by the server instead of revising the existing one.
   expect((pkgReq.body as { create_only?: boolean }).create_only).toBe(true);
