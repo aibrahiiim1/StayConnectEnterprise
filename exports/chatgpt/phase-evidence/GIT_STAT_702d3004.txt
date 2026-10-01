@@ -1,4 +1,0 @@
-commit 702d30044c43db1bad4d85be8a706b4756d21c50
-Date:   Wed Sep 30 23:21:48 2026 +0300
-
-    Correction manifest seeded for the T0208 lineage
