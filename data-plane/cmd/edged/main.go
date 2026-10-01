@@ -399,6 +399,10 @@ func main() {
 			// iam_v2.vouchers. Two operator surfaces over two competing plan models is how an operator ends
 			// up editing the plan that nothing reads.
 			mountResource(r, s, "guest-accounts", s.guestAccountsRoutes)
+			// The format of GENERATED client-account passwords (0104): a property configuration decision, so
+			// its own key rather than guest-accounts write -- the desk creates accounts, it does not decide how
+			// strong every generated password is.
+			mountResource(r, s, "account-password-settings", s.accountPasswordSettingsRoutes)
 			mountResource(r, s, "sessions", s.sessionsRoutes)
 			// USAGE EXPLORER. Read-only investigation over durable accounting and session data; see
 			// resources_usage.go. Under the "sessions" role because it is the same live-access state that

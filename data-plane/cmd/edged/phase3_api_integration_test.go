@@ -227,6 +227,10 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 			mountResource(r, s, "financial-review", s.financialReviewRoutes)
 			// ...and the financial OPERATIONS surface, which shares that permission.
 			mountResource(r, s, "financial-ops", s.financialOpsRoutes)
+			// Client accounts and the generated-password format (0104): paging, search, newest-first and the
+			// format setting are exercised through the real router, role matrix and database.
+			mountResource(r, s, "guest-accounts", s.guestAccountsRoutes)
+			mountResource(r, s, "account-password-settings", s.accountPasswordSettingsRoutes)
 		})
 	})
 	f.srv = httptest.NewServer(r)

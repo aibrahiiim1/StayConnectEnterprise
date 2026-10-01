@@ -45,6 +45,7 @@ the keys are unchanged, [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md)). Legen
 | vouchers | W | W | **W** | **W** | **W** | R | R |
 | voucher-codes | W | **–** | **W** | **W** | **W** | – | **–** |
 | voucher-code-settings | W | **W** | R | R | R | – | R |
+| account-password-settings | W | **W** | R | R | R | – | R |
 | sessions (incl. disconnect) | W | W | **W** | **W** | – | R | R |
 | guests | W | W | **W** | **W** | – | R | R |
 | pms-providers (+test/cache/health) | W | W | R | R | – | R | R |
@@ -117,6 +118,13 @@ lifecycle belongs with whoever owns the format. Retiring a key reads no code and
 reveals nothing, which is why it is here rather than under `voucher-codes`: a desk
 role that may read one card's code has no business retiring the key that indexes
 every card in the building.
+
+`account-password-settings` chooses what a **generated** client-account password
+looks like (which characters, how many; migration 0104), and follows
+`voucher-code-settings` role for role for the same reason: it is property
+configuration, not a desk action. The desk roles that create accounts
+(`guest-accounts` **W**) read it and cannot change it. Every style is held to a
+40-bit entropy floor by the server, whichever role saves it.
 
 Issuing already returns plaintext, so it is worth being precise about what the
 second key protects: issuing creates codes **nobody holds yet**, while revealing
