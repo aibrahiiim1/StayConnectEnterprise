@@ -14,10 +14,11 @@
 // more rows than anyone scrolls), summary tiles, a per-row detail panel, and a disconnect confirmation that
 // names who is about to be cut off.
 
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { api, ListResp, Session } from "@/lib/api";
+import { api, Session } from "@/lib/api";
 import { usePoll } from "@/lib/use-poll";
+import { useServerPage, type PagedFields } from "@/lib/use-server-page";
 import { useOperatorRoles } from "@/lib/whoami-context";
 import { canWrite } from "@/lib/roles";
 import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
@@ -46,8 +47,6 @@ import { Users, Monitor, ArrowDownUp, Hotel, KeyRound, Ticket, UserCircle, Power
 
 type Tab = "active" | "recent";
 
-const PAGE = 50;
-
 const KIND_ICON = {
   room: Hotel,
   account: KeyRound,
@@ -66,10 +65,19 @@ const secs = (n?: number | null) => {
   return `${n}s`;
 };
 
+type SessionsResp = PagedFields & {
+  data?: Session[];
+  summary?: {
+    devices_online?: number;
+    clients_online?: number;
+    rooms_online?: number;
+    bytes_total?: number;
+    kinds?: Record<string, number>;
+  };
+};
+
 export default function SessionsPage() {
   const [tab, setTab] = useState<Tab>("active");
-  const [rows, setRows] = useState<Session[] | null>(null);
-  const [err, setErr] = useState<unknown>(null);
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState<string>("");
   const [detail, setDetail] = useState<Session | null>(null);
@@ -77,7 +85,6 @@ export default function SessionsPage() {
   const [busy, setBusy] = useState(false);
   const [actionErr, setActionErr] = useState<unknown>(null);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const toast = useToast();
 
   // DISCONNECT IS OFFERED ONLY TO A ROLE THAT CAN USE IT. site_viewer, payments_operator and voucher_operator
@@ -86,30 +93,39 @@ export default function SessionsPage() {
   const roles = useOperatorRoles();
   const mayDisconnect = roles === null ? false : canWrite("sessions", roles);
 
-  const load = useCallback(async () => {
-    const q = new URLSearchParams();
-    if (tab === "active") q.set("state", "active");
-    setRefreshing(true);
-    try {
-      const r = await api.get<ListResp<Session>>(`/sessions?${q.toString()}`);
-      setRows((prev) => keepUnchanged(prev, r.data ?? []));
-      setErr(null);
-      setUpdatedAt(Date.now());
-    } catch (e) {
-      setErr(e);
-      // The last good list stays on screen under the error: a poll that fails once must not blank the table
-      // the desk is reading. Only a first load that fails has nothing to keep.
-      setRows((prev) => prev ?? []);
-    } finally {
-      setRefreshing(false);
-    }
-  }, [tab]);
+  // PAGED, FILTERED AND SEARCHED ON THE SERVER. edged used to return the newest 200 sessions and this screen
+  // searched, filtered and counted those, so on a busy evening an earlier device was simply not findable and
+  // the tiles counted what had loaded. The search goes in a header: it is a room, a username or a guest's name,
+  // and edged logs request lines. A new tab, filter or search starts again at the first page.
+  const path = useMemo(() => {
+    const p = new URLSearchParams();
+    if (tab === "active") p.set("state", "active");
+    if (kind) p.set("kind", kind);
+    const s = p.toString();
+    return s ? `/sessions?${s}` : "/sessions";
+  }, [tab, kind]);
+  const needle = query.trim();
+  const headers = useMemo(
+    () => (needle ? { "X-Session-Search": encodeURIComponent(needle) } : undefined),
+    [needle],
+  );
+  const list = useServerPage<SessionsResp>({ path, headers });
+  const { resp, current, err, loading: refreshing } = list;
 
-  // The list is cleared on a tab CHANGE only, not on every poll. Blanking it each time the 10-second poll fired
-  // made the table flash and lose the row the operator was reading.
-  useEffect(() => { setRows(null); void load(); }, [load]);
-  // Paused while the tab is hidden; an operator switching back gets a fresh list at once.
-  usePoll(() => void load(), 10_000, { enabled: tab === "active" });
+  // The rows of the page on screen. An unchanged session stays the same object across polls, so the memoised
+  // rows below re-render only where a figure actually moved. A new question shows the skeleton, not the old
+  // question's rows; a failed first load shows an empty list under the error.
+  const prevRows = useRef<Session[] | null>(null);
+  const rows = useMemo(() => {
+    if (!current || !resp) return err && !resp ? [] : null;
+    const next = keepUnchanged(prevRows.current, resp.data ?? []);
+    prevRows.current = next;
+    return next;
+  }, [current, resp, err]);
+  useEffect(() => { if (current && resp) setUpdatedAt(Date.now()); }, [current, resp]);
+
+  // Paused while the tab is hidden; an operator switching back gets a fresh page at once.
+  usePoll(() => void list.reload(), 10_000, { enabled: tab === "active" });
 
   async function onDisconnect(s: Session) {
     setBusy(true); setActionErr(null);
@@ -120,7 +136,7 @@ export default function SessionsPage() {
       setDetail(null);
       // scd enforces asynchronously, so an immediate reload can still show the session as active. The short
       // delay is not cosmetic: without it the operator sees their own action appear not to have worked.
-      setTimeout(() => void load(), 600);
+      setTimeout(() => void list.reload(), 600);
     } catch (e) {
       setActionErr(e);
     } finally {
@@ -128,54 +144,21 @@ export default function SessionsPage() {
     }
   }
 
-  const filtered = useMemo(() => {
-    if (!rows) return null;
-    const q = query.trim().toLowerCase();
-    return rows.filter((s) => {
-      if (kind && (s.subject_kind ?? "") !== kind) return false;
-      if (!q) return true;
-      const id = identifySession(s);
-      return [
-        id.title, id.subtitle, s.room, s.subject_label, s.subject_name, s.external_reservation_id,
-        s.ip, s.mac, s.package_name, s.package_code, s.guest_network_name,
-      ].some((v) => typeof v === "string" && v.toLowerCase().includes(q));
-    });
-  }, [rows, query, kind]);
-
-  // A PAGE AT A TIME. edged returns up to 200 sessions and this list re-renders on every 10-second poll; drawing
-  // all of them each time made a busy evening's list slow to scroll. The filter still searches every row loaded,
-  // and a new search or filter starts again at the first page.
-  const [offset, setOffset] = useState(0);
-  useEffect(() => { setOffset(0); }, [tab, query, kind]);
-  // A poll can shrink the list under the page being read (guests leave); stay on the last page that exists.
-  const pageOffset = filtered && offset >= filtered.length && filtered.length > 0
-    ? Math.floor((filtered.length - 1) / PAGE) * PAGE
-    : offset;
-  const pageRows = useMemo(
-    () => (filtered ? filtered.slice(pageOffset, pageOffset + PAGE) : null),
-    [filtered, pageOffset],
-  );
   const openDetail = useCallback((s: Session) => { setDetail(s); setActionErr(null); }, []);
   const askDisconnect = useCallback((s: Session) => { setConfirm(s); setActionErr(null); }, []);
 
-  // Summary figures come from the rows on screen, which is the honest thing for them to describe: they are a
-  // summary OF THIS LIST, and the dashboard is where the site-wide numbers live.
-  const summary = useMemo(() => {
-    const list = rows ?? [];
-    const active = list.filter((s) => s.state === "active");
-    return {
-      devices: active.length,
-      guests: new Set(active.map((s) => s.entitlement_id || s.mac)).size,
-      rooms: new Set(active.filter((s) => s.subject_kind === "room").map((s) => s.subject_label)).size,
-      bytes: list.reduce((a, s) => a + (s.bytes_down ?? 0) + (s.bytes_up ?? 0), 0),
-    };
-  }, [rows]);
-
-  const kindCounts = useMemo(() => {
-    const c: Record<string, number> = {};
-    for (const s of rows ?? []) c[s.subject_kind ?? ""] = (c[s.subject_kind ?? ""] ?? 0) + 1;
-    return c;
-  }, [rows]);
+  // THE TILES DESCRIBE EVERY SESSION IN THE TAB, counted by the server -- not the page on screen, and not
+  // narrowed by the search or the sign-in type, so they stay put while the operator narrows the table.
+  const tiles = resp?.summary;
+  const summary = {
+    devices: tiles?.devices_online ?? 0,
+    guests: tiles?.clients_online ?? 0,
+    rooms: tiles?.rooms_online ?? 0,
+    bytes: tiles?.bytes_total ?? 0,
+  };
+  const kindCounts: Record<string, number> = tiles?.kinds ?? {};
+  const haveSummary = !!tiles;
+  const searching = needle !== "" || kind !== "";
 
   // WHICH SIGN-IN TYPES THIS SITE CAN HAVE. Rooms are a Hotel idea: they are offered as a filter, a search
   // term and a word in the help only where hospitality is licensed or has left records -- or where a room
@@ -231,7 +214,7 @@ export default function SessionsPage() {
           refreshing={refreshing && rows !== null}
           intervalSeconds={tab === "active" ? 10 : undefined}
           error={!!err && rows !== null && rows.length > 0}
-          onRefresh={() => void load()}
+          onRefresh={() => void list.reload()}
         />
         {roles !== null && !mayDisconnect && (
           <ReadOnlyNotice className="py-1.5">Your role can see who is online but not disconnect a device.</ReadOnlyNotice>
@@ -243,13 +226,13 @@ export default function SessionsPage() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Devices online"
-          value={rows ? summary.devices.toLocaleString() : "—"}
+          value={haveSummary ? summary.devices.toLocaleString() : "—"}
           icon={<Monitor />}
           tone="primary"
         />
         <StatCard
           label="Clients online"
-          value={rows ? summary.guests.toLocaleString() : "—"}
+          value={haveSummary ? summary.guests.toLocaleString() : "—"}
           icon={<Users />}
           explain={
             <Explain>
@@ -259,7 +242,7 @@ export default function SessionsPage() {
           }
         />
         {/* Rooms are a Hotel idea: the tile appears only when somebody is actually signed in with a room. */}
-        {rows && summary.rooms > 0 && (
+        {haveSummary && summary.rooms > 0 && (
           <StatCard
             label="Rooms online"
             value={summary.rooms.toLocaleString()}
@@ -269,9 +252,9 @@ export default function SessionsPage() {
         )}
         <StatCard
           label="Data in this list"
-          value={rows ? formatBytes(summary.bytes) : "—"}
+          value={haveSummary ? formatBytes(summary.bytes) : "—"}
           icon={<ArrowDownUp />}
-          hint="Total recorded against the sessions shown"
+          hint={tab === "active" ? "Recorded against every session online now" : "Recorded against every session in this list"}
         />
       </div>
 
@@ -284,6 +267,7 @@ export default function SessionsPage() {
               placeholder={rooms ? "Room, name, username, IP or MAC…" : "Name, username, IP or MAC…"}
               label="Search sessions"
               className="sm:max-w-xs"
+              delay={300}
             />
             <div className="flex items-end gap-2">
               <Select
@@ -309,20 +293,20 @@ export default function SessionsPage() {
         </CardBody>
 
         <CardBody className={cn("p-0", refreshing && rows !== null && refreshingClass)}>
-          {filtered === null ? (
+          {rows === null ? (
             <SkeletonRows rows={6} cols={6} />
-          ) : filtered.length === 0 ? (
+          ) : rows.length === 0 ? (
             <EmptyState
               icon={<Monitor />}
               title={
-                rows && rows.length > 0
+                searching
                   ? "No session matches this filter"
                   : tab === "active"
                     ? "Nobody is online"
                     : "No recent sessions"
               }
               hint={
-                rows && rows.length > 0
+                searching
                   ? "Try a different search, or clear the filters."
                   : tab === "active"
                     ? "Connected clients appear here as soon as they sign in."
@@ -344,20 +328,21 @@ export default function SessionsPage() {
                 </TR>
               </THead>
               <TBody>
-                {(pageRows ?? []).map((s) => (
+                {rows.map((s) => (
                   <SessionRow key={s.id} s={s} mayDisconnect={mayDisconnect} onOpen={openDetail} onDisconnect={askDisconnect} />
                 ))}
               </TBody>
             </Table>
           )}
-          {filtered && filtered.length > PAGE && (
+          {rows && rows.length > 0 && (list.offset > 0 || list.hasMore) && (
             <div className="border-t border-border px-4 py-3">
               <Pagination
-                offset={pageOffset}
-                limit={PAGE}
-                shown={pageRows?.length ?? 0}
-                total={filtered.length}
-                onChange={setOffset}
+                offset={list.offset}
+                limit={list.pageSize}
+                shown={rows.length}
+                total={list.total}
+                hasMore={list.hasMore}
+                onChange={list.setOffset}
               />
             </div>
           )}

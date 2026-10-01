@@ -210,7 +210,9 @@ describe("Stay events page", () => {
         processing_status: "MANUAL_REVIEW", review_code: "FOLIO_CLAIMED_BY_OTHER_STAY",
         received_at: new Date().toISOString(),
       }],
-      meta: { has_more: false },
+      meta: { has_more: false }, page: 1, page_size: 50, total: 1,
+      // edged counts every message for the tiles, whatever the filter.
+      summary: { applied: 0, pending: 0, manual_review: 1, rejected: 0, unmatched: 1 },
     });
     const { default: StayEventsPage } = await import("@/app/(app)/stay-events/page");
     render(<StayEventsPage />);
