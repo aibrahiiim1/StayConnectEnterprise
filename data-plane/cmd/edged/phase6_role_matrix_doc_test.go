@@ -134,7 +134,7 @@ func TestPhase6DocumentedRowCoversEveryRole(t *testing.T) {
 // everywhere else. These run the same two assertions over the three voucher resources, so the rows above
 // are now enforceable statements rather than intentions.
 func TestVoucherResourcesMatchTheDocumentedRoleMatrix(t *testing.T) {
-	for _, resource := range []string{"vouchers", "voucher-codes", "voucher-code-settings"} {
+	for _, resource := range []string{"vouchers", "voucher-codes", "voucher-code-settings", "account-password-settings"} {
 		row := docMatrixRow(t, resource)
 		if len(row) == 0 {
 			t.Fatalf("%s: empty row", resource)
@@ -167,7 +167,7 @@ func TestVoucherResourcesMatchTheDocumentedRoleMatrix(t *testing.T) {
 }
 
 func TestVoucherDocumentedRowsCoverEveryRole(t *testing.T) {
-	for _, resource := range []string{"vouchers", "voucher-codes", "voucher-code-settings"} {
+	for _, resource := range []string{"vouchers", "voucher-codes", "voucher-code-settings", "account-password-settings"} {
 		row := docMatrixRow(t, resource)
 		for role := range rolePerms {
 			if role == "tenant_admin" || role == "tenant_operator" {

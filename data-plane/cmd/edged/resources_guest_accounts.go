@@ -13,8 +13,6 @@ package main
 // which is tenant configuration rather than account storage.
 
 import (
-	"crypto/rand"
-	"math/big"
 	"net/http"
 	"strings"
 	"time"
@@ -107,24 +105,9 @@ func validPassword(p string) (bool, string) {
 	return true, ""
 }
 
-// generatePassword returns a readable, reasonably strong random password for the
-// optional server-side "Generate" action. It is returned to the operator ONCE
+// THE GENERATED PASSWORD is drawn in account_password_format.go, in the site's operator-chosen format
+// (migration 0104; default mixed, 14 -- what this file used to hardcode). It is returned to the operator ONCE
 // in the create/reset response and never stored in plaintext.
-const genPasswordAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
-
-func generatePassword() (string, error) {
-	const n = 14
-	b := make([]byte, n)
-	max := big.NewInt(int64(len(genPasswordAlphabet)))
-	for i := range b {
-		idx, err := rand.Int(rand.Reader, max)
-		if err != nil {
-			return "", err
-		}
-		b[i] = genPasswordAlphabet[idx.Int64()]
-	}
-	return string(b), nil
-}
 
 func (s *server) createGuestAccount(w http.ResponseWriter, r *http.Request) {
 	var in struct {
@@ -149,11 +132,12 @@ func (s *server) createGuestAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	// Password: operator-typed, or server-generated when generate=true. The
 	// plaintext is returned ONCE below and never stored.
+	ctx, cancel := dbCtx(r)
+	defer cancel()
 	generated := false
 	if in.Generate && in.Password == "" {
-		pw, err := generatePassword()
-		if err != nil {
-			jsonErr(w, http.StatusInternalServerError, "internal", "generate failed")
+		pw, ok := s.generateAccountPassword(w, ctx)
+		if !ok {
 			return
 		}
 		in.Password = pw
@@ -173,8 +157,6 @@ func (s *server) createGuestAccount(w http.ResponseWriter, r *http.Request) {
 	//
 	// The template_id field is still accepted on the wire and ignored, so an older client posting it gets a
 	// created account rather than a 400. It is not stored, because there is nowhere left to store it.
-	ctx, cancel := dbCtx(r)
-	defer cancel()
 	enabled := true
 	if in.Enabled != nil {
 		enabled = *in.Enabled

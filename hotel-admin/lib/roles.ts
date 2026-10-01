@@ -84,6 +84,8 @@ const MATRIX: Matrix = {
     // decision, the same reasoning that puts auth-methods here. Not "voucher-codes": this role owns
     // configuration and the PMS integration, and neither job requires reading a guest's credential.
     vouchers: "write", "voucher-code-settings": "write",
+    // The format of GENERATED client-account passwords follows the voucher code format role for role.
+    "account-password-settings": "write",
     operators: "read", audit: "read",
     reports: "read", backups: "read", license: "read", diagnostics: "write",
   },
@@ -106,6 +108,7 @@ const MATRIX: Matrix = {
     "financial-review": "read", "financial-ops": "read",
     "guest-accounts": "write", sessions: "write", usage: "read",
     vouchers: "write", "voucher-codes": "write", "voucher-code-settings": "read",
+    "account-password-settings": "read",
     "auth-methods": "read", "walled-garden": "read", reports: "read", audit: "read", license: "read", backups: "read", diagnostics: "read",
   },
   guest_relations_operator: {
@@ -119,6 +122,7 @@ const MATRIX: Matrix = {
     "post-stay-profiles": "write", "stay-transfers": "write",
     "guest-accounts": "write", sessions: "write", usage: "read",
     vouchers: "write", "voucher-codes": "write", "voucher-code-settings": "read",
+    "account-password-settings": "read",
     "auth-methods": "read", reports: "read",
     audit: "read", license: "read", backups: "read", "walled-garden": "read", diagnostics: "read",
   },
@@ -129,6 +133,7 @@ const MATRIX: Matrix = {
     "guest-accounts": "write", sessions: "read", reports: "read",
     license: "read", diagnostics: "read",
     vouchers: "write", "voucher-codes": "write", "voucher-code-settings": "read",
+    "account-password-settings": "read",
   },
   payments_operator: {
     "guest-device-self-service": "read",
@@ -160,7 +165,7 @@ const MATRIX: Matrix = {
     backups: "read", license: "read", network: "read", diagnostics: "read",
     // Sees which cards exist and in what state; reads no code, for the same reason
     // guest-signin-credentials is absent from this role.
-    vouchers: "read", "voucher-code-settings": "read",
+    vouchers: "read", "voucher-code-settings": "read", "account-password-settings": "read",
   },
 };
 

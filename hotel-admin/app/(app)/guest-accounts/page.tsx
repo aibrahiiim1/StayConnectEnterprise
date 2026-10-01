@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api, ApiError, GuestAccount, GuestAccountCreateResp,
-  GuestAccountPasswordResp, ListResp,
+  GuestAccountPasswordResp, type GuestAccountsPage as AccountsPageResp,
 } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
-import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
+import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody } from "@/components/ui/card";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
@@ -19,14 +19,24 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody,
   ConfirmDialog,
 } from "@/components/ui/dialog";
-import { SearchInput } from "@/components/ui/data";
+import { Pagination, SearchInput } from "@/components/ui/data";
+import { Select } from "@/components/ui/input";
 import { Switch, SkeletonRows } from "@/components/ui/misc";
+import { PasswordFormatCard } from "@/components/guest-accounts/password-format";
 import { OneTimeReveal, ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { Plus, KeyRound, Eye, EyeOff, Pencil, Power, Users } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
 import { useOperatorRoles } from "@/lib/whoami-context";
 import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
+
+const PAGE_SIZES = [25, 50, 100, 200];
+const STATUS_FILTERS: { value: string; label: string }[] = [
+  { value: "", label: "All accounts" },
+  { value: "enabled", label: "Can sign in" },
+  { value: "disabled", label: "Disabled" },
+  { value: "locked", label: "Locked out" },
+];
 
 function weakPassword(pw: string): boolean {
   return pw.length > 0 && pw.length < 8;
@@ -54,6 +64,10 @@ export default function GuestAccountsPage() {
   const [showNew, setShowNew] = useState(false);
   const [busy, setBusy] = useState(false);
   const [q, setQ] = useState("");
+  const [status, setStatus] = useState("");
+  const [pageSize, setPageSize] = useState(PAGE_SIZES[1]);
+  const [offset, setOffset] = useState(0);
+  const [resp, setResp] = useState<AccountsPageResp | null>(null);
   const [editing, setEditing] = useState<GuestAccount | null>(null);
   const [pwFor, setPwFor] = useState<GuestAccount | null>(null);
   const [reveal, setReveal] = useState<{ username: string; password: string } | null>(null);
@@ -73,6 +87,9 @@ export default function GuestAccountsPage() {
   // handoff lists against this screen. Fails closed while the roles load.
   const roles = useOperatorRoles();
   const mayWrite = roles === null ? false : canWrite("guest-accounts", roles);
+  // The generated-password FORMAT is a separate key: the desk creates accounts, it does not decide how strong
+  // every generated password is.
+  const mayEditFormat = roles === null ? false : canWrite("account-password-settings", roles);
 
   // THERE IS NO AUTHORITY DIMENSION ANY MORE.
   //
@@ -86,33 +103,49 @@ export default function GuestAccountsPage() {
   // A credential carries no plan. What a guest may acquire is decided by PACKAGE ELIGIBILITY RULES evaluated
   // when packages are listed, which is why there is no plan control here and no plans request at all.
 
-  async function load() {
+  // A new question starts at its first page.
+  useEffect(() => { setOffset(0); }, [q, status, pageSize]);
+
+  // PAGED, SEARCHED AND COUNTED ON THE SERVER, newest account first. The search text goes in a header, not the
+  // URL: it is a username or a person's name, and edged logs request lines.
+  //
+  // ONLY THE LATEST QUESTION MAY ANSWER (the Stays pattern): responses can return in any order, so each request
+  // takes a number and is applied only if no newer request has started since.
+  const latest = useRef(0);
+  const load = useCallback(async () => {
+    const mine = ++latest.current;
     // Clearing both at entry matters for the RETRY path: without it a successful reload leaves the previous
     // failure's banner sitting above fresh, correct data.
     setErr(null);
     setLoadFailed(false);
     try {
-      const [ga, pv] = await Promise.all([
-        api.get<ListResp<GuestAccount>>("/guest-accounts"),
-        api.get<{ enabled: boolean }>("/guest-accounts/portal").catch(() => ({ enabled: false })),
-      ]);
-      setRows(ga.data);
-      setPortalOn(!!pv.enabled);
+      const params = new URLSearchParams();
+      if (status) params.set("status", status);
+      params.set("page", String(Math.floor(offset / pageSize) + 1));
+      params.set("page_size", String(pageSize));
+      const needle = q.trim();
+      const ga = await api.get<AccountsPageResp>(
+        "/guest-accounts?" + params.toString(),
+        needle ? { "X-Account-Search": needle } : undefined,
+      );
+      if (mine !== latest.current) return; // superseded
+      setResp(ga);
+      setRows(Array.isArray(ga?.data) ? ga.data : []);
     } catch (e: any) {
+      if (mine !== latest.current) return; // superseded
       setErr(e?.message ?? "Failed to load");
       setLoadFailed(true);
     }
-  }
-  useEffect(() => { load(); }, []);
+  }, [q, status, offset, pageSize]);
+  useEffect(() => { void load(); }, [load]);
 
-  const filtered = useMemo(() => {
-    if (!rows) return [];
-    const needle = q.trim().toLowerCase();
-    if (!needle) return rows;
-    return rows.filter((a) =>
-      a.username.toLowerCase().includes(needle) ||
-      (a.display_name ?? "").toLowerCase().includes(needle));
-  }, [rows, q]);
+  useEffect(() => {
+    api.get<{ enabled: boolean }>("/guest-accounts/portal")
+      .then((pv) => setPortalOn(!!pv?.enabled))
+      .catch(() => setPortalOn(false));
+  }, []);
+
+  const filtered = rows ?? [];
 
   async function onTogglePortal() {
     setErr(null);
@@ -237,15 +270,18 @@ export default function GuestAccountsPage() {
 
   const locked = (a: GuestAccount) => a.locked_until && new Date(a.locked_until) > new Date();
 
+  // Totals over EVERY account that matches, from the server -- not over the page on screen.
   const totals = useMemo(() => {
+    const sm = resp?.summary;
     const list = rows ?? [];
     return {
-      all: list.length,
-      enabled: list.filter((a) => a.enabled).length,
-      online: list.reduce((n, a) => n + (a.active_devices ?? 0), 0),
-      locked: list.filter((a) => locked(a)).length,
+      all: sm?.total ?? list.length,
+      enabled: sm?.enabled ?? list.filter((a) => a.enabled).length,
+      online: sm?.devices_online ?? list.reduce((n, a) => n + (a.active_devices ?? 0), 0),
+      locked: sm?.locked ?? list.filter((a) => locked(a)).length,
     };
-  }, [rows]);
+  }, [resp, rows]);
+  const searching = q.trim() !== "" || status !== "";
 
   return (
     <PageShell width="wide">
@@ -335,6 +371,8 @@ export default function GuestAccountsPage() {
         </CardBody>
       </Card>
 
+      <PasswordFormatCard canEdit={mayEditFormat} />
+
       <OneTimeReveal
         open={reveal !== null}
         title={`Password for ${reveal?.username ?? ""}`}
@@ -351,12 +389,31 @@ export default function GuestAccountsPage() {
 
       <Card className="overflow-hidden">
         <CardBody className="border-b border-border py-3">
-          <SearchInput
-            value={q}
-            onChange={setQ}
-            placeholder="Search username or name…"
-            label="Search client accounts"
-          />
+          <Toolbar>
+            <SearchInput
+              value={q}
+              onChange={setQ}
+              delay={300}
+              placeholder="Search username or name…"
+              label="Search client accounts"
+            />
+            <Select
+              aria-label="Filter by status"
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              className="w-44"
+            >
+              {STATUS_FILTERS.map((f) => <option key={f.value || "all"} value={f.value}>{f.label}</option>)}
+            </Select>
+            <Select
+              aria-label="Accounts per page"
+              value={String(pageSize)}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              className="w-32"
+            >
+              {PAGE_SIZES.map((n) => <option key={n} value={n}>{n} per page</option>)}
+            </Select>
+          </Toolbar>
         </CardBody>
         {loadFailed ? (
           // A failed load is not an empty list and not a slow one. Saying so, and offering the one action
@@ -371,10 +428,10 @@ export default function GuestAccountsPage() {
         ) : filtered.length === 0 ? (
           <EmptyState
             icon={<KeyRound />}
-            title={q ? "No account matches that search" : "No client accounts"}
-            hint={q ? undefined : mayWrite ? "Create one to let a client sign in with a username and password." : undefined}
+            title={searching ? "No account matches that search" : "No client accounts"}
+            hint={searching ? undefined : mayWrite ? "Create one to let a client sign in with a username and password." : undefined}
             action={
-              q ? <Button variant="secondary" onClick={() => setQ("")}>Clear search</Button>
+              searching ? <Button variant="secondary" onClick={() => { setQ(""); setStatus(""); }}>Clear search</Button>
                 : mayWrite ? <Button onClick={openNew}><Plus /> Add the first account</Button> : undefined
             }
           />
@@ -453,6 +510,17 @@ export default function GuestAccountsPage() {
               })}
             </TBody>
           </Table>
+        )}
+        {!loadFailed && filtered.length > 0 && (
+          <CardBody className="border-t border-border py-3">
+            <Pagination
+              offset={offset}
+              limit={pageSize}
+              shown={filtered.length}
+              total={resp?.summary?.total ?? null}
+              onChange={setOffset}
+            />
+          </CardBody>
         )}
       </Card>
 

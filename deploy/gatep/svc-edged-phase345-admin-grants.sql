@@ -428,3 +428,12 @@ GRANT EXECUTE ON FUNCTION iam_v2.p4_authorize_zero_attempt_retry(uuid,uuid,text,
 -- Reads that screens already make and that were silently denied: the emergency-grace history on Checkout grace,
 -- and the active-client count that guards deleting a client network.
 GRANT SELECT ON iam_v2.checkout_grace_audit, iam_v2.device_network_appearances TO svc_edged;
+
+-- ---- the generated client-account password format (migration 0104) ----------------------------------
+-- Which characters and how many a GENERATED client-account password uses. edged generates the password, so
+-- edged reads the format, writes it ONLY through the setter (which keeps the append-only change row), and
+-- reads the history directly. Neither table is granted, for the reason given for 0085 above. scd generates
+-- no account password and is granted nothing here.
+GRANT EXECUTE ON FUNCTION iam_v2.account_password_settings_get(uuid,uuid)                        TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.account_password_settings_set(uuid,uuid,text,integer,text,text) TO svc_edged;
+GRANT SELECT  ON iam_v2.account_password_settings_changes                                        TO svc_edged;

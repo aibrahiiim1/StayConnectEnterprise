@@ -31,7 +31,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -59,8 +61,8 @@ func (s *server) iamv2AccountAuthority() bool {
 //
 // Absent fields are OMITTED rather than filled with a zero time or a borrowed legacy value. A fabricated
 // 0001-01-01 would be indistinguishable from a real timestamp to the UI, and back-filling template_id from
-// a legacy row would restore the very dependency this trial removed. If the IAM-v2 schema should record
-// creation time, that is a schema change to propose -- not a value to invent here.
+// a legacy row would restore the very dependency this trial removed. created_at exists since migration 0104
+// and is NULL (omitted) for accounts created before it: they recorded no creation time and none is invented.
 type iamv2Account struct {
 	ID          string     `json:"id"`
 	Username    string     `json:"username"`
@@ -72,6 +74,7 @@ type iamv2Account struct {
 	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
 	LoginCount  int64      `json:"login_count"`
 	LockedUntil *time.Time `json:"locked_until,omitempty"`
+	CreatedAt   *time.Time `json:"created_at,omitempty"`
 	// Live device count for this account, from IAM-v2 session state.
 	ActiveDevices int `json:"active_devices"`
 	// Authority is explicit so an operator or a test never has to infer which domain owns this record.
@@ -80,16 +83,57 @@ type iamv2Account struct {
 
 // iamv2AccountCols is the projection shared by list, get and patch so the three cannot drift apart.
 const iamv2AccountCols = `id, username, display_name, notes, enabled,
-                valid_from, valid_until, last_login_at, login_count, locked_until`
+                valid_from, valid_until, last_login_at, login_count, locked_until, created_at`
 
 func scanIAMv2Account(row interface{ Scan(...any) error }, a *iamv2Account) error {
 	if err := row.Scan(&a.ID, &a.Username, &a.DisplayName, &a.Notes, &a.Enabled,
-		&a.ValidFrom, &a.ValidUntil, &a.LastLoginAt, &a.LoginCount, &a.LockedUntil); err != nil {
+		&a.ValidFrom, &a.ValidUntil, &a.LastLoginAt, &a.LoginCount, &a.LockedUntil, &a.CreatedAt); err != nil {
 		return err
 	}
 	a.Authority = "iam_v2"
 	return nil
 }
+
+// CLIENT ACCOUNTS ARE PAGED, SEARCHED AND COUNTED ON THE SERVER, the Stays pattern (resources_phase3.go).
+//
+// The list used to return every account of the site, then ask for each one's live device count in a separate
+// query (one round trip per account), and leave searching and counting to the browser. It now returns one page,
+// newest first, with the counters computed over EVERY matching account in the same request, and the device
+// counts joined in one query.
+//
+// THE SEARCH TEXT TRAVELS IN A HEADER (X-Account-Search), NOT THE URL: it is a username or a person's name, and
+// edged logs request lines.
+const (
+	accountsPageSizeDefault = 50
+	accountsPageSizeMax     = 200
+	accountSearchHeader     = "X-Account-Search"
+	accountSearchMaxLen     = 100
+)
+
+type accountsSummary struct {
+	Total         int `json:"total"`
+	Enabled       int `json:"enabled"`
+	Disabled      int `json:"disabled"`
+	Locked        int `json:"locked"`
+	DevicesOnline int `json:"devices_online"`
+}
+
+// accountFrom projects one account with its live device count. The LATERAL replaces the per-row query the list
+// used to run: one statement for the page, however many accounts it holds.
+const accountFrom = `FROM iam_v2.guest_access_accounts a
+	  LEFT JOIN LATERAL (
+	      SELECT count(DISTINCT s.device_id)::int AS active_devices
+	        FROM iam_v2.sessions s
+	        JOIN iam_v2.entitlements e ON e.id = s.entitlement_id
+	       WHERE e.guest_account_id = a.id AND s.ended IS NULL) dev ON true`
+
+// accountFilter: $1 tenant, $2 site, $3 status (enabled|disabled|locked), $4 search pattern.
+const accountFilter = `WHERE a.tenant_id=$1 AND a.site_id=$2
+	  AND ($3::text IS NULL
+	       OR ($3 = 'enabled'  AND a.enabled)
+	       OR ($3 = 'disabled' AND NOT a.enabled)
+	       OR ($3 = 'locked'   AND a.locked_until > now()))
+	  AND ($4::text IS NULL OR a.username ILIKE $4 OR a.display_name ILIKE $4)`
 
 func (s *server) listGuestAccountsIAMv2(w http.ResponseWriter, r *http.Request) {
 	// Guest accounts are tenant/site scoped, and a factory-clean appliance has neither until its signed
@@ -100,12 +144,71 @@ func (s *server) listGuestAccountsIAMv2(w http.ResponseWriter, r *http.Request) 
 		writeAwaitingAssignment(w, "guest accounts")
 		return
 	}
+	qv := r.URL.Query()
+	var statusArg any
+	switch v := qv.Get("status"); v {
+	case "":
+	case "enabled", "disabled", "locked":
+		statusArg = v
+	default:
+		jsonErr(w, http.StatusBadRequest, "bad_request", "status must be enabled, disabled or locked")
+		return
+	}
+	page, size := 1, accountsPageSizeDefault
+	if v := qv.Get("page"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			jsonErr(w, http.StatusBadRequest, "bad_request", "page must be a positive whole number")
+			return
+		}
+		page = n
+	}
+	if v := qv.Get("page_size"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > accountsPageSizeMax {
+			jsonErr(w, http.StatusBadRequest, "bad_request",
+				fmt.Sprintf("page_size must be between 1 and %d", accountsPageSizeMax))
+			return
+		}
+		size = n
+	}
+	var searchArg any
+	if v := strings.TrimSpace(r.Header.Get(accountSearchHeader)); v != "" {
+		if len([]rune(v)) > accountSearchMaxLen {
+			jsonErr(w, http.StatusBadRequest, "bad_request",
+				fmt.Sprintf("search is limited to %d characters", accountSearchMaxLen))
+			return
+		}
+		searchArg = "%" + likeEscape(v) + "%"
+	}
+	args := []any{s.tenantID, s.siteID, statusArg, searchArg}
+
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	rows, err := s.db.Query(ctx, `SELECT `+iamv2AccountCols+`
-	      FROM iam_v2.guest_access_accounts
-	     WHERE tenant_id=$1 AND site_id=$2
-	     ORDER BY username`, s.tenantID, s.siteID)
+
+	// The counters are over EVERY matching account, so they describe the site, not the page on screen.
+	var sum accountsSummary
+	if err := s.db.QueryRow(ctx, `SELECT count(*)::int,
+	           count(*) FILTER (WHERE a.enabled)::int,
+	           count(*) FILTER (WHERE NOT a.enabled)::int,
+	           count(*) FILTER (WHERE a.locked_until > now())::int,
+	           COALESCE(sum(dev.active_devices), 0)::int
+	      `+accountFrom+`
+	      `+accountFilter, args...).Scan(&sum.Total, &sum.Enabled, &sum.Disabled, &sum.Locked,
+		&sum.DevicesOnline); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "list failed")
+		return
+	}
+
+	// NEWEST FIRST. Accounts created before migration 0104 have no creation time and sort after every dated
+	// one, by username; id breaks the last tie so a page boundary is stable.
+	rows, err := s.db.Query(ctx, `SELECT a.id, a.username, a.display_name, a.notes, a.enabled,
+	           a.valid_from, a.valid_until, a.last_login_at, a.login_count, a.locked_until, a.created_at,
+	           COALESCE(dev.active_devices, 0)
+	      `+accountFrom+`
+	      `+accountFilter+`
+	     ORDER BY a.created_at DESC NULLS LAST, lower(a.username), a.id
+	     LIMIT $5 OFFSET $6`, append(args, size+1, (page-1)*size)...)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "list failed")
 		return
@@ -114,26 +217,28 @@ func (s *server) listGuestAccountsIAMv2(w http.ResponseWriter, r *http.Request) 
 	out := []iamv2Account{}
 	for rows.Next() {
 		var a iamv2Account
-		if err := scanIAMv2Account(rows, &a); err != nil {
+		if err := rows.Scan(&a.ID, &a.Username, &a.DisplayName, &a.Notes, &a.Enabled,
+			&a.ValidFrom, &a.ValidUntil, &a.LastLoginAt, &a.LoginCount, &a.LockedUntil, &a.CreatedAt,
+			&a.ActiveDevices); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "list failed")
 			return
 		}
-		a.ActiveDevices = s.iamv2ActiveDeviceCount(ctx, a.ID)
+		a.Authority = "iam_v2"
 		out = append(out, a)
 	}
 	if rows.Err() != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "list failed")
 		return
 	}
-	// The AUTHORITY is stated on the ENVELOPE, not only on each row.
-	//
-	// Per-row authority answers "who owns this record", which is useless to a screen that has no records: an
-	// empty site cannot tell whether it is running IAM-v2 or legacy, so the operator-facing form has to guess.
-	// It guessed wrong -- it kept presenting a mandatory "Guest access plan" picker that IAM-v2 ignores
-	// entirely, because under IAM-v2 what a guest may acquire is decided by PACKAGE ELIGIBILITY RULES, not by
-	// a plan attached to the credential. A required control whose value is discarded is worse than a missing
-	// one: the operator believes they have chosen what the guest gets.
-	writeJSON(w, http.StatusOK, map[string]any{"data": out, "meta": listMeta{}, "authority": "iam_v2"})
+	more := len(out) > size
+	if more {
+		out = out[:size]
+	}
+	// The AUTHORITY is stated on the ENVELOPE, not only on each row: an empty site has no rows to ask.
+	writeJSON(w, http.StatusOK, map[string]any{
+		"data": out, "meta": listMeta{HasMore: more}, "authority": "iam_v2",
+		"page": page, "page_size": size, "summary": sum,
+	})
 }
 
 func (s *server) getGuestAccountIAMv2(w http.ResponseWriter, r *http.Request) {
@@ -237,11 +342,12 @@ func (s *server) setGuestAccountPasswordIAMv2(w http.ResponseWriter, r *http.Req
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
 	}
+	ctx, cancel := dbCtx(r)
+	defer cancel()
 	generated := false
 	if in.Generate && in.Password == "" {
-		pw, err := generatePassword()
-		if err != nil {
-			jsonErr(w, http.StatusInternalServerError, "internal", "generate failed")
+		pw, ok := s.generateAccountPassword(w, ctx)
+		if !ok {
 			return
 		}
 		in.Password, generated = pw, true
@@ -255,8 +361,6 @@ func (s *server) setGuestAccountPasswordIAMv2(w http.ResponseWriter, r *http.Req
 		jsonErr(w, http.StatusInternalServerError, "internal", "hash failed")
 		return
 	}
-	ctx, cancel := dbCtx(r)
-	defer cancel()
 	// A password reset also clears the lockout counters: an operator resetting a password is resolving the
 	// situation that caused the lockout, and leaving the account locked would make the reset appear to fail.
 	var username string

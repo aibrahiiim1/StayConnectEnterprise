@@ -250,6 +250,9 @@ var rolePerms = map[string]map[string]perm{
 		// The code FORMAT is a property configuration decision -- digits for a keypad, mixed for a printed
 		// card -- which is the same reasoning that puts auth-methods and checkout-grace here.
 		"voucher-code-settings": permWrite,
+		// What a GENERATED client-account password looks like (0104) is the same kind of property
+		// configuration decision, so it follows the voucher code format role for role.
+		"account-password-settings": permWrite,
 		// NOT voucher-codes. This role owns configuration and the PMS integration; neither job requires
 		// reading a guest's credential in the clear, and issuing a NEW card is a different act from reading
 		// one already in a guest's hand.
@@ -294,7 +297,7 @@ var rolePerms = map[string]map[string]perm{
 		// card is exactly the case, and it is gated by the password step-up and an audit row either way.
 		"vouchers": permWrite, "voucher-codes": permWrite,
 		// The format is set once, by the role that owns configuration. The desk sees what it is.
-		"voucher-code-settings": permRead,
+		"voucher-code-settings": permRead, "account-password-settings": permRead,
 	},
 	"guest_relations_operator": {
 		// Same desk, same conversation with the guest, same need.
@@ -317,6 +320,7 @@ var rolePerms = map[string]map[string]perm{
 		"diagnostics":               permRead,
 		// Same desk, same conversation with the guest, same need.
 		"vouchers": permWrite, "voucher-codes": permWrite, "voucher-code-settings": permRead,
+		"account-password-settings": permRead,
 	},
 	"voucher_operator": {
 		"guest-accounts": permWrite, "sessions": permRead, "reports": permRead,
@@ -326,7 +330,7 @@ var rolePerms = map[string]map[string]perm{
 		// voucher permission at all, while two documents said otherwise.
 		"vouchers": permWrite, "voucher-codes": permWrite,
 		// Reads the format so the print station knows what it is printing; does not set it.
-		"voucher-code-settings": permRead,
+		"voucher-code-settings": permRead, "account-password-settings": permRead,
 	},
 	"payments_operator": {
 		"payment-providers": permRead, "modules": permRead, "pms-financial-onboarding": permRead,
@@ -378,7 +382,7 @@ var rolePerms = map[string]map[string]perm{
 		"financial-ops": permRead,
 		// A viewer sees which cards exist and in what state, and reads no code -- the same shape as
 		// guest-signin-credentials, which is deliberately absent from this role for the same reason.
-		"vouchers": permRead, "voucher-code-settings": permRead,
+		"vouchers": permRead, "voucher-code-settings": permRead, "account-password-settings": permRead,
 	},
 	// Legacy tenant roles accepted for migrated operators.
 	"tenant_admin":    nil, // treated like site_admin below
