@@ -1,4 +1,0 @@
-commit b76afaaa077242ad1eafa03f943ce683c6522ed1
-Date:   Thu Oct 1 12:16:20 2026 +0300
-
-    Governance: the repair delivery head is its last content commit
