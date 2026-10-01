@@ -102,3 +102,12 @@ func TestGuestAttributes_PayloadCarriesThemOnlyWhenStated(t *testing.T) {
 		t.Fatalf("a stated non-VIP must persist as false and an unstated agent must be absent: %s", got)
 	}
 }
+
+// THE LINK DESCRIPTION IS THE VERIFIED ONE. pmsd once sent "LD|..|pmsd|V#1|RT4|": no IF (Interface Family)
+// field at all, although IF is what the PMS uses to activate an interface's functions. The record must be the
+// handshake verified on this property's Protel for both the feed and posting.
+func TestLinkDescriptionIsTheVerifiedHandshake(t *testing.T) {
+	if got, want := pms.VerifiedLD("261001", "120000"), "LD|DA261001|TI120000|IFPB|V#1.13|RT4|"; got != want {
+		t.Fatalf("LD = %q, want %q", got, want)
+	}
+}

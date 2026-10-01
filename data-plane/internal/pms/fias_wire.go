@@ -54,11 +54,31 @@ func BuildLD(dateYYMMDD, timeHHMMSS, ifcName, version string) string {
 	return "LD|DA" + dateYYMMDD + "|TI" + timeHHMMSS + "|" + ifcName + "|V#" + version + "|RT4|"
 }
 
+// The interface identity this connector declares in LD. IF (Interface Family) is the field FIAS says the PMS
+// uses "to determine the screen display for the requested interface type and to activate/deactivate certain
+// functionalities" (FIAS 2.20, IF - Interface Types). IFPB / V#1.13 is the handshake verified against this
+// property's Protel on 150.0.0.18:5003 for the read-only feed AND the live posting (Phase-0 spike, Gate 1B and
+// Gate 3A; the ProtelFIAS connector's defaults).
+//
+// THE pmsd REWRITE HAD DROPPED IT. It sent the bare token "pmsd" where the IF field belongs -- not a FIAS field
+// at all -- and V#1, so the link declared no interface family. VerifiedLD restores the verified record exactly.
+const (
+	VerifiedInterfaceID = "IFPB"
+	VerifiedIFCVersion  = "1.13"
+)
+
+// VerifiedLD is the link-description record of the verified handshake.
+func VerifiedLD(dateYYMMDD, timeHHMMSS string) string {
+	return BuildLD(dateYYMMDD, timeHHMMSS, VerifiedInterfaceID, VerifiedIFCVersion)
+}
+
 // BuildLRs are the read-only record subscriptions (GI/GC/GO).
 func BuildLRs() []string {
 	return []string{
-		// A0 and A1 are this property's user-defined fields: Protel maps its travel agent (AG) to A0 and its
-		// VIP flag (VP) to A1, on both GI and GC. They are guest attributes, never identity.
+		// A0 and A1 are FIAS user-definable fields (FIAS 2.20: "requires special configuration in PMS"). The
+		// legacy StayConnect+ Protel client requested exactly these on GI and GC and read A0 as the travel agent
+		// and A1 as VIP (stayconnectplus libs/fias/protel_client.py FL_GI/FL_GC, libs/pms_protel.py). They are
+		// guest attributes, never identity. Field order in LR is not significant (FIAS 2.20, Link Records).
 		"LR|RIGI|FLRNG#GNGFGAGDA0A1|",
 		"LR|RIGC|FLRNG#GNGFGAGDA0A1|",
 		"LR|RIGO|FLRNG#|",
