@@ -296,6 +296,16 @@ type PackageCurrent struct {
 	DataAllocationPolicy map[string]any `json:"data_allocation_policy,omitempty"`
 	// RoomChargeMappings are the revision's live posting codes per PMS interface (room charge only).
 	RoomChargeMappings []RoomChargeMapping `json:"room_charge_mappings"`
+
+	// THE THREE COLUMNS NOTHING COULD READ. plan_overrides, renewable and max_purchases_per_stay live on
+	// internet_package_revisions and were not in this reader, not in PackagePublishSpec and not in the INSERT.
+	// Since a revision is immutable and publishing replaces the whole spec, every republish — an operator's own
+	// save as much as the automatic one a client-network replacement performs — silently reset all three to
+	// NULL / false / NULL, on a new revision nobody could tell apart from its predecessor. They are read and
+	// carried here so a republish preserves what it did not set out to change.
+	PlanOverrides       map[string]any `json:"plan_overrides,omitempty"`
+	Renewable           bool           `json:"renewable"`
+	MaxPurchasesPerStay *int           `json:"max_purchases_per_stay,omitempty"`
 }
 
 // PackagePublishSpec is a request to publish a new immutable free package revision.
@@ -330,6 +340,20 @@ type PackagePublishSpec struct {
 	CurrencyExponent   int
 	AcquisitionMethods []string
 	RoomChargeMappings []RoomChargeMapping
+	// PlanOverrides, Renewable and MaxPurchasesPerStay are carried so a republish preserves them. See the
+	// matching comment on PackageCurrent: these three columns existed with no way to read or rewrite them, so
+	// every republish reset them. A client that does not set them publishes exactly what it published before.
+	PlanOverrides       map[string]any
+	Renewable           bool
+	MaxPurchasesPerStay *int
+
+	// DryRun validates the spec through every gate publication applies and then writes NOTHING, returning
+	// Reason "validated". It exists for the one caller that must know in advance whether a republish will
+	// succeed: a client-network replacement may not be confirmed while any package that depends on it could
+	// not be carried forward (a package whose duration policy has since expired, whose stored rule shape a
+	// later validator rejects, or whose conditions are unreadable). Pre-flighting through the real
+	// PublishRevision is what keeps that answer from drifting away from the thing it predicts.
+	DryRun bool
 }
 
 // RoomChargeMapping is how a room-charge purchase of one revision is posted on one PMS interface: the
@@ -428,6 +452,12 @@ func (a *CommerceAdmin) PublishRevision(ctx context.Context, spec PackagePublish
 	}
 	if reason := normalizeAcquisition(&spec); reason != "" {
 		return AdminResult{Reason: reason}, nil
+	}
+	// DRY RUN: every gate above has passed and nothing has been written. The caller asked whether this spec
+	// WOULD publish, and the only honest way to answer that is to ask the gates themselves -- a second,
+	// separate copy of this validation would be free to drift from the one that decides.
+	if spec.DryRun {
+		return AdminResult{Reason: "validated"}, nil
 	}
 
 	var res AdminResult

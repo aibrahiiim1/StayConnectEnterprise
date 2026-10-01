@@ -446,3 +446,10 @@ GRANT SELECT  ON iam_v2.account_password_settings_changes                       
 -- service that stages, materialises, reverts or settles one. netd renders what the rows say and is granted
 -- nothing in iam_v2; scd, acctd and pmsd have no business with a staged request.
 GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.guest_network_replacements TO svc_edged;
+
+-- 0106 — the client-network LINEAGE view.
+--
+-- Read by the replacement surface itself; the view, never the table behind it. It is what makes a successor
+-- network the continuation of the one it replaced, so an immutable package revision naming the retired id keeps
+-- meaning what its author meant.
+GRANT SELECT ON iam_v2.guest_network_lineage TO svc_edged;

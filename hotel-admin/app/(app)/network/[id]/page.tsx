@@ -225,9 +225,17 @@ export default function EditGuestNetworkPage() {
               {!!replaced.packages?.length && (
                 <p className="mt-1">
                   Internet packages limited to this network ({replaced.packages.join(", ")}) are moved onto the
-                  replacement automatically when you confirm.
+                  replacement automatically when you confirm. If one of them cannot be moved, the change is not
+                  kept and you are told which package and why.
                 </p>
               )}
+              {/* THE QUESTION AN OPERATOR WOULD OTHERWISE HAVE TO GUESS. A printed voucher is pinned to the
+                  package revision it was issued against, so the obvious fear is that a cabling change kills
+                  every card in the drawer. It does not: the replacement continues this network's identity. */}
+              <p className="mt-1">
+                Vouchers already printed for those packages keep working. The replacement counts as this same
+                client network, so there is nothing to reissue.
+              </p>
             </Callout>
           )}
           <Card>

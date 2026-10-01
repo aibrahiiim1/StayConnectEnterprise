@@ -508,33 +508,48 @@ func (s *server) reconcileStaleReplacements(ctx context.Context, r *http.Request
 		return
 	}
 	var stale []string
+	retry := false
 	for rows.Next() {
 		var id, state string
 		if rows.Scan(&id, &state) != nil {
 			continue
 		}
 		switch state {
-		case "applying", "pending_confirmation", "active":
-			// still in flight, or confirmed and waiting for settle
+		case "applying", "pending_confirmation":
+			// still in flight
+		case "active":
+			// the apply was KEPT but this request never settled: a package refused to be carried forward.
+			retry = true
 		default:
 			stale = append(stale, id)
 		}
 	}
 	rows.Close()
-	if len(stale) == 0 {
-		return
+	if len(stale) > 0 {
+		if err := s.revertMaterialised(ctx, stale, "the apply was rolled back"); err == nil && r != nil {
+			s.audit(r, "network.guest.replacement_reverted", "guest_network", "", map[string]any{"replacements": stale})
+		}
 	}
-	if err := s.revertMaterialised(ctx, stale, "the apply was rolled back"); err == nil && r != nil {
-		s.audit(r, "network.guest.replacement_reverted", "guest_network", "", map[string]any{"replacements": stale})
+	// A settle WITHHELD because a package could not be carried forward is retried here, on the operator's own
+	// next read of the networks. Without this, correcting the package would leave the change APPLIED forever:
+	// the configuration is already confirmed, so no second confirm is coming.
+	if retry {
+		_ = s.settleConfirmedReplacements(ctx, r, "")
 	}
 }
 
 // settleConfirmedReplacements marks applied requests CONFIRMED and republishes the Internet Packages that were
 // limited to each original network forward onto its successor. It returns what it did, for the response.
 func (s *server) settleConfirmedReplacements(ctx context.Context, r *http.Request, revisionID string) []map[string]any {
-	rows, err := s.db.Query(ctx, `SELECT id::text, original_network_id::text, successor_network_id::text
-		  FROM iam_v2.guest_network_replacements
-		 WHERE tenant_id=$1 AND site_id=$2 AND state='APPLIED'`, s.tenantID, s.siteID)
+	// ONLY requests whose apply was actually KEPT. revisionID is the revision being confirmed in this very
+	// request (its row is not 'active' yet); anything else must already be 'active', which is how a settle
+	// withheld earlier for a package that could not be carried forward is retried later without a second
+	// confirm — nothing else would ever come back for it.
+	rows, err := s.db.Query(ctx, `SELECT g.id::text, g.original_network_id::text, g.successor_network_id::text
+		  FROM iam_v2.guest_network_replacements g
+		  LEFT JOIN network_config_revisions v ON v.id = g.revision_id
+		 WHERE g.tenant_id=$1 AND g.site_id=$2 AND g.state='APPLIED'
+		   AND (g.revision_id = NULLIF($3,'')::uuid OR v.state = 'active')`, s.tenantID, s.siteID, revisionID)
 	if err != nil {
 		return nil
 	}
@@ -554,6 +569,31 @@ func (s *server) settleConfirmedReplacements(ctx context.Context, r *http.Reques
 	var out []map[string]any
 	for _, d := range settled {
 		republished, failed := s.republishPackagesOnto(ctx, d.orig, d.succ)
+		// FAIL-CLOSED. A replacement becomes CONFIRMED only when every dependent package was carried forward.
+		// If one refused, the request stays APPLIED: the operator sees the exact package and the exact reason,
+		// and the settle is retried on their next read of the networks (reconcileStaleReplacements) once they
+		// have corrected it. Leaving it APPLIED is what keeps "this change is finished" from meaning two
+		// different things on the wire and in the catalogue.
+		//
+		// What this does NOT do is leave guests stranded in the meantime: the retired network keeps its logical
+		// identity (0106), so a rule still naming it is satisfied by a device on the successor whether the
+		// republish has happened or not. The republish makes the CURRENT revision say what it means; lineage is
+		// what makes the pinned ones keep working.
+		if len(failed) > 0 {
+			slogReplacement("settle_withheld", d.repl, fmt.Sprintf("%d package(s) could not be carried forward", len(failed)))
+			if r != nil {
+				s.audit(r, "network.guest.replacement_settle_withheld", "guest_network", d.succ, map[string]any{
+					"replacement_id": d.repl, "replaces": d.orig,
+					"packages_republished": republished, "packages_not_republished": failed,
+				})
+			}
+			out = append(out, map[string]any{
+				"replacement_id": d.repl, "replaced": d.orig, "successor": d.succ, "state": "APPLIED",
+				"packages_republished": republished, "packages_not_republished": failed,
+				"next": "the configuration is live, but this change is not finished: correct the packages listed and the change settles on its own.",
+			})
+			continue
+		}
 		if _, err := s.db.Exec(ctx, `UPDATE iam_v2.guest_network_replacements
 			   SET state='CONFIRMED', settled_at=now(), revision_id=COALESCE(revision_id, NULLIF($2,'')::uuid)
 			 WHERE id=$1`, d.repl, revisionID); err != nil {
@@ -562,15 +602,48 @@ func (s *server) settleConfirmedReplacements(ctx context.Context, r *http.Reques
 		if r != nil {
 			s.audit(r, "network.guest.replacement_confirmed", "guest_network", d.succ, map[string]any{
 				"replacement_id": d.repl, "replaces": d.orig,
-				"packages_republished": republished, "packages_not_republished": failed,
+				"packages_republished": republished,
 			})
 		}
 		out = append(out, map[string]any{
-			"replacement_id": d.repl, "replaced": d.orig, "successor": d.succ,
-			"packages_republished": republished, "packages_not_republished": failed,
+			"replacement_id": d.repl, "replaced": d.orig, "successor": d.succ, "state": "CONFIRMED",
+			"packages_republished": republished, "packages_not_republished": []map[string]string{},
 		})
 	}
 	return out
+}
+
+// replacementsBlockingConfirm pre-flights the package forward for every APPLIED request, writing nothing. It is
+// called BEFORE netd is told to keep the configuration, so a package that cannot be carried forward refuses the
+// confirm outright rather than leaving the wire permanent and the catalogue behind it.
+func (s *server) replacementsBlockingConfirm(ctx context.Context) []map[string]any {
+	rows, err := s.db.Query(ctx, `SELECT id::text, original_network_id::text, successor_network_id::text
+		  FROM iam_v2.guest_network_replacements
+		 WHERE tenant_id=$1 AND site_id=$2 AND state='APPLIED' AND successor_network_id IS NOT NULL`,
+		s.tenantID, s.siteID)
+	if err != nil {
+		return nil
+	}
+	type pair struct{ repl, orig, succ string }
+	var live []pair
+	for rows.Next() {
+		var p pair
+		if rows.Scan(&p.repl, &p.orig, &p.succ) == nil {
+			live = append(live, p)
+		}
+	}
+	rows.Close()
+
+	var blocking []map[string]any
+	for _, p := range live {
+		if _, failed := s.forwardPackagesOnto(ctx, p.orig, p.succ, true); len(failed) > 0 {
+			blocking = append(blocking, map[string]any{
+				"replacement_id": p.repl, "replaced": p.orig, "successor": p.succ,
+				"packages_not_preservable": failed,
+			})
+		}
+	}
+	return blocking
 }
 
 // republishPackagesOnto publishes a NEW revision of every active package whose CURRENT revision is limited to
@@ -578,6 +651,13 @@ func (s *server) settleConfirmedReplacements(ctx context.Context, r *http.Reques
 // a forward revision, exactly as an operator editing it would, so future guests are offered what the hotel
 // intended. Guests already holding an entitlement keep the revision they were granted on.
 func (s *server) republishPackagesOnto(ctx context.Context, oldID, newID string) (republished []string, failed []map[string]string) {
+	return s.forwardPackagesOnto(ctx, oldID, newID, false)
+}
+
+// forwardPackagesOnto is republishPackagesOnto with a dryRun switch. With dryRun it writes nothing and reports
+// exactly which packages WOULD refuse, which is what makes the confirm step fail-closed: a replacement must not
+// become permanent while a package that depends on the retired network could not be carried forward.
+func (s *server) forwardPackagesOnto(ctx context.Context, oldID, newID string, dryRun bool) (republished []string, failed []map[string]string) {
 	if s.commerce == nil {
 		return nil, nil
 	}
@@ -606,6 +686,10 @@ func (s *server) republishPackagesOnto(ctx context.Context, oldID, newID string)
 		if disabled || !ruleNamesNetwork(cur.EligibilityRules, oldID) {
 			continue
 		}
+		// EVERYTHING THE CURRENT REVISION SAYS, with the network id substituted and NOTHING else touched.
+		// This is the whole contract of an automatic republish: the operator did not ask for a package change,
+		// they asked for a cabling change, so any field this spec fails to carry is a silent edit to their
+		// pricing, their offer window or their quota on an immutable revision they cannot correct.
 		spec := iamv2.PackagePublishSpec{
 			TenantID: s.tenantID, SiteID: s.siteID, PackageCode: cur.Code,
 			ServicePlanRevisionID: cur.ServicePlanRevisionID,
@@ -616,21 +700,48 @@ func (s *server) republishPackagesOnto(ctx context.Context, oldID, newID string)
 			DataAllocationPolicy: cur.DataAllocationPolicy,
 			PriceMinor:           cur.PriceMinor, Currency: cur.Currency,
 			AcquisitionMethods: cur.SettlementMethods, RoomChargeMappings: cur.RoomChargeMappings,
+			PlanOverrides:       cur.PlanOverrides,
+			Renewable:           cur.Renewable,
+			MaxPurchasesPerStay: cur.MaxPurchasesPerStay,
+			DryRun:              dryRun,
 		}
 		if cur.CurrencyExponent != nil {
 			spec.CurrencyExponent = *cur.CurrencyExponent
 		}
-		if cur.VisibleFrom != nil {
-			if t, perr := time.Parse(time.RFC3339, *cur.VisibleFrom); perr == nil {
-				spec.VisibleFrom = &t
-			}
+		// A SALE WINDOW IS NOT OPTIONAL TO CARRY. This used to swallow the parse error, and the reader used to
+		// hand back a format time.RFC3339 cannot parse -- so a seasonal package came out of a replacement
+		// permanently visible. The reader now renders RFC3339; a value that still will not parse is a refusal,
+		// not a dropped field, because publishing without the window would widen the package silently.
+		if vf, verr := parseVisibility(cur.VisibleFrom); verr != nil {
+			failed = append(failed, map[string]string{"package": cur.Code, "why": "unreadable visible_from: " + verr.Error()})
+			continue
+		} else {
+			spec.VisibleFrom = vf
 		}
-		if cur.VisibleUntil != nil {
-			if t, perr := time.Parse(time.RFC3339, *cur.VisibleUntil); perr == nil {
-				spec.VisibleUntil = &t
-			}
+		if vu, verr := parseVisibility(cur.VisibleUntil); verr != nil {
+			failed = append(failed, map[string]string{"package": cur.Code, "why": "unreadable visible_until: " + verr.Error()})
+			continue
+		} else {
+			spec.VisibleUntil = vu
 		}
 		res, perr := s.commerce.PublishRevision(ctx, spec)
+		if dryRun {
+			// The dry run's own success word, so a caller cannot mistake "it would publish" for "it published".
+			if perr == nil && !res.Disabled && res.Reason == "validated" {
+				republished = append(republished, cur.Code)
+				continue
+			}
+			why := "refused"
+			if perr != nil {
+				why = perr.Error()
+			} else if res.Disabled {
+				why = "commerce authoring disabled"
+			} else if res.Reason != "" {
+				why = res.Reason
+			}
+			failed = append(failed, map[string]string{"package": cur.Code, "why": why})
+			continue
+		}
 		if perr != nil || res.Disabled || res.Reason != "published" {
 			why := "refused"
 			if perr != nil {
@@ -644,6 +755,34 @@ func (s *server) republishPackagesOnto(ctx context.Context, oldID, newID string)
 		republished = append(republished, cur.Code)
 	}
 	return republished, failed
+}
+
+// describeBlockingPackages renders "Lobby free (invalid_duration_policy); Premium (no_grant_tiers)".
+func describeBlockingPackages(blocking []map[string]any) string {
+	var parts []string
+	for _, b := range blocking {
+		list, _ := b["packages_not_preservable"].([]map[string]string)
+		for _, f := range list {
+			parts = append(parts, fmt.Sprintf("%s (%s)", f["package"], f["why"]))
+		}
+	}
+	if len(parts) == 0 {
+		return "none named"
+	}
+	return strings.Join(parts, "; ")
+}
+
+// parseVisibility turns the reader's RFC3339 sale-window bound into a time. Absent is absent (no bound); a
+// present value that will not parse is an error, never a silently dropped bound.
+func parseVisibility(raw *string) (*time.Time, error) {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
+		return nil, nil
+	}
+	t, err := time.Parse(time.RFC3339, strings.TrimSpace(*raw))
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
 }
 
 func substituteNetwork(rules []iamv2.EligibilityRule, oldID, newID string) []iamv2.EligibilityRule {

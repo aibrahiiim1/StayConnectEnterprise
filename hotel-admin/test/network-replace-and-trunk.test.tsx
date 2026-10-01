@@ -81,6 +81,12 @@ describe("Change VLAN or port", () => {
     expect(await screen.findByText(/Change recorded — nothing has changed yet/)).toBeTruthy();
     expect(screen.getByText(/1 PMS route/)).toBeTruthy();
     expect(screen.getByText(/moved onto the\s+replacement automatically when you confirm/)).toBeTruthy();
+    // THE QUESTION THE OPERATOR WOULD OTHERWISE ANSWER WRONGLY. A printed voucher is pinned to the package
+    // revision it was issued against, so the reasonable fear is that moving a port kills every card in the
+    // drawer. It does not — the successor continues the same logical client network — and the screen says so,
+    // because an operator who assumes the worst reissues codes for nothing.
+    expect(screen.getByText(/Vouchers already printed .* keep working/)).toBeTruthy();
+    expect(screen.getByText(/nothing to reissue/)).toBeTruthy();
   });
 
   it("will not 'replace' a network with the topology it already has", async () => {

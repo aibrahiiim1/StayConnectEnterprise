@@ -541,7 +541,7 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// THE OFFER SET the real eligibility engine says this verified Stay qualifies for — not the site's whole
 	// free catalogue. Two Stays verified a second apart can legitimately get different answers.
-	decisions, err := p.offersFor(ctx, out.Stay, iface, time.Now())
+	decisions, err := p.offersFor(ctx, out.Stay, iface, dev.GuestNetwork, time.Now())
 	if err != nil {
 		at.Result = signinattempt.ServiceUnavailable
 		notVerified(w, at.Result, "offers: "+err.Error())

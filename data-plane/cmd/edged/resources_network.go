@@ -824,6 +824,31 @@ func (s *server) getRevision(w http.ResponseWriter, r *http.Request) {
 // successor, so eligibility keeps meaning what the hotel intended.
 func (s *server) confirmRevision(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	// FAIL-CLOSED, BEFORE THE WIRE IS MADE PERMANENT. Confirming tells netd to keep this configuration; after
+	// that the retired client network is gone for good. So the packages that depend on it are pre-flighted
+	// first, writing nothing: if one could not be carried forward, the confirm is refused and the appliance is
+	// left inside its confirmation window, where the operator can still correct the package and confirm, or let
+	// the watchdog roll the whole change back. Confirming anyway would be exactly the half-finished state this
+	// whole staged lifecycle exists to prevent.
+	{
+		ctx, cancel := dbCtx(r)
+		if blocking := s.replacementsBlockingConfirm(ctx); len(blocking) > 0 {
+			cancel()
+			// The reason is IN THE MESSAGE, not only in a structured field. Every confirm button in the console
+			// renders the message; an operator told "packages_not_preservable" and nothing else has no idea
+			// which package or why, and the only lever they would have left is rolling back a change that was
+			// otherwise correct.
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error": "packages_not_preservable",
+				"message": "this change cannot be kept yet. These Internet Packages are limited to the client network being replaced and could not be carried forward onto its successor: " +
+					describeBlockingPackages(blocking) +
+					". Correct them in Internet packages and confirm again, or roll back.",
+				"blocking": blocking,
+			})
+			return
+		}
+		cancel()
+	}
 	s.audit(r, "network.revision.confirmed", "network_revision", id, nil)
 	st, raw, err := s.netd.call(r.Context(), http.MethodPost, "/v1/confirm",
 		map[string]string{"revision_id": id, "actor": s.actor(r)})

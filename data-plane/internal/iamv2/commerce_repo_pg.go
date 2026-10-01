@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"hash/fnv"
+	"strings"
 	"time"
 
 	"errors"
@@ -265,6 +266,32 @@ func (t *pgCommerceTx) VoucherPinnedPackageRevision(ctx context.Context, tenantI
 		return "", err
 	}
 	return rev, nil
+}
+
+// GuestNetworkAncestors reads the lineage view. SELECT on iam_v2.guest_network_lineage only -- not on the
+// replacement table behind it, which carries the operator, the reason and the staged addressing that no guest
+// path has any business reading.
+func (t *pgCommerceTx) GuestNetworkAncestors(ctx context.Context, tenantID, siteID, guestNetworkID string) ([]string, error) {
+	if strings.TrimSpace(guestNetworkID) == "" {
+		return nil, nil
+	}
+	rows, err := t.tx.Query(ctx, `
+	    SELECT ancestor_id::text FROM iam_v2.guest_network_lineage
+	     WHERE tenant_id = $1 AND site_id = $2 AND network_id = $3 ORDER BY depth`,
+		tenantID, siteID, guestNetworkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 func (t *pgCommerceTx) LoadEligibilityRules(ctx context.Context, packageRevisionID string) ([]EligibilityRule, error) {

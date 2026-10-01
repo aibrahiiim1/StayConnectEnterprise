@@ -54,6 +54,15 @@ func TestEligibilityTypedRules(t *testing.T) {
 		{"subject kind allowed", []EligibilityRule{{RuleSubjectKind, map[string]any{"kinds": []any{"ACCOUNT"}}}}, base, true},
 		{"site network allowed", []EligibilityRule{{RuleSiteNetwork, map[string]any{"guest_network_ids": []any{"gn-1"}}}}, base, true},
 		{"site network denied", []EligibilityRule{{RuleSiteNetwork, map[string]any{"guest_network_ids": []any{"gn-2"}}}}, base, false},
+		// A CLIENT NETWORK THAT WAS REPLACED KEEPS ITS LOGICAL IDENTITY. The rule names the network the operator
+		// chose; the device is on the successor the appliance built when a VLAN id or a port changed. Matching
+		// only the live id made every PINNED revision stop matching -- including the one an unused printed
+		// voucher redeems -- the moment a cable moved.
+		{"site network allowed through lineage", []EligibilityRule{{RuleSiteNetwork, map[string]any{"guest_network_ids": []any{"gn-OLD"}}}},
+			EligibilitySubject{Now: now, AuthMethod: MethodVoucher, Kind: SubjectVoucher, GuestNetworkID: "gn-new", GuestNetworkLineage: []string{"gn-old"}}, true},
+		// ...and only BACKWARD. A rule naming some other network is not satisfied by having a lineage at all.
+		{"lineage does not widen to an unrelated network", []EligibilityRule{{RuleSiteNetwork, map[string]any{"guest_network_ids": []any{"gn-elsewhere"}}}},
+			EligibilitySubject{Now: now, AuthMethod: MethodVoucher, Kind: SubjectVoucher, GuestNetworkID: "gn-new", GuestNetworkLineage: []string{"gn-old"}}, false},
 		{"prior required, absent", []EligibilityRule{{RulePriorPurchase, map[string]any{"requires_prior": true}}}, base, false},
 		{"prior forbidden, present", []EligibilityRule{{RulePriorPurchase, map[string]any{"forbids_prior": true}}}, EligibilitySubject{Now: now, AuthMethod: MethodAccount, Kind: SubjectAccount, HasPriorPurchaseOfPackage: true}, false},
 		{"unknown rule type fails closed", []EligibilityRule{{"WILD", map[string]any{}}}, base, false},
