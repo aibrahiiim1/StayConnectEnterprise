@@ -183,12 +183,54 @@ export type GuestAccount = {
   locked_until?: string | null;
   // Derived (list/get): plan device cap + live distinct active devices.
   max_devices?: number | null; active_devices?: number;
-  created_at: string; updated_at: string;
+  // When the account was created. ABSENT for accounts created before migration 0104, which recorded none.
+  created_at?: string | null; updated_at?: string;
+};
+
+/** One page of client accounts, newest first, with totals over EVERY matching account (not just this page). */
+export type GuestAccountsPage = ListResp<GuestAccount> & {
+  page: number;
+  page_size: number;
+  summary: { total: number; enabled: number; disabled: number; locked: number; devices_online: number };
 };
 
 // Response of create / set-password: password reveal is one-time only.
 export type GuestAccountCreateResp = { account: GuestAccount; generated_password?: string };
 export type GuestAccountPasswordResp = { status: string; disconnected_sessions?: number; generated_password?: string };
+
+/** The format of GENERATED client-account passwords (migration 0104). The bounds come from the server. */
+export type AccountPasswordStyle = {
+  key: string;
+  label: string;
+  alphabet: string;
+  min_length: number;
+  max_length: number;
+  bits_per_char: number;
+};
+export type AccountPasswordFormat = {
+  password_style: string;
+  password_length: number;
+  config_version: number;
+  updated_at?: string | null;
+  updated_by?: string | null;
+  limits: {
+    entropy_floor_bits: number;
+    max_length: number;
+    default_style: string;
+    default_length: number;
+    styles: AccountPasswordStyle[];
+  };
+};
+export type AccountPasswordFormatChange = {
+  changed_at: string;
+  changed_by: string;
+  change_reason: string;
+  old_password_style: string | null;
+  old_password_length: number | null;
+  new_password_style: string;
+  new_password_length: number;
+  new_config_version: number;
+};
 
 // NOTE THE ABSENCE OF `code`. The old type had one, and a `code_display` beside it, from a surface where
 // the list carried the plaintext. A list is a screen an operator leaves open; a code on it would be a

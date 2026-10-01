@@ -14,7 +14,7 @@ import type { Page, Route } from "@playwright/test";
 // spec's own catch-all, so it takes precedence for /capabilities only and changes nothing else a spec mocks.
 
 const SURFACES = [
-  "audit", "auth-methods", "backups", "checkout-grace", "commercial-packages", "diagnostics", "financial-ops",
+  "account-password-settings", "audit", "auth-methods", "backups", "checkout-grace", "commercial-packages", "diagnostics", "financial-ops",
   "financial-review", "guest-accounts", "guest-device-self-service", "guest-signin-attempts",
   "guest-signin-credentials", "guest-signin-protection", "guest-signin-restrictions", "license", "modules",
   "network", "notification-providers", "operational-alerts", "operators", "payment-providers", "pms-events",
