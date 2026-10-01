@@ -1,0 +1,4 @@
+commit d75881b6229b5cf2364a4c802a21eaa9588f77d0
+Date:   Thu Oct 1 13:36:44 2026 +0300
+
+    Closure manifest seeded for the T0212 lineage
