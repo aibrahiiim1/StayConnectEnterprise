@@ -79,7 +79,8 @@ if ! git rev-parse --git-dir >/dev/null 2>&1; then
   echo "TRANSITION_TIMESTAMPS = SKIPPED"; exit 0
 fi
 
-# Every forward correction recorded in the ledger: "<id> <recorded_timestamp> <introducing_commit> <late_by> <by>".
+# Every forward correction recorded in the ledger:
+# "<id> <recorded_timestamp> <introducing_commit> <introducing_commit_time> <late_by> <by>".
 CORRECTIONS="$($PY3 - "$TDIR" <<'PY' 2>/dev/null
 import glob, io, json, os, sys
 for f in sorted(glob.glob(os.path.join(sys.argv[1], "T*.json"))):
@@ -88,9 +89,9 @@ for f in sorted(glob.glob(os.path.join(sys.argv[1], "T*.json"))):
     except Exception:
         continue
     for c in d.get("timestamp_corrections") or []:
-        print("%s %s %s %s %s" % (c.get("transition_id", "-"), c.get("recorded_timestamp", "-"),
-                                  c.get("introducing_commit", "-"), c.get("late_by_seconds", "-"),
-                                  d.get("transition_id", os.path.basename(f)[:-5])))
+        print("%s %s %s %s %s %s" % (c.get("transition_id", "-"), c.get("recorded_timestamp", "-"),
+                                     c.get("introducing_commit", "-"), c.get("introducing_commit_time", "-"),
+                                     c.get("late_by_seconds", "-"), d.get("transition_id", os.path.basename(f)[:-5])))
 PY
 )"
 
@@ -133,20 +134,29 @@ print('LATE:%d' % int((t-a).total_seconds()) if t>a else 'OK')
           grandfathered_seen=$((grandfathered_seen+1))
           ;;
         *)
-          corr="$(printf '%s
-' "$CORRECTIONS" | awk -v id="$id" '$1==id' | head -1)"
-          if [ -z "$corr" ]; then
+          matches="$(printf '%s\n' "$CORRECTIONS" | awk -v id="$id" '$1==id')"
+          nmatch="$(printf '%s\n' "$matches" | grep -c . || true)"
+          if [ "$nmatch" -eq 0 ]; then
             echo "  FAIL: $id records $ts, which is ${secs}s AFTER the commit that introduced it ($add)"
             fail=$((fail+1))
+          elif [ "$nmatch" -gt 1 ]; then
+            # Two corrections for one receipt: neither is trusted over the other.
+            echo "  FAIL: $id is corrected by more than one receipt ($(printf '%s\n' "$matches" | awk '{print $6}' | tr '\n' ' ')); a late receipt takes exactly one correction"
+            fail=$((fail+1))
           else
-            read -r _ cts ccommit clate cby <<EOF2
-$corr
+            read -r _ cts ccommit ctime clate cby <<EOF2
+$matches
 EOF2
-            if [ "$cts" = "$ts" ] && [ "$ccommit" = "$addc" ] && [ "$clate" = "$secs" ]; then
+            idn="${id#T}"; byn="${cby#T}"
+            if ! [ "$((10#$byn))" -gt "$((10#$idn))" ] 2>/dev/null; then
+              # A correction can only come AFTER the receipt it corrects; an older receipt cannot vouch for a newer one.
+              echo "  FAIL: $id is 'corrected' by $cby, which is not a later receipt"
+              fail=$((fail+1))
+            elif [ "$cts" = "$ts" ] && [ "$ccommit" = "$addc" ] && [ "$ctime" = "$add" ] && [ "$clate" = "$secs" ]; then
               echo "  corrected forward: $id is ${secs}s later than the commit that introduced it (left as written; corrected forward by $cby)"
               corrected_seen=$((corrected_seen+1))
             else
-              echo "  FAIL: $id records $ts, ${secs}s AFTER its introducing commit $addc ($add); the correction in $cby states $cts, $ccommit, ${clate}s, which does not match"
+              echo "  FAIL: $id records $ts, ${secs}s AFTER its introducing commit $addc ($add); the correction in $cby states $cts, $ccommit ($ctime), ${clate}s, which does not match"
               fail=$((fail+1))
             fi
           fi

@@ -117,36 +117,36 @@ else
   esac
 fi
 
-# 6-8. FORWARD CORRECTION OF A LATE RECEIPT IS EXACT, OR IT IS NOTHING. T0199 is a real receipt written under
-#    the rule and introduced 654s before the time it records. With no correction it must fail; with a later
-#    receipt that names it and states exactly what the repository measures it passes as "corrected forward";
-#    with a correction whose figures do not match it must still fail.
-T199ADD="$(git log --diff-filter=A --format='%H' -- governance/transitions/T0199.json | tail -1)"
+# 6-11. FORWARD CORRECTION OF A LATE RECEIPT IS EXACT, OR IT IS NOTHING. T0199 is a real receipt written under
+#    the rule and introduced 654s before the time it records. With no correction it must fail; with ONE LATER
+#    receipt that names it and states exactly what the repository measures it passes as "corrected forward".
+#    It must still fail when the lateness is wrong, when the introducing-commit time is wrong, when the
+#    "correction" sits in an EARLIER receipt, and when two receipts both claim to correct it.
+T199FIRST="$(git log --diff-filter=A --format='%H %cI' -- governance/transitions/T0199.json | tail -1)"
+T199ADD="${T199FIRST%% *}"; T199AT="${T199FIRST#* }"
 T199TS="$("$PY3" -c "import json,io;print(json.load(io.open('governance/transitions/T0199.json',encoding='utf-8'))['timestamp'])")"
-corr_receipt(){ # corr_receipt <file> <late_by>
-  "$PY3" - "$1" "$T199TS" "$T199ADD" "$2" <<'PY'
+corr_receipt(){ # corr_receipt <dir> <corrector_id> <late_by> <introducing_commit_time>
+  "$PY3" - "$1/$2.json" "$2" "$T199TS" "$T199ADD" "$3" "$4" <<'PY'
 import io, json, sys
-io.open(sys.argv[1], "w", encoding="utf-8", newline=chr(10)).write(json.dumps({
-    "transition_id": "T9100", "seq": 9100, "timestamp": "2099-01-01T00:00:00Z",
+f, cid, ts, commit, late, at = sys.argv[1:7]
+io.open(f, "w", encoding="utf-8", newline=chr(10)).write(json.dumps({
+    "transition_id": cid, "seq": int(cid[1:]), "timestamp": "2099-01-01T00:00:00Z",
     "record_type": "SELFTEST_TIMESTAMP_CORRECTION",
-    "timestamp_corrections": [{"transition_id": "T0199", "recorded_timestamp": sys.argv[2],
-                               "introducing_commit": sys.argv[3], "late_by_seconds": int(sys.argv[4])}],
+    "timestamp_corrections": [{"transition_id": "T0199", "recorded_timestamp": ts, "introducing_commit": commit,
+                               "introducing_commit_time": at, "late_by_seconds": int(late)}],
 }, indent=2) + chr(10))
 PY
 }
-mkdir -p "$W/late"
-cp governance/transitions/T0199.json "$W/late/T0199.json"
-if run_ungrandfathered "$W/late"; then
-  no "a late receipt with no correction is refused" "T0199 passed with nothing correcting it"
-else
-  case "$OUT" in
-    *"T0199 records"*"654s AFTER"*) ok "a late receipt with no correction is refused, stating the exact 654s" ;;
-    *) no "a late receipt with no correction is refused" "wrong wording: $OUT" ;;
-  esac
-fi
-mkdir -p "$W/corrected"
-cp governance/transitions/T0199.json "$W/corrected/T0199.json"
-corr_receipt "$W/corrected/T9100.json" 654
+fixture(){ mkdir -p "$W/$1"; cp governance/transitions/T0199.json "$W/$1/T0199.json"; }
+expect_refused(){ # expect_refused <dir> <label> <wording>
+  if run_ungrandfathered "$W/$1"; then no "$2" "accepted: $OUT"
+  else case "$OUT" in *"$3"*) ok "$2" ;; *) no "$2" "wrong wording: $OUT" ;; esac; fi
+}
+
+fixture late
+expect_refused late "a late receipt with no correction is refused, stating the exact 654s" "654s AFTER"
+
+fixture corrected; corr_receipt "$W/corrected" T9100 654 "$T199AT"
 if run_ungrandfathered "$W/corrected"; then
   case "$OUT" in
     *"corrected forward: T0199 is 654s later"*"corrected forward by T9100"*) ok "an exact forward correction is accepted and printed with its lateness and its corrector" ;;
@@ -155,17 +155,18 @@ if run_ungrandfathered "$W/corrected"; then
 else
   no "an exact forward correction is accepted" "$OUT"
 fi
-mkdir -p "$W/mismatch"
-cp governance/transitions/T0199.json "$W/mismatch/T0199.json"
-corr_receipt "$W/mismatch/T9100.json" 600
-if run_ungrandfathered "$W/mismatch"; then
-  no "a correction whose figures do not match is refused" "a 600s correction excused a 654s receipt"
-else
-  case "$OUT" in
-    *"does not match"*) ok "a correction whose figures do not match the measurement is refused" ;;
-    *) no "a mismatched correction is refused" "wrong wording: $OUT" ;;
-  esac
-fi
+
+fixture wronglate; corr_receipt "$W/wronglate" T9100 600 "$T199AT"
+expect_refused wronglate "a correction stating the wrong lateness is refused" "does not match"
+
+fixture wrongtime; corr_receipt "$W/wrongtime" T9100 654 "2026-01-01T00:00:00+03:00"
+expect_refused wrongtime "a correction stating the wrong introducing-commit time is refused" "does not match"
+
+fixture earlier; corr_receipt "$W/earlier" T0100 654 "$T199AT"
+expect_refused earlier "a 'correction' inside an EARLIER receipt is refused" "not a later receipt"
+
+fixture twice; corr_receipt "$W/twice" T9100 654 "$T199AT"; corr_receipt "$W/twice" T9101 654 "$T199AT"
+expect_refused twice "two receipts correcting the same receipt are refused, not first-wins" "more than one receipt"
 
 echo "------------------------------------------------------------"
 echo "MERGE_RECEIPT_TIMES_SELFTEST pass=$pass fail=$fail"
