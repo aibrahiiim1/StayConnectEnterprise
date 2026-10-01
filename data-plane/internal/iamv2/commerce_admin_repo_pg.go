@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -374,6 +375,14 @@ func (t *pgCommerceAdminTx) PlanRevisionBelongs(ctx context.Context, tenantID, s
 	return ok, err
 }
 
+// packageTypeOr defaults an unstated package type to the kind every authored package has.
+func packageTypeOr(t string) string {
+	if strings.TrimSpace(t) == "" {
+		return "GENERAL"
+	}
+	return strings.TrimSpace(t)
+}
+
 // InsertPackageRevision writes a FREE (price 0 / settlement NOT_REQUIRED), non-PMS immutable revision.
 func (t *pgCommerceAdminTx) InsertPackageRevision(ctx context.Context, spec PackagePublishSpec, packageID string, revNo int) (string, error) {
 	display, _ := json.Marshal(orEmptyObj(spec.Display))
@@ -396,11 +405,12 @@ func (t *pgCommerceAdminTx) InsertPackageRevision(ctx context.Context, spec Pack
 		   (tenant_id, site_id, package_id, revision_no, service_plan_revision_id, package_type,
 		    price_minor, currency, currency_exponent, settlement_methods, duration_policy,
 		    visible_from, visible_until, display, data_allocation_policy)
-		 VALUES ($1,$2,$3,$4,$5,'GENERAL',$11,$12,$13,$14::text[],$6::jsonb,$7,$8,$9::jsonb,$10::jsonb)
+		 VALUES ($1,$2,$3,$4,$5,$15,$11,$12,$13,$14::text[],$6::jsonb,$7,$8,$9::jsonb,$10::jsonb)
 		 RETURNING id::text`,
 		spec.TenantID, spec.SiteID, packageID, revNo, spec.ServicePlanRevisionID,
 		duration, spec.VisibleFrom, spec.VisibleUntil, display, alloc,
-		spec.PriceMinor, spec.Currency, spec.CurrencyExponent, spec.AcquisitionMethods).Scan(&id)
+		spec.PriceMinor, spec.Currency, spec.CurrencyExponent, spec.AcquisitionMethods,
+		packageTypeOr(spec.PackageType)).Scan(&id)
 	return id, err
 }
 

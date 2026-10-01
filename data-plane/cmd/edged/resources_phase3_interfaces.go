@@ -1072,8 +1072,19 @@ func (s *server) setPMSRoute(w http.ResponseWriter, r *http.Request) {
 	if mode == "" {
 		mode = "MAPPED"
 	}
-	if mode != "MAPPED" && mode != "ALL_ACTIVE_INTERFACES" {
-		jsonErr(w, http.StatusBadRequest, "validation", "routing_mode must be MAPPED or ALL_ACTIVE_INTERFACES")
+	// ALL_ACTIVE_INTERFACES IS NOT IMPLEMENTED, SO IT IS NOT OFFERED.
+	//
+	// The column has always allowed it and the screen used to present it as "Every active PMS", but no
+	// resolver ever read routing_mode: internal/pmsresolve selects candidates with mapped(), which returns the
+	// interfaces this network is MAPPED to and nothing else. A site that chose it got MAPPED behaviour under a
+	// name promising a fan-out -- the worst kind of configuration, one that reads as deliberate. Implementing a
+	// multi-PMS resolution is a product decision (STRICT candidate rules, ambiguity, the candidate cap), not a
+	// validation change, so until that decision the option is refused rather than mis-sold. Rows that already
+	// carry it keep working: they resolve against their mapped interface, which is what they always did.
+	if mode != "MAPPED" {
+		jsonErr(w, http.StatusBadRequest, "validation",
+			"routing_mode must be MAPPED. Routing a client network to every active PMS is not implemented: "+
+				"the resolver only ever consults the interface a network is mapped to.")
 		return
 	}
 

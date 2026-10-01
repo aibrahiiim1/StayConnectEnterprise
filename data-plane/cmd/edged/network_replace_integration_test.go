@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// CLIENT NETWORKS: SEVERAL VLANS AT ONCE, A SAFE TOPOLOGY CHANGE, AND HISTORY THAT IS KEPT.
+// CLIENT NETWORKS: SEVERAL VLANS AT ONCE, AND A TOPOLOGY CHANGE THAT IS STAGED BEFORE IT IS LIVE.
 
 func netBody(name, typ, parent string, vlan int, subnet, gw, poolStart, poolEnd string) map[string]any {
 	b := map[string]any{
@@ -36,6 +36,51 @@ func (f *apiFixture) networkCount(t *testing.T) int {
 	return n
 }
 
+func (f *apiFixture) networkState(t *testing.T, id string) (enabled bool, netType string, vlan *int, subnet string) {
+	t.Helper()
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT enabled, network_type, vlan_id, subnet_cidr::text FROM guest_networks WHERE id=$1`, id).
+		Scan(&enabled, &netType, &vlan, &subnet); err != nil {
+		t.Fatalf("read network %s: %v", id, err)
+	}
+	return
+}
+
+func (f *apiFixture) replacementState(t *testing.T, replID string) (state string, successor *string) {
+	t.Helper()
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT state, successor_network_id::text FROM iam_v2.guest_network_replacements WHERE id=$1`, replID).
+		Scan(&state, &successor); err != nil {
+		t.Fatalf("read replacement %s: %v", replID, err)
+	}
+	return
+}
+
+// seedReplaceable creates an untagged network with a pool, a reservation and a PMS route.
+func (f *apiFixture) seedReplaceable(t *testing.T, parent, subnet, gw string) (id, iface string) {
+	t.Helper()
+	ctx := context.Background()
+	st, body := f.do(t, "POST", "/network/guest-networks",
+		netBody("Lobby", "untagged", parent, 0, subnet, gw, strings.TrimSuffix(subnet, ".0/24")+".100", strings.TrimSuffix(subnet, ".0/24")+".200"))
+	if st != 201 {
+		t.Fatalf("create = %d %v", st, body)
+	}
+	id = body["id"].(string)
+	if _, err := f.pool.Exec(ctx, `INSERT INTO dhcp_reservations (guest_network_id, mac, reserved_ip)
+		VALUES ($1,'aa:bb:cc:00:00:01',$2::inet)`, id, strings.TrimSuffix(subnet, ".0/24")+".50"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.pool.QueryRow(ctx, `INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)
+		VALUES (gen_random_uuid(),$1,$2,'protel-fias','ACTIVE') RETURNING id::text`, f.tenant, f.site).Scan(&iface); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `INSERT INTO iam_v2.guest_network_pms_map (tenant_id,site_id,guest_network_id,pms_interface_id,is_default,routing_mode)
+		VALUES ($1,$2,$3,$4,true,'MAPPED')`, f.tenant, f.site, id, iface); err != nil {
+		t.Fatal(err)
+	}
+	return id, iface
+}
+
 func TestIntegration_Network_BatchCreatesATrunkOfVLANsAllOrNothing(t *testing.T) {
 	f := newAPI(t)
 	parent := uniqueParent()
@@ -51,7 +96,6 @@ func TestIntegration_Network_BatchCreatesATrunkOfVLANsAllOrNothing(t *testing.T)
 		t.Fatalf("created %d networks (rows %d), want 3", got, f.networkCount(t))
 	}
 
-	// One overlapping subnet refuses the whole batch: nothing from it is created.
 	before := f.networkCount(t)
 	status, body = f.do(t, "POST", "/network/guest-networks/batch", map[string]any{"networks": []any{
 		netBody("Ext3", "vlan", parent, 114, "10.114.0.0/24", "10.114.0.1", "10.114.0.100", "10.114.0.200"),
@@ -64,7 +108,6 @@ func TestIntegration_Network_BatchCreatesATrunkOfVLANsAllOrNothing(t *testing.T)
 		t.Fatal("a refused batch left networks behind; it must be all or nothing")
 	}
 
-	// The same VLAN twice on one port is refused before anything is written.
 	status, body = f.do(t, "POST", "/network/guest-networks/batch", map[string]any{"networks": []any{
 		netBody("A", "vlan", parent, 120, "10.120.0.0/24", "10.120.0.1", "10.120.0.100", "10.120.0.200"),
 		netBody("B", "vlan", parent, 120, "10.121.0.0/24", "10.121.0.1", "10.121.0.100", "10.121.0.200"),
@@ -74,77 +117,167 @@ func TestIntegration_Network_BatchCreatesATrunkOfVLANsAllOrNothing(t *testing.T)
 	}
 }
 
-func TestIntegration_Network_ReplaceMovesAnUntaggedLANOntoAVLANAndCarriesItsSetup(t *testing.T) {
+// THE CENTRAL PROPERTY: staging changes nothing at all.
+func TestIntegration_Network_StagingAReplacementChangesNothing(t *testing.T) {
+	f := newAPI(t)
+	parent := uniqueParent()
+	id, iface := f.seedReplaceable(t, parent, "10.130.0.0/24", "10.130.0.1")
+	before := f.networkCount(t)
+
+	status, body := f.do(t, "POST", "/network/guest-networks/"+id+"/replace", map[string]any{
+		"network_type": "vlan", "parent_interface": parent, "vlan_id": 30, "reason": "port moved to a trunk"})
+	if status != 201 {
+		t.Fatalf("stage = %d %v", status, body)
+	}
+	replID := body["replacement_id"].(string)
+	if body["state"] != "PENDING" {
+		t.Fatalf("staged state = %v, want PENDING", body["state"])
+	}
+	carries := body["carries"].(map[string]any)
+	if carries["pools"] != float64(1) || carries["reservations"] != float64(1) || carries["pms_routes"] != float64(1) {
+		t.Fatalf("carries = %v, want 1/1/1", carries)
+	}
+
+	// Nothing moved: the network is still enabled, still untagged, and no successor exists.
+	enabled, netType, vlan, _ := f.networkState(t, id)
+	if !enabled || netType != "untagged" || vlan != nil {
+		t.Fatalf("staging changed the live network: enabled=%v type=%s vlan=%v", enabled, netType, vlan)
+	}
+	if f.networkCount(t) != before {
+		t.Fatal("staging created a network row; it must create nothing until the apply")
+	}
+	var routed string
+	_ = f.pool.QueryRow(context.Background(), `SELECT pms_interface_id::text FROM iam_v2.guest_network_pms_map WHERE guest_network_id=$1`, id).Scan(&routed)
+	if routed != iface {
+		t.Fatal("staging disturbed the PMS route")
+	}
+
+	// A second request for the same network is refused.
+	if st, b := f.do(t, "POST", "/network/guest-networks/"+id+"/replace", map[string]any{
+		"network_type": "vlan", "parent_interface": parent, "vlan_id": 31, "reason": "second attempt"}); st != 409 || b["error"] != "replacement_exists" {
+		t.Fatalf("second staged replacement = %d %v", st, b)
+	}
+
+	// It is listed, and cancelling it leaves nothing behind.
+	st, list := f.do(t, "GET", "/network/guest-network-replacements", nil)
+	if st != 200 || len(list["data"].([]any)) != 1 {
+		t.Fatalf("list = %d %v", st, list)
+	}
+	if st, b := f.do(t, "DELETE", "/network/guest-network-replacements/"+replID, nil); st != 200 {
+		t.Fatalf("cancel = %d %v", st, b)
+	}
+	if state, _ := f.replacementState(t, replID); state != "CANCELLED" {
+		t.Fatalf("after cancel state = %s", state)
+	}
+}
+
+func TestIntegration_Network_StagingRefusesAConflictUpFront(t *testing.T) {
+	f := newAPI(t)
+	parent := uniqueParent()
+	id, _ := f.seedReplaceable(t, parent, "10.131.0.0/24", "10.131.0.1")
+	// A second, tagged network already on that trunk.
+	if st, b := f.do(t, "POST", "/network/guest-networks",
+		netBody("Ext2", "vlan", parent, 40, "10.132.0.0/24", "10.132.0.1", "10.132.0.100", "10.132.0.200")); st != 201 {
+		t.Fatalf("seed vlan = %d %v", st, b)
+	}
+	// ...so moving the first onto VLAN 40 of the same trunk is refused before anything is staged.
+	st, b := f.do(t, "POST", "/network/guest-networks/"+id+"/replace", map[string]any{
+		"network_type": "vlan", "parent_interface": parent, "vlan_id": 40, "reason": "clashing vlan"})
+	if st != 409 || b["error"] != "topology_conflict" || !strings.Contains(fmt.Sprint(b["message"]), "VLAN 40") {
+		t.Fatalf("clashing VLAN = %d %v", st, b)
+	}
+	// An overlapping new subnet is refused the same way.
+	st, b = f.do(t, "POST", "/network/guest-networks/"+id+"/replace", map[string]any{
+		"network_type": "vlan", "parent_interface": parent, "vlan_id": 41, "reason": "clashing subnet",
+		"subnet_cidr": "10.132.0.0/25", "gateway_ip": "10.132.0.1",
+		"pools": []map[string]string{{"start_ip": "10.132.0.10", "end_ip": "10.132.0.20"}}})
+	if st != 409 || b["error"] != "topology_conflict" {
+		t.Fatalf("overlapping subnet = %d %v", st, b)
+	}
+	// The same topology it already has is not a replacement.
+	st, b = f.do(t, "POST", "/network/guest-networks/"+id+"/replace", map[string]any{
+		"network_type": "untagged", "parent_interface": parent, "reason": "no change at all"})
+	if st != 400 || b["error"] != "no_topology_change" {
+		t.Fatalf("same topology = %d %v", st, b)
+	}
+	// And a reason is required.
+	st, b = f.do(t, "POST", "/network/guest-networks/"+id+"/replace", map[string]any{
+		"network_type": "vlan", "parent_interface": parent, "vlan_id": 42})
+	if st != 400 || b["error"] != "reason_required" {
+		t.Fatalf("no reason = %d %v", st, b)
+	}
+}
+
+// THE APPLY MOMENT, AND ITS UNDO. Materialising is what moves the rows; reverting puts them all back.
+func TestIntegration_Network_MaterialiseCarriesEverythingAndRevertRestoresIt(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
 	parent := uniqueParent()
-	status, body := f.do(t, "POST", "/network/guest-networks",
-		netBody("Lobby", "untagged", parent, 0, "10.130.0.0/24", "10.130.0.1", "10.130.0.100", "10.130.0.200"))
-	if status != 201 {
-		t.Fatalf("create = %d %v", status, body)
+	id, iface := f.seedReplaceable(t, parent, "10.133.0.0/24", "10.133.0.1")
+
+	st, body := f.do(t, "POST", "/network/guest-networks/"+id+"/replace", map[string]any{
+		"network_type": "vlan", "parent_interface": parent, "vlan_id": 50, "reason": "moved to a trunk"})
+	if st != 201 {
+		t.Fatalf("stage = %d %v", st, body)
 	}
-	oldID := body["id"].(string)
-	// A MAC reservation and a PMS route that must follow the network.
-	if _, err := f.pool.Exec(ctx, `INSERT INTO dhcp_reservations (guest_network_id, mac, reserved_ip) VALUES ($1,'aa:bb:cc:00:00:01','10.130.0.50')`, oldID); err != nil {
+	replID := body["replacement_id"].(string)
+
+	tx, err := f.app.db.Begin(ctx)
+	if err != nil {
 		t.Fatal(err)
 	}
-	var iface string
-	if err := f.pool.QueryRow(ctx, `INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)
-		VALUES (gen_random_uuid(),$1,$2,'protel-fias','ACTIVE') RETURNING id::text`, f.tenant, f.site).Scan(&iface); err != nil {
+	mats, err := f.app.materialisePendingReplacements(ctx, tx, "operator@test")
+	if err != nil {
+		t.Fatalf("materialise: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.pool.Exec(ctx, `INSERT INTO iam_v2.guest_network_pms_map (tenant_id,site_id,guest_network_id,pms_interface_id,is_default,routing_mode)
-		VALUES ($1,$2,$3,$4,true,'MAPPED')`, f.tenant, f.site, oldID, iface); err != nil {
-		t.Fatal(err)
+	if len(mats) != 1 {
+		t.Fatalf("materialised %d replacements, want 1", len(mats))
 	}
+	succ := mats[0].SuccessorID
 
-	// In-place topology edits are still refused.
-	if st, b := f.do(t, "PUT", "/network/guest-networks/"+oldID, map[string]any{"name": "Lobby", "network_type": "vlan", "vlan_id": 30,
-		"subnet_cidr": "10.130.0.0/24", "gateway_ip": "10.130.0.1"}); st != 409 {
-		t.Fatalf("in-place topology change = %d %v, want 409", st, b)
+	// The successor is live with the new topology, the original is retired, and everything followed.
+	if enabled, _, _, _ := f.networkState(t, id); enabled {
+		t.Fatal("the original is still enabled after materialisation")
 	}
-
-	// No reason, no replacement.
-	if st, b := f.do(t, "POST", "/network/guest-networks/"+oldID+"/replace", map[string]any{
-		"network_type": "vlan", "parent_interface": parent, "vlan_id": 30}); st != 400 || b["error"] != "reason_required" {
-		t.Fatalf("replace without reason = %d %v", st, b)
+	enabled, netType, vlan, subnet := f.networkState(t, succ)
+	if !enabled || netType != "vlan" || vlan == nil || *vlan != 50 || subnet != "10.133.0.0/24" {
+		t.Fatalf("successor: enabled=%v type=%s vlan=%v subnet=%s", enabled, netType, vlan, subnet)
 	}
-
-	status, body = f.do(t, "POST", "/network/guest-networks/"+oldID+"/replace", map[string]any{
-		"network_type": "vlan", "parent_interface": parent, "vlan_id": 30, "reason": "switch port moved to a trunk"})
-	if status != 201 {
-		t.Fatalf("replace = %d %v", status, body)
-	}
-	newID := body["id"].(string)
-	carried := body["carried"].(map[string]any)
-	if carried["pools"] != float64(1) || carried["reservations"] != float64(1) || carried["pms_routes"] != float64(1) {
-		t.Fatalf("carried = %v, want pools 1, reservations 1, pms_routes 1", carried)
-	}
-
-	var oldEnabled, newEnabled bool
-	var newType, newSubnet string
-	var newVLAN int
-	_ = f.pool.QueryRow(ctx, `SELECT enabled FROM guest_networks WHERE id=$1`, oldID).Scan(&oldEnabled)
-	_ = f.pool.QueryRow(ctx, `SELECT enabled, network_type, vlan_id, subnet_cidr::text FROM guest_networks WHERE id=$1`, newID).
-		Scan(&newEnabled, &newType, &newVLAN, &newSubnet)
-	if oldEnabled || !newEnabled || newType != "vlan" || newVLAN != 30 || newSubnet != "10.130.0.0/24" {
-		t.Fatalf("after replace: old enabled=%v, new enabled=%v %s vlan %d %s", oldEnabled, newEnabled, newType, newVLAN, newSubnet)
-	}
+	var pools, reservations int
 	var routed string
-	_ = f.pool.QueryRow(ctx, `SELECT pms_interface_id::text FROM iam_v2.guest_network_pms_map WHERE guest_network_id=$1`, newID).Scan(&routed)
-	if routed != iface {
-		t.Fatal("the PMS route did not follow the network")
+	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM dhcp_pools WHERE guest_network_id=$1`, succ).Scan(&pools)
+	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM dhcp_reservations WHERE guest_network_id=$1`, succ).Scan(&reservations)
+	_ = f.pool.QueryRow(ctx, `SELECT pms_interface_id::text FROM iam_v2.guest_network_pms_map WHERE guest_network_id=$1`, succ).Scan(&routed)
+	if pools != 1 || reservations != 1 || routed != iface {
+		t.Fatalf("carried pools=%d reservations=%d route=%q", pools, reservations, routed)
 	}
-	var audited int
-	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action='network.guest.replaced' AND target_id=$1`, newID).Scan(&audited)
-	if audited != 1 {
-		t.Fatalf("replacement audited %d times, want 1", audited)
+	if state, s := f.replacementState(t, replID); state != "APPLIED" || s == nil || *s != succ {
+		t.Fatalf("replacement state=%s successor=%v", state, s)
 	}
 
-	// Replacing with the same topology is not a replacement.
-	if st, b := f.do(t, "POST", "/network/guest-networks/"+newID+"/replace", map[string]any{
-		"network_type": "vlan", "parent_interface": parent, "vlan_id": 30, "reason": "no change"}); st != 400 || b["error"] != "no_topology_change" {
-		t.Fatalf("same-topology replace = %d %v", st, b)
+	// ...and the undo is complete.
+	if err := f.app.revertMaterialised(ctx, []string{replID}, "test rollback"); err != nil {
+		t.Fatalf("revert: %v", err)
+	}
+	if enabled, netType, vlan, _ := f.networkState(t, id); !enabled || netType != "untagged" || vlan != nil {
+		t.Fatalf("the original did not come back: enabled=%v type=%s vlan=%v", enabled, netType, vlan)
+	}
+	var left int
+	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM guest_networks WHERE id=$1`, succ).Scan(&left)
+	if left != 0 {
+		t.Fatal("the successor row survived the revert")
+	}
+	if state, s := f.replacementState(t, replID); state != "PENDING" || s != nil {
+		t.Fatalf("after revert state=%s successor=%v, want PENDING/nil so it can be retried", state, s)
+	}
+	// The original keeps its own reservation and route.
+	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM dhcp_reservations WHERE guest_network_id=$1`, id).Scan(&reservations)
+	_ = f.pool.QueryRow(ctx, `SELECT pms_interface_id::text FROM iam_v2.guest_network_pms_map WHERE guest_network_id=$1`, id).Scan(&routed)
+	if reservations != 1 || routed != iface {
+		t.Fatalf("the original lost something: reservations=%d route=%q", reservations, routed)
 	}
 }
 

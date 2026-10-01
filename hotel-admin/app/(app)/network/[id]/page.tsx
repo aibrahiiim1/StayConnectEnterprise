@@ -215,20 +215,17 @@ export default function EditGuestNetworkPage() {
         <>
           {/* read-only topology + status */}
           {replaced && (
-            <Callout tone="success" title="Replacement created — not applied yet">
+            <Callout tone="success" title="Change recorded — nothing has changed yet">
               <p>
-                Carried over: {replaced.carried.pools} DHCP pool(s), {replaced.carried.reservations} reservation(s),{" "}
-                {replaced.carried.pms_routes} PMS route(s). This network is now disabled.{" "}
-                <Link href="/network" className="font-medium underline">Go to Client networks</Link> to validate and apply,
-                then confirm. <Link href={`/network/${replaced.id}`} className="font-medium underline">Open the replacement</Link>.
+                This network is still serving its clients. When you{" "}
+                <Link href="/network" className="font-medium underline">apply the configuration</Link> and confirm it, the
+                replacement takes over carrying {replaced.carries.pools} DHCP pool(s),{" "}
+                {replaced.carries.reservations} reservation(s) and {replaced.carries.pms_routes} PMS route(s).
               </p>
-              {replaced.active_sessions_on_old_network > 0 && (
-                <p className="mt-1">{replaced.active_sessions_on_old_network} client(s) are online on this network now; after the apply they reconnect on the replacement.</p>
-              )}
-              {!!replaced.packages_limited_to_old_network?.length && (
+              {!!replaced.packages?.length && (
                 <p className="mt-1">
-                  These packages are limited to this network and must be edited to include the replacement:{" "}
-                  {replaced.packages_limited_to_old_network.join(", ")}.
+                  Internet packages limited to this network ({replaced.packages.join(", ")}) are moved onto the
+                  replacement automatically when you confirm.
                 </p>
               )}
             </Callout>

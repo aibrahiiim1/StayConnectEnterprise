@@ -134,13 +134,12 @@ describe("an unreadable health result is unknown, never an outage", () => {
     expect(r.unchecked).toEqual(["Spa"]);
   });
 
-  // An ALL_ACTIVE_INTERFACES network where one candidate is broken and another unreadable: the unread one
-  // might have been the healthy one, so this is unknown rather than an outage.
-  it("is unchecked when an unread candidate could have been the healthy one", () => {
+  // A network whose own interface is unread is unknown, not an outage.
+  it("is unchecked when the routed interface was not read", () => {
     const r = roomSignInReadiness(
       [iface("a", "Protel Main"), iface("b", "Protel Annexe")],
-      [health("a", false, "MIRROR_NEVER_SYNCHRONIZED")], // b unread
-      [route("Guest Wi-Fi", "a", "Protel Main", "ALL_ACTIVE_INTERFACES")],
+      [health("b", false, "MIRROR_NEVER_SYNCHRONIZED")], // a unread
+      [route("Guest Wi-Fi", "a", "Protel Main")],
     );
     expect(r.state).toBe("unknown");
   });
@@ -179,16 +178,18 @@ describe("routing semantics are unchanged", () => {
     expect(r.state).toBe("ready");
   });
 
-  it("treats ALL_ACTIVE_INTERFACES as served while any active interface is healthy", () => {
+  // ALL_ACTIVE_INTERFACES never fanned out: no resolver has ever read routing_mode, so a row carrying it
+  // resolves against its MAPPED interface like any other. A healthy neighbour does not rescue it.
+  it("reads a stored ALL_ACTIVE_INTERFACES route as the one interface it is mapped to", () => {
     const r = roomSignInReadiness(
       [iface("a", "Protel Main"), iface("b", "Protel Annexe")],
       [health("a", false, "MIRROR_NEVER_SYNCHRONIZED"), READY("b")],
       [route("Guest Wi-Fi", "a", "Protel Main", "ALL_ACTIVE_INTERFACES")],
     );
-    expect(r.state).toBe("ready");
+    expect(r.state).toBe("down");
   });
 
-  it("reports ALL_ACTIVE_INTERFACES as down when no active interface is healthy", () => {
+  it("reports a stored ALL_ACTIVE_INTERFACES route as down when its interface is unhealthy", () => {
     const r = roomSignInReadiness(
       [iface("a", "Protel Main"), iface("b", "Protel Annexe")],
       [health("a", false, "MIRROR_NEVER_SYNCHRONIZED"), health("b", false, "MIRROR_NEVER_SYNCHRONIZED")],

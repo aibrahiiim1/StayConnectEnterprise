@@ -1,4 +1,4 @@
-// Addressing suggestions for laying out several VLANs on one trunk (app/(app)/network/trunk).
+// Addressing suggestions for laying out several VLANs on one trunk (the New client network wizard).
 
 /** 10.<n>.0.0/24 with the first n not used by an existing network or another row. */
 export function suggestSubnet(vlan: number, used: Set<string>): string {

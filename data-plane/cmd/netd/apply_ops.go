@@ -53,6 +53,11 @@ func (a *applier) applyBundle(ctx context.Context, revID string, intent []netcfg
 				}
 			}
 		}
+		// ...and converge the addressing of the bridges that were ALREADY there, which createNetwork never
+		// touches. Without this an edited subnet or gateway is applied everywhere except on the wire.
+		if err := a.reconcileAddresses(ctx, revID, intent); err != nil {
+			return err
+		}
 	}
 	a.st.Event(ctx, revID, "l2l3", true, map[string]any{"bridges": len(desired)})
 
@@ -193,6 +198,66 @@ func (a *applier) createNetwork(ctx context.Context, n netcfg.GuestNetwork) erro
 	}
 	// prime tc root on the bridge for download shaping (best-effort).
 	_ = a.run(ctx, "tc", "qdisc", "replace", "dev", n.BridgeName, "root", "handle", "1:", "htb", "default", "1")
+	return nil
+}
+
+// reconcileAddress makes an EXISTING managed bridge carry exactly the gateway address its intent asks for, and
+// reports whether it had to change anything.
+//
+// WHY AN APPLY USED TO LIE ABOUT THIS. applyBundle only ever called createNetwork for a bridge that was
+// MISSING, and `ip addr add` lives inside createNetwork. So an operator who edited a client network's subnet or
+// gateway -- the one addressing change the detail page offers -- had their edit written to the database,
+// rendered into the bundle, pushed to Kea... and never applied to the live bridge, which went on carrying the
+// previous address. The DHCP scope then handed out addresses in a subnet the gateway was not on.
+//
+// It is reconciled here instead: the desired address is added if absent and every other address this bridge
+// carries is removed, so the live interface ends up with exactly what the intent says. Only bridges in the
+// desired managed set are ever touched -- liveGuestBridges() returns br-g* only, and the management and WAN
+// interfaces are never in it.
+func (a *applier) reconcileAddress(ctx context.Context, n netcfg.GuestNetwork) (bool, error) {
+	want := fmt.Sprintf("%s/%d", n.GatewayIP, n.PrefixLen)
+	have := a.ifaceAddrsOf(n.BridgeName)
+	changed := false
+	found := false
+	for _, c := range have {
+		if c == want {
+			found = true
+			continue
+		}
+		changed = true
+		_ = a.run(ctx, "ip", "addr", "del", c, "dev", n.BridgeName)
+	}
+	if !found {
+		changed = true
+		if err := a.run(ctx, "ip", "addr", "add", want, "dev", n.BridgeName); err != nil {
+			return true, fmt.Errorf("address %s on %s: %w", want, n.BridgeName, err)
+		}
+	}
+	return changed, nil
+}
+
+// reconcileAddresses converges every enabled managed bridge that already exists onto its intent's addressing.
+func (a *applier) reconcileAddresses(ctx context.Context, revID string, intent []netcfg.GuestNetwork) error {
+	if a.dryRun {
+		return nil
+	}
+	live := a.liveGuestBridges()
+	var readdressed []string
+	for _, n := range a.netdManaged(intent) {
+		if !n.Enabled || !live[n.BridgeName] {
+			continue
+		}
+		changed, err := a.reconcileAddress(ctx, n)
+		if err != nil {
+			return err
+		}
+		if changed {
+			readdressed = append(readdressed, n.BridgeName)
+		}
+	}
+	if len(readdressed) > 0 {
+		a.event(ctx, revID, "readdress", true, map[string]any{"bridges": readdressed})
+	}
 	return nil
 }
 
@@ -350,6 +415,13 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) {
 		// own intent says which bridges must exist; any that are missing are rebuilt exactly as an apply
 		// builds them, before nftables, DHCP and DNS are restored for them below.
 		a.recreateMissingBridges(ctx, failedID)
+		// A failed apply may also have RE-ADDRESSED a bridge it kept. The previous confirmed intent says what
+		// each bridge should carry, so the same reconciliation puts the addressing back.
+		if prevIntent, ierr := a.previousActiveIntent(ctx, failedID); ierr == nil && prevIntent != nil {
+			if rerr := a.reconcileAddresses(ctx, failedID, prevIntent); rerr != nil {
+				a.event(ctx, failedID, "rollback_addresses", false, map[string]any{"error": rerr.Error()})
+			}
+		}
 	}
 	// Restore the previous good revision's nft structure by RENDERING ITS STORED INTENT with the current
 	// renderer.
@@ -532,6 +604,24 @@ func (a *applier) liveGuestBridges() map[string]bool {
 func ifaceExists(name string) bool {
 	_, err := os.Stat("/sys/class/net/" + name)
 	return err == nil
+}
+
+// ifaceAddrs lists the IPv4 CIDRs configured on an interface ("10.20.0.1/24"), newest kernel order.
+func ifaceAddrs(name string) []string {
+	out, err := exec.Command("ip", "-o", "-4", "addr", "show", "dev", name).Output()
+	if err != nil {
+		return nil
+	}
+	var cidrs []string
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Fields(line)
+		for i, tok := range f {
+			if tok == "inet" && i+1 < len(f) {
+				cidrs = append(cidrs, f[i+1])
+			}
+		}
+	}
+	return cidrs
 }
 
 func ifaceHasIP(name, ip string) bool {

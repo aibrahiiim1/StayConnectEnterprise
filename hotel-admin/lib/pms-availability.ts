@@ -82,9 +82,10 @@ function verdictFor(id: string, healthById: Map<string, PmsInterfaceHealth>): If
 /**
  * Room sign-in readiness, evaluated per routed guest network.
  *
- * `routes` decides which interfaces matter. An interface nobody routes to cannot affect the answer, and a
- * network routed in ALL_ACTIVE_INTERFACES mode fans out across every ACTIVE interface exactly as the resolver
- * does — so its guests are served while any one of them is healthy.
+ * `routes` decides which interfaces matter: an interface nobody routes to cannot affect the answer, and a
+ * network is served by the ONE interface it is routed to. Some older rows still carry the routing_mode
+ * ALL_ACTIVE_INTERFACES, which never did anything — the resolver has only ever consulted the mapped interface
+ * — so it is read here exactly like MAPPED rather than as a fan-out that does not exist.
  */
 export function roomSignInReadiness(
   interfaces: PmsInterface[] | null | undefined,
@@ -107,7 +108,7 @@ export function roomSignInReadiness(
 
     // A network mapped to an interface that is not ACTIVE cannot resolve at all. That is a configuration
     // state the server also reports, but the mapping itself is only visible here, so it is named here.
-    if (r.routing_mode !== "ALL_ACTIVE_INTERFACES" && !activeIds.has(r.pms_interface_id)) {
+    if (!activeIds.has(r.pms_interface_id)) {
       affected.push({
         guestNetwork: network,
         pmsInterface: label(r.pms_interface_id),
@@ -116,7 +117,7 @@ export function roomSignInReadiness(
       continue;
     }
 
-    const candidateIds = r.routing_mode === "ALL_ACTIVE_INTERFACES" ? [...activeIds] : [r.pms_interface_id];
+    const candidateIds = [r.pms_interface_id];
     if (candidateIds.length === 0) { unchecked.push(network); continue; }
 
     // One healthy candidate is enough: that is the interface these guests resolve against.

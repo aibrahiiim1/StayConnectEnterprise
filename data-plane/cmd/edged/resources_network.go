@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -38,7 +39,9 @@ func (s *server) networkRoutes() http.Handler {
 	r.Delete("/guest-networks/{id}", s.deleteGuestNetwork)
 	r.Post("/guest-networks/{id}/disable", s.disableGuestNetwork)
 	r.Post("/guest-networks/{id}/enable", s.enableGuestNetwork)
-	r.Post("/guest-networks/{id}/replace", s.replaceGuestNetwork)
+	r.Post("/guest-networks/{id}/replace", s.stageGuestNetworkReplacement)
+	r.Get("/guest-network-replacements", s.listGuestNetworkReplacements)
+	r.Delete("/guest-network-replacements/{id}", s.cancelGuestNetworkReplacement)
 	r.Get("/guest-networks/{id}/status", s.guestNetworkStatus)
 
 	// validate / apply operate on the whole intent (all networks) via netd.
@@ -174,6 +177,10 @@ func scanGuestNetwork(row interface{ Scan(...any) error }) (guestNetworkRow, err
 }
 
 func (s *server) listGuestNetworks(w http.ResponseWriter, r *http.Request) {
+	if ctx, cancel := dbCtx(r); true {
+		s.reconcileStaleReplacements(ctx, r)
+		cancel()
+	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	rows, err := s.db.Query(ctx, `SELECT `+gnCols+` FROM guest_networks ORDER BY COALESCE(vlan_id,0), name`)
@@ -485,13 +492,69 @@ func (s *server) netValidate(w http.ResponseWriter, r *http.Request) {
 	s.netd.proxy(w, r, http.MethodPost, "/v1/validate", map[string]string{"actor": s.actor(r), "summary": "validate"})
 }
 
+// netApply materialises every staged client-network replacement, then asks netd to render and apply the whole
+// intent. netd answers synchronously, so a validation failure, a failed apply or a failed health check is
+// undone here, in the same request: the database and the appliance never disagree about which network is live.
 func (s *server) netApply(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Summary string `json:"summary"`
 	}
 	_ = decodeJSON(r, &in)
-	s.audit(r, "network.apply", "network", "", map[string]any{"summary": in.Summary})
-	s.netd.proxy(w, r, http.MethodPost, "/v1/apply", map[string]string{"actor": s.actor(r), "summary": in.Summary})
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	s.reconcileStaleReplacements(ctx, r)
+
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "tx begin")
+		return
+	}
+	mats, merr := s.materialisePendingReplacements(ctx, tx, s.actor(r))
+	if merr != nil {
+		_ = tx.Rollback(ctx)
+		writeNetworkInsertErr(w, merr)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		_ = tx.Rollback(ctx)
+		jsonErr(w, http.StatusInternalServerError, "internal", "commit failed")
+		return
+	}
+	staged := make([]string, 0, len(mats))
+	for _, m := range mats {
+		staged = append(staged, m.ReplacementID)
+	}
+
+	s.audit(r, "network.apply", "network", "", map[string]any{"summary": in.Summary, "replacements": staged})
+	st, raw, err := s.netd.call(r.Context(), http.MethodPost, "/v1/apply",
+		map[string]string{"actor": s.actor(r), "summary": in.Summary})
+	if err != nil {
+		if rerr := s.revertMaterialised(ctx, staged, "netd could not be reached"); rerr != nil {
+			slog.Error("client network replacement could not be reverted after an unreachable netd", "err", rerr)
+		}
+		jsonErr(w, http.StatusBadGateway, "netd_unreachable", err.Error())
+		return
+	}
+	var res struct {
+		RevisionID string `json:"revision_id"`
+		State      string `json:"state"`
+	}
+	_ = json.Unmarshal(raw, &res)
+	switch {
+	case st >= 300, res.State == "failed", res.State == "rolled_back":
+		if rerr := s.revertMaterialised(ctx, staged, "the apply did not hold ("+res.State+")"); rerr != nil {
+			slog.Error("client network replacement could not be reverted after a failed apply", "err", rerr)
+		}
+	case len(staged) > 0 && res.RevisionID != "":
+		// Remember which revision carries them, so a watchdog rollback can be noticed later.
+		if _, uerr := s.db.Exec(ctx, `UPDATE iam_v2.guest_network_replacements SET revision_id=$2::uuid
+			 WHERE id = ANY($1::uuid[]) AND state='APPLIED'`, staged, res.RevisionID); uerr != nil {
+			slog.Error("client network replacement revision could not be recorded", "err", uerr)
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(st)
+	_, _ = w.Write(raw)
 }
 
 func (s *server) netAdopt(w http.ResponseWriter, r *http.Request) {
@@ -756,16 +819,55 @@ func (s *server) getRevision(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// confirmRevision keeps the applied configuration. Only now does a replacement become permanent: the request
+// is settled and the Internet Packages that named the retired network are republished forward onto its
+// successor, so eligibility keeps meaning what the hotel intended.
 func (s *server) confirmRevision(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	s.audit(r, "network.revision.confirmed", "network_revision", id, nil)
-	s.netd.proxy(w, r, http.MethodPost, "/v1/confirm", map[string]string{"revision_id": id, "actor": s.actor(r)})
+	st, raw, err := s.netd.call(r.Context(), http.MethodPost, "/v1/confirm",
+		map[string]string{"revision_id": id, "actor": s.actor(r)})
+	if err != nil {
+		jsonErr(w, http.StatusBadGateway, "netd_unreachable", err.Error())
+		return
+	}
+	if st < 300 {
+		ctx, cancel := dbCtx(r)
+		defer cancel()
+		if settled := s.settleConfirmedReplacements(ctx, r, id); len(settled) > 0 {
+			out := map[string]any{}
+			_ = json.Unmarshal(raw, &out)
+			out["replacements"] = settled
+			if merged, merr := json.Marshal(out); merr == nil {
+				raw = merged
+			}
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(st)
+	_, _ = w.Write(raw)
 }
 
+// rollbackRevision undoes the applied configuration. The appliance goes back to the previous confirmed
+// revision and so does this database: every replacement the apply materialised is reverted, leaving the
+// original client network enabled and the request waiting for another attempt.
 func (s *server) rollbackRevision(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	s.audit(r, "network.revision.rolledback", "network_revision", id, nil)
-	s.netd.proxy(w, r, http.MethodPost, "/v1/rollback", map[string]string{"revision_id": id, "actor": s.actor(r)})
+	st, raw, err := s.netd.call(r.Context(), http.MethodPost, "/v1/rollback",
+		map[string]string{"revision_id": id, "actor": s.actor(r)})
+	if err != nil {
+		jsonErr(w, http.StatusBadGateway, "netd_unreachable", err.Error())
+		return
+	}
+	if st < 300 {
+		ctx, cancel := dbCtx(r)
+		defer cancel()
+		s.reconcileStaleReplacements(ctx, r)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(st)
+	_, _ = w.Write(raw)
 }
 
 // ---- helpers ----

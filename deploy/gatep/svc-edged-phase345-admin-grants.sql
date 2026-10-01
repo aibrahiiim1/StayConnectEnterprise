@@ -437,3 +437,12 @@ GRANT SELECT ON iam_v2.checkout_grace_audit, iam_v2.device_network_appearances T
 GRANT EXECUTE ON FUNCTION iam_v2.account_password_settings_get(uuid,uuid)                        TO svc_edged;
 GRANT EXECUTE ON FUNCTION iam_v2.account_password_settings_set(uuid,uuid,text,integer,text,text) TO svc_edged;
 GRANT SELECT  ON iam_v2.account_password_settings_changes                                        TO svc_edged;
+
+-- 0105 — staged client-network replacements.
+--
+-- A topology change (untagged <-> tagged, VLAN id, parent port, re-addressing) is recorded as an intent and
+-- materialised into public.guest_networks only when the operator applies the configuration, then settled when
+-- they confirm it or it is rolled back. edged is the only writer of guest_networks and therefore the only
+-- service that stages, materialises, reverts or settles one. netd renders what the rows say and is granted
+-- nothing in iam_v2; scd, acctd and pmsd have no business with a staged request.
+GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.guest_network_replacements TO svc_edged;

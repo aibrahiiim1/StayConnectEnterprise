@@ -19,12 +19,11 @@ import { Callout } from "@/components/ui/error-banner";
 const SELECTABLE = new Set(["guest_access", "guest_trunk", "unused"]);
 
 export type ReplaceResult = {
-  id: string;
-  replaces: string;
-  bridge_name: string;
-  carried: { pools: number; reservations: number; pms_routes: number };
-  packages_limited_to_old_network?: string[] | null;
-  active_sessions_on_old_network: number;
+  replacement_id: string;
+  state: string;
+  original_network_id: string;
+  carries: { pools: number; reservations: number; pms_routes: number };
+  packages?: string[] | null;
 };
 
 export function ReplaceTopologyDialog({
@@ -105,9 +104,10 @@ export function ReplaceTopologyDialog({
     >
       <div className="space-y-4">
         <Callout tone="info" title="Nothing changes until you apply">
-          The replacement keeps this network&rsquo;s addressing, DHCP pools, reservations, DNS, sign-in page settings
-          and PMS route. After you apply and confirm, clients on this network reconnect on the new one; their internet
-          package and data used carry on.
+          This only records the change. The client network keeps serving its clients, keeps its PMS routing and keeps
+          its place in your Internet packages until you apply the configuration on Client networks and confirm it.
+          The replacement then carries over this network&rsquo;s addressing, DHCP pools, reservations, DNS, sign-in page
+          settings and PMS route; clients reconnect on it, and their internet package and data used carry on.
         </Callout>
         <Field label="Port" required>
           <Select aria-label="Port" value={parent} onChange={(e) => setParent(e.target.value)}>

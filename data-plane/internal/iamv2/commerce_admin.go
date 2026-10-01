@@ -313,6 +313,12 @@ type PackagePublishSpec struct {
 	// {"mode":"FIXED"}) means the pinned service plan revision's quota is used unchanged, which is what every
 	// revision published before this field existed carries.
 	DataAllocationPolicy map[string]any
+	// PackageType is carried through a republish so a revision keeps the kind it already had. Empty means
+	// GENERAL, which is what every revision published before this field existed carries and what the
+	// authoring form publishes. It exists because republishing read the type back and then wrote 'GENERAL'
+	// over it: an automatic republish -- the one a client-network replacement performs -- would silently
+	// change what the package IS.
+	PackageType string
 	// CreateOnly means "this is a NEW package": publication refuses with ErrCodeExists when the code is already
 	// in use, instead of silently becoming a new revision of the package that owns it. Edit leaves it false.
 	CreateOnly bool

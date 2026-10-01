@@ -45,7 +45,10 @@ type Unmapped = { guest_network_id: string; guest_network_name?: string };
 
 const MODE_WORDS: Record<string, string> = {
   MAPPED: "This one PMS",
-  ALL_ACTIVE_INTERFACES: "Every active PMS",
+  // Stored on a few older rows. It never did anything: the resolver only ever consults the interface a network
+  // is mapped to, so such a route behaves exactly like MAPPED and is described that way rather than as a
+  // fan-out that does not exist. It can no longer be chosen.
+  ALL_ACTIVE_INTERFACES: "This one PMS",
 };
 
 export default function PMSRoutingPage() {
@@ -156,7 +159,7 @@ export default function PMSRoutingPage() {
               <HelpList
                 items={[
                   <><strong>This one PMS</strong> checks the room against the single named connection — the normal choice for a site with one PMS.</>,
-                  <><strong>Every active PMS</strong> tries all of them, which only makes sense where one appliance serves several sites.</>,
+                  <>Each client network resolves against the one PMS connection it is routed to, so two extensions with the same room numbers never collide.</>,
                 ]}
               />
             </HelpSection>
@@ -205,9 +208,9 @@ export default function PMSRoutingPage() {
                     <span className="inline-flex items-center gap-1">
                       Scope
                       <Explain>
-                        <strong>This one PMS</strong> checks the room against the single named connection — the
-                        normal choice for a site with one PMS. <strong>Every active PMS</strong> tries all of
-                        them, which only makes sense where one appliance serves several sites.
+                        The room is checked against the single PMS connection this client network is routed to.
+                        That is what keeps two hotel extensions apart: each VLAN resolves against its own PMS, so
+                        the same room number in both never collides.
                       </Explain>
                     </span>
                   </TH>
@@ -417,15 +420,10 @@ function RouteDialog({
 
       <Field
         label="Scope"
-        hint={
-          mode === "MAPPED"
-            ? "The room is checked against this connection only. This is what a single-property appliance wants."
-            : "The room is tried against every PMS connection that is in use. Only correct where one appliance serves more than one site."
-        }
+        hint="The room is checked against this connection only. Each client network resolves against the one PMS it is routed to — that is how two hotel extensions keep their room numbers apart."
       >
-        <Select value={mode} onChange={(e) => setMode(e.target.value)}>
+        <Select value="MAPPED" disabled aria-label="How the room is resolved">
           <option value="MAPPED">This one PMS</option>
-          <option value="ALL_ACTIVE_INTERFACES">Every active PMS</option>
         </Select>
       </Field>
     </DialogForm>

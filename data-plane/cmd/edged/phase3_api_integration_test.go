@@ -102,7 +102,11 @@ func seedGuestNetwork(t *testing.T, p *pgxpool.Pool, tenant, site, name, subnet 
 }
 
 type apiFixture struct {
-	srv      *httptest.Server
+	srv *httptest.Server
+	// app is the very server the routes are mounted on, so a test can drive an internal step directly --
+	// materialising a staged client-network replacement, for instance, which the apply performs between the
+	// operator's request and netd.
+	app      *server
 	pool     *pgxpool.Pool
 	tenant   string
 	site     string
@@ -194,6 +198,7 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 	// rather than about the product.
 	s.commerceRepo = iamv2.NewPgCommerceAdminRepository(p)
 	// the Phase-3 admin surface is mounted explicitly below; this fixture exercises the routes themselves.
+	f.app = s
 	f.sessTok = s.sessions.create(&session{OperatorID: f.operator, Email: "op@test.local", Roles: roles})
 
 	r := chi.NewRouter()

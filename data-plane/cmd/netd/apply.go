@@ -67,6 +67,17 @@ type applier struct {
 	// liveBridgesFn answers which guest bridges exist right now (default: /sys/class/net). A seam so a test
 	// can state that a bridge the previous revision needs has been destroyed.
 	liveBridgesFn func() map[string]bool
+	// addrsFn answers which IPv4 CIDRs an interface carries right now (default: ip -o -4 addr show). A seam so
+	// a test can state that a live bridge still carries the addressing a revision has just changed.
+	addrsFn func(name string) []string
+}
+
+// ifaceAddrsOf is the address seam with its default.
+func (a *applier) ifaceAddrsOf(name string) []string {
+	if a.addrsFn != nil {
+		return a.addrsFn(name)
+	}
+	return ifaceAddrs(name)
 }
 
 // revisionState is the state seam for the operator rollback guard.
