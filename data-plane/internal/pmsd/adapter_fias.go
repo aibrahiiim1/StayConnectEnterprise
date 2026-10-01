@@ -140,7 +140,7 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 
 	t := a.now()
 	da, ti := t.Format("060102"), t.Format("150405")
-	for _, body := range append([]string{pms.BuildLS(da, ti), pms.BuildLD(da, ti, "pmsd", "1")}, pms.BuildLRs()...) {
+	for _, body := range append([]string{pms.BuildLS(da, ti), pms.VerifiedLD(da, ti)}, pms.BuildLRs()...) {
 		if err := w.SubmitSync(ctx, body); err != nil { // startup handshake through the single writer
 			return err
 		}
@@ -533,6 +533,8 @@ func (a *fiasAdapter) toEvent(body string) (Event, error) {
 		FolioRef:                tf.Folio,
 		GuestLastName:           tf.LastName,
 		GuestFirstName:          tf.FirstName,
+		TravelAgent:             tf.TravelAgent,
+		VIP:                     tf.VIP,
 		ArrivalRaw:              tf.Arrival,
 		DepartureRaw:            tf.Departure,
 		// GI/GC/GO carry no verified FIAS event timestamp -> PMSEvent* left unavailable (never substitute GA).

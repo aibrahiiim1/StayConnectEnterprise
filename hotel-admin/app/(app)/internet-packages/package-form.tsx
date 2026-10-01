@@ -43,6 +43,7 @@ import {
 } from "@/lib/commerce-form";
 import { moduleLicensedIn } from "@/lib/commerce-form";
 import { AcquisitionSection } from "./acquisition-section";
+import { TravelAgentPicker } from "./travel-agent-picker";
 
 export type PackageFormValue = {
   payload: PublishPayload;
@@ -89,7 +90,7 @@ function emptyRule(type: RuleType): EligibilityRuleForm {
     case "ROOM_TYPE": return { type, room_types: "" };
     case "RATE_PLAN": return { type, rate_plans: "" };
     case "VIP": return { type, is_vip: "true" };
-    case "TRAVEL_AGENT": return { type, travel_agents: "" };
+    case "TRAVEL_AGENT": return { type, travel_agents: [] };
     case "PMS_INTERFACE": return { type, pms_interface_ids: "" };
   }
 }
@@ -438,7 +439,7 @@ export function PackageForm({
                 <option value="false">Non-VIP guests only</option>
               </Select>
             )}
-            {r.type === "TRAVEL_AGENT" && <Input data-testid={`rule-travel-agents-${i}`} aria-label={`${n}: travel agents`} placeholder="EXPEDIA, BOOKING" value={r.travel_agents} onChange={(e) => setRule(i, { travel_agents: e.target.value })} />}
+            {r.type === "TRAVEL_AGENT" && <TravelAgentPicker testId={`rule-travel-agents-${i}`} label={`${n}: travel agents`} value={r.travel_agents} onChange={(v) => setRule(i, { travel_agents: v })} />}
             {r.type === "PMS_INTERFACE" && <Input data-testid={`rule-pms-interfaces-${i}`} aria-label={`${n}: PMS interfaces`} placeholder="interface id" value={r.pms_interface_ids} onChange={(e) => setRule(i, { pms_interface_ids: e.target.value })} />}
             <Button type="button" variant="ghost" data-testid={`remove-rule-${i}`} aria-label={`Remove condition ${i + 1}`} onClick={() => setRules((rs) => rs.filter((_, j) => j !== i))}><Trash2 size={14} /></Button>
           </div>

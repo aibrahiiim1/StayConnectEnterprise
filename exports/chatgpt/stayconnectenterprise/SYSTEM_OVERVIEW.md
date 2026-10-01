@@ -264,7 +264,7 @@ Standalone enrollment/NATS smoke tester: default hello flow, `--replay` (JWT rep
 | Kind | Transport | Notes |
 |---|---|---|
 | `stub` | in-memory | dev/pilot; always "connected" |
-| `protel-fias`, `opera-fias`, `fidelio-fias` | **FIAS over persistent TCP** (STX/ETX framing, pipe-separated records) | push-based: maintains an in-memory room cache fed by GI (guest-in) / GC (change) / GO (guest-out) records; handshake LS→LD (`IFPB`, v1.13, RT4)→LR subscriptions; `LA` keepalive after 60s idle; exponential reconnect 1s→30s; dates YYMMDD UTC. FIAS 2.20.24 spec PDF is in `docs/` |
+| `protel-fias`, `opera-fias`, `fidelio-fias` | **FIAS over persistent TCP** (STX/ETX framing, pipe-separated records) | push-based: maintains an in-memory room cache fed by GI (guest-in) / GC (change) / GO (guest-out) records; handshake LS→LD (`IFPB`, v1.13, RT4)→LR subscriptions (pmsd: GI/GC `RN G# GN GF GA GD A0 A1`, GO `RN G#`; A0 = travel agent and A1 = VIP flag are the property's FidServ user-defined fields, best-effort attributes that never fault the feed); `LA` keepalive after 60s idle; exponential reconnect 1s→30s; dates YYMMDD UTC. FIAS 2.20.24 spec PDF is in `docs/` |
 | `mews` | REST (`api.mews-demo.com` default) | ClientToken+AccessToken in body; background room→SpaceId refresh every 15 min; ValidateGuest = reservations/getAll (Processed/Started, colliding now) + customers/getAll |
 | `apaleo` | REST + OAuth2 client-credentials (`identity.apaleo.com`) | token cache w/ 60s skew, 401 invalidation; room→unitId map refresh 15 min; reservations OverlappingStay with expand=primaryGuest; reservation number matches `bookingId` |
 

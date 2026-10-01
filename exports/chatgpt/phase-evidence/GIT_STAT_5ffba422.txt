@@ -1,0 +1,4 @@
+commit 5ffba4229319aa0eb5d85554e45dd9f3ac3b53ab
+Date:   Thu Oct 1 12:56:41 2026 +0300
+
+    Governance: T0210 records the merge of PR #206; T0211 re-records the PR #205 acceptance

@@ -30,6 +30,9 @@ type InboxEvent struct {
 	// Sharers is the full occupancy list when the connector reports one. Sharing a Stay is legal and ordinary;
 	// exactly one occupant is the primary.
 	Sharers []Sharer
+	// Guest attributes, nil when the record did not state them.
+	TravelAgent *string
+	VIP         *bool
 }
 
 // StayView is the CURRENT persisted state of the Stay for this reservation within one interface (nil if none).

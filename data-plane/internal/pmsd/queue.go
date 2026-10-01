@@ -61,6 +61,11 @@ type Event struct {
 	GuestLastName  string
 	GuestFirstName string
 
+	// Guest attributes from the property-mapped FIAS fields (A0 travel agent, A1 VIP flag). nil = not stated,
+	// which the stay engine reads as "leave the stay's value alone"; a stated empty travel agent clears it.
+	TravelAgent *string
+	VIP         *bool
+
 	// Sharers is the OPTIONAL full occupancy list, set only by connectors whose provider names every occupant
 	// (the REST connectors). The FIAS adapter never sets it, so a FIAS payload is byte-identical to before.
 	Sharers []EventSharer

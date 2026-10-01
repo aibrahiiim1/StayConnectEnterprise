@@ -16,8 +16,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -143,13 +145,64 @@ func scanStay(row interface{ Scan(...any) error }, e *stayRow) error {
 func (s *server) pmsStaysRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", s.listStays)
+	r.Get("/travel-agents", s.listTravelAgents)
 	r.Get("/{id}", s.getStay)
 	return r
 }
 
+// STAYS ARE PAGED ON THE SERVER, AND SEARCHED THERE TOO.
+//
+// The list used to stop at the 200 most recent arrivals and search only those, in the browser. A property with
+// 400 rooms in house saw half of them, and the counters above the table counted the half it saw -- so the Stays
+// screen said 200 in-house stays while the mirror held 403. The page now asks for one page at a time, and the
+// totals are counted over every stay that matches, not over the rows on screen.
+//
+// THE SEARCH TEXT TRAVELS IN A HEADER (X-Stay-Search), NOT THE URL. An operator searches by guest name, and edged
+// logs every request line through chi's request logger; a name in the query string would be a guest name in the
+// log. Headers are not logged there. The stays surface is read-only for the roles that use it, so a POST body is
+// not an option either.
+const (
+	staysPageSizeDefault = 50
+	staysPageSizeMax     = 200
+	staySearchHeader     = "X-Stay-Search"
+	staySearchMaxLen     = 100
+)
+
+type staysSummary struct {
+	Total         int `json:"total"`
+	WithInternet  int `json:"with_internet"`
+	DevicesOnline int `json:"devices_online"`
+	Arriving      int `json:"arriving"`
+	VIP           int `json:"vip"`
+}
+
+type staysPage struct {
+	Data     []stayRow    `json:"data"`
+	Meta     listMeta     `json:"meta"`
+	Page     int          `json:"page"`
+	PageSize int          `json:"page_size"`
+	Summary  staysSummary `json:"summary"`
+}
+
+// stayFilter is the WHERE clause the page, and the totals over it, share. $1 tenant, $2 status, $3 search
+// pattern, $4 VIP only, $5 travel agent (exact).
+const stayFilter = `WHERE s.tenant_id=$1 AND ($2::text IS NULL OR s.status=$2)
+		  AND ($4::bool IS NOT TRUE OR s.vip IS TRUE)
+		  AND ($5::text IS NULL OR s.travel_agent = $5)
+		  AND ($3::text IS NULL
+		       OR s.normalized_room_number ILIKE $3
+		       OR s.external_reservation_id ILIKE $3
+		       OR s.travel_agent ILIKE $3
+		       OR pkgr.display->>'name' ILIKE $3
+		       OR pkg.code ILIKE $3
+		       OR EXISTS (SELECT 1 FROM iam_v2.stay_guests g
+		                   WHERE g.stay_id = s.id
+		                     AND (g.display_name ILIKE $3 OR g.last_name_norm ILIKE $3)))`
+
 func (s *server) listStays(w http.ResponseWriter, r *http.Request) {
+	qv := r.URL.Query()
 	var statusArg any
-	if v := r.URL.Query().Get("status"); v != "" {
+	if v := qv.Get("status"); v != "" {
 		switch v {
 		case "RESERVED", "IN_HOUSE", "CHECKED_OUT", "POST_STAY_ACTIVE", "CANCELLED", "NO_SHOW":
 			statusArg = v
@@ -158,21 +211,64 @@ func (s *server) listStays(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	page, size := 1, staysPageSizeDefault
+	if v := qv.Get("page"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			jsonErr(w, http.StatusBadRequest, "bad_request", "page must be a positive whole number")
+			return
+		}
+		page = n
+	}
+	if v := qv.Get("page_size"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > staysPageSizeMax {
+			jsonErr(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("page_size must be between 1 and %d", staysPageSizeMax))
+			return
+		}
+		size = n
+	}
+	var searchArg any
+	if v := strings.TrimSpace(r.Header.Get(staySearchHeader)); v != "" {
+		if len([]rune(v)) > staySearchMaxLen {
+			jsonErr(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("search is limited to %d characters", staySearchMaxLen))
+			return
+		}
+		searchArg = "%" + likeEscape(v) + "%"
+	}
+	var vipArg any
+	if qv.Get("vip") == "true" {
+		vipArg = true
+	}
+	var agentArg any
+	if v := strings.TrimSpace(qv.Get("travel_agent")); v != "" {
+		agentArg = v
+	}
+	args := []any{s.tenantID, statusArg, searchArg, vipArg, agentArg}
+
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	// ORDERED BY ARRIVAL, because iam_v2.stays HAS NO updated_at.
-	//
-	// This listing ordered by s.updated_at, a column that does not exist in the schema, so every request to
-	// the Stays screen failed with "query failed" -- a 500 the handler produced by swallowing
-	// `column s.updated_at does not exist`. The screen could never have worked against any database built
-	// from these migrations; nothing listed stays through this endpoint in any test, so nothing said so.
-	//
-	// Arrival is the ordering an operator actually wants (most recent stays first) and it is a column the
-	// schema really keeps. Inventing an updated_at to satisfy the old query would have been the other way to
-	// make this compile, and it would have added a timestamp nothing maintains.
+
+	// The totals are over EVERY matching stay, so the counters above the table mean the property, not the page.
+	var sum staysSummary
+	if err := s.db.QueryRow(ctx, `SELECT count(*)::int,
+		       count(*) FILTER (WHERE ent.id IS NOT NULL)::int,
+		       COALESCE(sum((SELECT count(DISTINCT d.mac) FROM iam_v2.sessions d
+		                       WHERE d.entitlement_id = ent.id AND d.state = 'active')), 0)::int,
+		       count(*) FILTER (WHERE s.status = 'RESERVED')::int,
+		       count(*) FILTER (WHERE s.vip IS TRUE)::int
+		`+stayFrom+`
+		`+stayFilter, args...).Scan(&sum.Total, &sum.WithInternet, &sum.DevicesOnline, &sum.Arriving, &sum.VIP); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+
+	// ORDERED BY ARRIVAL, because iam_v2.stays HAS NO updated_at (an earlier query ordered by that missing
+	// column and failed on every request). Room number breaks ties so a page boundary is stable.
 	rows, err := s.db.Query(ctx, `SELECT `+stayCols+` `+stayFrom+`
-		WHERE s.tenant_id=$1 AND ($2::text IS NULL OR s.status=$2)
-		ORDER BY s.arrival DESC NULLS LAST, s.id LIMIT 200`, s.tenantID, statusArg)
+		`+stayFilter+`
+		ORDER BY s.arrival DESC NULLS LAST, s.normalized_room_number, s.id
+		LIMIT $6 OFFSET $7`, append(args, size+1, (page-1)*size)...)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
@@ -186,6 +282,49 @@ func (s *server) listStays(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	more := len(out) > size
+	if more {
+		out = out[:size]
+	}
+	writeJSON(w, http.StatusOK, staysPage{Data: out, Meta: listMeta{HasMore: more}, Page: page, PageSize: size, Summary: sum})
+}
+
+// listTravelAgents answers the package editor's travel-agent picker: every travel agent the PMS has named on a
+// stay, with how many stays are in house under it now. Company names, not guest data.
+func (s *server) listTravelAgents(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	rows, err := s.db.Query(ctx, `SELECT s.travel_agent,
+		       count(*) FILTER (WHERE s.status = 'IN_HOUSE')::int,
+		       count(*)::int
+		  FROM iam_v2.stays s
+		 WHERE s.tenant_id = $1 AND NULLIF(btrim(s.travel_agent), '') IS NOT NULL
+		 GROUP BY s.travel_agent
+		 ORDER BY lower(s.travel_agent)
+		 LIMIT 2000`, s.tenantID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	defer rows.Close()
+	type agent struct {
+		Name    string `json:"name"`
+		InHouse int    `json:"in_house"`
+		Stays   int    `json:"stays"`
+	}
+	out := []agent{}
+	for rows.Next() {
+		var a agent
+		if err := rows.Scan(&a.Name, &a.InHouse, &a.Stays); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
+			return
+		}
+		out = append(out, a)
 	}
 	writeList(w, out)
 }

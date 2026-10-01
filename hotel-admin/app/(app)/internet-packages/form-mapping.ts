@@ -90,7 +90,13 @@ export function rulesToForm(rules: PackageCurrent["eligibility_rules"]): Eligibi
       case "ROOM_TYPE": out.push({ type: "ROOM_TYPE", room_types: list("room_types") }); break;
       case "RATE_PLAN": out.push({ type: "RATE_PLAN", rate_plans: list("rate_plans") }); break;
       case "VIP": out.push({ type: "VIP", is_vip: value.is_vip === false ? "false" : "true" }); break;
-      case "TRAVEL_AGENT": out.push({ type: "TRAVEL_AGENT", travel_agents: list("travel_agents") }); break;
+      // Kept as the stored list: joining it into text would split a name that contains a comma on the next save.
+      case "TRAVEL_AGENT": out.push({
+        type: "TRAVEL_AGENT",
+        travel_agents: Array.isArray(value.travel_agents)
+          ? (value.travel_agents as unknown[]).filter((x): x is string => typeof x === "string")
+          : [],
+      }); break;
       case "PMS_INTERFACE": out.push({
         type: "PMS_INTERFACE", pms_interface_ids: list("pms_interface_ids"),
       }); break;
