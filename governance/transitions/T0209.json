@@ -1,0 +1,65 @@
+{
+  "transition_id": "T0209",
+  "seq": 209,
+  "timestamp": "2026-10-01T10:34:47+03:00",
+  "timestamp_derivation": "Written after the repair content commit and before the commit that introduces this receipt.",
+  "record_type": "MASTER_GATES_REPAIRED_LATE_RECEIPTS_CORRECTED_FORWARD",
+  "authorisation": "Product-Owner mission of 2026-10-01: restore master to a fully green authoritative baseline before merging PR #205 -- fix the Phase 3/4 browser-test failures and the T0199/T0200/T0202 receipt-timestamp failures through a separate protected PR, without weakening tests or gates and without rewriting governance history (forward correction).",
+  "decision": "none (repair; no product or architecture decision)",
+  "decisions_recorded": [],
+  "timestamp_corrections": [
+    {
+      "transition_id": "T0199",
+      "recorded_timestamp": "2026-09-29T03:05:00+03:00",
+      "introducing_commit": "48948911caaf5eb72fec4ac605a4d45616556a45",
+      "introducing_commit_time": "2026-09-29T02:54:06+03:00",
+      "late_by_seconds": 654,
+      "what_is_true": "The transition T0199 records happened no later than 2026-09-29T02:54:06+03:00, when the commit that introduced its receipt was made; the receipt's hand-typed time is 654s too late. The receipt is left exactly as written."
+    },
+    {
+      "transition_id": "T0200",
+      "recorded_timestamp": "2026-09-29T07:25:00+03:00",
+      "introducing_commit": "474f408d44fa60959c50ba53000bd682748ba23c",
+      "introducing_commit_time": "2026-09-29T07:18:35+03:00",
+      "late_by_seconds": 385,
+      "what_is_true": "The transition T0200 records happened no later than 2026-09-29T07:18:35+03:00, when the commit that introduced its receipt was made; the receipt's hand-typed time is 385s too late. The receipt is left exactly as written."
+    },
+    {
+      "transition_id": "T0202",
+      "recorded_timestamp": "2026-09-29T11:20:00+03:00",
+      "introducing_commit": "f02f8390200938ea3c2310fd097d868acf455ee0",
+      "introducing_commit_time": "2026-09-29T11:14:20+03:00",
+      "late_by_seconds": 340,
+      "what_is_true": "The transition T0202 records happened no later than 2026-09-29T11:14:20+03:00, when the commit that introduced its receipt was made; the receipt's hand-typed time is 340s too late. The receipt is left exactly as written."
+    }
+  ],
+  "correction_note": "T0199, T0200 and T0202 (PR #202) were written under the transition-timing rule and still landed after the commits that introduced them; the gate that refuses that was not run when they merged. They are immutable and NOT rewritten. This receipt corrects them forward; tools/validate-transition-times.sh accepts a late receipt only when a later receipt states exactly what the repository measures for it, prints it as corrected, and still refuses any late receipt without an exact correction (self-test: tools/validate-merge-receipt-times-selftest.sh cases 6-8 on the real T0199).",
+  "root_cause_browser_failures": "58 Phase 3/4 browser tests failed on master since the site-modules delivery (D44): module-owned Admin Console pages fail closed unless edged's /capabilities confirms the surface and the module, and the browser suites' mocked edged answered /capabilities with {} through their catch-all, so every module page showed 'Not enabled on this appliance'. Fixed by a shared fixture answering as a fully licensed hotel appliance in edged's exact shape (hotel-admin/e2e/capabilities.ts). Three expectations stale against accepted behaviour were updated without loosening their intent: free package states price 0 and NOT_REQUIRED only (D44); Package payments redesign (93a56f34) labels and wording, still no refund/chargeback/reverse action; portal preview reads the site's own /auth-methods.",
+  "delivered": [
+    "hotel-admin/e2e/capabilities.ts and its use in nine browser specs.",
+    "Updated expectations in hotel-admin.spec, phase4-financial-operator.spec and portal-settings.spec.",
+    "Exact forward correction support in tools/validate-transition-times.sh, with three self-test cases."
+  ],
+  "verification": "Full local Playwright suite (CI=1); validate-transition-times.sh and its self-test; project-state validators. The four comprehensive gates are dispatched on the repair head and on master after the merge.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0208."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. Tests, a validator and governance only; nothing deployed. PRE-LIVE remains PRE-LIVE."
+  },
+  "state_note": "No phase, activity or acceptance state changes.",
+  "base": "614cfdf1a683d585e1f85bcf57cc136987670c8d",
+  "base_note": "Master at the merge of PR #204, where repair/master-gates was cut.",
+  "head": "3bb3bd0b",
+  "head_note": "The repair's content commit before this governance record.",
+  "previous_delivery": "T0208",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
