@@ -30,7 +30,7 @@
 // PMS_DATA_SUSPECT clear only from fresh Protel data, POSTING_UNRESOLVED only from the charge's manual review —
 // the page never offers to lift them and says who does.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { api, Stay, StayDetail, StayPostingBlock, StaysPage as StaysPageResp } from "@/lib/api";
 import { useOperatorRoles } from "@/lib/whoami-context";
@@ -114,7 +114,14 @@ export default function StaysPage() {
   // PAGED AND SEARCHED ON THE SERVER. The list used to stop at 200 rows and search only those in the browser,
   // so a property with 400 rooms in house saw half of them and its counters counted that half. The search text
   // goes in a header, not the URL: it is often a guest's name, and edged logs request lines.
+  //
+  // ONLY THE LATEST QUESTION MAY ANSWER. A filter changed on page 3 fires the old offset's request and then the
+  // reset's page-1 request; quick typing fires one per pause. Responses can return in any order, so each request
+  // takes a number and a response is applied only if no newer request has started since -- otherwise an old page
+  // could land last and show rows and totals for a question the controls no longer ask.
+  const latest = useRef(0);
   const load = useCallback(async () => {
+    const mine = ++latest.current;
     setRows(null);
     setErr(null);
     try {
@@ -128,9 +135,11 @@ export default function StaysPage() {
         "/pms-stays?" + params.toString(),
         needle ? { "X-Stay-Search": needle } : undefined,
       );
+      if (mine !== latest.current) return; // superseded
       setResp(r);
       setRows(r.data ?? []);
     } catch (e) {
+      if (mine !== latest.current) return; // superseded
       setErr(e);
       setResp(null);
       setRows([]);

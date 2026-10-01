@@ -60,6 +60,39 @@ describe("Stays page — server paging", () => {
     });
   });
 
+  // A filter changed on page 2 fires the old page's request and then the reset's page-1 request. The answers can
+  // come back in any order; the screen must show the answer to the question the controls now ask.
+  it("ignores an older response that arrives after the newer one", async () => {
+    const pending: { path: string; headers: any; resolve: (v: any) => void }[] = [];
+    let staysCalls = 0;
+    get.mockImplementation((path: string, headers?: any) => {
+      if (typeof path !== "string" || !path.startsWith("/pms-stays")) return Promise.resolve({});
+      if (staysCalls++ === 0) return Promise.resolve(pageOf(1, 50, 403)); // the first load answers at once
+      return new Promise((resolve) => pending.push({ path, headers, resolve }));
+    });
+    const { default: StaysPage } = await import("@/app/(app)/stays/page");
+    render(<StaysPage />);
+    expect(await screen.findByText("Showing 1–50 of 403")).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: /Next/ })); // page 2, left pending
+    await userEvent.type(screen.getByRole("searchbox", { name: "Search stays" }), "Andersen");
+    await waitFor(() => expect(pending.some((p) => p.headers && p.path.includes("page=1"))).toBe(true));
+
+    // The race exists: the old offset was asked WITH the new search before the reset asked page 1.
+    expect(pending.some((p) => p.headers && p.path.includes("page=2"))).toBe(true);
+    // The newest question (search, page 1) answers FIRST...
+    const newest = pending[pending.length - 1];
+    expect(newest.path).toContain("page=1");
+    newest.resolve({ ...pageOf(1, 50, 1), data: [stay(7)] });
+    expect(await screen.findByText("Showing 1–1 of 1")).toBeTruthy();
+
+    // ...then every older one arrives late. None may replace it.
+    for (const p of pending.slice(0, -1)) p.resolve(pageOf(2, 50, 403));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByText("Showing 1–1 of 1")).toBeTruthy();
+    expect(screen.queryByText(/of 403/)).toBeNull();
+  });
+
   it("filters to VIP guests on the server", async () => {
     get.mockResolvedValue(pageOf(1, 50, 7));
     const { default: StaysPage } = await import("@/app/(app)/stays/page");
