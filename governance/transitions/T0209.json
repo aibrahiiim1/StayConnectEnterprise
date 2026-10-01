@@ -1,0 +1,48 @@
+{
+  "transition_id": "T0209",
+  "seq": 209,
+  "timestamp": "2026-10-01T08:16:08+03:00",
+  "timestamp_derivation": "Written after the Product Owner's acceptance of PR #205 and the PRE-LIVE deployment of its last content, and before the commit that introduces this receipt.",
+  "record_type": "STAYS_PAGING_AND_GUEST_ATTRIBUTES_ACCEPTED_MERGE_AUTHORISED",
+  "authorisation": "Product-Owner missions of 2026-10-01 on PR #205 (stays paging, VIP and travel agent, travel-agent picker; the comma fix; the read-only legacy investigation), acceptance of PR #205 at 6a403326, and the instruction of the same day to fix the remaining automated review finding and merge without re-approval. NOT Go-Live; no Protel configuration change; no financial traffic.",
+  "decision": "none (product delivery; no new PO decision recorded)",
+  "decisions_recorded": [],
+  "acceptance": {
+    "accepted_by": "Product Owner",
+    "accepted_on": "2026-10-01",
+    "accepted_head": "6a403326ea4205b54577db3ed640edbe6459d608",
+    "after_acceptance": "One automated review finding (a superseded Stays query could overwrite the current one) was fixed in 6151e690; the Product Owner chose 'fix and merge without re-approval'. Documentation sync ba0d2e6a and this governance record follow."
+  },
+  "delivered": [
+    "Stays: server-side paging and search over every stay (the list had stopped at 200 of 403 in-house stays); totals over every matching stay; VIP only filter; travel agent per row; search text in the X-Stay-Search header, never the URL; only the latest query may answer.",
+    "VIP and travel agent from Protel FIAS: GI/GC link records request A0 (travel agent) and A1 (VIP flag), the property's FidServ user-defined fields (owner's Protel UI: GIA0/GCA0 -> AG, GIA1/GCA1 -> VP), as the legacy StayConnect+ Protel client did; best-effort attributes that never fault the feed; the stay engine writes only what a record states.",
+    "The FIAS link description restored to the Phase-0 verified handshake LD|..|IFPB|V#1.13|RT4| (pms.VerifiedLD); the pmsd rewrite 54ee4d7f had sent a bare 'pmsd' token where the IF field belongs.",
+    "Package editor: a searchable multi-select of the travel agents the PMS named (GET /pms-stays/travel-agents); a name containing a comma stays one agent (the form model is a list end to end)."
+  ],
+  "verification": "pmsd/pms/iamv2 unit tests; scripts/pmsd-pg-integration.sh rc=0 (stay-engine attribute tests, edged paging/search/filter tests); Admin Console vitest 162/162 across the Stays and package-editor suites (incl. a race test that fails without the fix) and tsc. PRE-LIVE: A0/A1 received on every GI since 2026-10-01 04:29Z (415/415 on two reconnects; aggregates only); 415 of 416 in-house stays carry VIP (103 VIP), 412 a travel agent across 29 agents; API filters verified; read-only browser checks of the Stays page and the picker; guest-access harness 47/47 with postings unchanged.",
+  "a0_a1_observation": "Two earlier sessions (2026-09-30 20:56Z, 2026-10-01 03:52Z) received no A0/A1; the second sent the same bytes as the later, successful ones. What changed in between is not determined (a Protel-side save/reload, or Protel applying the new LD one session late). IF=MS, re-describing after LS and LR order/contents are excluded by the captures.",
+  "deployment_provenance": "PRE-LIVE 172.21.60.25: edged 25f9d03b, pmsd 6a403326, Admin Console 6151e690 (release 20261001-050328); scd 442f6e61; portald d5c3e578; netd and acctd 99ba9f10. No migration. DEPLOYED_BINARIES.{sha256,txt} rewritten from the installed bytes (6/6 OK).",
+  "real_pms_posting": "None.",
+  "merge": "Follows this receipt through the protected path (po-merge-approved, po-merge-authorization, merge commit); recorded by the closure receipt.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0208."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. PRE-LIVE remains PRE-LIVE; Go-Live is not authorised."
+  },
+  "state_note": "No phase, activity or acceptance state changes.",
+  "base": "614cfdf1a683d585e1f85bcf57cc136987670c8d",
+  "base_note": "Master at the merge of PR #204, where delivery/stays-pagination-guest-attributes was cut.",
+  "head": "ba0d2e6a",
+  "head_note": "PR #205's last content commit (documentation sync) before this governance record.",
+  "previous_delivery": "T0208",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
