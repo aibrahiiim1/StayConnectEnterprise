@@ -1,4 +1,5 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
+import { installCapabilities } from "./capabilities";
 
 // Browser-level E2E for the Phase-3 (DARK) Hotel-Admin surface. The edged backend is fully mocked at the
 // network layer — no real backend, no database, no production data, no PMS. The Next server under test runs
@@ -107,6 +108,7 @@ async function installBackend(
     }
     return route.fulfill(json(200, list([])));
   });
+  await installCapabilities(page); // a fully licensed hotel appliance (e2e/capabilities.ts)
 }
 
 const stay = {

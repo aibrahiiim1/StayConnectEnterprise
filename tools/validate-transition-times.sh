@@ -36,6 +36,19 @@
 # T0054 IS GRANDFATHERED, deliberately and visibly. It is preserved byte-for-byte as historical evidence and
 # corrected FORWARD by T0055 under D23; rewriting it to satisfy a rule invented afterwards would manufacture
 # exactly the tidiness this check exists to detect. Its measured discrepancy is printed on every run.
+#
+# ---------------------------------------------------------------------------------------------------------
+# FORWARD CORRECTION OF A LATE RECEIPT (receipts written under the rule, found late afterwards).
+#
+# T0199, T0200 and T0202 were written while this rule existed and still landed 654s, 385s and 340s after the
+# commits that introduced them -- hand-typed times, and the gate that would have refused them was not run when
+# they merged. They are immutable history: they are NOT rewritten and the rule is NOT relaxed. A LATER receipt
+# corrects them forward by naming each one in `timestamp_corrections` with what the repository measures --
+# the receipt's recorded timestamp, its introducing commit and that commit's time, and the exact lateness in
+# seconds. A late receipt passes ONLY if such a correction exists and every figure in it matches what this run
+# measures; it is then printed as corrected, with its lateness and the receipt that corrects it. A correction
+# that does not match, or a late receipt nobody corrected, still fails. So the exception is exact, visible and
+# checkable, and a new late receipt is refused exactly as before.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -66,8 +79,25 @@ if ! git rev-parse --git-dir >/dev/null 2>&1; then
   echo "TRANSITION_TIMESTAMPS = SKIPPED"; exit 0
 fi
 
+# Every forward correction recorded in the ledger:
+# "<id> <recorded_timestamp> <introducing_commit> <introducing_commit_time> <late_by> <by>".
+CORRECTIONS="$($PY3 - "$TDIR" <<'PY' 2>/dev/null
+import glob, io, json, os, sys
+for f in sorted(glob.glob(os.path.join(sys.argv[1], "T*.json"))):
+    try:
+        d = json.load(io.open(f, encoding="utf-8"))
+    except Exception:
+        continue
+    for c in d.get("timestamp_corrections") or []:
+        print("%s %s %s %s %s %s" % (c.get("transition_id", "-"), c.get("recorded_timestamp", "-"),
+                                     c.get("introducing_commit", "-"), c.get("introducing_commit_time", "-"),
+                                     c.get("late_by_seconds", "-"), d.get("transition_id", os.path.basename(f)[:-5])))
+PY
+)"
+
 fail=0
 grandfathered_seen=0
+corrected_seen=0
 for f in "$TDIR"/T*.json; do
   [ -f "$f" ] || continue
   id="$(basename "$f" .json)"
@@ -75,8 +105,13 @@ for f in "$TDIR"/T*.json; do
   if [ -z "$ts" ]; then
     echo "  FAIL: $id has no timestamp"; fail=$((fail+1)); continue
   fi
-  # The FIRST commit that added the file. `tail -1` because git lists newest first.
-  add="$(git log --diff-filter=A --format='%cI' -- "$f" 2>/dev/null | tail -1)"
+  # The FIRST commit that added the file. `tail -1` because git lists newest first. When the rule is driven
+  # against a fixture directory (the self-test), a copied real receipt is measured against the commit that
+  # introduced the REAL receipt of that id -- otherwise every copy would look uncommitted and go unchecked.
+  src="$f"
+  [ "$TDIR" = "governance/transitions" ] || src="governance/transitions/$id.json"
+  first="$(git log --diff-filter=A --format='%H %cI' -- "$src" 2>/dev/null | tail -1)"
+  addc="${first%% *}"; add="${first#* }"; [ -n "$first" ] || { addc=""; add=""; }
   if [ -z "$add" ]; then
     # Not yet committed: this is the receipt being written right now, and it will be checked on the next run.
     echo "  note: $id is not yet committed; its introducing commit does not exist yet"
@@ -99,8 +134,32 @@ print('LATE:%d' % int((t-a).total_seconds()) if t>a else 'OK')
           grandfathered_seen=$((grandfathered_seen+1))
           ;;
         *)
-          echo "  FAIL: $id records $ts, which is ${secs}s AFTER the commit that introduced it ($add)"
-          fail=$((fail+1))
+          matches="$(printf '%s\n' "$CORRECTIONS" | awk -v id="$id" '$1==id')"
+          nmatch="$(printf '%s\n' "$matches" | grep -c . || true)"
+          if [ "$nmatch" -eq 0 ]; then
+            echo "  FAIL: $id records $ts, which is ${secs}s AFTER the commit that introduced it ($add)"
+            fail=$((fail+1))
+          elif [ "$nmatch" -gt 1 ]; then
+            # Two corrections for one receipt: neither is trusted over the other.
+            echo "  FAIL: $id is corrected by more than one receipt ($(printf '%s\n' "$matches" | awk '{print $6}' | tr '\n' ' ')); a late receipt takes exactly one correction"
+            fail=$((fail+1))
+          else
+            read -r _ cts ccommit ctime clate cby <<EOF2
+$matches
+EOF2
+            idn="${id#T}"; byn="${cby#T}"
+            if ! [ "$((10#$byn))" -gt "$((10#$idn))" ] 2>/dev/null; then
+              # A correction can only come AFTER the receipt it corrects; an older receipt cannot vouch for a newer one.
+              echo "  FAIL: $id is 'corrected' by $cby, which is not a later receipt"
+              fail=$((fail+1))
+            elif [ "$cts" = "$ts" ] && [ "$ccommit" = "$addc" ] && [ "$ctime" = "$add" ] && [ "$clate" = "$secs" ]; then
+              echo "  corrected forward: $id is ${secs}s later than the commit that introduced it (left as written; corrected forward by $cby)"
+              corrected_seen=$((corrected_seen+1))
+            else
+              echo "  FAIL: $id records $ts, ${secs}s AFTER its introducing commit $addc ($add); the correction in $cby states $cts, $ccommit ($ctime), ${clate}s, which does not match"
+              fail=$((fail+1))
+            fi
+          fi
           ;;
       esac
       ;;
@@ -169,6 +228,7 @@ done
 echo "  ($merge_seen merge receipt(s) checked against the merge commit each one names; $merge_grandfathered_seen grandfathered)"
 
 echo "  ($grandfathered_seen pre-rule receipt(s) grandfathered and listed above; the rule is enforced from T0018 onward)"
+echo "  ($corrected_seen late receipt(s) corrected forward by an exact, measured correction and listed above)"
 if [ "$fail" -eq 0 ]; then
   echo "TRANSITION_TIMESTAMPS = PASS"; exit 0
 fi

@@ -1,4 +1,5 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
+import { installCapabilities } from "./capabilities";
 
 // THE COLLAPSIBLE DESKTOP SIDEBAR.
 //
@@ -24,6 +25,7 @@ async function installBackend(page: Page) {
       return route.fulfill(json(200, { email: "admin@test.local", roles: ["site_admin"] }));
     return route.fulfill(json(200, { data: [], meta: { has_more: false } }));
   });
+  await installCapabilities(page); // a fully licensed hotel appliance (e2e/capabilities.ts)
 }
 
 const collapseBtn = (page: Page) => page.getByRole("button", { name: "Collapse sidebar" });

@@ -1276,7 +1276,7 @@
     "prelive_phase4_flag_posture": "PRE-LIVE 172.21.60.25 since 2026-09-30 (D47): scd runs STAYCONNECT_PHASE4_MASTER, _PAYMENT, _PAYMENT_PROVIDER, _POSTING, _FINANCIAL_REVIEW, _OUTBOX_WORKER and _PMS_TRANSMIT; pmsd runs _MASTER, _OUTBOX_WORKER and _PMS_TRANSMIT; edged runs _MASTER, _POSTING and _FINANCIAL_REVIEW. STAYCONNECT_PAYMENT_LIVE_ALLOWED is set nowhere. Real PMS postings ever: one (T0204, USD 1.00, PA OK). Payment-provider traffic ever: none.",
     "phase4_flags_off_scope": "phase4_flags_off records the DELIVERED REPOSITORY configuration (no file in the tree enables a Phase-4 flag; scripts/ci/phase4-dark-check.sh asserts it). It is not a statement about the PRE-LIVE environment, whose posture is recorded in prelive_phase4_flag_posture."
   },
-  "latest_transition_id": "T0208",
+  "latest_transition_id": "T0209",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1771,19 +1771,18 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "SITE_MODULES_ACQUISITION_ACCEPTANCE_CORRECTION",
-    "decision": "D44 (Site Type, licence v4 modules, Internet Package acquisition: Free, Voucher, Card payment, Room charge) and D45 (Room charge on the existing single FIAS connection; pmsd transport only), both 2026-09-28; D46 (FIAS guest posting targets the reservation, RN + G#, not a folio; Phase-0 Amendment A1), 2026-09-29; D47 (PRE-LIVE is the fully functional acceptance environment; real room-charge posting enabled on PRE-LIVE), 2026-09-30; D48 (room-charge financial freshness is feed health plus a proven mirror age), 2026-09-30.",
-    "decision_note": "Forward correction of the PR #202 acceptance record (T0208). The original Product-Owner merge authorisation covered 3728d0d4; the three card-payment fixes (442f6e61) were added afterwards and merged at 255a0e26 without explicit prior approval. The Product Owner accepted them and the merged content at 255a0e26 after the merge. Governance only.",
-    "manifest": "docs/manifests/PR202AcceptanceCorrection-change-manifest.md",
-    "base": "811c534045308ec33aeb3dd4baceff7c5b8baadd",
-    "base_note": "Master after the closure merge of PR #203 (T0207).",
-    "head": "811c5340",
-    "head_note": "No content commit: this lineage corrects a record. The delivery's last content commit is 442f6e61.",
-    "transition": "T0208",
-    "previous_delivery": "T0207",
-    "pr": 202,
-    "pr_state": "MERGED as 75997775 (2026-09-30) and CLOSED; merged content accepted by the Product Owner POST-MERGE (T0208)",
-    "note": "T0208. Chronology corrected forward; T0206/T0207 and Git history unchanged. No runtime rollback required; PRE-LIVE unchanged. Go-Live not authorised."
+    "kind": "MASTER_GATES_REPAIR",
+    "decision": "Product-Owner mission of 2026-10-01: restore master to a fully green authoritative baseline before merging PR #205.",
+    "decision_note": "Tests, a validator and governance only. No product behaviour change, no deployment. Late receipts T0199/T0200/T0202 corrected forward, not rewritten.",
+    "manifest": "docs/manifests/MasterGatesRepair-change-manifest.md",
+    "base": "614cfdf1a683d585e1f85bcf57cc136987670c8d",
+    "base_note": "Master at the merge of PR #204, where repair/master-gates was cut.",
+    "head": "a51f7458",
+    "head_note": "The repair's last content commit (forward corrections must be later, complete and unique -- review findings on PR #206), after T0209 recorded 3bb3bd0b; the manifest records base..HEAD including the governance, pack and manifest commits.",
+    "transition": "T0209",
+    "previous_delivery": "T0208",
+    "pr_state": "OPEN -- the protected merge follows once the four gates are green on its head",
+    "note": "T0209. Restores the four comprehensive gates on master; PR #205 merges after this."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

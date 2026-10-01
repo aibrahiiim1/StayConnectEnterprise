@@ -1,4 +1,5 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
+import { installCapabilities } from "./capabilities";
 
 // Browser-level E2E for the Phase-5 (DARK) post-stay identity screen. edged is fully mocked at the network
 // layer — no real backend, no database, no production data, no PMS.
@@ -92,6 +93,7 @@ async function installBackend(page: Page, mutations: Mutations, roles = ["site_a
     }
     return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
   });
+  await installCapabilities(page); // a fully licensed hotel appliance (e2e/capabilities.ts)
   await page.context().addCookies([
     { name: "sc_edge_session", value: "e2e-test", url: "http://127.0.0.1:3123" },
     { name: "sc_edge_session", value: "e2e-test", url: "http://localhost:3123" },
