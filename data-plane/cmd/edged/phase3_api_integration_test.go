@@ -227,6 +227,9 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 			mountResource(r, s, "financial-review", s.financialReviewRoutes)
 			// ...and the financial OPERATIONS surface, which shares that permission.
 			mountResource(r, s, "financial-ops", s.financialOpsRoutes)
+			// Client networks: create, batch create, replace and delete are site-database work in edged (only
+			// validate/apply/confirm/rollback reach netd), so they are exercised here against a real schema.
+			mountResource(r, s, "network", s.networkRoutes)
 		})
 	})
 	f.srv = httptest.NewServer(r)

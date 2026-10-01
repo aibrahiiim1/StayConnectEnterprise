@@ -174,9 +174,14 @@ export default function NetworkPage() {
   const hasResults = !!validation || !!(health && health.length);
 
   const newButton = (
-    <Link href="/network/new" className={buttonVariants({ variant: "primary" })}>
-      <Plus /> New client network
-    </Link>
+    <div className="flex flex-wrap gap-2">
+      <Link href="/network/trunk" className={buttonVariants({ variant: "secondary" })}>
+        <Plus /> Add VLANs on a trunk
+      </Link>
+      <Link href="/network/new" className={buttonVariants({ variant: "primary" })}>
+        <Plus /> New client network
+      </Link>
+    </div>
   );
 
   return (

@@ -302,3 +302,47 @@ func TestRollback_AFailedSafeReconciliationDoesNotDegradeToTheLegacyPath(t *test
 		t.Fatalf("the blocker was not reported: %s", joined)
 	}
 }
+
+// A ROLLBACK BRINGS BACK WHAT THE FAILED APPLY TOOK AWAY. A revision that deleted or replaced a network
+// destroyed that network's bridge; rolling back used to destroy only what the failed apply ADDED, so the old
+// network stayed down until the next boot. The previous confirmed intent names br-g90, it is not live here,
+// and the rollback must rebuild it (and say so).
+func TestRollback_RebuildsABridgeTheFailedApplyRemoved(t *testing.T) {
+	rev := &fakeRevisions{prev: confirmedIntent()}
+	a, k := rollbackHarness(t, rev)
+	a.liveBridgesFn = func() map[string]bool { return map[string]bool{} } // br-g90 was destroyed by the failed apply
+
+	a.rollback(context.Background(), "failed-rev", "confirmation expired")
+
+	rebuilt := false
+	for _, c := range k.cmds {
+		if strings.Contains(c, "link add") && strings.Contains(c, "br-g90") {
+			rebuilt = true
+		}
+	}
+	if !rebuilt {
+		t.Fatalf("the previous revision's bridge br-g90 was not rebuilt: %v", k.cmds)
+	}
+	joined := strings.Join(rev.events, " | ")
+	if !strings.Contains(joined, "rollback_bridges=true") || !strings.Contains(joined, "br-g90") {
+		t.Fatalf("the rebuild was not recorded: %s", joined)
+	}
+}
+
+// ...and a bridge that is already live is left exactly as it is.
+func TestRollback_LeavesALiveBridgeAlone(t *testing.T) {
+	rev := &fakeRevisions{prev: confirmedIntent()}
+	a, k := rollbackHarness(t, rev)
+	a.liveBridgesFn = func() map[string]bool { return map[string]bool{"br-g90": true} }
+
+	a.rollback(context.Background(), "failed-rev", "confirmation expired")
+
+	for _, c := range k.cmds {
+		if strings.Contains(c, "link add") && strings.Contains(c, "br-g90") {
+			t.Fatalf("a live bridge was rebuilt: %s", c)
+		}
+	}
+	if strings.Contains(strings.Join(rev.events, " | "), "rollback_bridges") {
+		t.Fatal("nothing was rebuilt, so no rebuild event may be recorded")
+	}
+}

@@ -64,6 +64,9 @@ type applier struct {
 	// revStateFn answers "what state is this revision in", which is what decides whether an
 	// OPERATOR-requested rollback has a target at all. See Rollback.
 	revStateFn func(ctx context.Context, id string) (string, error)
+	// liveBridgesFn answers which guest bridges exist right now (default: /sys/class/net). A seam so a test
+	// can state that a bridge the previous revision needs has been destroyed.
+	liveBridgesFn func() map[string]bool
 }
 
 // revisionState is the state seam for the operator rollback guard.

@@ -371,9 +371,13 @@ Create client networks in the Admin Console → **Networking → Client networks
 7. **Apply** — **Create, validate & apply**, then **Confirm within the countdown**
    (default **120 s**) or it **auto-rolls-back**.
 
-> **Immutable after creation:** network **type**, **VLAN id**, **parent
-> interface**, and **bridge name**. To change any of these, delete and recreate
-> the network. All other settings are editable on the network's detail page.
+> **Not editable in place:** network **type**, **VLAN id**, **parent
+> interface**, and **bridge name**. To change the first three, use **Change VLAN
+> or port** (a replacement that carries the addressing, pools, reservations,
+> settings and PMS route, and disables the original); apply and confirm it like
+> any change. A network that has had clients cannot be deleted — it stays
+> disabled as part of their history. All other settings are editable on the
+> network's detail page.
 >
 > A client network **cannot be deleted while it is enabled or has active
 > sessions** — disable it / let sessions drain first.

@@ -135,10 +135,15 @@ seven steps:
 7. **Apply** — **Create, validate & apply**, then **Keep this change** before the
    countdown ends (or it rolls back on its own).
 
-> The topology (type, VLAN, parent interface) cannot change after creation — to
-> change it, delete and recreate the network. Other settings are editable on the
-> network's own page; saved edits reach clients only after **Apply changes** on
-> Client networks (and confirming in time).
+> The topology (type, VLAN, parent interface) is not edited in place. To move a
+> network — for example from an untagged port onto a tagged trunk — use **Change
+> VLAN or port** on the network's page: it creates a replacement with the new
+> topology that keeps the addressing, DHCP pools, reservations, settings and PMS
+> route, and disables the original (kept as history). Several VLANs on one trunk
+> are created together with **Add VLANs on a trunk** — each its own network with
+> its own subnet and DHCP scope. Other settings are editable on the network's own
+> page; every change reaches clients only after **Apply changes** on Client
+> networks (and confirming in time, or it rolls back automatically).
 
 **DHCP reservations:** pin a device's MAC to a fixed address on **DHCP & leases**
 (`/network/dhcp` → Reservations → **New reservation**) or on the client network's

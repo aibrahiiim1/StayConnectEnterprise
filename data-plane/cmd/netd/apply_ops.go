@@ -344,6 +344,12 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) {
 				_ = a.destroyBridge(ctx, br)
 			}
 		}
+		// ...AND RECREATE what the failed apply removed. A revision that deleted or replaced a network
+		// destroyed that network's bridge; rolling back used to leave it destroyed until the next boot
+		// reconcile, so a refused replacement took the OLD network down too. The previous good revision's
+		// own intent says which bridges must exist; any that are missing are rebuilt exactly as an apply
+		// builds them, before nftables, DHCP and DNS are restored for them below.
+		a.recreateMissingBridges(ctx, failedID)
 	}
 	// Restore the previous good revision's nft structure by RENDERING ITS STORED INTENT with the current
 	// renderer.
@@ -398,6 +404,31 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) {
 		_ = os.WriteFile(a.netplanFile, raw, 0o600)
 	}
 	_ = a.markRolledBack(ctx, failedID, reason)
+}
+
+// recreateMissingBridges rebuilds every enabled, netd-managed bridge of the previous ACTIVE revision that is
+// not live. Each failure is recorded as a rollback event and the rest continue: one bridge that cannot be
+// rebuilt must not stop the others from coming back.
+func (a *applier) recreateMissingBridges(ctx context.Context, failedID string) {
+	prevIntent, err := a.previousActiveIntent(ctx, failedID)
+	if err != nil || prevIntent == nil {
+		return // the nft step below records why the previous revision could not be read
+	}
+	live := a.liveGuestBridges()
+	var rebuilt, failed []string
+	for _, n := range a.netdManaged(prevIntent) {
+		if !n.Enabled || live[n.BridgeName] {
+			continue
+		}
+		if err := a.createNetwork(ctx, n); err != nil {
+			failed = append(failed, n.BridgeName+": "+err.Error())
+			continue
+		}
+		rebuilt = append(rebuilt, n.BridgeName)
+	}
+	if len(rebuilt) > 0 || len(failed) > 0 {
+		a.event(ctx, failedID, "rollback_bridges", len(failed) == 0, map[string]any{"rebuilt": rebuilt, "failed": failed})
+	}
 }
 
 func (a *applier) pushKeaFile(raw []byte) error {
@@ -484,6 +515,9 @@ func (a *applier) bridgesInBundle(bundle string) map[string]bool {
 }
 
 func (a *applier) liveGuestBridges() map[string]bool {
+	if a.liveBridgesFn != nil {
+		return a.liveBridgesFn()
+	}
 	out := map[string]bool{}
 	entries, _ := os.ReadDir("/sys/class/net")
 	for _, e := range entries {

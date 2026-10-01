@@ -32,11 +32,13 @@ func (s *server) networkRoutes() http.Handler {
 	// guest networks
 	r.Get("/guest-networks", s.listGuestNetworks)
 	r.Post("/guest-networks", s.createGuestNetwork)
+	r.Post("/guest-networks/batch", s.createGuestNetworkBatch)
 	r.Get("/guest-networks/{id}", s.getGuestNetwork)
 	r.Put("/guest-networks/{id}", s.updateGuestNetwork)
 	r.Delete("/guest-networks/{id}", s.deleteGuestNetwork)
 	r.Post("/guest-networks/{id}/disable", s.disableGuestNetwork)
 	r.Post("/guest-networks/{id}/enable", s.enableGuestNetwork)
+	r.Post("/guest-networks/{id}/replace", s.replaceGuestNetwork)
 	r.Get("/guest-networks/{id}/status", s.guestNetworkStatus)
 
 	// validate / apply operate on the whole intent (all networks) via netd.
@@ -244,33 +246,9 @@ func (s *server) createGuestNetwork(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	if in.NetworkType == "" {
-		in.NetworkType = "untagged"
-	}
-	if in.DHCPMode == "" {
-		in.DHCPMode = "local"
-	}
-	if in.DNSMode == "" {
-		in.DNSMode = "appliance"
-	}
-	if in.DomainName == "" {
-		in.DomainName = "guest.local"
-	}
-	if in.LeaseDefault == 0 {
-		in.LeaseDefault, in.LeaseMin, in.LeaseMax = 3600, 900, 7200
-	}
-	vlan := 0
-	if in.VLANID != nil {
-		vlan = *in.VLANID
-	}
+	normalizeGuestNetworkInput(&in)
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-
-	// enforce max_guest_access_plans-equivalent? networks are commercially
-	// gated by max_appliances/HA elsewhere; no explicit cap here beyond DB.
-	newID := newUUID()
-	bridge := netcfg.BridgeNameFor(in.NetworkType, vlan, newID)
-	portalURL := netcfg.PortalURLFor(in.GatewayIP, 8380)
 
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -278,37 +256,17 @@ func (s *server) createGuestNetwork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
-
-	dnsRaw, _ := json.Marshal(in.DNSServers)
-	_, err = tx.Exec(ctx, `
-        INSERT INTO guest_networks (id, tenant_id, site_id, name, description, ssid_label, enabled,
-            network_type, parent_interface, vlan_id, bridge_name, gateway_cidr, gateway_ip, subnet_cidr,
-            dhcp_mode, dns_mode, dns_servers, domain_name, lease_default_seconds, lease_min_seconds,
-            lease_max_seconds, captive_portal_enabled, internet_access_enabled, nat_enabled,
-            client_isolation_enabled, portal_url)
-        VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),$7,$8,$9,$10,$11,
-            ($12 || '/' || masklen($13::cidr))::inet, $12::inet, $13::cidr,
-            $14,$15,$16::jsonb,$17,$18,$19,$20,$21,$22,$23,$24,$25)
-    `, newID, s.tenantID, s.siteID, in.Name, in.Description, in.SSIDLabel, boolOr(in.Enabled, true),
-		in.NetworkType, in.ParentInterface, nullIfZero(vlan), bridge,
-		in.GatewayIP, in.SubnetCIDR,
-		in.DHCPMode, in.DNSMode, string(dnsRaw), in.DomainName, in.LeaseDefault, in.LeaseMin,
-		in.LeaseMax, boolOr(in.CaptiveEnabled, true), boolOr(in.InternetEnabled, true), boolOr(in.NATEnabled, true),
-		boolOr(in.ClientIsolation, false), portalURL)
+	created, err := s.insertGuestNetwork(ctx, tx, in, nil)
 	if err != nil {
-		jsonErr(w, http.StatusBadRequest, "bad_request", pgErr(err))
-		return
-	}
-	if err := insertPools(ctx, tx, newID, in.Pools); err != nil {
-		jsonErr(w, http.StatusBadRequest, "bad_request", pgErr(err))
+		writeNetworkInsertErr(w, err)
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "commit failed")
 		return
 	}
-	s.audit(r, "network.guest.created", "guest_network", newID, map[string]any{"name": in.Name, "vlan": vlan})
-	writeJSON(w, http.StatusCreated, map[string]any{"id": newID, "bridge_name": bridge, "portal_url": portalURL})
+	s.audit(r, "network.guest.created", "guest_network", created.ID, map[string]any{"name": in.Name, "vlan": created.VLAN})
+	writeJSON(w, http.StatusCreated, map[string]any{"id": created.ID, "bridge_name": created.Bridge, "portal_url": created.PortalURL})
 }
 
 func (s *server) updateGuestNetwork(w http.ResponseWriter, r *http.Request) {
@@ -449,6 +407,16 @@ func (s *server) deleteGuestNetwork(w http.ResponseWriter, r *http.Request) {
 	}
 	tag, err := s.db.Exec(ctx, `DELETE FROM guest_networks WHERE id=$1`, id)
 	if err != nil {
+		// A NETWORK THAT HAS SEEN CLIENTS IS PART OF THEIR HISTORY. Sign-ins, resolutions and device
+		// appearances name the network they happened on (foreign keys with no cascade, deliberately), so such a
+		// network cannot be deleted -- that used to surface as a bare "delete failed" 500. It stays disabled:
+		// it is not rendered, frees its VLAN/interface for a new network, and keeps the history readable.
+		if isFKViolation(err) {
+			jsonErr(w, http.StatusConflict, "kept_as_history",
+				"this network has client history (sign-ins and devices recorded on it), so it is kept, disabled, "+
+					"as part of that history. A disabled network is not served and does not block its VLAN or interface.")
+			return
+		}
 		jsonErr(w, http.StatusInternalServerError, "internal", "delete failed")
 		return
 	}
@@ -810,6 +778,8 @@ func pgErr(err error) string {
 		return "that VLAN id is already used on this interface"
 	case strings.Contains(msg, "guest_networks_untagged_parent_uniq"):
 		return "that interface already has an untagged client network"
+	case strings.Contains(msg, "guest_networks_bridge_uniq"):
+		return "another client network already uses that bridge name; try again"
 	case strings.Contains(msg, "dhcp_reservations_guest_network_id_mac"):
 		return "a reservation for that MAC already exists on this network"
 	case strings.Contains(msg, "dhcp_reservations_guest_network_id_reserved_ip"):
