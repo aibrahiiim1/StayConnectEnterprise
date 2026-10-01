@@ -131,7 +131,9 @@ What clients are offered on the portal, and what those packages are doing for cl
   (the service plan's allowance or an amount per night of the stay, with minimum/maximum), **Who this package is
   offered to** (conditions; empty means everyone who signs in — the condition types are grouped **General**
   and **Hotel (PMS stay)**, the Hotel group holding the conditions that only mean something for a PMS stay:
-  nights staying, room type, rate plan, VIP guest, travel agent and which PMS the stay came from), and advanced options (offer from/until,
+  nights staying, room type, rate plan, VIP guest, travel agent and which PMS the stay came from; travel agents are
+  chosen from a searchable list of the agents the PMS has named on stays, several at once, and a name not yet seen
+  can still be added — a name with a comma stays one agent), and advanced options (offer from/until,
   speed steps). Saving records a new permanent version; clients already online keep the terms they connected
   under. Packages are free to the client.
 - **Disable** ("Stop offering it") — **reason + password confirmation**. Clients stop being offered it at
@@ -427,9 +429,14 @@ meaning depends on the PMS stay record; whether room sign-in is offered at all i
 What the PMS reports about who is in house and which internet package each room has. Read-only: stays are
 changed in the PMS.
 
-- **Shows:** tiles *In-house stays*, *With an internet package*, *Devices online*, *Arriving*; search (room,
-  guest, reservation, package) and a status filter (In house by default). Table: Room, Guest, Stay, Status,
-  Internet package (package, speed, devices of the limit), Charges.
+- **Shows:** tiles *In-house stays*, *With an internet package*, *Devices online*, *VIP guests* — each a total
+  over **every** matching stay, not just the page on screen; search (room, guest, reservation, travel agent,
+  package) across all stays; a status filter (In house by default); a **VIP only** filter; and 25 / 50 / 100 /
+  200 stays per page with Previous / Next. Table: Room (with a VIP badge), Guest (with the travel agent), Stay,
+  Status, Internet package (package, speed, devices of the limit), Room charge.
+- **VIP and travel agent** come from the PMS with each guest record (Protel FIAS: the property's user-defined
+  fields A1 = VIP flag, A0 = travel agent, mapped on the FidServ interface). A stay whose record did not state
+  them shows neither.
 - **View** opens the stay: *Internet for this room* (package, service plan, speed, devices online), arrival,
   departure, charges to room, when the PMS last confirmed the stay, occupants, room type, rate plan, travel
   agent and folios.
