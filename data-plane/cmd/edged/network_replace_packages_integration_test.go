@@ -269,7 +269,7 @@ func TestIntegration_NetworkReplace_WillNotSettleWhileAPackageCannotBeCarriedFor
 
 	// The pre-flight the confirm route runs refuses it, naming the package — and writes nothing.
 	rev := f.materialise(t, replID, "pending_confirmation")
-	blocking := f.app.replacementsBlockingConfirm(context.Background())
+	blocking := f.app.replacementsBlockingConfirm(context.Background(), rev)
 	if len(blocking) != 1 {
 		t.Fatalf("pre-flight found %d blockers, want 1: %v", len(blocking), blocking)
 	}

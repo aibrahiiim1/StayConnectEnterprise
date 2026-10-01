@@ -230,20 +230,24 @@ func (s *server) createGuestNetworkBatch(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusCreated, map[string]any{"networks": out})
 }
 
-func (s *server) loadPoolsTx(ctx context.Context, tx pgx.Tx, id string) []netcfg.Pool {
+// loadPoolsTx reads a network's DHCP pools. IT REPORTS FAILURE, because returning nil meant a replacement
+// carried the original's addressing with NO POOL -- a live subnet whose gateway answers and whose DHCP hands out
+// nothing, created silently by a read error on the common (non-readdressing) path.
+func (s *server) loadPoolsTx(ctx context.Context, tx pgx.Tx, id string) ([]netcfg.Pool, error) {
 	rows, err := tx.Query(ctx, `SELECT host(start_ip), host(end_ip) FROM dhcp_pools WHERE guest_network_id=$1 ORDER BY sort_order`, id)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
 	var out []netcfg.Pool
 	for rows.Next() {
 		var p netcfg.Pool
-		if rows.Scan(&p.StartIP, &p.EndIP) == nil {
-			out = append(out, p)
+		if err := rows.Scan(&p.StartIP, &p.EndIP); err != nil {
+			return nil, err
 		}
+		out = append(out, p)
 	}
-	return out
+	return out, rows.Err()
 }
 
 func parseDNSServers(raw []byte) []string {

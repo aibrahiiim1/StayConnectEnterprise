@@ -222,6 +222,10 @@ func rollbackHarness(t *testing.T, rev *fakeRevisions) (*applier, *fakeKernel) {
 	rev.bundle_ = dir
 	a.prevBundleFn = func(context.Context, string) (string, error) { return dir, nil }
 	a.markRolledFn = func(context.Context, string, string) error { return nil }
+	// Rollback now re-reads the revision's state on EVERY branch, not only the factory-clean one, so that a
+	// confirmation landing in the gap cannot be rolled back on top of. These cases are about a revision that is
+	// still awaiting confirmation, which is what a rollback is for.
+	a.revStateFn = func(context.Context, string) (string, error) { return "pending_confirmation", nil }
 	a.netplanFile = dir + "/50-stayconnect-guest.yaml"
 	a.unboundFrag = dir + "/stayconnect-guest.conf"
 	return a, k

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -178,7 +179,7 @@ func scanGuestNetwork(row interface{ Scan(...any) error }) (guestNetworkRow, err
 
 func (s *server) listGuestNetworks(w http.ResponseWriter, r *http.Request) {
 	if ctx, cancel := dbCtx(r); true {
-		s.reconcileStaleReplacements(ctx, r)
+		_ = s.reconcileStaleReplacements(ctx, r)
 		cancel()
 	}
 	ctx, cancel := dbCtx(r)
@@ -398,12 +399,28 @@ func (s *server) deleteGuestNetwork(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	// only allow deleting a disabled network with no active sessions
+	//
+	// BOTH READS ARE CHECKED. They were discarded, so a failed read produced enabled=false and active=0 -- which
+	// is precisely "it is safe to delete". The two guards that stop an operator from deleting a live client
+	// network out from under its guests were therefore disabled by any error that reached them.
 	var enabled bool
 	var active int
-	_ = s.db.QueryRow(ctx, `SELECT enabled FROM guest_networks WHERE id=$1`, id).Scan(&enabled)
-	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.sessions se
+	if err := s.db.QueryRow(ctx, `SELECT enabled FROM guest_networks WHERE id=$1`, id).Scan(&enabled); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			jsonErr(w, http.StatusNotFound, "not_found", "no such client network")
+			return
+		}
+		jsonErr(w, http.StatusInternalServerError, "internal",
+			"whether this client network is still in use could not be determined, so it was not deleted")
+		return
+	}
+	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.sessions se
 	           JOIN iam_v2.device_network_appearances a ON a.device_id = se.device_id
-	          WHERE a.guest_network_id=$1 AND se.state='active'`, id).Scan(&active)
+	          WHERE a.guest_network_id=$1 AND se.state='active'`, id).Scan(&active); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal",
+			"whether this client network still has clients online could not be determined, so it was not deleted")
+		return
+	}
 	if enabled {
 		jsonErr(w, http.StatusConflict, "conflict", "disable the network before deleting it")
 		return
@@ -501,25 +518,76 @@ func (s *server) netApply(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = decodeJSON(r, &in)
 	ctx, cancel := dbCtx(r)
-	defer cancel()
-	s.reconcileStaleReplacements(ctx, r)
+
+	// ONE APPLY AT A TIME, FOR THIS SITE.
+	//
+	// Nothing serialized materialise-commit + netd-apply as a unit, and the two interleave badly. Request A
+	// commits its materialisation and calls netd; request B calls netd a moment later; netd's LoadIntent now
+	// includes A's successor, and whichever of the two loses netd's single in-flight slot gets a 500. When that
+	// is A, A reverts ITS OWN materialisation -- deleting the successor row -- while B's apply has already built
+	// that successor's bridge and is awaiting confirmation. The wire then holds a bridge no enabled row
+	// describes, and the database holds an original that is not on the wire.
+	//
+	// It also makes the /v1/pending fallback below trustworthy: with one apply in flight, the pending revision
+	// netd names can only be this one's.
+	//
+	// A SESSION-scoped advisory lock on a DEDICATED CONNECTION, not a transaction one: it has to outlive the
+	// materialise transaction and cover the netd call, and a session lock belongs to the connection that took
+	// it -- so it is taken and released on a connection held for the whole handler. Releasing it through the
+	// pool would reach some other connection and quietly fail, leaving the appliance unable to apply anything.
+	lockConn, lerr := s.db.Acquire(context.Background())
+	if lerr != nil {
+		cancel()
+		jsonErr(w, http.StatusInternalServerError, "internal", "the apply lock could not be taken")
+		return
+	}
+	defer lockConn.Release()
+	lockKey := "stayconnect:network-apply:" + s.siteID
+	lockCtx, lockCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	var locked bool
+	lockErr := lockConn.QueryRow(lockCtx, `SELECT pg_try_advisory_lock(hashtext($1))`, lockKey).Scan(&locked)
+	lockCancel()
+	if lockErr != nil || !locked {
+		cancel()
+		if lockErr != nil {
+			jsonErr(w, http.StatusInternalServerError, "internal", "the apply lock could not be taken")
+			return
+		}
+		jsonErr(w, http.StatusConflict, "apply_in_progress",
+			"another network configuration apply is already running on this appliance. Wait for it to finish or be "+
+				"rolled back, then apply again.")
+		return
+	}
+	defer func() {
+		rel, relCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer relCancel()
+		if _, err := lockConn.Exec(rel, `SELECT pg_advisory_unlock(hashtext($1))`, lockKey); err != nil {
+			slog.Error("the network apply lock could not be released", "err", err)
+		}
+	}()
+
+	_ = s.reconcileStaleReplacements(ctx, r)
 
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
+		cancel()
 		jsonErr(w, http.StatusInternalServerError, "internal", "tx begin")
 		return
 	}
 	mats, merr := s.materialisePendingReplacements(ctx, tx, s.actor(r))
 	if merr != nil {
 		_ = tx.Rollback(ctx)
+		cancel()
 		writeNetworkInsertErr(w, merr)
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
 		_ = tx.Rollback(ctx)
+		cancel()
 		jsonErr(w, http.StatusInternalServerError, "internal", "commit failed")
 		return
 	}
+	cancel() // the materialise is committed; the netd call and the recovery below get their own contexts
 	staged := make([]string, 0, len(mats))
 	for _, m := range mats {
 		staged = append(staged, m.ReplacementID)
@@ -528,9 +596,26 @@ func (s *server) netApply(w http.ResponseWriter, r *http.Request) {
 	s.audit(r, "network.apply", "network", "", map[string]any{"summary": in.Summary, "replacements": staged})
 	st, raw, err := s.netd.call(r.Context(), http.MethodPost, "/v1/apply",
 		map[string]string{"actor": s.actor(r), "summary": in.Summary})
+
+	// EVERYTHING BELOW RUNS ON A FRESH CONTEXT OF ITS OWN, NOT ON THE ONE THE MATERIALISE USED.
+	//
+	// dbCtx gives ten seconds; the netd client deliberately allows a hundred, because an apply does netplan
+	// generate, two systemctl restarts, bridge creation and health checks. So by the time netd answers, the
+	// context the materialise ran under is almost always ALREADY EXPIRED -- and every recovery path below used
+	// it. The consequence was the worst available: a successful apply whose revision id could not be recorded
+	// (context deadline exceeded), whose revert then also failed on the same dead context, leaving the successor
+	// live and confirmed on the wire while the database held it as APPLIED with no revision -- which this very
+	// file's reconcile then reverted ten minutes later, tearing down a working network.
+	//
+	// It is derived from Background, not from the request: a revert must finish whether or not the operator is
+	// still waiting, and a closed browser tab is not a reason to leave the database describing a network that is
+	// not there.
+	ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	if err != nil {
 		if rerr := s.revertMaterialised(ctx, staged, "netd could not be reached"); rerr != nil {
-			slog.Error("client network replacement could not be reverted after an unreachable netd", "err", rerr)
+			unrevertedStagedChanges(w, staged, rerr, "the appliance's network service could not be reached")
+			return
 		}
 		jsonErr(w, http.StatusBadGateway, "netd_unreachable", err.Error())
 		return
@@ -543,13 +628,51 @@ func (s *server) netApply(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case st >= 300, res.State == "failed", res.State == "rolled_back":
 		if rerr := s.revertMaterialised(ctx, staged, "the apply did not hold ("+res.State+")"); rerr != nil {
-			slog.Error("client network replacement could not be reverted after a failed apply", "err", rerr)
+			unrevertedStagedChanges(w, staged, rerr, "the configuration did not hold ("+res.State+")")
+			return
 		}
-	case len(staged) > 0 && res.RevisionID != "":
-		// Remember which revision carries them, so a watchdog rollback can be noticed later.
+	case len(staged) > 0:
+		// WHICH REVISION CARRIES THEM, OR NO APPLY AT ALL. Everything that notices a watchdog rollback later
+		// keys on this id, so a replacement that never records one is a successor on the wire the database
+		// cannot account for.
+		//
+		// A successful apply states its revision; this asks netd directly when the answer did not arrive
+		// (a body edged could not parse, a field a future netd renames), because GUESSING is the one thing
+		// that may not happen here, and /v1/pending is the same question netd's own watchdog asks.
+		rev := res.RevisionID
+		if rev == "" {
+			if _, praw, perr := s.netd.call(r.Context(), http.MethodGet, "/v1/pending", nil); perr == nil {
+				var p struct {
+					RevisionID string `json:"revision_id"`
+				}
+				_ = json.Unmarshal(praw, &p)
+				rev = p.RevisionID
+			}
+		}
+		if rev == "" {
+			// netd answered that the apply was fine and there is no revision to confirm. Those two statements
+			// cannot both be true, so edged does not know what the appliance did -- and must not leave the
+			// database claiming a successor network on that basis.
+			if rerr := s.revertMaterialised(ctx, staged, "the apply reported no revision to confirm"); rerr != nil {
+				unrevertedStagedChanges(w, staged, rerr, "the apply named no revision")
+				return
+			}
+			jsonErr(w, http.StatusBadGateway, "apply_unidentifiable",
+				"the appliance applied the configuration but did not say which revision carries it, so the staged client-network changes were put back. Check Client networks and apply again.")
+			return
+		}
 		if _, uerr := s.db.Exec(ctx, `UPDATE iam_v2.guest_network_replacements SET revision_id=$2::uuid
-			 WHERE id = ANY($1::uuid[]) AND state='APPLIED'`, staged, res.RevisionID); uerr != nil {
+			 WHERE id = ANY($1::uuid[]) AND state='APPLIED'`, staged, rev); uerr != nil {
+			// THE RECORD IS THE WHOLE SAFETY NET. Without it nothing can tell later whether this apply was
+			// kept or rolled back, so the change is put back now rather than left unaccountable.
 			slog.Error("client network replacement revision could not be recorded", "err", uerr)
+			if rerr := s.revertMaterialised(ctx, staged, "the apply's revision could not be recorded"); rerr != nil {
+				unrevertedStagedChanges(w, staged, rerr, "the apply's revision could not be recorded")
+				return
+			}
+			jsonErr(w, http.StatusInternalServerError, "revision_not_recorded",
+				"the staged client-network changes could not be tied to the applied configuration and were put back. Apply again.")
+			return
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -832,7 +955,7 @@ func (s *server) confirmRevision(w http.ResponseWriter, r *http.Request) {
 	// whole staged lifecycle exists to prevent.
 	{
 		ctx, cancel := dbCtx(r)
-		if blocking := s.replacementsBlockingConfirm(ctx); len(blocking) > 0 {
+		if blocking := s.replacementsBlockingConfirm(ctx, id); len(blocking) > 0 {
 			cancel()
 			// The reason is IN THE MESSAGE, not only in a structured field. Every confirm button in the console
 			// renders the message; an operator told "packages_not_preservable" and nothing else has no idea
@@ -849,13 +972,17 @@ func (s *server) confirmRevision(w http.ResponseWriter, r *http.Request) {
 		}
 		cancel()
 	}
-	s.audit(r, "network.revision.confirmed", "network_revision", id, nil)
+	// THE AUDIT FOLLOWS THE ACTION. It used to be written before the netd call, so a 409, a 500 or a timeout
+	// still left a record asserting the revision had been confirmed -- in the log an operator reads to find out
+	// what was done to the live network, which is the wrong direction to be wrong in.
 	st, raw, err := s.netd.call(r.Context(), http.MethodPost, "/v1/confirm",
 		map[string]string{"revision_id": id, "actor": s.actor(r)})
 	if err != nil {
+		s.audit(r, "network.revision.confirm_failed", "network_revision", id, map[string]any{"error": err.Error()})
 		jsonErr(w, http.StatusBadGateway, "netd_unreachable", err.Error())
 		return
 	}
+	s.audit(r, "network.revision.confirmed", "network_revision", id, map[string]any{"kept": st < 300, "status": st})
 	if st < 300 {
 		ctx, cancel := dbCtx(r)
 		defer cancel()
@@ -878,17 +1005,31 @@ func (s *server) confirmRevision(w http.ResponseWriter, r *http.Request) {
 // original client network enabled and the request waiting for another attempt.
 func (s *server) rollbackRevision(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	s.audit(r, "network.revision.rolledback", "network_revision", id, nil)
 	st, raw, err := s.netd.call(r.Context(), http.MethodPost, "/v1/rollback",
 		map[string]string{"revision_id": id, "actor": s.actor(r)})
 	if err != nil {
+		s.audit(r, "network.revision.rollback_failed", "network_revision", id, map[string]any{"error": err.Error()})
 		jsonErr(w, http.StatusBadGateway, "netd_unreachable", err.Error())
 		return
 	}
+	// Recorded with what actually happened, for the reason given on the confirm route above.
+	s.audit(r, "network.revision.rolledback", "network_revision", id, map[string]any{"undone": st < 300, "status": st})
 	if st < 300 {
-		ctx, cancel := dbCtx(r)
+		// A BACKGROUND-DERIVED CONTEXT, because netd has ALREADY changed the wire. If the operator's connection
+		// drops while this runs, the database must still be brought back in line with the configuration that is
+		// now live; a closed browser tab is not a reason to leave the two disagreeing until somebody happens to
+		// open the networks page.
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		s.reconcileStaleReplacements(ctx, r)
+		// THE OPERATOR ASKED FOR THIS ONE, so they are told if it did not finish. netd has put the previous
+		// configuration back on the wire; if the staged client-network rows could not follow, the database is
+		// the only thing still claiming the successor and saying "rolled back" would be false.
+		if rerr := s.reconcileStaleReplacements(ctx, r); rerr != nil {
+			jsonErr(w, http.StatusInternalServerError, "staged_changes_not_reverted",
+				"the live network was rolled back, but "+rerr.Error()+". The live network is unchanged by this; "+
+					"reload Client networks, which retries it.")
+			return
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(st)
