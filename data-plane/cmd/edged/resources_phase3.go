@@ -229,7 +229,7 @@ func (s *server) listStays(w http.ResponseWriter, r *http.Request) {
 		size = n
 	}
 	var searchArg any
-	if v := strings.TrimSpace(r.Header.Get(staySearchHeader)); v != "" {
+	if v := headerSearchText(r, staySearchHeader); v != "" {
 		if len([]rune(v)) > staySearchMaxLen {
 			jsonErr(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("search is limited to %d characters", staySearchMaxLen))
 			return

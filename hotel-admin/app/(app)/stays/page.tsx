@@ -133,7 +133,8 @@ export default function StaysPage() {
       const needle = q.trim();
       const r = await api.get<StaysPageResp>(
         "/pms-stays?" + params.toString(),
-        needle ? { "X-Stay-Search": needle } : undefined,
+        // Percent-encoded: a browser refuses non-Latin-1 text (an Arabic or Cyrillic name) in a header.
+        needle ? { "X-Stay-Search": encodeURIComponent(needle) } : undefined,
       );
       if (mine !== latest.current) return; // superseded
       setResp(r);

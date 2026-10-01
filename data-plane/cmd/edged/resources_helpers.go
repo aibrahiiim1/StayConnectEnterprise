@@ -93,6 +93,16 @@ func readPage(w http.ResponseWriter, r *http.Request, legacyMax int) (pageReq, b
 // so a guest name typed in Arabic or Cyrillic would fail before it left the page; the screen sends
 // encodeURIComponent(text) and this decodes it. A value that is not valid percent-encoding is taken as typed,
 // so a plain-text header from a script still works.
+// headerSearchText is the decoded, trimmed search text of a header (see readSearch) for the lists that bound
+// and refuse it themselves (Stays, Client accounts).
+func headerSearchText(r *http.Request, header string) string {
+	v := r.Header.Get(header)
+	if d, err := url.PathUnescape(v); err == nil {
+		v = d
+	}
+	return strings.TrimSpace(v)
+}
+
 func readSearch(w http.ResponseWriter, r *http.Request, header string) (string, bool) {
 	v := r.Header.Get(header)
 	if d, err := url.PathUnescape(v); err == nil {

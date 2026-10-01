@@ -173,7 +173,7 @@ func (s *server) listGuestAccountsIAMv2(w http.ResponseWriter, r *http.Request) 
 		size = n
 	}
 	var searchArg any
-	if v := strings.TrimSpace(r.Header.Get(accountSearchHeader)); v != "" {
+	if v := headerSearchText(r, accountSearchHeader); v != "" {
 		if len([]rune(v)) > accountSearchMaxLen {
 			jsonErr(w, http.StatusBadRequest, "bad_request",
 				fmt.Sprintf("search is limited to %d characters", accountSearchMaxLen))

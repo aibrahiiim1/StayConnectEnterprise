@@ -198,3 +198,21 @@ func TestPageLeases_SearchesOrdersAndPagesTheWholeList(t *testing.T) {
 		t.Error("an unreadable lease list was accepted")
 	}
 }
+
+// A NON-LATIN SEARCH SURVIVES THE HEADER. The Admin Console percent-encodes it (a browser refuses non-Latin-1 in a
+// header); Stays and Client accounts decode it exactly; a plain header from a script is taken as typed.
+func TestHeaderSearchTextDecodesAnEncodedName(t *testing.T) {
+	cases := map[string]string{
+		"%D8%A3%D8%AD%D9%85%D8%AF%20%D8%B9%D9%84%D9%8A": "أحمد علي",
+		"Andersen":      "Andersen",
+		"  100%25 off ": "100% off",
+		"50%":           "50%", // not valid percent-encoding: taken as typed
+	}
+	for raw, want := range cases {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.Header.Set(staySearchHeader, raw)
+		if got := headerSearchText(r, staySearchHeader); got != want {
+			t.Errorf("header %q decoded to %q, want %q", raw, got, want)
+		}
+	}
+}

@@ -126,7 +126,8 @@ export default function GuestAccountsPage() {
       const needle = q.trim();
       const ga = await api.get<AccountsPageResp>(
         "/guest-accounts?" + params.toString(),
-        needle ? { "X-Account-Search": needle } : undefined,
+        // Percent-encoded: a browser refuses non-Latin-1 text (an Arabic or Cyrillic name) in a header.
+        needle ? { "X-Account-Search": encodeURIComponent(needle) } : undefined,
       );
       if (mine !== latest.current) return; // superseded
       setResp(ga);
