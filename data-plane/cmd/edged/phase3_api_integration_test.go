@@ -227,6 +227,10 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 			mountResource(r, s, "financial-review", s.financialReviewRoutes)
 			// ...and the financial OPERATIONS surface, which shares that permission.
 			mountResource(r, s, "financial-ops", s.financialOpsRoutes)
+			// The paged operator lists (paging_integration_test.go): the activity trail and the sessions
+			// list, through the real router and role matrix.
+			mountResource(r, s, "audit", s.auditRoutes)
+			mountResource(r, s, "sessions", s.sessionsRoutes)
 		})
 	})
 	f.srv = httptest.NewServer(r)

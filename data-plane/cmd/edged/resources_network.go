@@ -534,21 +534,71 @@ func (s *server) netAdopt(w http.ResponseWriter, r *http.Request) {
 // ---- DHCP ----
 
 func (s *server) dhcpLeases(w http.ResponseWriter, r *http.Request) {
-	s.netd.proxy(w, r, http.MethodGet, "/v1/leases", nil)
+	// Unpaged callers get netd's answer untouched, as they always did. A paged caller gets one page of it,
+	// searched and ordered here (dhcp_paging.go).
+	if !hasPageParams(r.URL.Query()) {
+		s.netd.proxy(w, r, http.MethodGet, "/v1/leases", nil)
+		return
+	}
+	pg, ok := readPage(w, r, 0)
+	if !ok {
+		return
+	}
+	search, ok := readSearch(w, r, dhcpSearchHeader)
+	if !ok {
+		return
+	}
+	st, raw, err := s.netd.call(r.Context(), http.MethodGet, "/v1/leases", nil)
+	if err != nil {
+		jsonErr(w, http.StatusBadGateway, "netd_unreachable", err.Error())
+		return
+	}
+	if st != http.StatusOK {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(st)
+		_, _ = w.Write(raw)
+		return
+	}
+	out, err := pageLeases(raw, search, pg)
+	if err != nil {
+		jsonErr(w, http.StatusBadGateway, "dhcp_leases_unreadable", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *server) listReservations(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
+	// Paged only when asked: a client network's own page reads every reservation it has, as it always did.
+	paged := hasPageParams(r.URL.Query())
+	pg, ok := readPage(w, r, 0)
+	if !ok {
+		return
+	}
+	search, ok := readSearch(w, r, dhcpSearchHeader)
+	if !ok {
+		return
+	}
 	gnFilter := r.URL.Query().Get("guest_network_id")
-	q := `SELECT id::text, guest_network_id::text, text(mac), host(reserved_ip), hostname, enabled
-            FROM dhcp_reservations`
+	where := ` WHERE true`
 	args := []any{}
 	if gnFilter != "" {
-		q += ` WHERE guest_network_id=$1`
 		args = append(args, gnFilter)
+		where += fmt.Sprintf(` AND d.guest_network_id=$%d`, len(args))
 	}
-	q += ` ORDER BY reserved_ip`
+	// The search matches what the screen shows a reservation by, the network's name included.
+	if search != "" {
+		args = append(args, likePattern(search))
+		where += fmt.Sprintf(` AND (text(d.mac) ILIKE $%[1]d OR host(d.reserved_ip) ILIKE $%[1]d
+		    OR COALESCE(d.hostname,'') ILIKE $%[1]d OR COALESCE(gn.name,'') ILIKE $%[1]d)`, len(args))
+	}
+	from := ` FROM dhcp_reservations d LEFT JOIN guest_networks gn ON gn.id = d.guest_network_id`
+	q := `SELECT d.id::text, d.guest_network_id::text, text(d.mac), host(d.reserved_ip), d.hostname, d.enabled` +
+		from + where + ` ORDER BY d.reserved_ip, d.id`
+	if paged {
+		q += fmt.Sprintf(` LIMIT %d OFFSET %d`, pg.Fetch(), pg.Offset())
+	}
 	rows, err := s.db.Query(ctx, q, args...)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
@@ -568,7 +618,22 @@ func (s *server) listReservations(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, x)
 	}
-	writeList(w, out)
+	if err := rows.Err(); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	if !paged {
+		writeList(w, out)
+		return
+	}
+	rows.Close()
+	out, more := trimPage(out, pg)
+	var total int
+	if err := s.db.QueryRow(ctx, `SELECT count(*)::int`+from+where, args...).Scan(&total); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, newPagedList(out, more, pg, &total))
 }
 
 func (s *server) createReservation(w http.ResponseWriter, r *http.Request) {

@@ -447,6 +447,49 @@ func (s *server) pmsEventsRoutes() http.Handler {
 	return r
 }
 
+// PMS ACTIVITY IS PAGED AND SEARCHED ON THE SERVER.
+//
+// The list used to be the newest 200 messages, searched and counted in the browser -- on a property whose feed
+// carries a few hundred messages an hour, that is the last few minutes. The search text (a room, a reservation,
+// a guest's name) travels in X-Pms-Event-Search, never the URL, because edged logs request lines.
+const pmsEventSearchHeader = "X-Pms-Event-Search"
+
+// stayEventFrom: both joins are LEFT, and that is the point rather than defensive habit: an event NOT matched to
+// a stay is the one an operator most needs to see, so it must list with its stay columns empty instead of being
+// filtered out by an inner join.
+const stayEventFrom = `FROM iam_v2.stay_events ev
+		LEFT JOIN iam_v2.pms_interfaces i ON i.id = ev.pms_interface_id
+		LEFT JOIN iam_v2.stays st
+		       ON st.tenant_id = ev.tenant_id AND st.site_id = ev.site_id AND st.id = ev.stay_id`
+
+// stayEventMatch is the status and search filter. $2 processing status (NULL for every one), $3 the ILIKE
+// pattern (NULL for no search).
+const stayEventMatch = `($2::text IS NULL OR ev.processing_status = $2)
+		  AND ($3::text IS NULL
+		       OR st.normalized_room_number ILIKE $3
+		       OR st.external_reservation_id ILIKE $3
+		       OR ev.event_type ILIKE $3
+		       OR ev.external_event_identity ILIKE $3
+		       OR EXISTS (SELECT 1 FROM iam_v2.stay_guests g
+		                   WHERE g.stay_id = st.id
+		                     AND (g.display_name ILIKE $3 OR g.last_name_norm ILIKE $3)))`
+
+// stayEventsSummary counts EVERY message this appliance holds, whatever the filter: the tiles answer "is the
+// feed alive and is anything waiting", which a filtered count cannot.
+type stayEventsSummary struct {
+	Applied   int        `json:"applied"`
+	Pending   int        `json:"pending"`
+	Review    int        `json:"manual_review"`
+	Rejected  int        `json:"rejected"`
+	Unmatched int        `json:"unmatched"`
+	Newest    *time.Time `json:"newest_received_at,omitempty"`
+}
+
+type stayEventsPage struct {
+	pagedList[stayEventRow]
+	Summary stayEventsSummary `json:"summary"`
+}
+
 func (s *server) listStayEvents(w http.ResponseWriter, r *http.Request) {
 	var statusArg any
 	if v := r.URL.Query().Get("processing_status"); v != "" {
@@ -458,11 +501,35 @@ func (s *server) listStayEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	pg, ok := readPage(w, r, 0)
+	if !ok {
+		return
+	}
+	search, ok := readSearch(w, r, pmsEventSearchHeader)
+	if !ok {
+		return
+	}
+	args := []any{s.tenantID, statusArg, likePattern(search)}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	// Both joins are LEFT, and that is the point rather than defensive habit: an event NOT matched to a stay is
-	// the one an operator most needs to see, so it must list with its stay columns empty instead of being
-	// filtered out by an inner join.
+
+	var sum stayEventsSummary
+	var total int
+	if err := s.db.QueryRow(ctx, `SELECT
+			count(*) FILTER (WHERE ev.processing_status = 'APPLIED')::int,
+			count(*) FILTER (WHERE ev.processing_status = 'PENDING')::int,
+			count(*) FILTER (WHERE ev.processing_status = 'MANUAL_REVIEW')::int,
+			count(*) FILTER (WHERE ev.processing_status = 'REJECTED')::int,
+			count(*) FILTER (WHERE ev.stay_id IS NULL)::int,
+			max(ev.received_at),
+			count(*) FILTER (WHERE `+stayEventMatch+`)::int
+		`+stayEventFrom+`
+		WHERE ev.tenant_id=$1`, args...).Scan(&sum.Applied, &sum.Pending, &sum.Review, &sum.Rejected,
+		&sum.Unmatched, &sum.Newest, &total); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+
 	rows, err := s.db.Query(ctx, `SELECT ev.id::text, ev.pms_interface_id::text, ev.external_event_identity,
 			ev.event_type, ev.processing_status, ev.review_code, ev.stay_id::text,
 			ev.pms_timestamp_utc, ev.received_at,
@@ -472,12 +539,10 @@ func (s *server) listStayEvents(w http.ResponseWriter, r *http.Request) {
 			   FROM iam_v2.stay_guests g WHERE g.stay_id = st.id
 			  ORDER BY g.is_primary DESC LIMIT 1),
 			st.status
-		FROM iam_v2.stay_events ev
-		LEFT JOIN iam_v2.pms_interfaces i ON i.id = ev.pms_interface_id
-		LEFT JOIN iam_v2.stays st
-		       ON st.tenant_id = ev.tenant_id AND st.site_id = ev.site_id AND st.id = ev.stay_id
-		WHERE ev.tenant_id=$1 AND ($2::text IS NULL OR ev.processing_status=$2)
-		ORDER BY ev.received_at DESC LIMIT 200`, s.tenantID, statusArg)
+		`+stayEventFrom+`
+		WHERE ev.tenant_id=$1 AND `+stayEventMatch+`
+		ORDER BY ev.received_at DESC, ev.id
+		LIMIT $4 OFFSET $5`, append(args, pg.Fetch(), pg.Offset())...)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
@@ -494,7 +559,12 @@ func (s *server) listStayEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, e)
 	}
-	writeList(w, out)
+	if err := rows.Err(); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	out, more := trimPage(out, pg)
+	writeJSON(w, http.StatusOK, stayEventsPage{pagedList: newPagedList(out, more, pg, &total), Summary: sum})
 }
 
 // ---------- PMS resolutions (evidence only, never guest PII) ----------
@@ -523,7 +593,43 @@ func (s *server) pmsResolutionsRoutes() http.Handler {
 	return r
 }
 
+// resolutionSummaryWindow is how many of the most recent checks the summary describes. The breakdown answers
+// "what is happening now" -- one network failing while the others succeed -- and counting a year of history
+// would bury a fault that started this morning under months of successes. It is the window the screen always
+// summarised; the table below it now pages through every check.
+const resolutionSummaryWindow = 200
+
+type resolutionOutcomeCount struct {
+	Outcome string `json:"outcome_code"`
+	Count   int    `json:"count"`
+}
+
+type resolutionNetworkCount struct {
+	GuestNetwork     string  `json:"guest_network_id"`
+	GuestNetworkName *string `json:"guest_network_name,omitempty"`
+	Total            int     `json:"total"`
+	Verified         int     `json:"verified"`
+}
+
+type resolutionsSummary struct {
+	Window   int                      `json:"window"`
+	Total    int                      `json:"total"`
+	Verified int                      `json:"verified"`
+	Newest   *time.Time               `json:"newest_resolved_at,omitempty"`
+	Outcomes []resolutionOutcomeCount `json:"outcomes"`
+	Networks []resolutionNetworkCount `json:"networks"`
+}
+
+type resolutionsPage struct {
+	pagedList[resolutionRow]
+	Summary resolutionsSummary `json:"summary"`
+}
+
 func (s *server) listResolutions(w http.ResponseWriter, r *http.Request) {
+	pg, ok := readPage(w, r, 0)
+	if !ok {
+		return
+	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	// deliberately NO stay identity, guest name, room or reservation: a resolution list is operational
@@ -538,7 +644,8 @@ func (s *server) listResolutions(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN public.guest_networks gn
 		       ON gn.tenant_id = ar.tenant_id AND gn.site_id = ar.site_id AND gn.id = ar.guest_network_id
 		WHERE ar.tenant_id=$1
-		ORDER BY ar.resolved_at DESC LIMIT 200`, s.tenantID)
+		ORDER BY ar.resolved_at DESC, ar.id
+		LIMIT $2 OFFSET $3`, s.tenantID, pg.Fetch(), pg.Offset())
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
@@ -553,7 +660,66 @@ func (s *server) listResolutions(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, e)
 	}
-	writeList(w, out)
+	if err := rows.Err(); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	rows.Close()
+	out, more := trimPage(out, pg)
+
+	var total int
+	if err := s.db.QueryRow(ctx, `SELECT count(*)::int FROM iam_v2.auth_resolutions WHERE tenant_id=$1`,
+		s.tenantID).Scan(&total); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+
+	// The summary, over the most recent window. One grouped read gives both breakdowns: GROUPING SETS keeps
+	// the per-outcome and per-network counts in a single pass over the same window.
+	sum := resolutionsSummary{Window: resolutionSummaryWindow, Outcomes: []resolutionOutcomeCount{}, Networks: []resolutionNetworkCount{}}
+	srows, err := s.db.Query(ctx, `WITH recent AS (
+			SELECT ar.guest_network_id::text AS gnid, gn.name AS gname, ar.outcome_code,
+			       (ar.resolved_stay_id IS NOT NULL) AS verified, ar.resolved_at
+			  FROM iam_v2.auth_resolutions ar
+			  LEFT JOIN public.guest_networks gn
+			         ON gn.tenant_id = ar.tenant_id AND gn.site_id = ar.site_id AND gn.id = ar.guest_network_id
+			 WHERE ar.tenant_id=$1
+			 ORDER BY ar.resolved_at DESC, ar.id
+			 LIMIT $2)
+		SELECT GROUPING(outcome_code)::int, GROUPING(gnid)::int, COALESCE(outcome_code,''), COALESCE(gnid,''),
+		       max(gname), count(*)::int, count(*) FILTER (WHERE verified)::int, max(resolved_at)
+		  FROM recent
+		 GROUP BY GROUPING SETS ((outcome_code), (gnid), ())
+		 ORDER BY count(*) DESC, 3, 4`, s.tenantID, resolutionSummaryWindow)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	defer srows.Close()
+	for srows.Next() {
+		var byOutcome, byNetwork, n, verified int
+		var outcome, gnid string
+		var gname *string
+		var newest *time.Time
+		if err := srows.Scan(&byOutcome, &byNetwork, &outcome, &gnid, &gname, &n, &verified, &newest); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
+			return
+		}
+		// GROUPING() is 0 for the column a row is grouped BY: an outcome row, a network row, or the total.
+		switch {
+		case byOutcome == 0:
+			sum.Outcomes = append(sum.Outcomes, resolutionOutcomeCount{Outcome: outcome, Count: n})
+		case byNetwork == 0:
+			sum.Networks = append(sum.Networks, resolutionNetworkCount{GuestNetwork: gnid, GuestNetworkName: gname, Total: n, Verified: verified})
+		default:
+			sum.Total, sum.Verified, sum.Newest = n, verified, newest
+		}
+	}
+	if err := srows.Err(); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, resolutionsPage{pagedList: newPagedList(out, more, pg, &total), Summary: sum})
 }
 
 // ---------- Checkout-Grace configuration ----------
