@@ -128,7 +128,12 @@ async function installBackend(
       case path === "/financial-review/postings/p1":
         return json(REVIEW_DETAIL);
       case path === "/financial-ops/settlements":
-        return json({ settlements: [SETTLEMENT] });
+        // edged pages this list and counts every payment for the tiles; the mock answers the same shape.
+        return json({
+          settlements: [SETTLEMENT], limit: 50, meta: { has_more: false }, page: 1, page_size: 50, total: 1,
+          summary: { all: 1, attention: 0, paid: 1, voucher: 0, free: 0,
+            collected: [{ currency: "USD", currency_exponent: 2, amount_minor: 1000 }] },
+        });
       case path === "/financial-ops/settlements/s1":
         return json({ settlement: SETTLEMENT, payments: [PAYMENT], available_actions: [],
           note: "Refund and chargeback initiation are NOT available from this surface in Phase 4." });

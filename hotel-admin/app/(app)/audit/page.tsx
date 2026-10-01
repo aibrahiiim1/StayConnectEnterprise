@@ -136,17 +136,25 @@ export default function ActivityPage() {
       .catch(() => {});
   }, []);
 
-  // Counts per filter, over the WHOLE period -- the server counted every entry, not the page on screen.
+  // Counts per filter, over the WHOLE period -- the server counted every entry, not the page on screen. Read
+  // straight from the current answer when there is one, so the counts arrive with the rows rather than a
+  // render later.
+  const shownCounts = useMemo(
+    () => (current && resp?.actions
+      ? new Map(resp.actions.map((a) => [a.action, a.count]))
+      : countsReady ? counts!.byAction : null),
+    [current, resp, counts, countsReady],
+  );
   const chipCounts = useMemo(() => {
     const out = { all: 0, security: 0, byCategory: new Map<AuditCategory, number>() };
-    for (const [action, n] of countsReady ? counts!.byAction : []) {
+    for (const [action, n] of shownCounts ?? []) {
       const w = auditWords(action);
       out.all += n;
       if (w.severity === "security") out.security += n;
       out.byCategory.set(w.category, (out.byCategory.get(w.category) ?? 0) + n);
     }
     return out;
-  }, [counts, countsReady]);
+  }, [shownCounts]);
 
   // The Hotel filter only where hospitality has history -- or where a Hotel entry is in the period, because a
   // filter must never be missing for rows that exist. The rows themselves are never filtered by module.
@@ -156,18 +164,18 @@ export default function ActivityPage() {
     || AUDIT_CATEGORIES.some((c) => MODULE_CATEGORIES[c] === m && ((chipCounts.byCategory.get(c) ?? 0) > 0 || chip === c)));
 
   const chipOptions: { value: Chip; label: React.ReactNode; count?: number; tone?: "warn" }[] = [
-    { value: "all", label: "Everything", count: countsReady ? chipCounts.all : undefined },
+    { value: "all", label: "Everything", count: shownCounts ? chipCounts.all : undefined },
     // SECURITY EVENTS FIRST, because that is the filter somebody reaches for under pressure.
     {
       value: "security",
       label: <><ShieldAlert className="size-3.5" aria-hidden /> Security</>,
-      count: countsReady ? chipCounts.security : undefined,
+      count: shownCounts ? chipCounts.security : undefined,
       tone: "warn",
     },
     ...categories.map((c) => ({
       value: c as Chip,
       label: c,
-      count: countsReady ? chipCounts.byCategory.get(c) ?? 0 : undefined,
+      count: shownCounts ? chipCounts.byCategory.get(c) ?? 0 : undefined,
     })),
   ];
 

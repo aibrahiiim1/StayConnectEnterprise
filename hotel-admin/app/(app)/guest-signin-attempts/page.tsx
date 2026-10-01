@@ -21,7 +21,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { KeyRound, ShieldAlert, UserX } from "lucide-react";
 import {
-  api, ListResp, SignInAttempt, SignInAttemptDetail, SignInAttemptCredentials, Whoami,
+  api, SignInAttempt, SignInAttemptDetail, SignInAttemptCredentials, Whoami,
 } from "@/lib/api";
 import { canRead, canWrite } from "@/lib/roles";
 import { ActiveRestrictions } from "@/components/guest-signin-restrictions";
@@ -37,7 +37,8 @@ import { ErrorBanner, Callout } from "@/components/ui/error-banner";
 import { HelpList, HelpSection } from "@/components/help";
 import { SkeletonRows, DList, MonoId } from "@/components/ui/misc";
 import { DetailDialog } from "@/components/ui/dialog";
-import { SearchInput } from "@/components/ui/data";
+import { Pagination, SearchInput } from "@/components/ui/data";
+import { useServerPage, type PagedFields } from "@/lib/use-server-page";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LiveStatus, NotAvailable, refreshingClass } from "@/components/ui/patterns";
 
@@ -148,11 +149,15 @@ function mirrorAge(seconds?: number | null): string {
   return `${Math.floor(hrs / 24)}d`;
 }
 
+type AttemptsResp = PagedFields & {
+  data?: SignInAttempt[];
+  summary?: { total?: number; failed?: number; mismatch?: number; systemic?: number };
+};
+
 export default function GuestSignInAttemptsPage() {
-  const [rows, setRows] = useState<SignInAttempt[] | null>(null);
-  const [err, setErr] = useState<unknown>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const [anchor, setAnchor] = useState(() => Date.now());
+  const [openErr, setOpenErr] = useState<unknown>(null);
 
   const [room, setRoom] = useState("");
   const [result, setResult] = useState("");
@@ -182,51 +187,39 @@ export default function GuestSignInAttemptsPage() {
   // the guest is still standing there.
   const [tab, setTab] = useState<"attempts" | "restrictions">("attempts");
 
-  const load = useCallback(async (manual = false) => {
-    if (manual) setRefreshing(true);
-    try {
-      const from = new Date(Date.now() - Number(range) * 3600_000).toISOString();
-      const params = new URLSearchParams({ from });
-      if (room.trim()) params.set("room", room.trim());
-      if (result) params.set("result", result);
-      if (kind) params.set("credential_type", kind);
-      const r = await api.get<ListResp<SignInAttempt>>("/guest-signin-attempts?" + params.toString());
-      setRows(r.data ?? []);
-      setErr(null);
-      setUpdatedAt(Date.now());
-    } catch (e) {
-      setErr(e);
-      setRows([]);
-    } finally {
-      if (manual) setRefreshing(false);
-    }
-  }, [room, result, kind, range]);
+  // PAGED ON THE SERVER, AND SEARCHED THERE. The list used to be the newest 200 attempts, and the search box
+  // filtered only those; on a busy night an attempt from earlier in the period could not be found. The room,
+  // result, type and range were already server filters; the search now is too, and travels in a header (it is
+  // where somebody types a room number), never the URL. Any change starts again at the first page.
+  //
+  // The period is measured from `anchor`, fixed until the range changes or the operator refreshes, so paging
+  // walks one stable question instead of a window that slides under it.
+  const path = useMemo(() => {
+    const params = new URLSearchParams({ from: new Date(anchor - Number(range) * 3600_000).toISOString() });
+    if (room.trim()) params.set("room", room.trim());
+    if (result) params.set("result", result);
+    if (kind) params.set("credential_type", kind);
+    return "/guest-signin-attempts?" + params.toString();
+  }, [anchor, range, room, result, kind]);
+  const needle = query.trim();
+  const headers = useMemo(
+    () => (needle ? { "X-Signin-Search": encodeURIComponent(needle) } : undefined),
+    [needle],
+  );
+  const list = useServerPage<AttemptsResp>({ path, headers });
+  const { resp, current, err, loading: refreshing } = list;
+  const rows = current && resp ? resp.data ?? [] : err && !resp ? [] : null;
+  useEffect(() => { if (current && resp) setUpdatedAt(Date.now()); }, [current, resp]);
+  const load = (_manual?: boolean) => setAnchor(Date.now());
 
-  useEffect(() => { setRows(null); void load(); }, [load]);
-
-  // The search box filters what is ON SCREEN. The room, result, type and range go to the server, because a
-  // desk looking for one room must not have to pull thirty days of rows to find it.
-  const filtered = useMemo(() => {
-    if (rows === null) return null;
-    const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((a) =>
-      [a.room, a.guest_network, a.result_label, a.device_ip, a.device_mac, a.request_id]
-        .filter(Boolean).some((v) => String(v).toLowerCase().includes(q)));
-  }, [rows, query]);
-
-  const counts = useMemo(() => {
-    const r = rows ?? [];
-    return {
-      total: r.length,
-      failed: r.filter((a) => !a.succeeded).length,
-      mismatch: r.filter((a) => a.result === "CREDENTIAL_MISMATCH" || a.result === "ROOM_NOT_IN_MIRROR").length,
-      systemic: r.filter((a) =>
-        a.result === "MIRROR_STALE_OR_MISSING_CHANGE" ||
-        a.result === "ROUTING_OR_INTERFACE_FAILURE" ||
-        a.result === "SERVICE_UNAVAILABLE").length,
-    };
-  }, [rows]);
+  // The tiles count every attempt the filters select -- the server's count, not the page on screen.
+  const sum = resp?.summary;
+  const counts = {
+    total: sum?.total ?? 0,
+    failed: sum?.failed ?? 0,
+    mismatch: sum?.mismatch ?? 0,
+    systemic: sum?.systemic ?? 0,
+  };
 
   async function open(a: SignInAttempt) {
     setCreds(null);
@@ -242,7 +235,7 @@ export default function GuestSignInAttemptsPage() {
         }
       }
     } catch (e) {
-      setErr(e);
+      setOpenErr(e);
     }
   }
 
@@ -259,6 +252,7 @@ export default function GuestSignInAttemptsPage() {
         setResult("");
         setKind("");
         setRange("24");
+        setAnchor(Date.now());
       }}
     />
   );
@@ -289,7 +283,7 @@ export default function GuestSignInAttemptsPage() {
           <Toolbar className="justify-start">
             <SearchInput value={query} onChange={setQuery}
               placeholder="Room, network, device or correlation id…"
-              label="Search the attempts on screen" className="sm:max-w-xs" />
+              label="Search the attempts" className="sm:max-w-xs" delay={300} />
             <Input value={room} onChange={(e) => setRoom(e.target.value)} placeholder="Room"
               aria-label="Filter by room number" className="h-9 w-28" inputMode="numeric" />
             <Select value={result} onChange={(e) => setResult(e.target.value)}
@@ -300,22 +294,22 @@ export default function GuestSignInAttemptsPage() {
               aria-label="Filter by credential type" className="h-9 w-full sm:w-52">
               {KIND_FILTERS.map((f) => <option key={f.value || "any"} value={f.value}>{f.label}</option>)}
             </Select>
-            <Select value={range} onChange={(e) => setRange(e.target.value)}
+            <Select value={range} onChange={(e) => { setRange(e.target.value); setAnchor(Date.now()); }}
               aria-label="Filter by time range" className="h-9 w-full sm:w-64">
               {RANGES.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
             </Select>
-            <span className="text-xs text-muted-foreground">Newest first · up to 200</span>
+            <span className="text-xs text-muted-foreground">Newest first</span>
           </Toolbar>
         </CardBody>
 
         <div className={cn(refreshing && rows !== null && refreshingClass)}>
-        {filtered === null ? (
+        {rows === null ? (
           <SkeletonRows rows={8} cols={7} />
-        ) : filtered.length === 0 ? (
+        ) : rows.length === 0 ? (
           <EmptyState
             icon={<KeyRound />}
-            title={rows && rows.length > 0 ? "Nothing matches this search" : "No sign-in attempts in this period"}
-            hint={rows && rows.length > 0
+            title={needle ? "Nothing matches this search" : "No sign-in attempts in this period"}
+            hint={needle
               ? "Clear the search box, or widen the filters above."
               : "Every deliberate Connect submission is recorded here, including the ones that fail."}
           />
@@ -335,7 +329,7 @@ export default function GuestSignInAttemptsPage() {
               </TR>
             </THead>
             <TBody>
-              {filtered.map((a) => (
+              {rows.map((a) => (
                 <TR key={a.id}>
                   <TD className="whitespace-nowrap text-sm text-muted-foreground" title={formatDate(a.occurred_at)}>
                     {formatRelative(a.occurred_at)}
@@ -365,6 +359,18 @@ export default function GuestSignInAttemptsPage() {
           </Table>
         )}
         </div>
+        {rows && rows.length > 0 && (
+          <CardBody className="border-t border-border py-3">
+            <Pagination
+              offset={list.offset}
+              limit={list.pageSize}
+              shown={rows.length}
+              total={list.total}
+              hasMore={list.hasMore}
+              onChange={list.setOffset}
+            />
+          </CardBody>
+        )}
       </Card>
       </div>
   );
@@ -407,7 +413,7 @@ export default function GuestSignInAttemptsPage() {
         }
       />
 
-      <ErrorBanner err={err} />
+      <ErrorBanner err={openErr ?? err} />
 
       {maySeeRestrictions ? (
         <Tabs value={tab} onValueChange={(v) => setTab(v as "attempts" | "restrictions")}>

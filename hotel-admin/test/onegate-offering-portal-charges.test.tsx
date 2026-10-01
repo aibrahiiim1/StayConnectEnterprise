@@ -32,6 +32,7 @@ import { FinancialHealthView } from "@/components/phase4/financial-health-view";
 import { ManualReviewView } from "@/components/phase4/manual-review-view";
 import { SettlementsView } from "@/components/phase4/settlements-view";
 import { FinancialRecoveryView } from "@/components/phase4/financial-recovery-view";
+import { fakeSettlements } from "./fake-paged";
 
 const g = api.get as unknown as ReturnType<typeof vi.fn>;
 const put = api.put as unknown as ReturnType<typeof vi.fn>;
@@ -63,6 +64,9 @@ function routes(roles: string[], extra: Record<string, unknown> = {}) {
   g.mockImplementation((path: string) => {
     if (path === "/auth/whoami") return Promise.resolve({ roles });
     if (path in extra) return Promise.resolve(extra[path]);
+    // A paged list (?page=&page_size=) is answered by a fake that reads its parameters.
+    const fake = extra[path.split("?")[0]];
+    if (typeof fake === "function") return Promise.resolve(fake(path));
     if (path === "/commercial-packages/plans") return Promise.resolve(list([PLAN]));
     if (path === "/commercial-packages") return Promise.resolve(list([PKG]));
     if (path === "/auth-methods") return Promise.resolve({ voucher: { enabled: true }, guest_account: { enabled: false } });
@@ -175,7 +179,7 @@ describe("every Hotel charge screen has its menu label as its title", () => {
       "/financial-ops/health": { health: HEALTH },
       "/financial-review/queue": { queue: [] },
       "/financial-review/actions": { actions: [] },
-      "/financial-ops/settlements": { settlements: [] },
+      "/financial-ops/settlements": fakeSettlements([]),
       "/financial-ops/recovery": { recovery: { Epoch: 1, Reason: "INITIAL", Active: false, HeldTotal: 0, HeldOpen: 0, EnteredAt: "", ReleasedAt: "" } },
       "/financial-ops/recovery/holds": { holds: [] },
       "/financial-ops/recovery/zero-attempt": { queue: [], limit: 200, note: "", eligibility: "" },
@@ -187,8 +191,8 @@ describe("every Hotel charge screen has its menu label as its title", () => {
 
   it("Package payments offers no refund button, even with a settled charge on screen", async () => {
     routes([], {
-      "/financial-ops/settlements": { settlements: [{ settlement_id: "s1", purchase_id: "p1", method: "ONLINE_PAYMENT",
-        status: "SETTLED", purchase_state: "GRANTED", amount_minor: 1000, currency: "USD", currency_exponent: 2 }] },
+      "/financial-ops/settlements": fakeSettlements([{ settlement_id: "s1", purchase_id: "p1", method: "ONLINE_PAYMENT",
+        status: "SETTLED", purchase_state: "GRANTED", amount_minor: 1000, currency: "USD", currency_exponent: 2 }]),
     });
     render(<SettlementsView />);
     expect((await screen.findAllByText("10.00 USD")).length).toBeGreaterThan(0);

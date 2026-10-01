@@ -392,7 +392,13 @@ describe("Resolution evidence page", () => {
         { id: "a2", guest_network_id: "gn1", outcome_code: "AMBIGUOUS_DISCRIMINATOR_REQUIRED", resolved: false, resolved_at: new Date().toISOString() },
         { id: "a3", guest_network_id: "gn1", outcome_code: "AMBIGUOUS_DISCRIMINATOR_REQUIRED", resolved: false, resolved_at: new Date().toISOString() },
       ],
-      meta: { has_more: false },
+      meta: { has_more: false }, page: 1, page_size: 50, total: 3,
+      // edged summarises the recent window itself; the table is paged.
+      summary: {
+        window: 200, total: 3, verified: 1, newest_resolved_at: new Date().toISOString(),
+        outcomes: [{ outcome_code: "AMBIGUOUS_DISCRIMINATOR_REQUIRED", count: 2 }, { outcome_code: "VERIFIED", count: 1 }],
+        networks: [{ guest_network_id: "gn1", total: 3, verified: 1 }],
+      },
     });
     const Page = (await import("@/app/(app)/pms-resolutions/page")).default;
     const { container } = render(<Page />);
