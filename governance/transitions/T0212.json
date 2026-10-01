@@ -1,0 +1,44 @@
+{
+  "transition_id": "T0212",
+  "seq": 212,
+  "timestamp": "2026-10-01T13:36:38+03:00",
+  "timestamp_derivation": "Written after GitHub merged PR #205 (cec3e609, committer date 2026-10-01T13:35:43+03:00) and before the commit that introduces this receipt, so it neither pre-dates the merge it records nor post-dates its own commit.",
+  "record_type": "STAYS_PAGING_AND_GUEST_ATTRIBUTES_MERGED_TO_MASTER_AND_CLOSED",
+  "authorisation": "Product-Owner acceptance of PR #205 at 6a403326 (2026-10-01) the instruction of the same day to fix the remaining review finding and merge without re-approval, and the mission to restore master to green first (PR #206) and then complete PR #205's protected merge, clean up and report closure. NOT Go-Live.",
+  "merge": {
+    "pull_request": 205,
+    "merge_commit": "cec3e609a4c2a7c807b705749e3b4182f507367a",
+    "merged_at": "2026-10-01T10:35:44Z",
+    "parents": [
+      "e62765afcdbef3a8f49d72ee20ee155a6ae4402e",
+      "ee0a7faf2f58c592ac73ceb3a76468f72c5d8754"
+    ],
+    "tested_head": "ee0a7faf2f58c592ac73ceb3a76468f72c5d8754",
+    "merge_introduced_no_content": "The tree of master at cec3e609 is identical to the tree of the tested head ee0a7faf.",
+    "how": "D42 protected path: both automated review threads answered and resolved after their fixes (6fc797ab, 6151e690); the four comprehensive gates dispatched on the exact head (governance, phase3-full-software-gate, phase4-financial-core-gate and phase5-post-stay-transfer-gate all success); po-merge-approved applied on that head; po-merge-authorization passed; mergeable_state clean; merged with a merge commit through the REST API with the head SHA pinned."
+  },
+  "acceptance": "Accepted by the Product Owner at 6a403326; the review fix 6151e690 and documentation ba0d2e6a followed under the Product Owner's instruction to merge without re-approval; the branch was brought up to the master repaired by PR #206 (T0209, T0210) and re-recorded by T0211.",
+  "deployment_provenance": "Unchanged by this closure; no redeploy was needed because the merged runtime content equals what PRE-LIVE runs: edged 25f9d03b, pmsd 6a403326, Admin Console 6151e690, scd 442f6e61, portald d5c3e578, netd and acctd 99ba9f10 -- every one now contained in master. The commits after 6151e690 are documentation and governance only.",
+  "cleanup": "The merged branch delivery/stays-pagination-guest-attributes (tip ee0a7faf) is contained in master and is deleted on GitHub and locally after this closure merges, together with this closure branch.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0211."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. THIS transition records a merge to master and closes a delivery; it changed no phase, applied no migration, deployed nothing and performed no cutover. PRE-LIVE remains PRE-LIVE."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "cec3e609a4c2a7c807b705749e3b4182f507367a",
+  "base_note": "Master after the merge of PR #205; this closure lineage is built on it.",
+  "head": "cec3e609",
+  "head_note": "No content commit: this lineage is governance only. The closed delivery's last content commit is ba0d2e6a (T0211).",
+  "previous_delivery": "T0211",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

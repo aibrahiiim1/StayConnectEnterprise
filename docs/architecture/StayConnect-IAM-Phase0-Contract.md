@@ -3,7 +3,7 @@
 > **Amended by [Amendment A1, D46](StayConnect-IAM-Phase0-Amendment-A1.md) (2026-09-29).** FIAS guest posting targets the reservation: posting identity `(PMS interface, G#)`; the room is refreshed before sending; no folio model. The sections below carry the amended wording.
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0211 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0212 -->
 **Current phase:** 7 — Cleanup, final docs, full-system re-acceptance
 **Current activity:** `FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 ACCEPTED_AND_CLOSED · 6 ACCEPTED_AND_CLOSED · 7 ACCEPTED_AND_CLOSED
