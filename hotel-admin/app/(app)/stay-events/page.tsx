@@ -16,8 +16,9 @@
 // A row with no room is the meaningful case rather than a rendering gap: it means the appliance received a message
 // it could not match to a stay, which is usually exactly why it is still waiting.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, ListResp, StayEvent } from "@/lib/api";
+import { useEffect, useMemo, useState } from "react";
+import type { StayEvent } from "@/lib/api";
+import { useServerPage, type PagedFields } from "@/lib/use-server-page";
 import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
 import { Card, CardBody } from "@/components/ui/card";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
@@ -31,7 +32,7 @@ import { HelpList, HelpSection } from "@/components/help";
 import { MonoId, SkeletonRows } from "@/components/ui/misc";
 import { DetailDialog } from "@/components/ui/dialog";
 import { DList } from "@/components/ui/misc";
-import { SearchInput } from "@/components/ui/data";
+import { Pagination, SearchInput } from "@/components/ui/data";
 import { LiveStatus, refreshingClass } from "@/components/ui/patterns";
 import { cn, formatRelative, formatDate } from "@/lib/utils";
 import { Inbox, Send } from "lucide-react";
@@ -91,6 +92,18 @@ const FILTERS: { value: string; label: string }[] = [
   { value: "REJECTED", label: "Rejected" },
 ];
 
+type StayEventsResp = PagedFields & {
+  data?: StayEvent[];
+  summary?: {
+    applied?: number;
+    pending?: number;
+    manual_review?: number;
+    rejected?: number;
+    unmatched?: number;
+    newest_received_at?: string;
+  };
+};
+
 export default function StayEventsPage() {
   // OPENS ON EVERYTHING, not on the review queue.
   //
@@ -98,55 +111,36 @@ export default function StayEventsPage() {
   // "Nothing to review" — which an operator checking whether the feed is alive reads as "the feed is dead".
   // The review queue is still one click away and is called out above the table when it is non-empty.
   const [status, setStatus] = useState("");
-  const [rows, setRows] = useState<StayEvent[] | null>(null);
-  const [err, setErr] = useState<unknown>(null);
   const [query, setQuery] = useState("");
   const [detail, setDetail] = useState<StayEvent | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
 
-  const load = useCallback(async (manual = false) => {
-    if (manual) setRefreshing(true);
-    try {
-      const q = status ? "?processing_status=" + encodeURIComponent(status) : "";
-      const r = await api.get<ListResp<StayEvent>>("/pms-events" + q);
-      setRows(r.data ?? []);
-      setErr(null);
-      setUpdatedAt(Date.now());
-    } catch (e) {
-      setErr(e);
-      // A failed refresh keeps the rows the operator was reading; only a first load has nothing to keep.
-      setRows((prev) => prev ?? []);
-    } finally {
-      if (manual) setRefreshing(false);
-    }
-  }, [status]);
+  // PAGED AND SEARCHED ON THE SERVER. The list used to be the newest 200 messages, searched and counted in the
+  // browser -- on a busy feed, the last few minutes. The search (a room, a reservation, a guest's name) goes in a
+  // header, never the URL, because edged logs request lines. A new filter or search starts at the first page.
+  const path = status ? "/pms-events?processing_status=" + encodeURIComponent(status) : "/pms-events";
+  const needle = query.trim();
+  const headers = useMemo(
+    () => (needle ? { "X-Pms-Event-Search": encodeURIComponent(needle) } : undefined),
+    [needle],
+  );
+  const list = useServerPage<StayEventsResp>({ path, headers });
+  const { resp, current, err, loading: refreshing } = list;
+  // A new question shows the skeleton, not the previous question's rows; a failed first load, an empty list.
+  const rows = current && resp ? resp.data ?? [] : err && !resp ? [] : null;
+  useEffect(() => { if (current && resp) setUpdatedAt(Date.now()); }, [current, resp]);
 
-  useEffect(() => { setRows(null); void load(); }, [load]);
-
-  const filtered = useMemo(() => {
-    if (!rows) return null;
-    const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((e) =>
-      [e.room, e.primary_guest, e.external_reservation_id, e.event_type, e.external_event_identity]
-        .some((v) => typeof v === "string" && v.toLowerCase().includes(q)),
-    );
-  }, [rows, query]);
-
-  const counts = useMemo(() => {
-    const c = { applied: 0, waiting: 0, review: 0, rejected: 0, unmatched: 0 };
-    for (const e of rows ?? []) {
-      if (e.processing_status === "APPLIED") c.applied++;
-      else if (e.processing_status === "PENDING") c.waiting++;
-      else if (e.processing_status === "MANUAL_REVIEW") c.review++;
-      else if (e.processing_status === "REJECTED") c.rejected++;
-      if (!e.stay_id) c.unmatched++;
-    }
-    return c;
-  }, [rows]);
-
-  const newest = rows?.[0]?.received_at;
+  // THE TILES COUNT EVERY MESSAGE, from the server, whatever the filter: they answer "is the feed alive and is
+  // anything waiting", which a count of the page on screen cannot.
+  const sum = resp?.summary;
+  const counts = {
+    applied: sum?.applied ?? 0,
+    waiting: sum?.pending ?? 0,
+    review: sum?.manual_review ?? 0,
+    rejected: sum?.rejected ?? 0,
+    unmatched: sum?.unmatched ?? 0,
+  };
+  const newest = sum?.newest_received_at;
 
   return (
     <PageShell width="wide">
@@ -181,7 +175,7 @@ export default function StayEventsPage() {
           </>
         }
         actions={
-          <LiveStatus updatedAt={updatedAt} refreshing={refreshing} error={!!err && !!rows?.length} onRefresh={() => void load(true)} />
+          <LiveStatus updatedAt={updatedAt} refreshing={refreshing} error={!!err && !!rows?.length} onRefresh={() => void list.reload()} />
         }
       />
 
@@ -238,6 +232,7 @@ export default function StayEventsPage() {
               placeholder="Room, guest or reservation…"
               label="Search PMS activity"
               className="sm:max-w-xs"
+              delay={300}
             />
             <Select
               value={status}
@@ -252,20 +247,20 @@ export default function StayEventsPage() {
           </Toolbar>
         </CardBody>
         <CardBody className={cn("p-0", refreshing && refreshingClass)}>
-          {filtered === null ? (
+          {rows === null ? (
             <SkeletonRows rows={6} cols={5} />
-          ) : filtered.length === 0 ? (
+          ) : rows.length === 0 ? (
             <EmptyState
               icon={<Send />}
               title={
-                rows && rows.length > 0
+                needle
                   ? "Nothing matches this search"
                   : status
                     ? "No messages in this state"
                     : "The PMS has not sent anything"
               }
               hint={
-                rows && rows.length === 0 && !status
+                !needle && !status
                   ? "If the front desk has checked guests in since the connection came up, this is worth investigating on the PMS connection screen."
                   : undefined
               }
@@ -283,7 +278,7 @@ export default function StayEventsPage() {
                 </TR>
               </THead>
               <TBody>
-                {filtered.map((e) => {
+                {rows.map((e) => {
                   const st = STATUS_WORDS[e.processing_status] ?? {
                     label: e.processing_status.replace(/_/g, " ").toLowerCase(),
                     tone: "default" as const,
@@ -338,6 +333,18 @@ export default function StayEventsPage() {
             </Table>
           )}
         </CardBody>
+        {rows && rows.length > 0 && (
+          <CardBody className="border-t border-border py-3">
+            <Pagination
+              offset={list.offset}
+              limit={list.pageSize}
+              shown={rows.length}
+              total={list.total}
+              hasMore={list.hasMore}
+              onChange={list.setOffset}
+            />
+          </CardBody>
+        )}
       </Card>
 
       <DetailDialog

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useServerPage, type PagedFields } from "@/lib/use-server-page";
 import {
   api, ListResp,
   DhcpLease, Reservation, GuestNetwork,
@@ -12,13 +13,13 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { PageShell, PageHeader, Toolbar } from "@/components/ui/page";
-import { SearchInput } from "@/components/ui/data";
+import { Pagination, SearchInput } from "@/components/ui/data";
 import { SkeletonRows } from "@/components/ui/misc";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { Pencil, Pin, Plus, Trash2, Wifi } from "lucide-react";
-import { errMsg, formatRelative } from "@/lib/utils";
+import { formatRelative } from "@/lib/utils";
 import { HelpList, HelpSection } from "@/components/help";
 import {
   AddReservationDialog, EditReservationDialog, RemoveReservationDialog, useNetworkAccess,
@@ -44,19 +45,13 @@ function leaseExpiry(l: DhcpLease): string {
   return "—";
 }
 
-function matches(q: string, ...fields: (string | number | undefined | null)[]): boolean {
-  if (!q) return true;
-  const needle = q.trim().toLowerCase();
-  return fields.some((f) => f != null && String(f).toLowerCase().includes(needle));
-}
+type LeasesResp = PagedFields & { leases?: DhcpLease[] };
+type ReservationsResp = PagedFields & { data?: Reservation[] };
 
 export default function DhcpPage() {
   const [tab, setTab] = useState<"leases" | "reservations">("leases");
   const { known, writable } = useNetworkAccess();
-  const [leases, setLeases] = useState<DhcpLease[] | null>(null);
-  const [reservations, setReservations] = useState<Reservation[] | null>(null);
   const [networks, setNetworks] = useState<GuestNetwork[]>([]);
-  const [err, setErr] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [adding, setAdding] = useState(false);
   const [editRes, setEditRes] = useState<Reservation | null>(null);
@@ -65,23 +60,24 @@ export default function DhcpPage() {
 
   const netName = (gid: string) => networks.find((n) => n.id === gid)?.name ?? gid;
 
-  async function loadLeases() {
-    try { setLeases((await api.get<{ leases: DhcpLease[] }>("/network/dhcp/leases")).leases ?? []); }
-    catch (e) { setErr(errMsg(e)); }
-  }
-  async function loadReservations() {
-    try { setReservations((await api.get<ListResp<Reservation>>("/network/dhcp/reservations")).data ?? []); }
-    catch (e) { setErr(errMsg(e)); }
-  }
+  // BOTH LISTS ARE PAGED AND SEARCHED IN EDGED. A property's pools hold thousands of leases; the screen used to
+  // draw them all and filter in the browser. The search (an address, a MAC, a device name) goes in a header,
+  // like every other list's, and a new search starts at the first page.
+  const needle = q.trim();
+  const headers = useMemo(
+    () => (needle ? { "X-Dhcp-Search": encodeURIComponent(needle) } : undefined),
+    [needle],
+  );
+  const leaseList = useServerPage<LeasesResp>({ path: "/network/dhcp/leases", headers, rowsOf: (r) => r.leases });
+  const resList = useServerPage<ReservationsResp>({ path: "/network/dhcp/reservations", headers });
+  const leases = leaseList.current && leaseList.resp ? leaseList.resp.leases ?? [] : leaseList.err && !leaseList.resp ? [] : null;
+  const reservations = resList.current && resList.resp ? resList.resp.data ?? [] : resList.err && !resList.resp ? [] : null;
+  const err = leaseList.err ?? resList.err;
+  const loadReservations = () => void resList.reload();
 
   useEffect(() => {
-    loadLeases();
-    loadReservations();
     api.get<ListResp<GuestNetwork>>("/network/guest-networks").then((r) => setNetworks(r.data ?? [])).catch(() => {});
   }, []);
-
-  const shownLeases = (leases ?? []).filter((l) => matches(q, l["ip-address"], l["hw-address"], l.hostname));
-  const shownRes = (reservations ?? []).filter((r) => matches(q, r.reserved_ip, r.mac, r.hostname, netName(r.guest_network_id)));
 
   const noMatch = (what: string) => (
     <EmptyState
@@ -135,22 +131,22 @@ export default function DhcpPage() {
         <Toolbar className="items-center">
           <TabsList className="border-b-0">
             <TabsTrigger value="leases">
-              Active leases {leases !== null && <Badge tone="neutral">{leases.length}</Badge>}
+              Active leases {leaseList.total !== null && <Badge tone="neutral">{leaseList.total}</Badge>}
             </TabsTrigger>
             <TabsTrigger value="reservations">
-              Reservations {reservations !== null && <Badge tone="neutral">{reservations.length}</Badge>}
+              Reservations {resList.total !== null && <Badge tone="neutral">{resList.total}</Badge>}
             </TabsTrigger>
           </TabsList>
-          <SearchInput value={q} onChange={setQ} placeholder="Search IP, MAC or hostname" />
+          <SearchInput value={q} onChange={setQ} placeholder="Search IP, MAC or hostname" delay={300} />
         </Toolbar>
 
         <TabsContent value="leases" className="mt-4">
           <Card>
             {leases === null ? (
               <SkeletonRows rows={5} cols={5} />
-            ) : leases.length === 0 ? (
+            ) : leases.length === 0 && !needle ? (
               <EmptyState icon={<Wifi />} title="No active leases" hint="Leases appear here once clients connect and are given an address." />
-            ) : shownLeases.length === 0 ? (
+            ) : leases.length === 0 ? (
               noMatch("leases")
             ) : (
               <Table>
@@ -165,7 +161,7 @@ export default function DhcpPage() {
                   </TR>
                 </THead>
                 <TBody>
-                  {shownLeases.map((l, i) => {
+                  {leases.map((l, i) => {
                     const st = leaseState(l.state);
                     const s = LEASE_STATE[st] ?? { label: st, tone: "default" as const };
                     return (
@@ -185,6 +181,18 @@ export default function DhcpPage() {
                 </TBody>
               </Table>
             )}
+            {leases && leases.length > 0 && (leaseList.offset > 0 || leaseList.hasMore) && (
+              <div className="border-t border-border px-4 py-3">
+                <Pagination
+                  offset={leaseList.offset}
+                  limit={leaseList.pageSize}
+                  shown={leases.length}
+                  total={leaseList.total}
+                  hasMore={leaseList.hasMore}
+                  onChange={leaseList.setOffset}
+                />
+              </div>
+            )}
           </Card>
         </TabsContent>
 
@@ -192,14 +200,14 @@ export default function DhcpPage() {
           <Card>
             {reservations === null ? (
               <SkeletonRows rows={4} cols={5} />
-            ) : reservations.length === 0 ? (
+            ) : reservations.length === 0 && !needle ? (
               <EmptyState
                 icon={<Pin />}
                 title="No reservations"
                 hint="Pin a device to a fixed address on one of your client networks — a printer, a TV or a door lock."
                 action={writable ? <Button size="sm" onClick={() => setAdding(true)}><Plus /> New reservation</Button> : undefined}
               />
-            ) : shownRes.length === 0 ? (
+            ) : reservations.length === 0 ? (
               noMatch("reservations")
             ) : (
               <Table>
@@ -214,7 +222,7 @@ export default function DhcpPage() {
                   </TR>
                 </THead>
                 <TBody>
-                  {shownRes.map((r) => (
+                  {reservations.map((r) => (
                     <TR key={r.id}>
                       <TD>{netName(r.guest_network_id)}</TD>
                       <TD className="hidden font-mono text-xs sm:table-cell">{r.mac}</TD>
@@ -231,6 +239,18 @@ export default function DhcpPage() {
                   ))}
                 </TBody>
               </Table>
+            )}
+            {reservations && reservations.length > 0 && (resList.offset > 0 || resList.hasMore) && (
+              <div className="border-t border-border px-4 py-3">
+                <Pagination
+                  offset={resList.offset}
+                  limit={resList.pageSize}
+                  shown={reservations.length}
+                  total={resList.total}
+                  hasMore={resList.hasMore}
+                  onChange={resList.setOffset}
+                />
+              </div>
             )}
           </Card>
         </TabsContent>

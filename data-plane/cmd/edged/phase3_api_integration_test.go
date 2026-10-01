@@ -234,6 +234,10 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 			// format setting are exercised through the real router, role matrix and database.
 			mountResource(r, s, "guest-accounts", s.guestAccountsRoutes)
 			mountResource(r, s, "account-password-settings", s.accountPasswordSettingsRoutes)
+			// The paged operator lists (paging_integration_test.go): the activity trail and the sessions
+			// list, through the real router and role matrix.
+			mountResource(r, s, "audit", s.auditRoutes)
+			mountResource(r, s, "sessions", s.sessionsRoutes)
 		})
 	})
 	f.srv = httptest.NewServer(r)

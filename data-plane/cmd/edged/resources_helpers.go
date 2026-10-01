@@ -6,29 +6,151 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// parseLimit reads ?limit= with a default and a hard cap.
-func parseLimit(r *http.Request, def, max int) int {
-	v := r.URL.Query().Get("limit")
+// ONE PAGING CONTRACT FOR EVERY ADMIN CONSOLE LIST THAT GROWS WITH REAL DATA.
+//
+// ?page= (1-based, default 1) and ?page_size= (1..200, default 50). A value outside those bounds is refused
+// with 400 rather than quietly clamped, so a client that asks for page 0 or 10,000 rows learns it at once
+// instead of reading a page it did not ask for. The handler fetches page_size+1 rows: the extra row is how it
+// knows there is a next page (meta.has_more) without a second query.
+//
+// The search text of these lists never travels in the URL: chi's request logger writes every request line,
+// and a free-text box is where an operator types a guest's name. Each list reads its own X-...-Search header.
+const (
+	pageSizeDefault = 50
+	pageSizeMax     = 200
+	searchMaxLen    = 100
+)
+
+type pageReq struct {
+	Page int
+	Size int
+}
+
+// Offset is the number of rows before this page.
+func (p pageReq) Offset() int { return (p.Page - 1) * p.Size }
+
+// Fetch is the LIMIT to query with: one more than the page holds, to learn whether another page follows.
+func (p pageReq) Fetch() int { return p.Size + 1 }
+
+// parsePage reads ?page and ?page_size. legacyMax > 0 keeps an older ?limit= working for a client that has not
+// moved to page_size: when page_size is absent, a valid limit becomes the page size, capped at legacyMax (the
+// cap the endpoint always had). An invalid limit falls back to the default, as it always did.
+func parsePage(q url.Values, legacyMax int) (pageReq, error) {
+	p := pageReq{Page: 1, Size: pageSizeDefault}
+	if v := q.Get("page"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			return p, errors.New("page must be a positive whole number")
+		}
+		p.Page = n
+	}
+	if v := q.Get("page_size"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > pageSizeMax {
+			return p, fmt.Errorf("page_size must be between 1 and %d", pageSizeMax)
+		}
+		p.Size = n
+	} else if legacyMax > 0 {
+		if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 {
+			p.Size = min(n, legacyMax)
+		}
+	}
+	return p, nil
+}
+
+// hasPageParams reports whether the caller asked for paging at all. A list whose existing callers expect the
+// whole set (and always got it) pages only when asked.
+func hasPageParams(q url.Values) bool {
+	return q.Get("page") != "" || q.Get("page_size") != ""
+}
+
+// readPage parses the paging parameters and answers 400 itself when they are out of bounds.
+func readPage(w http.ResponseWriter, r *http.Request, legacyMax int) (pageReq, bool) {
+	p, err := parsePage(r.URL.Query(), legacyMax)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", err.Error())
+		return p, false
+	}
+	return p, true
+}
+
+// readSearch reads a list's free-text search from its header, trimmed and bounded. ok=false means a 400 has
+// been written.
+//
+// THE ADMIN CONSOLE PERCENT-ENCODES IT. A browser refuses to put a character outside ISO-8859-1 in a header,
+// so a guest name typed in Arabic or Cyrillic would fail before it left the page; the screen sends
+// encodeURIComponent(text) and this decodes it. A value that is not valid percent-encoding is taken as typed,
+// so a plain-text header from a script still works.
+func readSearch(w http.ResponseWriter, r *http.Request, header string) (string, bool) {
+	v := r.Header.Get(header)
+	if d, err := url.PathUnescape(v); err == nil {
+		v = d
+	}
+	v = strings.TrimSpace(v)
+	if len([]rune(v)) > searchMaxLen {
+		jsonErr(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("search is limited to %d characters", searchMaxLen))
+		return "", false
+	}
+	return v, true
+}
+
+// likePattern turns search text into an ILIKE "contains" pattern, or nil (SQL NULL) when there is no search.
+func likePattern(v string) any {
 	if v == "" {
-		return def
+		return nil
 	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n < 1 {
-		return def
+	return "%" + likeEscape(v) + "%"
+}
+
+// trimPage cuts the look-ahead row off a fetched page and reports whether it was there.
+func trimPage[T any](rows []T, p pageReq) ([]T, bool) {
+	if rows == nil {
+		rows = []T{}
 	}
-	if n > max {
-		return max
+	if len(rows) > p.Size {
+		return rows[:p.Size], true
 	}
-	return n
+	return rows, false
+}
+
+// slicePage pages a list that is already in memory (one edged fetched whole from another service).
+func slicePage[T any](all []T, p pageReq) ([]T, bool) {
+	start := min(p.Offset(), len(all))
+	end := min(start+p.Size, len(all))
+	out := all[start:end]
+	if out == nil {
+		out = []T{}
+	}
+	return out, end < len(all)
+}
+
+// pagedList is the shape a paged list answers with. data and meta are what writeList always wrote, so a client
+// that ignores the rest reads the response exactly as before.
+type pagedList[T any] struct {
+	Data     []T      `json:"data"`
+	Meta     listMeta `json:"meta"`
+	Page     int      `json:"page"`
+	PageSize int      `json:"page_size"`
+	Total    *int     `json:"total,omitempty"`
+}
+
+func newPagedList[T any](rows []T, more bool, p pageReq, total *int) pagedList[T] {
+	if rows == nil {
+		rows = []T{}
+	}
+	return pagedList[T]{Data: rows, Meta: listMeta{HasMore: more}, Page: p.Page, PageSize: p.Size, Total: total}
 }
 
 func strDeref(p *string) string {

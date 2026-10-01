@@ -126,14 +126,7 @@ const sessionCols = `s.id, s.ip::text, s.mac::text, s.state,
        s.ended AS ended_at, s.expires_at, s.end_reason, s.bytes_up, s.bytes_down,
        NULLIF(s.credential_method,''), NULLIF(s.ingress_interface,''), gn.name,
        COALESCE(e.id::text,''), e.status,
-       CASE
-         WHEN e.stay_id             IS NOT NULL THEN 'room'
-         WHEN e.guest_account_id    IS NOT NULL THEN 'account'
-         WHEN e.voucher_id          IS NOT NULL THEN 'voucher'
-         WHEN e.guest_principal_id  IS NOT NULL THEN 'guest'
-         WHEN e.anonymous_subject_id IS NOT NULL THEN 'open'
-         ELSE ''
-       END AS subject_kind,
+       ` + sessionKindExpr + ` AS subject_kind,
        COALESCE(NULLIF(st.normalized_room_number,''), ga.username) AS subject_label,
        COALESCE(
          (SELECT COALESCE(NULLIF(g.display_name,''), NULLIF(g.last_name_norm,''))
@@ -213,6 +206,58 @@ func (s *server) sessionsRoutes() http.Handler {
 	return r
 }
 
+// sessionKindExpr is the one definition of a session's subject kind. The list's kind filter and the projected
+// subject_kind use this same text, so filtering and displaying cannot disagree about what a row is.
+const sessionKindExpr = `CASE
+         WHEN e.stay_id             IS NOT NULL THEN 'room'
+         WHEN e.guest_account_id    IS NOT NULL THEN 'account'
+         WHEN e.voucher_id          IS NOT NULL THEN 'voucher'
+         WHEN e.guest_principal_id  IS NOT NULL THEN 'guest'
+         WHEN e.anonymous_subject_id IS NOT NULL THEN 'open'
+         ELSE ''
+       END`
+
+// SESSIONS ARE PAGED AND SEARCHED ON THE SERVER.
+//
+// The list used to be the 200 most recent sessions, searched and counted in the browser, so on a busy evening
+// a device that signed in earlier was not on the screen at all and the tiles counted only what had loaded. The
+// search text travels in X-Session-Search, never the URL: it is a room, a username or a guest's name, and
+// edged logs request lines.
+const sessionSearchHeader = "X-Session-Search"
+
+// sessionMatch is the kind and search filter. $3 kind (NULL for every kind), $4 the ILIKE pattern (NULL for no
+// search). It matches what the screen shows a row by: room, guest name, username, reservation, address,
+// device, package and network.
+const sessionMatch = `($3::text IS NULL OR ` + sessionKindExpr + ` = $3)
+           AND ($4::text IS NULL
+                OR st.normalized_room_number ILIKE $4
+                OR st.external_reservation_id ILIKE $4
+                OR ga.username ILIKE $4
+                OR ga.display_name ILIKE $4
+                OR s.ip::text ILIKE $4
+                OR s.mac::text ILIKE $4
+                OR ip.code ILIKE $4
+                OR ipr.display->>'name' ILIKE $4
+                OR gn.name ILIKE $4
+                OR EXISTS (SELECT 1 FROM iam_v2.stay_guests g
+                            WHERE g.stay_id = st.id
+                              AND (g.display_name ILIKE $4 OR g.last_name_norm ILIKE $4)))`
+
+// sessionsSummary describes every session in the selected state -- not the page, and not narrowed by the kind
+// or search filter, so the tiles and the per-kind counts stay put while the operator narrows the table.
+type sessionsSummary struct {
+	Devices int            `json:"devices_online"`
+	Clients int            `json:"clients_online"`
+	Rooms   int            `json:"rooms_online"`
+	Bytes   int64          `json:"bytes_total"`
+	Kinds   map[string]int `json:"kinds"`
+}
+
+type sessionsPage struct {
+	pagedList[edgeSessionRow]
+	Summary sessionsSummary `json:"summary"`
+}
+
 func (s *server) listGuestSessions(w http.ResponseWriter, r *http.Request) {
 	var stateArg any
 	if v := r.URL.Query().Get("state"); v != "" {
@@ -231,16 +276,63 @@ func (s *server) listGuestSessions(w http.ResponseWriter, r *http.Request) {
 		}
 		stateArg = v
 	}
+	var kindArg any
+	switch v := r.URL.Query().Get("kind"); v {
+	case "":
+	case "room", "account", "voucher", "guest", "open":
+		kindArg = v
+	default:
+		jsonErr(w, http.StatusBadRequest, "bad_request", "kind must be room|account|voucher|guest|open")
+		return
+	}
+	pg, ok := readPage(w, r, 0)
+	if !ok {
+		return
+	}
+	search, ok := readSearch(w, r, sessionSearchHeader)
+	if !ok {
+		return
+	}
+	args := []any{s.tenantID, stateArg, kindArg, likePattern(search)}
+
 	ctx, cancel := dbCtx(r)
 	defer cancel()
+
+	sum := sessionsSummary{Kinds: map[string]int{}}
+	var total, kRoom, kAccount, kVoucher, kGuest, kOpen, kNone int
+	if err := s.db.QueryRow(ctx, `
+        SELECT count(*) FILTER (WHERE s.state = 'active')::int,
+               count(DISTINCT COALESCE(e.id::text, s.mac::text)) FILTER (WHERE s.state = 'active')::int,
+               count(DISTINCT COALESCE(NULLIF(st.normalized_room_number,''), ga.username))
+                     FILTER (WHERE s.state = 'active' AND e.stay_id IS NOT NULL)::int,
+               COALESCE(sum(s.bytes_down + s.bytes_up), 0)::bigint,
+               count(*) FILTER (WHERE `+sessionMatch+`)::int,
+               count(*) FILTER (WHERE `+sessionKindExpr+` = 'room')::int,
+               count(*) FILTER (WHERE `+sessionKindExpr+` = 'account')::int,
+               count(*) FILTER (WHERE `+sessionKindExpr+` = 'voucher')::int,
+               count(*) FILTER (WHERE `+sessionKindExpr+` = 'guest')::int,
+               count(*) FILTER (WHERE `+sessionKindExpr+` = 'open')::int,
+               count(*) FILTER (WHERE `+sessionKindExpr+` = '')::int
+          `+sessionFrom+`
+         WHERE s.tenant_id = $1
+           AND ($2::text IS NULL OR s.state = $2)
+    `, args...).Scan(&sum.Devices, &sum.Clients, &sum.Rooms, &sum.Bytes, &total,
+		&kRoom, &kAccount, &kVoucher, &kGuest, &kOpen, &kNone); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	sum.Kinds = map[string]int{"room": kRoom, "account": kAccount, "voucher": kVoucher, "guest": kGuest, "open": kOpen, "": kNone}
+
+	// s.id breaks ties on the start time, so a page boundary is stable.
 	rows, err := s.db.Query(ctx, `
         SELECT `+sessionCols+`
           `+sessionFrom+`
          WHERE s.tenant_id = $1
            AND ($2::text IS NULL OR s.state = $2)
-         ORDER BY s.started DESC
-         LIMIT 200
-    `, s.tenantID, stateArg)
+           AND `+sessionMatch+`
+         ORDER BY s.started DESC, s.id
+         LIMIT $5 OFFSET $6
+    `, append(args, pg.Fetch(), pg.Offset())...)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
@@ -255,7 +347,12 @@ func (s *server) listGuestSessions(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, e)
 	}
-	writeList(w, out)
+	if err := rows.Err(); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	out, more := trimPage(out, pg)
+	writeJSON(w, http.StatusOK, sessionsPage{pagedList: newPagedList(out, more, pg, &total), Summary: sum})
 }
 
 func (s *server) getGuestSession(w http.ResponseWriter, r *http.Request) {

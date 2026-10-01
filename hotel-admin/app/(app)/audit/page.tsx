@@ -14,18 +14,24 @@
 // happened), a change (configuration moved) and a security event (someone saw a guest's typed credentials,
 // a backup left the appliance, an unlicensed-mode attempt was refused). Anything unrecognised is shown with
 // its code intact rather than guessed at.
+//
+// PAGED ON THE SERVER. The screen used to read the newest 500 entries and filter and count those in the
+// browser, so on a busy appliance anything older was unreachable and the filter counts described the 500.
+// The period, category, security filter and search now all run in edged, a page at a time; the filter counts
+// are the server's count of the whole period. The search text travels in a header, not the URL.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, ApiError } from "@/lib/api";
+import { useEffect, useMemo, useState } from "react";
+import { api } from "@/lib/api";
 import { PageShell, PageHeader, Toolbar } from "@/components/ui/page";
 import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { ErrorBanner } from "@/components/ui/error-banner";
 import { SkeletonRows } from "@/components/ui/misc";
-import { FilterChips, KeyValueGrid, SearchInput } from "@/components/ui/data";
+import { FilterChips, KeyValueGrid, Pagination, SearchInput } from "@/components/ui/data";
+import { useServerPage, type PagedFields } from "@/lib/use-server-page";
 import { refreshingClass } from "@/components/ui/patterns";
 import { cn, formatDate } from "@/lib/utils";
 import {
@@ -45,20 +51,11 @@ type Row = {
   ip?: string | null;
   payload?: unknown;
 };
-
-/** The prefix that selects a category server-side. One clause instead of enumerating every code. */
-const CATEGORY_PREFIX: Record<AuditCategory, string[]> = {
-  "Sign-in & access": ["operator", "session", "guest_signin", "auth_methods"],
-  "Client Portal": ["branding", "portal_asset"],
-  "Internet offering": ["commercial_package", "service_plan"],
-  "Hotel": ["pms_", "checkout_grace"],
-  "Networks": ["network"],
-  "Licence & cloud": ["license", "cloud", "renewal", "hotel_admin_cert"],
-  "Backups": ["backup"],
-  "Diagnostics": ["health"],
+type AuditResp = PagedFields & {
+  data?: Row[];
+  /** How many entries of each action code the period holds -- never narrowed by the category or search. */
+  actions?: { action: string; count: number }[];
 };
-
-const LIMIT = 500;
 
 const RANGES = [
   { label: "Last 24 hours", hours: 24 },
@@ -70,43 +67,64 @@ const RANGES = [
 type Chip = "all" | "security" | AuditCategory;
 
 export default function ActivityPage() {
-  const [rows, setRows] = useState<Row[] | null>(null);
-  // Whether the rows on screen were narrowed by the server to one category. Counts per category are only
-  // honest when they were not: a narrowed page has nothing to say about the other categories.
-  const [narrowed, setNarrowed] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const [range, setRange] = useState(RANGES[2]);
+  // The moment the period was measured from. Fixed until the period changes or the operator refreshes, so
+  // paging walks one stable question instead of a window that slides with every request.
+  const [anchor, setAnchor] = useState(() => Date.now());
   const [chip, setChip] = useState<Chip>("all");
   const [text, setText] = useState("");
   const [open, setOpen] = useState<string | null>(null);
   const [names, setNames] = useState<Map<string, string>>(new Map());
 
-  const category: AuditCategory | "" = chip === "all" || chip === "security" ? "" : chip;
-  const securityOnly = chip === "security";
+  const period = `${range.label}|${anchor}`;
+  // The per-action counts of the period, from the server. They are what turns a category, the security filter
+  // and a search by readable title into the exact action codes the server filters by: the words live here, the
+  // rows live there.
+  const [counts, setCounts] = useState<{ period: string; byAction: Map<string, number> } | null>(null);
+  const countsReady = counts?.period === period;
+  const q = text.trim().toLowerCase();
 
-  const load = useCallback(async () => {
-    setBusy(true); setErr(null);
-    try {
-      const p = new URLSearchParams({ limit: String(LIMIT) });
-      if (range.hours) p.set("from", new Date(Date.now() - range.hours * 3600_000).toISOString());
-      // A category becomes one prefix clause. Several prefixes per category means several requests would be
-      // wrong; instead the widest prefix is sent and the rest is narrowed below, on a page the server sized.
-      let serverNarrowed = false;
-      if (category) {
-        const prefixes = CATEGORY_PREFIX[category];
-        if (prefixes.length === 1) { p.set("action_prefix", prefixes[0]); serverNarrowed = true; }
-      }
-      const r = await api.get<{ data: Row[] }>(`/audit?${p.toString()}`);
-      setRows(r.data ?? []);
-      setNarrowed(serverNarrowed);
-    } catch (e) {
-      // The last answer stays on screen; the banner says this one failed.
-      setErr(e instanceof ApiError ? e.message : "the activity trail could not be read");
-    } finally { setBusy(false); }
-  }, [range, category]);
+  const codes = useMemo(() => {
+    if (chip === "all" || !counts) return null;
+    return [...counts.byAction.keys()].filter((a) => {
+      const w = auditWords(a);
+      return chip === "security" ? w.severity === "security" : w.category === chip;
+    });
+  }, [chip, counts]);
+  const titled = useMemo(
+    () => (q && counts ? [...counts.byAction.keys()].filter((a) => auditWords(a).title.toLowerCase().includes(q)) : []),
+    [q, counts],
+  );
+  // A category or a title search needs this period's counts first. Until they arrive the request asks only for
+  // the period (and its counts), and its rows are not shown as if they were the filtered answer.
+  const needsCounts = chip !== "all" || q !== "";
+  const filterReady = !needsCounts || countsReady;
 
-  useEffect(() => { load(); }, [load]);
+  const path = useMemo(() => {
+    const p = new URLSearchParams();
+    if (range.hours) p.set("from", new Date(anchor - range.hours * 3600_000).toISOString());
+    if (filterReady && codes) p.set("action", codes.join(","));
+    return `/audit?${p.toString()}`;
+  }, [range, anchor, filterReady, codes]);
+  // THE SEARCH TRAVELS IN HEADERS, never the URL: the text, and the codes whose readable title matched it.
+  const headers = useMemo(
+    () => (q ? {
+      "X-Audit-Search": encodeURIComponent(text.trim()),
+      ...(filterReady && titled.length ? { "X-Audit-Search-Actions": titled.join(",") } : {}),
+    } : undefined),
+    [q, text, filterReady, titled],
+  );
+
+  const list = useServerPage<AuditResp>({ path, headers });
+  const { resp, current, err, loading } = list;
+
+  // Each answer carries the period's counts; keep them against the period they describe.
+  useEffect(() => {
+    if (!current || !resp?.actions) return;
+    setCounts({ period, byAction: new Map(resp.actions.map((a) => [a.action, a.count])) });
+  }, [current, resp, period]);
+
+  const rows = current && filterReady && resp ? resp.data ?? [] : null;
 
   // THE OPERATOR DIRECTORY, ONCE. An audit row records who by id, which is the precise fact and the useless
   // one -- nobody scanning for "who changed the retention policy" can read a uuid. The exact id stays in the
@@ -118,59 +136,53 @@ export default function ActivityPage() {
       .catch(() => {});
   }, []);
 
-  const visible = useMemo(() => {
-    if (!rows) return null;
-    const q = text.trim().toLowerCase();
-    return rows.filter((r) => {
-      const w = auditWords(r.action);
-      if (category && w.category !== category) return false;
-      if (securityOnly && w.severity !== "security") return false;
-      if (!q) return true;
-      return (
-        w.title.toLowerCase().includes(q) ||
-        r.action.toLowerCase().includes(q) ||
-        (r.actor_id ?? "").toLowerCase().includes(q) ||
-        (r.target_id ?? "").toLowerCase().includes(q) ||
-        (r.ip ?? "").toLowerCase().includes(q)
-      );
-    });
-  }, [rows, text, category, securityOnly]);
-
-  const counts = useMemo(() => {
-    const out = { security: 0, byCategory: new Map<AuditCategory, number>() };
-    for (const r of rows ?? []) {
-      const w = auditWords(r.action);
-      if (w.severity === "security") out.security++;
-      out.byCategory.set(w.category, (out.byCategory.get(w.category) ?? 0) + 1);
+  // Counts per filter, over the WHOLE period -- the server counted every entry, not the page on screen. Read
+  // straight from the current answer when there is one, so the counts arrive with the rows rather than a
+  // render later.
+  const shownCounts = useMemo(
+    () => (current && resp?.actions
+      ? new Map(resp.actions.map((a) => [a.action, a.count]))
+      : countsReady ? counts!.byAction : null),
+    [current, resp, counts, countsReady],
+  );
+  const chipCounts = useMemo(() => {
+    const out = { all: 0, security: 0, byCategory: new Map<AuditCategory, number>() };
+    for (const [action, n] of shownCounts ?? []) {
+      const w = auditWords(action);
+      out.all += n;
+      if (w.severity === "security") out.security += n;
+      out.byCategory.set(w.category, (out.byCategory.get(w.category) ?? 0) + n);
     }
     return out;
-  }, [rows]);
+  }, [shownCounts]);
 
-  // The Hotel filter only where hospitality has history -- or where a Hotel entry is on screen, because a filter
-  // must never be missing for rows that exist. The rows themselves are never filtered by module.
+  // The Hotel filter only where hospitality has history -- or where a Hotel entry is in the period, because a
+  // filter must never be missing for rows that exist. The rows themselves are never filtered by module.
   const caps = useCapabilities();
   const categories = auditCategoriesFor((m) =>
     moduleHasHistory(caps, m)
-    || AUDIT_CATEGORIES.some((c) => MODULE_CATEGORIES[c] === m && ((counts.byCategory.get(c) ?? 0) > 0 || chip === c)));
+    || AUDIT_CATEGORIES.some((c) => MODULE_CATEGORIES[c] === m && ((chipCounts.byCategory.get(c) ?? 0) > 0 || chip === c)));
 
   const chipOptions: { value: Chip; label: React.ReactNode; count?: number; tone?: "warn" }[] = [
-    { value: "all", label: "Everything", count: narrowed || !rows ? undefined : rows.length },
+    { value: "all", label: "Everything", count: shownCounts ? chipCounts.all : undefined },
     // SECURITY EVENTS FIRST, because that is the filter somebody reaches for under pressure.
     {
       value: "security",
       label: <><ShieldAlert className="size-3.5" aria-hidden /> Security</>,
-      count: narrowed || !rows ? undefined : counts.security,
+      count: shownCounts ? chipCounts.security : undefined,
       tone: "warn",
     },
     ...categories.map((c) => ({
       value: c as Chip,
       label: c,
-      count: narrowed || !rows ? undefined : counts.byCategory.get(c) ?? 0,
+      count: shownCounts ? chipCounts.byCategory.get(c) ?? 0 : undefined,
     })),
   ];
 
   const filtered = chip !== "all" || text.trim() !== "";
   const clearFilters = () => { setChip("all"); setText(""); };
+  const refresh = () => setAnchor(Date.now());
+  const total = list.total;
 
   return (
     <PageShell width="wide">
@@ -192,7 +204,7 @@ export default function ActivityPage() {
                 items={[
                   "Search matches what happened, who, a source address or an id.",
                   <>The <strong>Security</strong> filter shows events such as a client&rsquo;s typed credentials being viewed, a backup leaving the appliance, or a refused unlicensed-mode attempt.</>,
-                  `Each request reads up to ${LIMIT} entries for the chosen period. Choose a shorter period or a category to see more.`,
+                  "The whole period is searched and counted, newest first, a page at a time.",
                 ]}
               />
             </HelpSection>
@@ -205,9 +217,9 @@ export default function ActivityPage() {
           </>
         }
         actions={
-          <Button variant="secondary" onClick={load} disabled={busy}>
-            <RefreshCw className={cn(busy && "animate-spin motion-reduce:animate-none")} />
-            {busy ? "Reading…" : "Refresh"}
+          <Button variant="secondary" onClick={refresh} disabled={loading}>
+            <RefreshCw className={cn(loading && "animate-spin motion-reduce:animate-none")} />
+            {loading ? "Reading…" : "Refresh"}
           </Button>
         }
       />
@@ -222,12 +234,16 @@ export default function ActivityPage() {
             label="Search the activity trail"
             placeholder="Search — what happened, who, an address, an id"
             className="sm:w-96"
+            delay={300}
           />
           <Select
             aria-label="Period"
             className="h-9 w-full sm:w-44"
             value={range.label}
-            onChange={(e) => setRange(RANGES.find((x) => x.label === e.target.value) ?? RANGES[2])}
+            onChange={(e) => {
+              setRange(RANGES.find((x) => x.label === e.target.value) ?? RANGES[2]);
+              setAnchor(Date.now());
+            }}
           >
             {RANGES.map((r) => <option key={r.label}>{r.label}</option>)}
           </Select>
@@ -239,26 +255,19 @@ export default function ActivityPage() {
         <CardHeader>
           <div className="space-y-0.5">
             <CardTitle>
-              {visible === null ? "Activity" : `${visible.length.toLocaleString()} ${visible.length === 1 ? "entry" : "entries"}`}
+              {rows === null || total === null ? "Activity" : `${total.toLocaleString()} ${total === 1 ? "entry" : "entries"}`}
             </CardTitle>
-            <CardDescription>{range.label} · up to {LIMIT} entries per request</CardDescription>
+            <CardDescription>{range.label} · newest first</CardDescription>
           </div>
         </CardHeader>
 
-        {rows && rows.length >= LIMIT && (
-          <Callout tone="info" className="m-4 mb-0">
-            Only the first {LIMIT} entries for this period are shown. Choose a shorter period or a category to see
-            the rest.
-          </Callout>
-        )}
-
-        <div className={cn(busy && rows && refreshingClass)}>
-          {visible === null ? (
+        <div className={cn(loading && rows && refreshingClass)}>
+          {rows === null ? (
             err ? (
               <EmptyState icon={<ScrollText />} title="The activity trail could not be read"
                 hint="It appears here once the appliance answers." />
             ) : <SkeletonRows rows={6} cols={3} />
-          ) : visible.length === 0 ? (
+          ) : rows.length === 0 ? (
             filtered ? (
               <EmptyState icon={<ScrollText />} title="Nothing matches"
                 hint="No recorded activity fits these filters. Widen the period or clear the search."
@@ -269,7 +278,7 @@ export default function ActivityPage() {
             )
           ) : (
             <ul className="divide-y divide-border">
-              {visible.map((r, i) => {
+              {rows.map((r, i) => {
                 const w = auditWords(r.action);
                 const id = `${r.ts}-${i}`;
                 const isOpen = open === id;
@@ -338,6 +347,18 @@ export default function ActivityPage() {
             </ul>
           )}
         </div>
+        {rows && rows.length > 0 && (
+          <div className="border-t border-border px-4 py-3 sm:px-5">
+            <Pagination
+              offset={list.offset}
+              limit={list.pageSize}
+              shown={rows.length}
+              total={total}
+              hasMore={list.hasMore}
+              onChange={(o) => { setOpen(null); list.setOffset(o); }}
+            />
+          </div>
+        )}
       </Card>
     </PageShell>
   );
