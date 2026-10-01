@@ -66,3 +66,6 @@ __pycache__/
 /netd
 /acctd
 *.exe
+
+# Local Claude Code state (agent worktrees, local settings) — never part of the delivery.
+.claude/
