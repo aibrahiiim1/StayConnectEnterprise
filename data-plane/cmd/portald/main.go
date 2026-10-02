@@ -62,6 +62,11 @@ type handler struct {
 	tmplLand *template.Template
 	tmplSucc *template.Template
 	arpCache arpLookup
+	// arpNudge asks the kernel to resolve a neighbour the cache does not have yet (arp_resolve.go). A seam, so
+	// a test can drive resolution without a network.
+	arpNudge arpNudge
+	// arpSleep is the resolver's own wait, kept off the budget's clock so the budget still has exactly one pad.
+	arpSleep arpSleep
 
 	// Phase 2 DARK commerce bridge. commerceCfg gates whether the guest commerce routes are mounted, and
 	// commerceSessions -- which holds the trusted server-derived pins -- is NIL unless that same gate is on.
@@ -105,6 +110,7 @@ func newHandler(c cfg) (*handler, error) {
 		tmplLand:    tland,
 		tmplSucc:    tsucc,
 		arpCache:    defaultArp,
+		arpNudge:    defaultArpNudge,
 		commerceCfg: commCfg,
 		designs:     &designCache{},
 	}

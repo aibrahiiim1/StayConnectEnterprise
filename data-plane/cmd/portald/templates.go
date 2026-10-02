@@ -1368,6 +1368,24 @@ const landingHTML = `<!doctype html>
       errEl.textContent = PHASE3_FAIL();
     }
 
+    // phase3ClearFailure takes the page OUT of its failure state, including the countdown that writes to the
+    // message element on a timer.
+    //
+    // THE DEFECT THIS CLOSES. A refusal that carried a wait started an interval which rewrites errEl every
+    // second and re-disables the submit button. Clearing the text at the start of the next submission was not
+    // enough: the interval was still running and simply wrote its sentence back over the cleared element, so a
+    // guest whose NEXT attempt was verified could sit looking at a refusal -- with their package choices
+    // rendered underneath it -- while the server had already let them in. Nothing re-enabled the button either.
+    // Cancelling the timer is what makes a success actually look like one.
+    function phase3ClearFailure(errEl) {
+      if (PHASE3_WAIT_TIMER) { clearInterval(PHASE3_WAIT_TIMER); PHASE3_WAIT_TIMER = 0; }
+      PHASE3_WAIT_UNTIL = 0;
+      if (errEl) { errEl.textContent = ''; errEl.classList.remove('err--ok'); }
+      const form = document.getElementById('form-pms');
+      const btn = form ? form.querySelector('button[type=submit]') : null;
+      if (btn) btn.disabled = false;
+    }
+
     async function submitPhase3(body, errEl) {
       let j = {};
       try {
@@ -1377,15 +1395,18 @@ const landingHTML = `<!doctype html>
         j = await r.json().catch(function(){ return {}; });
       } catch (e) { j = {}; }
       if (j.ok && j.session_id) {
+        phase3ClearFailure(errEl);
         window.location = (j.redirect_to || '/success') + '?s=' + encodeURIComponent(j.session_id);
         return true;
       }
       // A PAID choice (room charge or card): go to the provider's page or to the confirmation page.
       if (j.ok && j.redirect_to && !j.needs_choice) {
+        phase3ClearFailure(errEl);
         window.location = j.redirect_to;
         return true;
       }
       if (j.ok && j.needs_choice) {
+        phase3ClearFailure(errEl);
         PMS_AUTH_CONTEXT = j.auth_context_id || '';
         renderPhase3Choices(j.choices || [], errEl);
         return true;

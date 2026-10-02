@@ -254,7 +254,21 @@ func (p *phase3Auth) device(ctx context.Context, d wireDevice) (deviceIdentity, 
 	if ip == nil || ip.To4() == nil {
 		return out, fmt.Errorf("%w: no usable source address", errDeviceUnreadable)
 	}
-	mac, err := net.ParseMAC(strings.TrimSpace(d.MAC))
+	// A HARDWARE ADDRESS THE APPLIANCE COULD NOT ESTABLISH IS A PLACEMENT FAILURE, NOT A MALFORMED SUBMISSION.
+	//
+	// The distinction decides what the guest is told. MalformedSubmission is a CREDENTIAL class, so classifying
+	// this as unreadable would answer "the room number or guest detail you entered is incorrect" to someone
+	// whose typing was never the problem -- sending them round a loop nothing they type can end.
+	// RoutingOrInterfaceFailure is TECHNICAL, and its documented meaning is exactly this: the request could not
+	// be routed because the appliance could not place the source device.
+	//
+	// An EMPTY address means the caller (portald) asked the kernel and the kernel could not answer. A non-empty
+	// but unparseable one means a client sent something broken, which is genuinely a malformed submission.
+	raw := strings.TrimSpace(d.MAC)
+	if raw == "" {
+		return out, fmt.Errorf("%w: the source device's hardware address could not be established", errDeviceUnrouted)
+	}
+	mac, err := net.ParseMAC(raw)
 	if err != nil {
 		return out, fmt.Errorf("%w: no usable hardware address", errDeviceUnreadable)
 	}
@@ -357,6 +371,17 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 		at.Result = signinattempt.MalformedSubmission
 		notVerified(w, at.Result, "malformed_request")
 		return
+	}
+	// THE SOURCE ADDRESS IS RECORDED BEFORE IT IS JUDGED. at.DeviceIP used to be set only after device()
+	// SUCCEEDED, so the refusals that need it most -- a device on no mapped guest network, a hardware address the
+	// appliance could not establish -- were recorded with no address at all, and an operator reading the sign-in
+	// attempt log had a refusal they could not attach to anything. Parsed rather than copied, so nothing a caller
+	// sent lands in the record unexamined.
+	if parsed := net.ParseIP(strings.TrimSpace(req.Device.IP)); parsed != nil {
+		at.DeviceIP = parsed.String()
+	}
+	if parsedMAC, perr := net.ParseMAC(strings.TrimSpace(req.Device.MAC)); perr == nil {
+		at.DeviceMAC = signinattempt.NormalizeMAC(parsedMAC)
 	}
 	dev, err := p.device(ctx, req.Device)
 	if err != nil {
