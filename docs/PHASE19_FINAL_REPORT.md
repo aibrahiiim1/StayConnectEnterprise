@@ -47,7 +47,8 @@ verified present.
 `GET /interfaces`, `PATCH /interfaces/{name}/role`;
 `GET|POST /guest-networks`, `GET|PUT|DELETE /guest-networks/{id}`,
 `POST /guest-networks/{id}/disable`, `GET /guest-networks/{id}/status`;
-`POST /validate`, `POST /apply`, `POST /adopt`;
+`POST /validate`, `POST /apply`, `POST /adopt`;  <!-- /adopt was retired on 2026-10-02; see
+docs/API_DEPRECATIONS.md §3. This inventory is left as the record of what Phase 19 shipped. -->
 `GET /dhcp/leases`, `GET|POST /dhcp/reservations`, `PUT|DELETE /dhcp/reservations/{id}`;
 `GET /revisions`, `GET /revisions/{id}`, `POST /revisions/{id}/confirm`,
 `POST /revisions/{id}/rollback`.

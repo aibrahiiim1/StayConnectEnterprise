@@ -46,9 +46,13 @@ func (s *server) networkRoutes() http.Handler {
 	r.Get("/guest-networks/{id}/status", s.guestNetworkStatus)
 
 	// validate / apply operate on the whole intent (all networks) via netd.
+	//
+	// THERE IS NO "ADOPT". A POST /network/adopt used to declare the editable guest_networks rows to be the
+	// ACTIVE revision without applying them, without validating them, and without a single check that the live
+	// Linux network matched -- see cmd/netd/store.go markActive for what that cost. It is retired: a client
+	// network configuration becomes active by being applied, health-checked and confirmed, and by no other route.
 	r.Post("/validate", s.netValidate)
 	r.Post("/apply", s.netApply)
-	r.Post("/adopt", s.netAdopt)
 
 	// system (WAN/LAN) network — the appliance's own base networking. GET =
 	// network.view; POST = network.change/apply/rollback (permWrite). Apply and
@@ -503,7 +507,7 @@ func (s *server) guestNetworkStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ---- validate / apply / adopt (proxy to netd) ----
+// ---- validate / apply (proxy to netd) ----
 
 func (s *server) netValidate(w http.ResponseWriter, r *http.Request) {
 	s.netd.proxy(w, r, http.MethodPost, "/v1/validate", map[string]string{"actor": s.actor(r), "summary": "validate"})
@@ -678,11 +682,6 @@ func (s *server) netApply(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(st)
 	_, _ = w.Write(raw)
-}
-
-func (s *server) netAdopt(w http.ResponseWriter, r *http.Request) {
-	s.audit(r, "network.adopt", "network", "", nil)
-	s.netd.proxy(w, r, http.MethodPost, "/v1/adopt", map[string]string{"actor": s.actor(r), "summary": "adopt current"})
 }
 
 // ---- DHCP ----

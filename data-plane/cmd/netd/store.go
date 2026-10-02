@@ -266,33 +266,41 @@ func (s *store) MarkPending(ctx context.Context, id string, deadline any) error 
 
 var errNotPending = errors.New("revision is not pending confirmation")
 
-// MarkActive confirms a revision. When requirePending is true it refuses to
-// activate a revision that is not currently pending_confirmation (so a
-// rolled-back/failed revision can never be forced active by a stray confirm).
+// MarkActive confirms a revision, and IS THE ONLY WAY A REVISION BECOMES ACTIVE.
+//
+// It refuses anything that is not currently pending_confirmation, which can only be reached by an apply that
+// rendered the configuration, put it on the wire and passed its health checks. That is the whole provenance
+// guarantee of this subsystem: the active revision is, by construction, one the appliance has actually applied
+// and verified -- which matters because netd's boot reconcile treats the active revision's intent as the truth
+// about what this appliance is supposed to be forwarding.
+//
+// THERE USED TO BE A SECOND WAY IN, and it had none of that. markActiveAdopt took a `requirePending=false`
+// variant of this function for POST /v1/adopt, which read the EDITABLE guest_networks rows -- the rows the Hotel
+// Admin UI writes directly, which may hold a draft nobody has applied -- created a revision from them, and
+// declared it active. No ValidateSet, no apply, no health check, no confirmation window, and not one check that
+// the live Linux network resembled what it had just recorded as live. An unapplied edit could therefore become
+// the appliance's definition of reality at the next reboot, with no apply record and nothing to roll back to.
+//
+// It was reachable only by calling the API directly: no screen, script, runbook, test or capability contract
+// referenced it, and across the whole life of the only appliance it had been used zero times (no revision with
+// an adopt summary, no network.adopt audit entry). It also could not be made honest: proving that the live
+// network matches an intent means inspecting bridges, addressing, nftables, Kea and DNS and reacting when they
+// differ, which is precisely what apply and its health checks do. An adopt that proves all of that IS an apply;
+// one that proves none of it is the defect. So it is retired, the parameter is gone, and the invariant is
+// structural rather than a flag a future caller could pass as false.
 func (s *store) MarkActive(ctx context.Context, id, confirmedBy string) error {
-	return s.markActive(ctx, id, confirmedBy, true)
-}
-
-// markActiveAdopt is the internal path used by adopt (no pending gate).
-func (s *store) markActiveAdopt(ctx context.Context, id, confirmedBy string) error {
-	return s.markActive(ctx, id, confirmedBy, false)
-}
-
-func (s *store) markActive(ctx context.Context, id, confirmedBy string, requirePending bool) error {
 	by := uuidOrNil(confirmedBy)
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if requirePending {
-		var state string
-		if err := tx.QueryRow(ctx, `SELECT state FROM network_config_revisions WHERE id=$1 FOR UPDATE`, id).Scan(&state); err != nil {
-			return err
-		}
-		if state != "pending_confirmation" {
-			return errNotPending
-		}
+	var state string
+	if err := tx.QueryRow(ctx, `SELECT state FROM network_config_revisions WHERE id=$1 FOR UPDATE`, id).Scan(&state); err != nil {
+		return err
+	}
+	if state != "pending_confirmation" {
+		return errNotPending
 	}
 	// supersede the previous active revision
 	if _, err := tx.Exec(ctx, `UPDATE network_config_revisions SET state='superseded' WHERE state='active' AND id<>$1`, id); err != nil {
