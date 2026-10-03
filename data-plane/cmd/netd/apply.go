@@ -64,6 +64,31 @@ type applier struct {
 	// revStateFn answers "what state is this revision in", which is what decides whether an
 	// OPERATOR-requested rollback has a target at all. See Rollback.
 	revStateFn func(ctx context.Context, id string) (string, error)
+	// liveBridgesFn answers which guest bridges exist right now (default: /sys/class/net). A seam so a test
+	// can state that a bridge the previous revision needs has been destroyed.
+	liveBridgesFn func() map[string]bool
+	// addrsFn answers which IPv4 CIDRs an interface carries right now (default: ip -o -4 addr show). A seam so
+	// a test can state that a live bridge still carries the addressing a revision has just changed.
+	addrsFn func(name string) []string
+	// memberFn answers which interface is enslaved to a bridge right now (default: /sys/class/net/<br>/brif). A
+	// seam so the "this bridge is attached to the wrong VLAN" refusal can be exercised without a kernel.
+	memberFn func(bridge string) string
+}
+
+// bridgeMemberOf is the bridge-membership seam with its default.
+func (a *applier) bridgeMemberOf(bridge string) string {
+	if a.memberFn != nil {
+		return a.memberFn(bridge)
+	}
+	return bridgeMember(bridge)
+}
+
+// ifaceAddrsOf is the address seam with its default.
+func (a *applier) ifaceAddrsOf(name string) []string {
+	if a.addrsFn != nil {
+		return a.addrsFn(name)
+	}
+	return ifaceAddrs(name)
 }
 
 // revisionState is the state seam for the operator rollback guard.
@@ -195,8 +220,18 @@ func (a *applier) Apply(ctx context.Context, summary, actor string) (*applyResul
 		}
 	}
 
-	deadline := time.Now().Add(a.confirmWindow)
-	if err := a.st.MarkApplying(ctx, id, bundle, actor, deadline); err != nil {
+	// THE CONFIRMATION WINDOW STARTS WHEN THE APPLY FINISHES, NOT WHEN IT BEGINS.
+	//
+	// This deadline used to be computed here and then handed to MarkPending unchanged, so the window was spent
+	// by applyBundle itself: waitBridgesRunning (up to 5s per bridge), the Kea socket wait (up to 20s), two
+	// systemctl restarts (20s each), netplan generate and the nft converge. On a factory-clean appliance
+	// bringing up several VLANs that plausibly exceeds the whole 120 seconds -- and MarkPending then wrote an
+	// ALREADY-PAST deadline, so the watchdog rolled the change back within five seconds of the operator seeing
+	// "applied", and their confirm came back 409. A correct change, torn down, with no way to keep it.
+	//
+	// MarkApplying still gets a deadline (it is what lets the watchdog reclaim an apply that died mid-flight);
+	// the operator's window is measured from the moment there is something to confirm.
+	if err := a.st.MarkApplying(ctx, id, bundle, actor, time.Now().Add(a.confirmWindow)); err != nil {
 		return nil, err
 	}
 	a.st.Event(ctx, id, "apply", true, map[string]any{"started": true})
@@ -223,7 +258,7 @@ func (a *applier) Apply(ctx context.Context, summary, actor string) (*applyResul
 	}
 
 	// Enter pending_confirmation; the watchdog will roll back if unconfirmed.
-	if err := a.st.MarkPending(ctx, id, deadline); err != nil {
+	if err := a.st.MarkPending(ctx, id, time.Now().Add(a.confirmWindow)); err != nil {
 		return nil, err
 	}
 	out.State = "pending_confirmation"

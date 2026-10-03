@@ -89,6 +89,19 @@ type CommerceTx interface {
 	// the choice that would be refused.
 	VoucherPinnedPackageRevision(ctx context.Context, tenantID, siteID, voucherID string) (string, error)
 	LoadGrantTiers(ctx context.Context, packageRevisionID string) ([]GrantTier, error)
+	// GuestNetworkAncestors returns the client networks the device's network is the continuation of, from
+	// iam_v2.guest_network_lineage (0106).
+	//
+	// WHY IT EXISTS. A package revision is immutable and names client networks by id. Replacing a client
+	// network — a VLAN id, a port, a subnet — gives it a NEW id, so every SITE_NETWORK rule in every EXISTING
+	// revision stopped matching the guests on that very network the moment the cable moved. For the CURRENT
+	// revision a forward republish fixes it; for a PINNED one it cannot. An unused printed voucher redeems its
+	// pinned revision directly and deliberately, so a cabling change made valid cards unredeemable with no
+	// explanation anyone could see. Lineage is what makes the successor the same LOGICAL network.
+	//
+	// Empty is the normal answer. A read failure is an error, never an empty slice: silently losing the lineage
+	// would silently narrow eligibility, which is the defect this closes.
+	GuestNetworkAncestors(ctx context.Context, tenantID, siteID, guestNetworkID string) ([]string, error)
 	HasPriorPurchase(ctx context.Context, tenantID, siteID, packageRevisionID string, subj CommerceSubject) (bool, error)
 	InsertOfferQuote(ctx context.Context, q OfferQuoteSpec) (string, error)
 

@@ -854,7 +854,6 @@ function NetworksTab({ routes }: { routes: PmsGuestNetworkRoute[] | null }) {
               <Router className="size-4 shrink-0 text-muted-foreground" aria-hidden />
               <span className="font-medium">{r.guest_network_name || "Unnamed network"}</span>
               {r.is_default && <Badge tone="info">Site default</Badge>}
-              {r.routing_mode === "ALL_ACTIVE_INTERFACES" && <Badge tone="neutral">Checks every active connection</Badge>}
             </li>
           ))}
         </ul>

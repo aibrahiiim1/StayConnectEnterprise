@@ -131,7 +131,15 @@ func (e *CommerceEngine) CreateQuote(ctx context.Context, req QuoteRequest) (Quo
 			return err
 		}
 
-		subj := EligibilitySubject{Now: now, AuthMethod: ac.Method, Kind: ac.Subject.Kind, GuestNetworkID: ac.GuestNetworkID}
+		// ...AND THE CLIENT NETWORKS THIS ONE CONTINUES. A rule naming a network that was safely replaced for
+		// VLAN/port/addressing reasons is satisfied by a device on its successor; without this an UNUSED PRINTED
+		// VOUCHER, which redeems its pinned immutable revision directly, died the moment a cable moved.
+		ancestors, aerr := tx.GuestNetworkAncestors(ctx, req.TenantID, req.SiteID, ac.GuestNetworkID)
+		if aerr != nil {
+			return aerr
+		}
+		subj := EligibilitySubject{Now: now, AuthMethod: ac.Method, Kind: ac.Subject.Kind,
+			GuestNetworkID: ac.GuestNetworkID, GuestNetworkLineage: ancestors}
 		prior, err := tx.HasPriorPurchase(ctx, req.TenantID, req.SiteID, pkg.ID, ac.Subject)
 		if err != nil {
 			return err

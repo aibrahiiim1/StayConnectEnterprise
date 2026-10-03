@@ -1254,6 +1254,20 @@ const landingHTML = `<!doctype html>
     ROOM_MESSAGES[BUILTIN.en['err.room.devices']] = 'err.room.devices';
     ROOM_MESSAGES[BUILTIN.en['err.capacity']] = 'err.capacity';
     ROOM_MESSAGES[BUILTIN.en['err.method.disabled']] = 'err.method.disabled';
+    // PHASE3_UNREACHED is the answer when there was no answer: the fetch threw, or the body was not JSON, so
+    // the server never spoke. It is NOT the credential sentence.
+    //
+    // PRODUCT DECISION. The page used to render one sentence for everything that was not a success, including a
+    // request that never arrived -- so a guest whose phone had dropped off the Wi-Fi was told to re-check their
+    // room number and family name. They would check them, be right, and be told the same thing again. The
+    // anti-enumeration argument for a uniform answer does not reach this case: with no server response there is
+    // nothing about this guest, this room or this property to leak, and the outcome is identical for everyone in
+    // the building at that moment whatever they typed.
+    //
+    // err.service is an existing, already-translated, OPERATOR-EDITABLE string ("Something went wrong. Please
+    // try again."), so the hotel can reword it in Portal Settings without a release.
+    function PHASE3_UNREACHED() { return t('err.service'); }
+
     function phase3Message(j) {
       if (!(j && typeof j.message === 'string' && j.message)) return PHASE3_FAIL();
       const m = j.message;
@@ -1338,12 +1352,13 @@ const landingHTML = `<!doctype html>
 
     async function submitPostStay(pin, errEl) {
       let j = {};
+      let reached = true;
       try {
         const r = await fetch('/auth/post-stay-pin', {
           method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pin: pin })
         });
-        j = await r.json().catch(function(){ return {}; });
-      } catch (e) { j = {}; }
+        j = await r.json().catch(function(){ reached = false; return {}; });
+      } catch (e) { reached = false; j = {}; }
       if (j.ok && j.session_id) {
         window.location = (j.redirect_to || '/success') + '?s=' + encodeURIComponent(j.session_id);
         return;
@@ -1363,29 +1378,52 @@ const landingHTML = `<!doctype html>
           return;
         }
       }
-      // Every other answer is the same message -- wrong PIN, expired, revoked, locked out, the room re-let,
-      // or post-stay not being offered here at all.
-      errEl.textContent = PHASE3_FAIL();
+      // Every other ANSWER is the same message -- wrong PIN, expired, revoked, locked out, the room re-let, or
+      // post-stay not being offered here at all. A request that never reached the server is not an answer, and
+      // telling a guest whose connection dropped to re-check a PIN they typed correctly helps nobody.
+      errEl.textContent = reached ? PHASE3_FAIL() : PHASE3_UNREACHED();
+    }
+
+    // phase3ClearFailure takes the page OUT of its failure state, including the countdown that writes to the
+    // message element on a timer.
+    //
+    // THE DEFECT THIS CLOSES. A refusal that carried a wait started an interval which rewrites errEl every
+    // second and re-disables the submit button. Clearing the text at the start of the next submission was not
+    // enough: the interval was still running and simply wrote its sentence back over the cleared element, so a
+    // guest whose NEXT attempt was verified could sit looking at a refusal -- with their package choices
+    // rendered underneath it -- while the server had already let them in. Nothing re-enabled the button either.
+    // Cancelling the timer is what makes a success actually look like one.
+    function phase3ClearFailure(errEl) {
+      if (PHASE3_WAIT_TIMER) { clearInterval(PHASE3_WAIT_TIMER); PHASE3_WAIT_TIMER = 0; }
+      PHASE3_WAIT_UNTIL = 0;
+      if (errEl) { errEl.textContent = ''; errEl.classList.remove('err--ok'); }
+      const form = document.getElementById('form-pms');
+      const btn = form ? form.querySelector('button[type=submit]') : null;
+      if (btn) btn.disabled = false;
     }
 
     async function submitPhase3(body, errEl) {
       let j = {};
+      let reached = true;
       try {
         const r = await fetch('/auth/pms/phase3', {
           method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
         });
-        j = await r.json().catch(function(){ return {}; });
-      } catch (e) { j = {}; }
+        j = await r.json().catch(function(){ reached = false; return {}; });
+      } catch (e) { reached = false; j = {}; }
       if (j.ok && j.session_id) {
+        phase3ClearFailure(errEl);
         window.location = (j.redirect_to || '/success') + '?s=' + encodeURIComponent(j.session_id);
         return true;
       }
       // A PAID choice (room charge or card): go to the provider's page or to the confirmation page.
       if (j.ok && j.redirect_to && !j.needs_choice) {
+        phase3ClearFailure(errEl);
         window.location = j.redirect_to;
         return true;
       }
       if (j.ok && j.needs_choice) {
+        phase3ClearFailure(errEl);
         PMS_AUTH_CONTEXT = j.auth_context_id || '';
         renderPhase3Choices(j.choices || [], errEl);
         return true;
@@ -1394,7 +1432,7 @@ const landingHTML = `<!doctype html>
       // NOTHING ABOUT THE FAILED ATTEMPT IS CARRIED FORWARD: the next tap mints its own id and is evaluated on
       // its own evidence. retry_after_seconds is present on exactly one answer — the restricted one — and it is
       // the SERVER's remaining time; phase3Countdown renders it shrinking and decides nothing.
-      phase3Countdown(errEl, phase3Message(j), j.retry_after_seconds || 0);
+      phase3Countdown(errEl, reached ? phase3Message(j) : PHASE3_UNREACHED(), j.retry_after_seconds || 0);
       return false;
     }
 

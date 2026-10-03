@@ -105,7 +105,10 @@ func (h *handler) authOTPVerify(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "bad ip")
 		return
 	}
-	mac, ok := h.arpCache(ip)
+	// The hardware address comes from the kernel's neighbour table, never from the client, and the kernel is
+	// ASKED to resolve it rather than only consulted (arp_resolve.go): a cold cache is not evidence that a
+	// device is off the guest network. Same mechanism, same guarantee, on every sign-in path.
+	mac, ok := h.deviceMAC(r.Context(), ip)
 	if !ok {
 		jsonErr(w, 400, "device not on this Wi-Fi network")
 		return

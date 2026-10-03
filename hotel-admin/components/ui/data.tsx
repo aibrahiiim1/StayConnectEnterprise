@@ -184,6 +184,7 @@ export function Pagination({
   limit,
   shown,
   total,
+  hasMore,
   onChange,
   className,
 }: {
@@ -192,12 +193,14 @@ export function Pagination({
   /** How many rows the current page actually holds. */
   shown: number;
   total?: number | null;
+  /** The server's meta.has_more, for a list it pages. Decides "Next" where no total is known. */
+  hasMore?: boolean;
   onChange: (offset: number) => void;
   className?: string;
 }) {
   const from = shown === 0 ? 0 : offset + 1;
   const to = offset + shown;
-  const hasNext = total != null ? to < total : shown >= limit;
+  const hasNext = total != null ? to < total : hasMore ?? shown >= limit;
   return (
     <div className={cn("flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground", className)}>
       <span className="tabular">

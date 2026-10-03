@@ -51,7 +51,18 @@ async function installBackend(
 
     if (path.startsWith("/pms-stays/")) return route.fulfill(json(200, opts.stayDetail ?? {}));
     if (path.startsWith("/pms-stays")) return route.fulfill(json(200, list(opts.stays ?? [])));
-    if (path.startsWith("/pms-events")) return route.fulfill(json(200, list(opts.events ?? [])));
+    if (path.startsWith("/pms-events")) {
+      // edged pages this list and counts every message for the tiles; the mock answers the same shape.
+      const ev = (opts.events ?? []) as { processing_status?: string; stay_id?: string; received_at?: string }[];
+      const n = (s: string) => ev.filter((e) => e.processing_status === s).length;
+      return route.fulfill(json(200, {
+        data: ev, meta: { has_more: false }, page: 1, page_size: 50, total: ev.length,
+        summary: {
+          applied: n("APPLIED"), pending: n("PENDING"), manual_review: n("MANUAL_REVIEW"), rejected: n("REJECTED"),
+          unmatched: ev.filter((e) => !e.stay_id).length, newest_received_at: ev[0]?.received_at,
+        },
+      }));
+    }
     if (path.startsWith("/operational-alerts") && method === "POST") {
       const st = opts.alertActionStatus ?? 200;
       if (st === 409) return route.fulfill(json(409, { error: "state_conflict", message: "the alert action was refused" }));

@@ -248,6 +248,10 @@ func newTestApplier(t *testing.T, k *fakeKernel) *applier {
 		generatedDir: t.TempDir(),
 		runFn:        k.run,
 		outFn:        k.output,
+		// Reading which guest bridges exist is FAIL-CLOSED in production: an unreadable /sys/class/net is an
+		// error, not "there are no guest bridges". These tests do not run on an appliance, so the seam answers
+		// for the kernel; cases that care about specific bridges override it.
+		liveBridgesFn: func() map[string]bool { return map[string]bool{} },
 	}
 }
 

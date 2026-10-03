@@ -191,7 +191,7 @@ describe("New client network", () => {
     });
     render(<NewGuestNetworkPage />);
     expect(await screen.findByText("Step 1 of 7 ·")).toBeTruthy();
-    for (const s of ["Identity", "Interface / VLAN", "Subnet & gateway", "DHCP & DNS", "Captive portal", "Review", "Apply"]) {
+    for (const s of ["Identity", "Port & VLANs", "Addressing", "DHCP & DNS", "Captive portal", "Review", "Apply"]) {
       expect(screen.getAllByText(s).length).toBeGreaterThan(0);
     }
     fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "Pool WiFi" } });

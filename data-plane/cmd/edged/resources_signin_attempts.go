@@ -24,7 +24,6 @@ package main
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -87,37 +86,125 @@ func (s *server) signInCredentialsRoutes() http.Handler {
 	return r
 }
 
+// THE ATTEMPTS LIST IS PAGED, AND ITS SEARCH RUNS ON THE SERVER.
+//
+// It used to be the newest 200 attempts with a search box that filtered only those, so on a busy night an
+// attempt from earlier in the period could not be found. The search text travels in X-Signin-Search, never the
+// URL: edged logs request lines, and the box is where somebody types a room number.
+const signInSearchHeader = "X-Signin-Search"
+
+// signInAttemptFilter is the WHERE clause the page, its total and its tiles share. $1 tenant, $2 site, $3 room,
+// $4 result, $5 network, $6 credential type, $7 from, $8 to.
+const signInAttemptFilter = `WHERE a.tenant_id=$1 AND a.site_id=$2
+		   AND ($3 = '' OR a.submitted_room = $3)
+		   AND ($4 = '' OR a.result = $4)
+		   AND ($5 = '' OR a.guest_network_name = $5)
+		   AND ($6 = '' OR a.verifier_kind = $6)
+		   AND ($7::timestamptz IS NULL OR a.occurred_at >= $7::timestamptz)
+		   AND ($8::timestamptz IS NULL OR a.occurred_at <= $8::timestamptz)`
+
+// signInSearchMatch is the search. $9 the ILIKE pattern (NULL for no search), $10 the result codes whose
+// plain-language reason contains the search text -- the reason is what the operator reads, so it is what they
+// type, and it lives in the Go map beside the codes.
+const signInSearchMatch = `($9::text IS NULL
+		   OR a.submitted_room ILIKE $9 OR a.guest_network_name ILIKE $9 OR a.result ILIKE $9
+		   OR host(a.device_ip) ILIKE $9 OR a.device_mac::text ILIKE $9 OR a.request_id::text ILIKE $9
+		   OR a.result = ANY($10))`
+
+// The tiles' groupings. The same codes the screen counted when it counted in the browser.
+var (
+	signInMismatchResults = []string{"CREDENTIAL_MISMATCH", "ROOM_NOT_IN_MIRROR"}
+	signInSystemicResults = []string{"MIRROR_STALE_OR_MISSING_CHANGE", "ROUTING_OR_INTERFACE_FAILURE", "SERVICE_UNAVAILABLE"}
+)
+
+func signInSucceededResults() []string {
+	out := []string{}
+	for _, r := range signinattempt.AllResults {
+		if r.Succeeded() {
+			out = append(out, string(r))
+		}
+	}
+	return out
+}
+
+// signInResultsLabelled returns the result codes whose reason contains q, case-insensitively.
+func signInResultsLabelled(q string) []string {
+	out := []string{}
+	if q == "" {
+		return out
+	}
+	q = strings.ToLower(q)
+	for _, r := range signinattempt.AllResults {
+		if strings.Contains(strings.ToLower(r.Label()), q) {
+			out = append(out, string(r))
+		}
+	}
+	return out
+}
+
+// signInAttemptsSummary counts every attempt the filters select -- the period, room, result, network and type --
+// not the page and not the search, so the tiles describe the question the operator asked of the server.
+type signInAttemptsSummary struct {
+	Total    int `json:"total"`
+	Failed   int `json:"failed"`
+	Mismatch int `json:"mismatch"`
+	Systemic int `json:"systemic"`
+}
+
+type signInAttemptsPage struct {
+	pagedList[signInAttemptRow]
+	Summary signInAttemptsSummary `json:"summary"`
+}
+
 func (s *server) listSignInAttempts(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	// ?limit= still sizes the page for an older client, up to the 500 it always allowed.
+	pg, ok := readPage(w, r, 500)
+	if !ok {
+		return
+	}
+	search, ok := readSearch(w, r, signInSearchHeader)
+	if !ok {
+		return
+	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 
-	q := r.URL.Query()
-	limit := 200
-	if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 && n <= 500 {
-		limit = n
-	}
 	// Filters are applied in SQL rather than in the browser: a desk looking for one room must not have to
 	// pull thirty days of rows to find it, and the empty-string default means "no filter" without a second
 	// query shape to keep correct.
+	args := []any{s.tenantID, s.siteID,
+		strings.ToUpper(strings.TrimSpace(q.Get("room"))), strings.TrimSpace(q.Get("result")),
+		strings.TrimSpace(q.Get("network")), strings.TrimSpace(q.Get("credential_type")),
+		nullableTime(q.Get("from")), nullableTime(q.Get("to")),
+		likePattern(search), signInResultsLabelled(search)}
+
+	var sum signInAttemptsSummary
+	var total int
+	if err := s.db.QueryRow(ctx, `SELECT count(*)::int,
+		       count(*) FILTER (WHERE a.result <> ALL($11))::int,
+		       count(*) FILTER (WHERE a.result = ANY($12))::int,
+		       count(*) FILTER (WHERE a.result = ANY($13))::int,
+		       count(*) FILTER (WHERE `+signInSearchMatch+`)::int
+		  FROM iam_v2.sign_in_attempts a
+		 `+signInAttemptFilter,
+		append(args, signInSucceededResults(), signInMismatchResults, signInSystemicResults)...).
+		Scan(&sum.Total, &sum.Failed, &sum.Mismatch, &sum.Systemic, &total); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+
 	rows, err := s.db.Query(ctx, `
 		SELECT a.id::text, a.occurred_at, COALESCE(a.submitted_room,''), COALESCE(a.guest_network_name,''),
 		       a.result, COALESCE(a.verifier_kind,''), a.mirror_age_seconds,
 		       COALESCE(a.pms_transport_status,''), COALESCE(host(a.device_ip),''),
 		       COALESCE(a.device_mac::text,''), COALESCE(a.request_id::text,''), a.latency_ms
 		  FROM iam_v2.sign_in_attempts a
-		 WHERE a.tenant_id=$1 AND a.site_id=$2
-		   AND ($3 = '' OR a.submitted_room = $3)
-		   AND ($4 = '' OR a.result = $4)
-		   AND ($5 = '' OR a.guest_network_name = $5)
-		   AND ($6 = '' OR a.verifier_kind = $6)
-		   AND ($7::timestamptz IS NULL OR a.occurred_at >= $7::timestamptz)
-		   AND ($8::timestamptz IS NULL OR a.occurred_at <= $8::timestamptz)
-		 ORDER BY a.occurred_at DESC
-		 LIMIT $9`,
-		s.tenantID, s.siteID,
-		strings.ToUpper(strings.TrimSpace(q.Get("room"))), strings.TrimSpace(q.Get("result")),
-		strings.TrimSpace(q.Get("network")), strings.TrimSpace(q.Get("credential_type")),
-		nullableTime(q.Get("from")), nullableTime(q.Get("to")), limit)
+		 `+signInAttemptFilter+`
+		   AND `+signInSearchMatch+`
+		 ORDER BY a.occurred_at DESC, a.id
+		 LIMIT $11 OFFSET $12`,
+		append(args, pg.Fetch(), pg.Offset())...)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
@@ -140,7 +227,12 @@ func (s *server) listSignInAttempts(w http.ResponseWriter, r *http.Request) {
 		e.Succeeded = signinattempt.Result(e.Result).Succeeded()
 		out = append(out, e)
 	}
-	writeList(w, out)
+	if err := rows.Err(); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	out, more := trimPage(out, pg)
+	writeJSON(w, http.StatusOK, signInAttemptsPage{pagedList: newPagedList(out, more, pg, &total), Summary: sum})
 }
 
 func (s *server) getSignInAttempt(w http.ResponseWriter, r *http.Request) {

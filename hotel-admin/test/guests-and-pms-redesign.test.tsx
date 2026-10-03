@@ -191,7 +191,7 @@ function wireAccounts(roles: string[]) {
   get.mockImplementation((raw: unknown) => {
     const path = pathOf(raw);
     if (path === "/auth/whoami") return Promise.resolve({ roles });
-    if (path === "/guest-accounts") return Promise.resolve({ data: [ACCOUNT], meta: { has_more: false } });
+    if (path === "/guest-accounts" || path.startsWith("/guest-accounts?")) return Promise.resolve({ data: [ACCOUNT], meta: { has_more: false } });
     if (path === "/guest-accounts/portal") return Promise.resolve({ enabled: true });
     return Promise.resolve({});
   });

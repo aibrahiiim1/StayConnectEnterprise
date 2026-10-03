@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { fakeAudit } from "./fake-paged";
 
 // THE SYSTEM SCREENS (Diagnostics, Alerts, Activity, Appliance & licence, Backups, Operators), redesigned.
 //
@@ -39,7 +40,9 @@ function routes(map: Record<string, unknown>, roles: string[]) {
   get.mockImplementation((path: string) => {
     if (path === "/auth/whoami") return Promise.resolve({ roles, operator_id: "me" });
     for (const [prefix, body] of Object.entries(map)) {
-      if (path === prefix || path.startsWith(prefix + "?")) return Promise.resolve(body);
+      if (path === prefix || path.startsWith(prefix + "?")) {
+        return Promise.resolve(typeof body === "function" ? body(path) : body);
+      }
     }
     return Promise.resolve({});
   });
@@ -111,12 +114,10 @@ describe("Alerts", () => {
 });
 
 describe("Activity", () => {
-  const ROWS = {
-    data: [
-      { ts: "2026-09-20T10:00:00Z", actor_type: "operator", actor_id: "op-1", action: "backup.downloaded", payload: { file: "db-1.sql.gz" } },
-      { ts: "2026-09-20T09:00:00Z", actor_type: "system", action: "health.recheck" },
-    ],
-  };
+  const ROWS = fakeAudit([
+    { ts: "2026-09-20T10:00:00Z", actor_type: "operator", actor_id: "op-1", action: "backup.downloaded", payload: { file: "db-1.sql.gz" } },
+    { ts: "2026-09-20T09:00:00Z", actor_type: "system", action: "health.recheck" },
+  ]);
 
   it("filters to security events with a count, and keeps the raw payload behind a disclosure", async () => {
     routes({ "/audit": ROWS, "/operators": { data: [{ id: "op-1", display_name: "Mona" }] } }, ["site_admin"]);

@@ -102,7 +102,12 @@ func seedGuestNetwork(t *testing.T, p *pgxpool.Pool, tenant, site, name, subnet 
 }
 
 type apiFixture struct {
-	srv      *httptest.Server
+	srv *httptest.Server
+	// app is the very server the routes are mounted on. Exposed so a test can drive an internal step directly
+	// -- materialising a staged client-network replacement, which the apply performs between the operator's
+	// request and netd -- and so it can supply a collaborator main.go would wire at startup, such as the scd
+	// unix-socket client the disconnect action must reach enforcement through.
+	app      *server
 	pool     *pgxpool.Pool
 	tenant   string
 	site     string
@@ -194,6 +199,7 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 	// rather than about the product.
 	s.commerceRepo = iamv2.NewPgCommerceAdminRepository(p)
 	// the Phase-3 admin surface is mounted explicitly below; this fixture exercises the routes themselves.
+	f.app = s
 	f.sessTok = s.sessions.create(&session{OperatorID: f.operator, Email: "op@test.local", Roles: roles})
 
 	r := chi.NewRouter()
@@ -227,6 +233,17 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 			mountResource(r, s, "financial-review", s.financialReviewRoutes)
 			// ...and the financial OPERATIONS surface, which shares that permission.
 			mountResource(r, s, "financial-ops", s.financialOpsRoutes)
+			// Client networks: create, batch create, replace and delete are site-database work in edged (only
+			// validate/apply/confirm/rollback reach netd), so they are exercised here against a real schema.
+			mountResource(r, s, "network", s.networkRoutes)
+			// Client accounts and the generated-password format (0104): paging, search, newest-first and the
+			// format setting are exercised through the real router, role matrix and database.
+			mountResource(r, s, "guest-accounts", s.guestAccountsRoutes)
+			mountResource(r, s, "account-password-settings", s.accountPasswordSettingsRoutes)
+			// The paged operator lists (paging_integration_test.go): the activity trail and the sessions
+			// list, through the real router and role matrix.
+			mountResource(r, s, "audit", s.auditRoutes)
+			mountResource(r, s, "sessions", s.sessionsRoutes)
 		})
 	})
 	f.srv = httptest.NewServer(r)

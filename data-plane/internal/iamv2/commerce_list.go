@@ -173,7 +173,13 @@ func (e *CommerceEngine) evalPackageForSubject(ctx context.Context, tx CommerceT
 		}
 		return GrantSnapshot{}, nil, false, err
 	}
-	subj := EligibilitySubject{Now: now, AuthMethod: ac.Method, Kind: ac.Subject.Kind, GuestNetworkID: ac.GuestNetworkID}
+	// ...and the client networks this one continues (0106), so a replaced network keeps its logical identity.
+	ancestors, aerr := tx.GuestNetworkAncestors(ctx, req.TenantID, req.SiteID, ac.GuestNetworkID)
+	if aerr != nil {
+		return GrantSnapshot{}, nil, false, aerr
+	}
+	subj := EligibilitySubject{Now: now, AuthMethod: ac.Method, Kind: ac.Subject.Kind,
+		GuestNetworkID: ac.GuestNetworkID, GuestNetworkLineage: ancestors}
 	// rules / tiers / prior-purpose are keyed on the RESOLVED package revision id (pkg.ID), exactly as
 	// CreateQuote does — not the package id.
 	prior, err := tx.HasPriorPurchase(ctx, req.TenantID, req.SiteID, pkg.ID, ac.Subject)
