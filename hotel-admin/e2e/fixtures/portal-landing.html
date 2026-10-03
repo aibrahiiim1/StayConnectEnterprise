@@ -1861,6 +1861,20 @@ main.card { display: block; }
     ROOM_MESSAGES[BUILTIN.en['err.room.devices']] = 'err.room.devices';
     ROOM_MESSAGES[BUILTIN.en['err.capacity']] = 'err.capacity';
     ROOM_MESSAGES[BUILTIN.en['err.method.disabled']] = 'err.method.disabled';
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    function PHASE3_UNREACHED() { return t('err.service'); }
+
     function phase3Message(j) {
       if (!(j && typeof j.message === 'string' && j.message)) return PHASE3_FAIL();
       const m = j.message;
@@ -1945,12 +1959,13 @@ main.card { display: block; }
 
     async function submitPostStay(pin, errEl) {
       let j = {};
+      let reached = true;
       try {
         const r = await fetch('/auth/post-stay-pin', {
           method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pin: pin })
         });
-        j = await r.json().catch(function(){ return {}; });
-      } catch (e) { j = {}; }
+        j = await r.json().catch(function(){ reached = false; return {}; });
+      } catch (e) { reached = false; j = {}; }
       if (j.ok && j.session_id) {
         window.location = (j.redirect_to || '/success') + '?s=' + encodeURIComponent(j.session_id);
         return;
@@ -1972,7 +1987,8 @@ main.card { display: block; }
       }
       
       
-      errEl.textContent = PHASE3_FAIL();
+      
+      errEl.textContent = reached ? PHASE3_FAIL() : PHASE3_UNREACHED();
     }
 
     
@@ -1995,12 +2011,13 @@ main.card { display: block; }
 
     async function submitPhase3(body, errEl) {
       let j = {};
+      let reached = true;
       try {
         const r = await fetch('/auth/pms/phase3', {
           method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
         });
-        j = await r.json().catch(function(){ return {}; });
-      } catch (e) { j = {}; }
+        j = await r.json().catch(function(){ reached = false; return {}; });
+      } catch (e) { reached = false; j = {}; }
       if (j.ok && j.session_id) {
         phase3ClearFailure(errEl);
         window.location = (j.redirect_to || '/success') + '?s=' + encodeURIComponent(j.session_id);
@@ -2022,7 +2039,7 @@ main.card { display: block; }
       
       
       
-      phase3Countdown(errEl, phase3Message(j), j.retry_after_seconds || 0);
+      phase3Countdown(errEl, reached ? phase3Message(j) : PHASE3_UNREACHED(), j.retry_after_seconds || 0);
       return false;
     }
 

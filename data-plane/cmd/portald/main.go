@@ -186,6 +186,13 @@ func (h *handler) landing(w http.ResponseWriter, r *http.Request, errMsg string)
 		ipStr = ip.String()
 		// Guarded: the ARP lookup is injected, and a portal that panics on the landing page because a
 		// lookup was not wired is a worse failure than one that simply cannot name the MAC.
+		//
+		// DELIBERATELY THE PLAIN CACHE READ, not the resolving lookup every sign-in path now uses. This is the
+		// support line on the landing page -- it names the device so a guest can read it out to reception -- and
+		// the landing page is served to every captive-portal probe on the network, every few seconds per device.
+		// Waiting up to the resolve window there would add that latency to the most-requested page on the
+		// appliance for no decision: nothing is refused here, and a missing MAC only means the line is omitted.
+		// The paths where a cold cache COSTS the guest something are the ones that resolve.
 		if h.arpCache != nil {
 			if mac, ok := h.arpCache(ip); ok {
 				macStr = mac.String()
@@ -221,9 +228,12 @@ func (h *handler) authVoucher(w http.ResponseWriter, r *http.Request) {
 		h.landing(w, r, "Unable to detect your device address.")
 		return
 	}
-	mac, ok := h.arpCache(ip)
+	// The hardware address comes from the kernel's neighbour table, never from the client, and the kernel is
+	// ASKED to resolve it rather than only consulted (arp_resolve.go): a cold cache is not evidence that a
+	// device is off the guest network. Same mechanism, same guarantee, on every sign-in path.
+	mac, ok := h.deviceMAC(r.Context(), ip)
 	if !ok {
-		slog.Warn("no arp entry", "ip", ip.String())
+		slog.Warn("device could not be placed on a guest network", "ip", ip.String())
 		h.landing(w, r, "Your device isn't connected to this Wi-Fi network.")
 		return
 	}
@@ -294,7 +304,10 @@ func (h *handler) authCredentials(w http.ResponseWriter, r *http.Request) {
 		h.landing(w, r, "Unable to detect your device address.")
 		return
 	}
-	mac, ok := h.arpCache(ip)
+	// The hardware address comes from the kernel's neighbour table, never from the client, and the kernel is
+	// ASKED to resolve it rather than only consulted (arp_resolve.go): a cold cache is not evidence that a
+	// device is off the guest network. Same mechanism, same guarantee, on every sign-in path.
+	mac, ok := h.deviceMAC(r.Context(), ip)
 	if !ok {
 		h.landing(w, r, "Your device isn't connected to this Wi-Fi network.")
 		return

@@ -137,13 +137,30 @@ func (h *handler) postStayConvert(w http.ResponseWriter, r *http.Request, b *pha
 // postStayDevice derives the guest's device from the connection and the appliance's own neighbour table. It
 // is the only place this flow acquires an identity, and it consults nothing the guest typed.
 func (h *handler) postStayDevice(w http.ResponseWriter, r *http.Request, b *phase3Budget) (map[string]string, bool) {
-	return h.originDevice(w, r, b, h.poststayFail)
+	// THE DEVICE ANSWER, NOT THE AUTHENTICATION ONE. Every refusal originDevice can produce is about the source
+	// device, so this is where post-stay stops borrowing its own "check your details" sentence for a condition
+	// the guest cannot act on. The other three callers of originDevice already pass something appropriate --
+	// the access-status poll answers with nothing at all, and the device list has its own sentence -- which is
+	// exactly why this is a parameter and not a hardcoded call.
+	return h.originDevice(w, r, b, h.poststayDeviceFail)
 }
 
 // poststayFail keeps this flow's existing audit vocabulary exactly as it was: the shared helpers now name the
 // condition and the flow supplies its own prefix, so no recorded reason code changes.
 func (h *handler) poststayFail(w http.ResponseWriter, r *http.Request, b *phase3Budget, reason string) {
 	h.phase3Fail(w, r, b, "poststay_"+reason, classPostStay)
+}
+
+// poststayDeviceFail is the post-stay refusal for the one condition that is NOT about the guest: the appliance
+// could not establish the device the request came from.
+//
+// The post-stay wording is deliberately uniform for everything else -- a departed guest returning with a PIN has
+// no room number, family name or reservation number to re-check, so the room sign-in sentence would be actively
+// misleading advice. But its sentence still says "check your details", and for a device that could not be placed
+// on a guest network that is advice about the one thing the guest cannot do anything about. TECHNICAL is the
+// honest class here, as it already is on the room path.
+func (h *handler) poststayDeviceFail(w http.ResponseWriter, r *http.Request, b *phase3Budget, reason string) {
+	h.phase3Fail(w, r, b, "poststay_"+reason, classTechnical)
 }
 
 // uniformFail is how a flow says "this did not succeed" WITHOUT saying why. Every one of them writes 200,
@@ -160,7 +177,10 @@ func (h *handler) originDevice(w http.ResponseWriter, r *http.Request, b *phase3
 		fail(w, r, b, "no_source_address")
 		return nil, false
 	}
-	mac, ok := h.arpCache(ip)
+	// The hardware address comes from the kernel's neighbour table, never from the client, and the kernel is
+	// ASKED to resolve it rather than only consulted (arp_resolve.go): a cold cache is not evidence that a
+	// device is off the guest network. Same mechanism, same guarantee, on every sign-in path.
+	mac, ok := h.deviceMAC(b.ctx, ip)
 	if !ok {
 		fail(w, r, b, "device_not_on_guest_network")
 		return nil, false

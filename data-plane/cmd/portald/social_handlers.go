@@ -37,7 +37,10 @@ func (h *handler) socialStart(w http.ResponseWriter, r *http.Request) {
 		fail(400, "err.device.detect", "bad ip")
 		return
 	}
-	mac, ok := h.arpCache(ip)
+	// The hardware address comes from the kernel's neighbour table, never from the client, and the kernel is
+	// ASKED to resolve it rather than only consulted (arp_resolve.go): a cold cache is not evidence that a
+	// device is off the guest network. Same mechanism, same guarantee, on every sign-in path.
+	mac, ok := h.deviceMAC(r.Context(), ip)
 	if !ok {
 		fail(400, "err.device.network", "device not on this Wi-Fi network")
 		return
@@ -114,7 +117,10 @@ func (h *handler) socialCallback(w http.ResponseWriter, r *http.Request) {
 		h.renderGuestError(w, r, http.StatusBadRequest, "err.device.detect")
 		return
 	}
-	mac, ok := h.arpCache(ip)
+	// The hardware address comes from the kernel's neighbour table, never from the client, and the kernel is
+	// ASKED to resolve it rather than only consulted (arp_resolve.go): a cold cache is not evidence that a
+	// device is off the guest network. Same mechanism, same guarantee, on every sign-in path.
+	mac, ok := h.deviceMAC(r.Context(), ip)
 	if !ok {
 		h.renderGuestError(w, r, http.StatusBadRequest, "err.device.network")
 		return
