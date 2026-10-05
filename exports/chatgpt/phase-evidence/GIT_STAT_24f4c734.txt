@@ -1,0 +1,4 @@
+commit 24f4c734d37c6f446a2a126db8f826d5c7546337
+Date:   Mon Oct 5 19:33:21 2026 +0300
+
+    The published project state stops lagging a transition behind the register
