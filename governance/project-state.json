@@ -1276,7 +1276,7 @@
     "prelive_phase4_flag_posture": "PRE-LIVE 172.21.60.25 since 2026-09-30 (D47): scd runs STAYCONNECT_PHASE4_MASTER, _PAYMENT, _PAYMENT_PROVIDER, _POSTING, _FINANCIAL_REVIEW, _OUTBOX_WORKER and _PMS_TRANSMIT; pmsd runs _MASTER, _OUTBOX_WORKER and _PMS_TRANSMIT; edged runs _MASTER, _POSTING and _FINANCIAL_REVIEW. STAYCONNECT_PAYMENT_LIVE_ALLOWED is set nowhere. Real PMS postings ever: one (T0204, USD 1.00, PA OK). Payment-provider traffic ever: none.",
     "phase4_flags_off_scope": "phase4_flags_off records the DELIVERED REPOSITORY configuration (no file in the tree enables a Phase-4 flag; scripts/ci/phase4-dark-check.sh asserts it). It is not a statement about the PRE-LIVE environment, whose posture is recorded in prelive_phase4_flag_posture."
   },
-  "latest_transition_id": "T0212",
+  "latest_transition_id": "T0213",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1771,19 +1771,19 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "STAYS_PAGING_AND_GUEST_ATTRIBUTES_CLOSED",
-    "decision": "Product-Owner missions of 2026-10-01 (PR #205): stays paging and search, VIP and travel agent from Protel FIAS A0/A1, travel-agent picker; no new PO decision.",
-    "decision_note": "Closure lineage for PR #205 (T0211), merged to master as cec3e609 at tested head ee0a7faf. Governance only.",
-    "manifest": "docs/manifests/StaysPagingGuestAttributesClosure-change-manifest.md",
-    "base": "cec3e609a4c2a7c807b705749e3b4182f507367a",
-    "base_note": "Master after the merge of PR #205 (T0212).",
-    "head": "cec3e609",
-    "head_note": "No content commit: this lineage records the merge and closes the delivery. The delivery's last content commit is ba0d2e6a (T0211).",
-    "transition": "T0212",
-    "previous_delivery": "T0211",
-    "pr": 205,
-    "pr_state": "MERGED as cec3e609 (2026-10-01) and CLOSED",
-    "note": "T0212. PR #205 merged through the protected path; every commit PRE-LIVE runs is contained in master. Go-Live not authorised."
+    "kind": "CLIENT_NETWORKING_ACCOUNTS_PAGINATION_AND_SOURCE_DEVICE_RELIABILITY_CLOSED",
+    "decision": "Product-Owner missions of 2026-10-01 to 2026-10-05 (PR #208): client networking and multi-VLAN creation, safe topology replacement, logical-network lineage, Client Accounts, server pagination, the networking lifecycle made fail-closed, the retirement of /network/adopt, source-device reliability across every guest path, and the stale service-plan guidance. One new product decision inside it: a transport failure must not be answered as bad guest credentials (2026-10-03).",
+    "decision_note": "Closure lineage for PR #208 (T0213), merged to master as a525cb16 at accepted head 77601405. Governance only.",
+    "manifest": "docs/manifests/ClientNetworkingSourceDeviceClosure-change-manifest.md",
+    "base": "a525cb1670d1702906421bafed9035cc7aa5fd5d",
+    "base_note": "Master after the merge of PR #208 (T0213).",
+    "head": "a525cb16",
+    "head_note": "No content commit: this lineage records the merge and closes the delivery. The delivery last content commit is 77601405 (the accepted head).",
+    "transition": "T0213",
+    "previous_delivery": "T0212",
+    "pr": 208,
+    "pr_state": "MERGED as a525cb16 (2026-10-05) and CLOSED",
+    "note": "T0213. PR #208 merged through the protected path with a merge commit; every commit PRE-LIVE runs is contained in master. Appliance migration head 0106. FULL CHECK was not run, by Product-Owner instruction. Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
