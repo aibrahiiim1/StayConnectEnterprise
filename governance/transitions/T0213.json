@@ -1,0 +1,59 @@
+{
+  "transition_id": "T0213",
+  "seq": 213,
+  "timestamp": "2026-10-05T18:52:30+03:00",
+  "timestamp_derivation": "Written after GitHub merged PR #208 (a525cb16, committer date 2026-10-05T18:47:44+03:00) and before the commit that introduces this receipt, so it neither pre-dates the merge it records nor post-dates its own commit.",
+  "record_type": "CLIENT_NETWORKING_ACCOUNTS_PAGINATION_AND_SOURCE_DEVICE_RELIABILITY_MERGED_TO_MASTER_AND_CLOSED",
+  "authorisation": "Product-Owner acceptance of PR #208 at exact head 77601405 (2026-10-05) with the instruction to apply the merge authorization, merge through the protected path with a merge commit, verify master provenance and the required normal check, synchronize the directly-related authoritative documentation for closure and clean up the delivery branch. Explicitly NOT FULL CHECK THE WHOLE CODE and NOT any Go-Live action.",
+  "merge": {
+    "pull_request": 208,
+    "merge_commit": "a525cb1670d1702906421bafed9035cc7aa5fd5d",
+    "merged_at": "2026-10-05T15:47:45Z",
+    "parents": [
+      "7da468a8515ca5e2dfaa41649d2f76e714e7e8b5",
+      "776014050b2edb6867bb88b1203497e2e4babcd2"
+    ],
+    "tested_head": "776014050b2edb6867bb88b1203497e2e4babcd2",
+    "merge_introduced_no_content": "The tree of master at a525cb16 is identical to the tree of the accepted head 77601405; git diff 77601405 origin/master is empty.",
+    "how": "D42 protected path. The single required context po-merge-authorization was green on the exact accepted head (run started 2026-10-05T15:43:17Z, conclusion success; the earlier run on the same head failed correctly, before the label existed). One unresolved automated review thread blocked the merge under required_review_thread_resolution: a P1 from 2026-10-01T15:49:41Z, marked outdated, asking that the enabled-state transition be staged against the applied revision rather than exposed immediately -- which is precisely what this delivery implemented in migration 0105. It was answered with that evidence and resolved, not dismissed. mergeable_state then reported clean and the merge was made with merge_method=merge and the head SHA pinned, the only method the ruleset allows.",
+    "full_check": "NOT run, by Product-Owner instruction and under D42: the four comprehensive gates are workflow_dispatch / FULL CHECK only and are not required contexts. po-merge-authorization is the single required check on master and it passed on the accepted head."
+  },
+  "acceptance": "Accepted by the Product Owner at 77601405 on 2026-10-05, after eight rounds of delivery with live PRE-LIVE verification reported at each round.",
+  "scope_closed": [
+    "One unified Client Network creation workflow: untagged or many tagged VLANs on one trunk, each with its own subnet, gateway and DHCP scope, created all-or-nothing, with conflicts refused where they are entered.",
+    "A topology change that is genuinely staged: staging writes nothing to public.guest_networks, the enabled-state transition happens only inside the apply transaction, and a rollback restores the previous configuration completely, including rebuilding a removed bridge and its addressing.",
+    "A replaced client network keeps its logical identity (appliance migration 0106), so an unused printed voucher pinned to an immutable revision naming the retired network still redeems on its successor.",
+    "SITE_NETWORK eligibility decides for PMS room sign-in, which had evaluated it with an empty client-network id.",
+    "The forward republish preserves the current package revision exactly, and a package that cannot be carried forward refuses the confirm rather than leaving the wire permanent and the catalogue behind it.",
+    "Database, confirmed revision and live Linux network cannot knowingly disagree: the confirm/watchdog race, the expired recovery context, superseded-read-as-failed, two kernel commands that could not fail, and a boot reconcile that asserted half its intent are closed.",
+    "POST /network/adopt and netd POST /v1/adopt are retired; MarkActive requires pending_confirmation unconditionally, so an active revision is by construction one the appliance applied and health-checked.",
+    "Source-device identification is reliable and consistent across every guest path: a cold neighbour cache no longer refuses a legitimate client, every server-reached refusal leaves operator-visible evidence, and a transport failure no longer masquerades as bad guest credentials.",
+    "Client Accounts: a real session disconnect, the generated account password format (migration 0104), and the removal of a lockout counter nothing ever set. Nine growing lists are server-paged.",
+    "The stale service-plan notice directs operators to the repin workflow that exists instead of one that cannot work."
+  ],
+  "database_schema": "Appliance migrations 0104 (generated account password format), 0105 (a client network topology change is staged before it is live) and 0106 (a replaced client network keeps its logical identity) are applied on PRE-LIVE and contained in master. No migration was applied by this closure, and no new migration was authorised.",
+  "deployment_provenance": "Unchanged by this closure; no redeploy was needed because every commit PRE-LIVE runs is now contained in master. PRE-LIVE at closure: Admin Console 77601405 (BUILD_ID NJL6hbO7yogdOYSDWUehQ, release 20261005-112012), portald 8e7e882c, scd dbf405f5, edged and netd bab4c616, pmsd 6a403326, acctd 99ba9f10. Appliance migration head 0106. DEPLOYED_BINARIES 6/6 OK.",
+  "live_verification": "Reported per round and not re-run by this closure: networking matrix 42/42 on the appliance, guest-access harness 47/47, netd boot reconcile ok with no problems, one active revision carrying both applied_at and confirmed_at, a cold neighbour cache resolved in 71ms against the real client, and a device that cannot be placed recorded as ROUTING_OR_INTERFACE_FAILURE with its source address.",
+  "cleanup": "The merged branch delivery/networking-accounts-pagination (tip 77601405) is contained in master and is deleted on GitHub and locally after this closure merges, together with this closure branch.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0212."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. THIS transition records a merge to master and closes a delivery; it changed no phase, applied no migration, deployed nothing and performed no cutover. PRE-LIVE remains PRE-LIVE."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "a525cb1670d1702906421bafed9035cc7aa5fd5d",
+  "base_note": "Master after the merge of PR #208; this closure lineage is built on it.",
+  "head": "a525cb16",
+  "head_note": "No content commit: this lineage is governance only. The closed delivery last content commit is 77601405.",
+  "previous_delivery": "T0212",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
