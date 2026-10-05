@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -294,52 +293,109 @@ type auditRow struct {
 	Payload    json.RawMessage `json:"payload,omitempty"`
 }
 
+// auditSearchHeader carries the activity trail's free-text search, and auditSearchActionsHeader the action codes
+// whose readable title matched it (the titles live in the Admin Console, so the browser resolves them). Headers,
+// not the URL: edged's request logger writes every request line.
+const (
+	auditSearchHeader        = "X-Audit-Search"
+	auditSearchActionsHeader = "X-Audit-Search-Actions"
+)
+
+// auditActionCount is how many entries of one action code the period holds -- over the period (and actor)
+// only, never narrowed by the category, action or search filters, so the screen's filter counts describe the
+// whole period whichever filter is selected.
+type auditActionCount struct {
+	Action string `json:"action"`
+	Count  int    `json:"count"`
+}
+
+type auditPage struct {
+	pagedList[auditRow]
+	Actions []auditActionCount `json:"actions"`
+}
+
 func (s *server) auditRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
-		limit := 100
-		if v, err := strconv.Atoi(req.URL.Query().Get("limit")); err == nil && v > 0 {
-			limit = min(v, 500)
+		// PAGED. The screen used to read the newest 500 entries and filter those in the browser, so on a busy
+		// appliance an older entry was simply unreachable. ?limit= still sizes the page for an older client.
+		pg, ok := readPage(w, req, 500)
+		if !ok {
+			return
 		}
+		search, ok := readSearch(w, req, auditSearchHeader)
+		if !ok {
+			return
+		}
+		qv := req.URL.Query()
+
 		// THE FILTERS AN OPERATOR ACTUALLY ARRIVES WITH: a period, a person, or a kind of thing.
 		//
-		// All three are applied in SQL rather than in the browser. The trail on a year-old appliance is tens
-		// of thousands of rows, and filtering a page of 100 that the server already chose is the kind of
-		// search box that looks like it works until the day somebody needs it.
-		q := `SELECT ts, actor_type, actor_id, action, target_type, target_id, ip::text, payload
-                FROM audit_log WHERE tenant_id = $1`
+		// All are applied in SQL rather than in the browser. The trail on a year-old appliance is tens of
+		// thousands of rows, and filtering a page the server already chose is the kind of search box that
+		// looks like it works until the day somebody needs it.
+		//
+		// `period` is the period and actor alone: the per-action counts are taken over it. `where` adds the
+		// action, category and search filters and selects the page.
 		args := []any{s.tenantID}
 		bind := func(v any) int { args = append(args, v); return len(args) }
+		period := ` WHERE tenant_id = $1`
 
-		if actions := req.URL.Query().Get("action"); actions != "" {
-			q += fmt.Sprintf(` AND action = ANY($%d)`, bind(strings.Split(actions, ",")))
-		}
-		// A PREFIX, not an exact match, so one category maps to one clause: "network" selects network.apply,
-		// network.guest.created and the rest without the screen enumerating them.
-		if p := req.URL.Query().Get("action_prefix"); p != "" {
-			q += fmt.Sprintf(` AND action LIKE $%d`, bind(p+"%"))
-		}
 		// ONE PLACEHOLDER, REFERENCED TWICE. On a sign-in the operator is the TARGET, not the actor, so an
 		// actor search that only looked at actor_id would miss every login on the appliance -- which is the
 		// most common thing anyone searches for.
-		if v := req.URL.Query().Get("actor"); v != "" {
+		if v := qv.Get("actor"); v != "" {
 			n := bind(v)
-			q += fmt.Sprintf(` AND (actor_id = $%d OR target_id = $%d)`, n, n)
+			period += fmt.Sprintf(` AND (actor_id = $%d OR target_id = $%d)`, n, n)
 		}
-		if v := req.URL.Query().Get("from"); v != "" {
+		if v := qv.Get("from"); v != "" {
 			if t, err := time.Parse(time.RFC3339, v); err == nil {
-				q += fmt.Sprintf(` AND ts >= $%d`, bind(t))
+				period += fmt.Sprintf(` AND ts >= $%d`, bind(t))
 			}
 		}
-		if v := req.URL.Query().Get("to"); v != "" {
+		if v := qv.Get("to"); v != "" {
 			if t, err := time.Parse(time.RFC3339, v); err == nil {
-				q += fmt.Sprintf(` AND ts <= $%d`, bind(t))
+				period += fmt.Sprintf(` AND ts <= $%d`, bind(t))
 			}
 		}
-		q += ` ORDER BY ts DESC LIMIT ` + strconv.Itoa(limit)
+		periodArgs := len(args)
+
+		where := period
+		// action= is an exact list. PRESENT BUT EMPTY means "none of them": the screen sends the codes a
+		// category holds in this period, and a category with no entries must show nothing, not everything.
+		if qv.Has("action") {
+			codes := []string{}
+			for _, c := range strings.Split(qv.Get("action"), ",") {
+				if c = strings.TrimSpace(c); c != "" {
+					codes = append(codes, c)
+				}
+			}
+			where += fmt.Sprintf(` AND action = ANY($%d)`, bind(codes))
+		}
+		// A PREFIX, not an exact match, so one category maps to one clause: "network" selects network.apply,
+		// network.guest.created and the rest without the screen enumerating them.
+		if p := qv.Get("action_prefix"); p != "" {
+			where += fmt.Sprintf(` AND action LIKE $%d`, bind(likeEscape(p)+"%"))
+		}
+		if search != "" {
+			titled := []string{}
+			for _, c := range strings.Split(req.Header.Get(auditSearchActionsHeader), ",") {
+				if c = strings.TrimSpace(c); c != "" && len(titled) < 200 {
+					titled = append(titled, c)
+				}
+			}
+			n, m := bind(likePattern(search)), bind(titled)
+			where += fmt.Sprintf(` AND (action ILIKE $%[1]d OR actor_id ILIKE $%[1]d OR target_id ILIKE $%[1]d
+			    OR target_type ILIKE $%[1]d OR host(ip) ILIKE $%[1]d OR action = ANY($%[2]d))`, n, m)
+		}
 
 		ctx, cancel := dbCtx(req)
 		defer cancel()
+
+		// ts alone is not unique, and an offset over a non-unique order can repeat or skip a row at a page
+		// boundary. Rows sharing a ts share a chunk of the hypertable, so ctid settles the order among them.
+		q := `SELECT ts, actor_type, actor_id, action, target_type, target_id, ip::text, payload
+                FROM audit_log` + where + fmt.Sprintf(` ORDER BY ts DESC, ctid DESC LIMIT %d OFFSET %d`, pg.Fetch(), pg.Offset())
 		rows, err := s.db.Query(ctx, q, args...)
 		if err != nil {
 			slog.Error("audit read failed", "err", err)
@@ -370,7 +426,39 @@ func (s *server) auditRoutes() http.Handler {
 			jsonErr(w, http.StatusInternalServerError, "internal", "the audit trail could not be read")
 			return
 		}
-		writeList(w, out)
+		rows.Close()
+		out, more := trimPage(out, pg)
+
+		var total int
+		if err := s.db.QueryRow(ctx, `SELECT count(*)::int FROM audit_log`+where, args...).Scan(&total); err != nil {
+			slog.Error("audit read failed", "err", err)
+			jsonErr(w, http.StatusInternalServerError, "internal", "the audit trail could not be read")
+			return
+		}
+		actions := []auditActionCount{}
+		arows, err := s.db.Query(ctx, `SELECT action, count(*)::int FROM audit_log`+period+`
+			GROUP BY action ORDER BY action`, args[:periodArgs]...)
+		if err != nil {
+			slog.Error("audit read failed", "err", err)
+			jsonErr(w, http.StatusInternalServerError, "internal", "the audit trail could not be read")
+			return
+		}
+		defer arows.Close()
+		for arows.Next() {
+			var a auditActionCount
+			if err := arows.Scan(&a.Action, &a.Count); err != nil {
+				slog.Error("audit scan failed", "err", err)
+				jsonErr(w, http.StatusInternalServerError, "internal", "the audit trail could not be read")
+				return
+			}
+			actions = append(actions, a)
+		}
+		if err := arows.Err(); err != nil {
+			slog.Error("audit read failed", "err", err)
+			jsonErr(w, http.StatusInternalServerError, "internal", "the audit trail could not be read")
+			return
+		}
+		writeJSON(w, http.StatusOK, auditPage{pagedList: newPagedList(out, more, pg, &total), Actions: actions})
 	})
 	return r
 }

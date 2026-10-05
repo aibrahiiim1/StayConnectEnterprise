@@ -91,7 +91,7 @@ describe("usage explorer by access source", () => {
     expect(screen.getByText("Room 4202")).toBeTruthy();
     // A room always travels with its PMS connection.
     expect(screen.getByText(/Hotel room\/stay · Main PMS/)).toBeTruthy();
-    expect(calls()[0]).toBe("/usage/sources?type=&q=&limit=100");
+    expect(calls()[0]).toBe("/usage/sources?type=&q=&page=1&page_size=50");
   });
 
   it("sends the type filter and the search text to edged", async () => {
@@ -100,13 +100,32 @@ describe("usage explorer by access source", () => {
     await screen.findByText("alex.morgan");
 
     await user.click(screen.getByRole("radio", { name: "Voucher" }));
-    await waitFor(() => expect(calls()).toContain("/usage/sources?type=voucher&q=&limit=100"));
+    await waitFor(() => expect(calls()).toContain("/usage/sources?type=voucher&q=&page=1&page_size=50"));
     await waitFor(() => expect(screen.queryByText("alex.morgan")).toBeNull());
 
     const box = screen.getByLabelText("Voucher card reference");
     await user.type(box, "3fa8");
     await user.click(screen.getByRole("button", { name: "Search" }));
-    await waitFor(() => expect(calls()).toContain("/usage/sources?type=voucher&q=3fa8&limit=100"));
+    await waitFor(() => expect(calls()).toContain("/usage/sources?type=voucher&q=3fa8&page=1&page_size=50"));
+  });
+
+  it("pages access sources on the server, and a new type starts again at page 1", async () => {
+    get.mockImplementation((raw?: unknown) => {
+      const path = typeof raw === "string" ? raw : "";
+      if (path.startsWith("/usage/sources?")) {
+        const page = Number(new URLSearchParams(path.split("?")[1]).get("page"));
+        return Promise.resolve({ data: page === 1 ? ROWS : [ROWS[0]], meta: { has_more: page === 1 }, page, page_size: 50 });
+      }
+      return Promise.resolve({ data: [], meta: { has_more: false } });
+    });
+    const user = await renderPage();
+    await screen.findByText("alex.morgan");
+    await user.click(screen.getByRole("button", { name: /Next/ }));
+    await waitFor(() => expect(calls()).toContain("/usage/sources?type=&q=&page=2&page_size=50"));
+    expect(await screen.findByText(`Showing 51–51`)).toBeTruthy();
+
+    await user.click(screen.getByRole("radio", { name: "Voucher" }));
+    await waitFor(() => expect(calls()[calls().length - 1]).toBe("/usage/sources?type=voucher&q=&page=1&page_size=50"));
   });
 
   it("shows a client account without any room or stay words", async () => {

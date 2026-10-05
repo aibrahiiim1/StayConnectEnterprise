@@ -30,7 +30,7 @@
 //
 // Read-only for every role that can open it: there is nothing to change here, only evidence to read.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Activity, ArrowLeft, ChevronRight, FileSearch, KeyRound, Search, Smartphone } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { PageHeader, PageShell } from "@/components/ui/page";
@@ -43,7 +43,7 @@ import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Meter, MonoId, SkeletonRows } from "@/components/ui/misc";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
-import { FilterChips, MetricStrip } from "@/components/ui/data";
+import { FilterChips, MetricStrip, Pagination } from "@/components/ui/data";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { refreshingClass } from "@/components/ui/patterns";
 import { formatBytes, quotaPercent, endReasonWords } from "@/lib/bytes";
@@ -87,6 +87,9 @@ type SourceDetail = {
 };
 
 type Tab = "sources" | "devices";
+
+/** Access sources per page. edged pages the list (?page, ?page_size). */
+const USAGE_PAGE = 50;
 type TypeFilter = "all" | SourceType;
 
 const SOURCE_LABEL: Record<SourceType, string> = {
@@ -171,16 +174,28 @@ export default function UsageExplorerPage() {
   const [busy, setBusy] = useState(false);
   const [samples, setSamples] = useState<Record<string, { bytes_total: number; sample_count: number } | "loading">>({});
 
-  const search = useCallback(async (type: TypeFilter = typeFilter) => {
+  // PAGED ON THE SERVER: one page of access sources at a time, heaviest first. A new search or type starts at
+  // the first page; only the newest request's answer is applied.
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const latest = useRef(0);
+  const search = useCallback(async (type: TypeFilter = typeFilter, at = 0) => {
+    const mine = ++latest.current;
     setBusy(true); setErr(null);
     try {
       const t = type === "all" ? "" : type;
-      const r = await api.get<{ data: SourceRow[] }>(
-        `/usage/sources?type=${encodeURIComponent(t)}&q=${encodeURIComponent(q)}&limit=100`,
+      const page = Math.floor(at / USAGE_PAGE) + 1;
+      const r = await api.get<{ data: SourceRow[]; meta?: { has_more?: boolean } }>(
+        `/usage/sources?type=${encodeURIComponent(t)}&q=${encodeURIComponent(q)}&page=${page}&page_size=${USAGE_PAGE}`,
       );
+      if (mine !== latest.current) return; // superseded
       setRows(r.data ?? []);
-    } catch (e) { setErr(e instanceof ApiError ? e.message : "the usage records could not be read"); }
-    finally { setBusy(false); }
+      setOffset(at);
+      setHasMore(!!r.meta?.has_more);
+    } catch (e) {
+      if (mine !== latest.current) return;
+      setErr(e instanceof ApiError ? e.message : "the usage records could not be read");
+    } finally { if (mine === latest.current) setBusy(false); }
   }, [q, typeFilter]);
 
   useEffect(() => { if (tab === "sources" && rows === null) search(); }, [tab, rows, search]);
@@ -376,6 +391,17 @@ export default function UsageExplorerPage() {
                     </TBody>
                   </Table>
                 </div>
+              )}
+              {rows && rows.length > 0 && (offset > 0 || hasMore) && (
+                <CardBody className="border-t border-border py-3">
+                  <Pagination
+                    offset={offset}
+                    limit={USAGE_PAGE}
+                    shown={rows.length}
+                    hasMore={hasMore}
+                    onChange={(o) => void search(typeFilter, o)}
+                  />
+                </CardBody>
               )}
             </Card>
           )}

@@ -74,7 +74,9 @@ function wire(roles: string[], overrides: Record<string, unknown> = {}) {
     const path = typeof raw === "string" ? raw : "";
     if (path === "/auth/whoami") return Promise.resolve({ roles });
     if (path.startsWith("/guest-signin-attempts?")) {
-      return Promise.resolve({ data: [ATTEMPT], meta: { has_more: false } });
+      // edged pages this list and counts the filtered set for the tiles.
+      return Promise.resolve({ data: [ATTEMPT], meta: { has_more: false }, page: 1, page_size: 50, total: 1,
+        summary: { total: 1, failed: 1, mismatch: 1, systemic: 0 } });
     }
     if (path.startsWith("/guest-signin-attempts/")) {
       return Promise.resolve({ ...DETAIL, ...overrides });

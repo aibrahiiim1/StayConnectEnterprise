@@ -128,7 +128,25 @@ async function installBackend(
       return route.fulfill(json(200, { conflicts: opts.conflicts ?? [] }));
     }
     if (path.startsWith("/pms-resolutions")) {
-      return route.fulfill(json(200, { data: opts.resolutions ?? [], meta: { has_more: false } }));
+      // edged pages the table and summarises the recent window; the mock answers the same shape.
+      const rs = (opts.resolutions ?? []) as { guest_network_id: string; outcome_code: string; resolved: boolean; resolved_at: string }[];
+      const outcomes = new Map<string, number>();
+      const networks = new Map<string, { total: number; verified: number }>();
+      for (const r of rs) {
+        outcomes.set(r.outcome_code, (outcomes.get(r.outcome_code) ?? 0) + 1);
+        const n = networks.get(r.guest_network_id) ?? { total: 0, verified: 0 };
+        n.total += 1;
+        if (r.resolved) n.verified += 1;
+        networks.set(r.guest_network_id, n);
+      }
+      return route.fulfill(json(200, {
+        data: rs, meta: { has_more: false }, page: 1, page_size: 50, total: rs.length,
+        summary: {
+          window: 200, total: rs.length, verified: rs.filter((r) => r.resolved).length, newest_resolved_at: rs[0]?.resolved_at,
+          outcomes: [...outcomes].map(([outcome_code, count]) => ({ outcome_code, count })),
+          networks: [...networks].map(([guest_network_id, n]) => ({ guest_network_id, ...n })),
+        },
+      }));
     }
     return route.fulfill(json(200, {}));
   });

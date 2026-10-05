@@ -4,13 +4,14 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  api, ListResp, Interface, Pool, NetRevision,
+  api, ListResp, Interface, Pool, NetRevision, GuestNetwork,
   GuestNetworkInput, ValidateResult, ApplyResult, ValidationIssue,
 } from "@/lib/api";
 import { Card, CardBody, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { ErrorBanner, Callout } from "@/components/ui/error-banner";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { KeyValueGrid, OptionCard, Stepper } from "@/components/ui/data";
@@ -21,8 +22,11 @@ import { ArrowLeft, ArrowRight, Cable, Network, Plus, Radio, X } from "lucide-re
 import { cn, errMsg } from "@/lib/utils";
 import { HelpList, HelpSection } from "@/components/help";
 import { HealthCheckList, SwitchRow, ValidationIssueList, useNetworkAccess } from "@/components/network/shared";
+import {
+  VlanAddressingTable, VlanIdList, newVlanRow, vlanPlanProblems, withSuggestedAddressing, type VlanRow,
+} from "@/components/network/vlan-plan";
 
-const STEPS = ["Identity", "Interface / VLAN", "Subnet & gateway", "DHCP & DNS", "Captive portal", "Review", "Apply"];
+const STEPS = ["Identity", "Port & VLANs", "Addressing", "DHCP & DNS", "Captive portal", "Review", "Apply"];
 
 const STEP_HINT = [
   "What the network is called here, and the SSID your wireless controller broadcasts for it.",
@@ -61,7 +65,11 @@ export default function NewGuestNetworkPage() {
   const [interfaces, setInterfaces] = useState<Interface[] | null>(null);
   const [parentInterface, setParentInterface] = useState("");
   const [vlanTagged, setVlanTagged] = useState(false);
-  const [vlanId, setVlanId] = useState("");
+  // ONE WIZARD FOR ONE NETWORK OR A WHOLE TRUNK. An untagged network uses the single fields below; a tagged
+  // port carries one row per VLAN, each becoming its own client network with its own subnet and DHCP scope.
+  const [vlans, setVlans] = useState<VlanRow[]>([newVlanRow()]);
+  const [addrMode, setAddrMode] = useState<"common" | "separate">("common");
+  const [existing, setExisting] = useState<GuestNetwork[]>([]);
   // subnet / gateway
   const [subnetCidr, setSubnetCidr] = useState("");
   const [gatewayIp, setGatewayIp] = useState("");
@@ -86,6 +94,13 @@ export default function NewGuestNetworkPage() {
   const [deadline, setDeadline] = useState<string | null>(null);
   const [acting, setActing] = useState<"confirm" | "rollback" | null>(null);
 
+  // What this appliance already serves, so a conflict is shown before the operator fills anything in.
+  useEffect(() => {
+    api.get<ListResp<GuestNetwork>>("/network/guest-networks")
+      .then((r) => setExisting(r.data ?? []))
+      .catch(() => setExisting([]));
+  }, []);
+
   // fetch interfaces when entering step 1
   useEffect(() => {
     if (step === 1 && interfaces === null) {
@@ -95,21 +110,53 @@ export default function NewGuestNetworkPage() {
     }
   }, [step, interfaces]);
 
+  const onParent = existing.filter((n) => n.parent_interface === parentInterface && n.enabled);
+  const untaggedHere = onParent.find((n) => n.network_type === "untagged");
+  const usedVLANs = new Set(onParent.filter((n) => n.vlan_id).map((n) => n.vlan_id!));
+  const usedSubnets = new Set(existing.filter((n) => n.enabled).map((n) => n.subnet_cidr));
+  const multi = vlanTagged && vlans.length > 1;
+  const separate = multi && addrMode === "separate";
+  const vlanProblems = vlanTagged ? vlanPlanProblems(vlans, usedVLANs, usedSubnets) : {};
+
+  /** Give a row free addressing as soon as it has a VLAN id, unless the operator chose it. */
+  function setVlanRows(rows: VlanRow[]) {
+    const taken = new Set(usedSubnets);
+    setVlans(rows.map((r) => {
+      const next = withSuggestedAddressing(r, taken);
+      if (next.subnet) taken.add(next.subnet);
+      return next;
+    }));
+  }
+
   function stepError(i: number): string | null {
     switch (i) {
       case 0:
         if (!name.trim()) return "Name is required.";
         return null;
       case 1:
-        if (!parentInterface) return "Pick a parent interface.";
-        if (vlanTagged && (!vlanId || Number(vlanId) < 1 || Number(vlanId) > 4094)) return "VLAN id must be 1..4094.";
+        if (!parentInterface) return "Pick a port.";
+        if (!vlanTagged && untaggedHere) {
+          return `${parentInterface} already carries an untagged client network (${untaggedHere.name}). ` +
+            "A port carries at most one untagged network — add this one as a tagged VLAN instead.";
+        }
+        if (vlanTagged) {
+          const first = vlans.find((r) => vlanProblems[r.key]);
+          if (first) return vlanProblems[first.key];
+        }
         return null;
       case 2:
+        if (vlanTagged) {
+          const first = vlans.find((r) => vlanProblems[r.key]);
+          if (first) return vlanProblems[first.key];
+          return null;
+        }
         if (!subnetCidr.trim()) return "Subnet CIDR is required (e.g. 10.20.0.0/22).";
         if (!gatewayIp.trim()) return "Gateway IP is required.";
+        if (usedSubnets.has(subnetCidr.trim())) return "That subnet is already used by another client network.";
         return null;
       case 3:
-        if (pools.length === 0 || pools.some((p) => !p.start_ip.trim() || !p.end_ip.trim()))
+        if (separate) return null; // each VLAN carries its own, checked on the addressing step
+        if (!vlanTagged && (pools.length === 0 || pools.some((p) => !p.start_ip.trim() || !p.end_ip.trim())))
           return "Add at least one DHCP pool with a start and end address.";
         if (dnsMode === "custom" && !dnsServers.trim()) return "Provide at least one DNS server.";
         return null;
@@ -126,31 +173,57 @@ export default function NewGuestNetworkPage() {
   }
   function back() { setErr(null); setStep((s) => Math.max(0, s - 1)); }
 
-  function buildBody(): GuestNetworkInput {
-    return {
-      name: name.trim(),
-      description: description.trim() || undefined,
-      ssid_label: ssidLabel.trim() || undefined,
-      network_type: vlanTagged ? "vlan" : "untagged",
-      parent_interface: parentInterface,
-      vlan_id: vlanTagged ? Number(vlanId) : undefined,
-      gateway_ip: gatewayIp.trim(),
-      subnet_cidr: subnetCidr.trim(),
-      dhcp_mode: "local",
-      dns_mode: dnsMode,
-      dns_servers: dnsMode === "custom"
-        ? dnsServers.split(",").map((s) => s.trim()).filter(Boolean)
-        : undefined,
-      domain_name: domainName.trim() || "guest.local",
-      lease_default_seconds: Number(leaseDefault) || 3600,
-      lease_min_seconds: Number(leaseMin) || 900,
-      lease_max_seconds: Number(leaseMax) || 7200,
-      captive_portal_enabled: captivePortal,
-      internet_access_enabled: internetAccess,
-      nat_enabled: nat,
-      client_isolation_enabled: clientIsolation,
-      pools: pools.filter((p) => p.start_ip && p.end_ip),
-    };
+  const shared = () => ({
+    description: description.trim() || undefined,
+    ssid_label: ssidLabel.trim() || undefined,
+    parent_interface: parentInterface,
+    dhcp_mode: "local" as const,
+    captive_portal_enabled: captivePortal,
+    internet_access_enabled: internetAccess,
+    nat_enabled: nat,
+    client_isolation_enabled: clientIsolation,
+  });
+  const dnsList = (mode: string, servers: string) =>
+    mode === "custom" ? servers.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
+
+  /** The client networks this wizard will create: one, or one per VLAN on the trunk. */
+  function buildBodies(): GuestNetworkInput[] {
+    if (!vlanTagged) {
+      return [{
+        ...shared(),
+        name: name.trim(),
+        network_type: "untagged",
+        gateway_ip: gatewayIp.trim(),
+        subnet_cidr: subnetCidr.trim(),
+        dns_mode: dnsMode,
+        dns_servers: dnsList(dnsMode, dnsServers),
+        domain_name: domainName.trim() || "guest.local",
+        lease_default_seconds: Number(leaseDefault) || 3600,
+        lease_min_seconds: Number(leaseMin) || 900,
+        lease_max_seconds: Number(leaseMax) || 7200,
+        pools: pools.filter((p) => p.start_ip && p.end_ip),
+      }];
+    }
+    return vlans.map((r) => {
+      const useOwn = separate;
+      const mode = useOwn ? r.dnsMode : dnsMode;
+      const servers = useOwn ? r.dnsServers : dnsServers;
+      return {
+        ...shared(),
+        name: (r.name.trim() || `${name.trim()} VLAN ${r.vlan}`).trim(),
+        network_type: "vlan" as const,
+        vlan_id: Number(r.vlan),
+        gateway_ip: r.gateway.trim(),
+        subnet_cidr: r.subnet.trim(),
+        dns_mode: mode,
+        dns_servers: dnsList(mode, servers),
+        domain_name: (useOwn ? r.domainName : domainName).trim() || "guest.local",
+        lease_default_seconds: Number(useOwn ? r.leaseDefault : leaseDefault) || 3600,
+        lease_min_seconds: Number(useOwn ? r.leaseMin : leaseMin) || 900,
+        lease_max_seconds: Number(useOwn ? r.leaseMax : leaseMax) || 7200,
+        pools: [{ start_ip: r.poolStart.trim(), end_ip: r.poolEnd.trim() }],
+      };
+    });
   }
 
   // The apply response carries no deadline; the revision list does. Read it so the countdown is the appliance's
@@ -168,8 +241,16 @@ export default function NewGuestNetworkPage() {
     try {
       let c = created;
       if (!c) {
-        c = await api.post<{ id: string; bridge_name: string; portal_url: string }>(
-          "/network/guest-networks", buildBody());
+        const bodies = buildBodies();
+        if (bodies.length === 1) {
+          c = await api.post<{ id: string; bridge_name: string; portal_url: string }>(
+            "/network/guest-networks", bodies[0]);
+        } else {
+          // Every VLAN in one transaction: all of them are created, or none is.
+          const batch = await api.post<{ networks: { id: string; bridge_name: string; portal_url: string }[] }>(
+            "/network/guest-networks/batch", { networks: bodies });
+          c = batch.networks[0];
+        }
         setCreated(c);
       }
       const v = await api.post<ValidateResult>("/network/validate");
@@ -178,7 +259,11 @@ export default function NewGuestNetworkPage() {
         setBusy(false);
         return;
       }
-      const a = await api.post<ApplyResult>("/network/apply", { summary: `create client network ${name}` });
+      const a = await api.post<ApplyResult>("/network/apply", {
+        summary: vlanTagged && vlans.length > 1
+          ? `create ${vlans.length} client networks on ${parentInterface}`
+          : `create client network ${name}`,
+      });
       setApplied(a);
       if (a.state === "pending_confirmation") void readDeadline(a.revision_id);
     } catch (e) { setErr(errMsg(e)); }
@@ -357,37 +442,101 @@ export default function NewGuestNetworkPage() {
                   </div>
                 )}
               </fieldset>
+              {parentInterface && (
+                <Callout tone={untaggedHere && !vlanTagged ? "warning" : "info"} title={`What ${parentInterface} already carries`}>
+                  {onParent.length === 0 ? (
+                    <p>Nothing yet — this would be the first client network on this port.</p>
+                  ) : (
+                    <ul className="space-y-0.5">
+                      {onParent.map((n) => (
+                        <li key={n.id}>
+                          {n.network_type === "vlan" ? <>VLAN <strong>{n.vlan_id}</strong></> : <strong>Untagged</strong>}
+                          {" · "}{n.name}{" · "}<span className="font-mono">{n.subnet_cidr}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <p className="mt-1">
+                    A port carries at most one untagged client network, and any number of tagged VLANs, each with
+                    its own VLAN id and its own subnet.
+                  </p>
+                </Callout>
+              )}
               <SwitchRow
                 label="VLAN tagged (802.1Q)"
-                hint="Turn on when the switch port carries several networks and this one arrives tagged."
+                hint="Turn on when the switch port is a trunk. One tagged port can carry several client networks — one per VLAN."
                 checked={vlanTagged}
                 onChange={setVlanTagged}
               />
               {vlanTagged && (
-                <Field label="VLAN id" required hint="1 to 4094. Must match the VLAN your wireless controller uses for the SSID." className="max-w-48">
-                  <Input type="number" min={1} max={4094} value={vlanId} onChange={(e) => setVlanId(e.target.value)} placeholder="20" />
-                </Field>
+                <fieldset className="space-y-2">
+                  <legend className="mb-1.5 text-label">VLANs on this trunk</legend>
+                  <VlanIdList rows={vlans} onChange={setVlanRows} problems={vlanProblems} />
+                  <p className="text-xs text-muted-foreground">
+                    Each VLAN becomes its own client network. Your switch must carry these VLAN ids on
+                    <span className="font-mono"> {parentInterface || "this port"}</span>, and your wireless controller must tag
+                    each SSID onto the matching VLAN — OneGate configures its own side only.
+                  </p>
+                </fieldset>
               )}
             </>
           )}
 
           {step === 2 && (
             <>
-              <Field label="Subnet (CIDR)" required hint="The whole address range of this network, e.g. 10.20.0.0/22.">
-                <Input value={subnetCidr} onChange={(e) => setSubnetCidr(e.target.value)} placeholder="10.20.0.0/22" className="font-mono" />
-              </Field>
-              <Field
-                label="Gateway IP"
-                required
-                hint="The appliance owns this address on the network; clients use it as their default gateway and DNS."
-              >
-                <Input value={gatewayIp} onChange={(e) => setGatewayIp(e.target.value)} placeholder="10.20.0.1" className="font-mono" />
-              </Field>
+              {vlanTagged ? (
+                <div className="space-y-3">
+                  {multi && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-label">DHCP and DNS</span>
+                      <div className="flex gap-1" role="radiogroup" aria-label="DHCP and DNS for these VLANs">
+                        {([["common", "Same settings for every VLAN"], ["separate", "Configure each VLAN separately"]] as const).map(([v, label]) => (
+                          <Button key={v} type="button" size="sm" variant={addrMode === v ? "primary" : "secondary"}
+                            role="radio" aria-checked={addrMode === v} onClick={() => setAddrMode(v)}>
+                            {label}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    Every VLAN gets its own subnet, gateway and DHCP scope — they are never shared. The suggested
+                    ranges avoid every subnet this appliance already serves; change any of them if your plan differs.
+                  </p>
+                  <VlanAddressingTable rows={vlans} onChange={setVlans} problems={vlanProblems} separate={separate} />
+                </div>
+              ) : (
+                <>
+                  <Field label="Subnet (CIDR)" required hint="The whole address range of this network, e.g. 10.20.0.0/22.">
+                    <Input value={subnetCidr} onChange={(e) => setSubnetCidr(e.target.value)} placeholder="10.20.0.0/22" className="font-mono" />
+                  </Field>
+                  <Field
+                    label="Gateway IP"
+                    required
+                    hint="The appliance owns this address on the network; clients use it as their default gateway and DNS."
+                  >
+                    <Input value={gatewayIp} onChange={(e) => setGatewayIp(e.target.value)} placeholder="10.20.0.1" className="font-mono" />
+                  </Field>
+                </>
+              )}
             </>
           )}
 
-          {step === 3 && (
+          {step === 3 && separate && (
+            <Callout tone="info" title="Each VLAN carries its own DHCP and DNS">
+              You chose to configure each VLAN separately, so the pools, DNS, search domain and lease times are set
+              per VLAN on the previous step. Captive portal and internet access below apply to all of them.
+            </Callout>
+          )}
+
+          {step === 3 && !separate && (
             <>
+              {vlanTagged ? (
+                <Callout tone="info" title="One DHCP and DNS policy for every VLAN">
+                  Each VLAN keeps its own address pool, taken from its own subnet on the previous step. The DNS,
+                  search domain and lease times below apply to all of them.
+                </Callout>
+              ) : (
               <fieldset className="space-y-2">
                 <legend className="mb-1.5 text-label">
                   Address pools<span className="ms-0.5 text-destructive">*</span>
@@ -415,6 +564,7 @@ export default function NewGuestNetworkPage() {
                   <Plus /> Add pool
                 </Button>
               </fieldset>
+              )}
               <Field label="DNS for clients">
                 <Select value={dnsMode} onChange={(e) => setDnsMode(e.target.value as "appliance" | "custom")}>
                   <option value="appliance">The appliance (resolve on the gateway)</option>
@@ -452,12 +602,14 @@ export default function NewGuestNetworkPage() {
                 items={[
                   { label: "Name", value: name },
                   { label: "SSID label", value: ssidLabel || "—" },
-                  { label: "Type", value: vlanTagged ? `VLAN ${vlanId}` : "Untagged" },
-                  { label: "Parent interface", value: <span className="font-mono">{parentInterface}</span> },
-                  { label: "Subnet", value: <span className="font-mono">{subnetCidr}</span> },
-                  { label: "Gateway", value: <span className="font-mono">{gatewayIp}</span> },
-                  { label: "Address pools", value: <span className="font-mono">{poolText}</span>, wide: true },
-                  { label: "DNS", value: dnsMode === "custom" ? <span className="font-mono">{dnsServers}</span> : "The appliance" },
+                  { label: "Type", value: vlanTagged ? `Tagged · ${vlans.length} VLAN${vlans.length === 1 ? "" : "s"}` : "Untagged" },
+                  { label: "Port", value: <span className="font-mono">{parentInterface}</span> },
+                  ...(vlanTagged ? [] : [
+                    { label: "Subnet", value: <span className="font-mono">{subnetCidr}</span> },
+                    { label: "Gateway", value: <span className="font-mono">{gatewayIp}</span> },
+                    { label: "Address pools", value: <span className="font-mono">{poolText}</span>, wide: true },
+                  ]),
+                  { label: "DNS", value: separate ? "Per VLAN" : dnsMode === "custom" ? <span className="font-mono">{dnsServers}</span> : "The appliance" },
                   { label: "Domain name", value: domainName || "guest.local" },
                   { label: "Captive portal", value: onOff(captivePortal) },
                   { label: "Internet access", value: onOff(internetAccess) },
@@ -465,9 +617,40 @@ export default function NewGuestNetworkPage() {
                   { label: "Client isolation", value: onOff(clientIsolation) },
                 ]}
               />
-              <Callout tone="warning" title="Wireless controller action required" icon={<Radio className="size-4" />}>
-                Map the &lsquo;{ssidLabel || name}&rsquo; SSID to VLAN {vlanTagged ? vlanId : "(untagged)"} on your wireless
-                controller. OneGate manages the gateway, DHCP and captive portal; it does not broadcast Wi-Fi.
+              {vlanTagged && (
+                <Table>
+                  <THead>
+                    <TR><TH>Client network</TH><TH>VLAN</TH><TH>Subnet</TH><TH>Gateway</TH><TH>DHCP pool</TH></TR>
+                  </THead>
+                  <TBody>
+                    {vlans.map((r) => (
+                      <TR key={r.key}>
+                        <TD>{r.name}</TD>
+                        <TD><Badge tone="info">{r.vlan}</Badge></TD>
+                        <TD className="font-mono">{r.subnet}</TD>
+                        <TD className="font-mono">{r.gateway}</TD>
+                        <TD className="font-mono">{r.poolStart} – {r.poolEnd}</TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
+              )}
+
+              <Callout tone="warning" title="Switch and wireless controller action required" icon={<Radio className="size-4" />}>
+                {vlanTagged ? (
+                  <>
+                    Make <span className="font-mono">{parentInterface}</span> a trunk carrying VLAN
+                    {vlans.length === 1 ? " " : "s "}{vlans.map((r) => r.vlan).join(", ")}, and tag each SSID onto its VLAN
+                    on your wireless controller.
+                  </>
+                ) : (
+                  <>
+                    Leave <span className="font-mono">{parentInterface}</span> untagged (native) for this network, and map
+                    the &lsquo;{ssidLabel || name}&rsquo; SSID to it on your wireless controller.
+                  </>
+                )}{" "}
+                OneGate manages the gateway, DHCP and captive portal on its own LAN side; it does not configure your
+                switch or broadcast Wi-Fi.
               </Callout>
             </div>
           )}

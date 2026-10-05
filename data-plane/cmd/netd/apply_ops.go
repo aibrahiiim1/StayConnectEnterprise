@@ -34,7 +34,40 @@ func (a *applier) applyBundle(ctx context.Context, revID string, intent []netcfg
 			desired[n.BridgeName] = n
 		}
 	}
-	live := a.liveGuestBridges()
+	live, err := a.liveGuestBridges()
+	if err != nil {
+		return err
+	}
+
+	// A BRIDGE THAT ALREADY EXISTS MUST STILL BE WHAT THE INTENT SAYS IT IS.
+	//
+	// applyBundle only ever calls createNetwork for a bridge that is MISSING, so a network whose VLAN id or
+	// parent port changed under an UNCHANGED bridge name was written to the database, rendered into the bundle,
+	// pushed to netplan, nftables and Kea -- and never to the wire. The live bridge went on being enslaved to
+	// the old VLAN interface while every record said otherwise, which is the original silent-divergence defect
+	// in its purest form.
+	//
+	// edged refuses such an edit (immutable_topology, and 0105's staged replacement is the supported route), so
+	// this cannot be reached through the product today. It is checked here because netd is the component that
+	// answers for the wire: anything that ever writes guest_networks -- a future surface, a migration, a hand-run
+	// UPDATE -- would otherwise reproduce the defect with nothing to catch it. Refusing is safe because a
+	// replacement always builds a NEW bridge name, so no legitimate change lands here.
+	if !a.dryRun {
+		for br, n := range desired {
+			if !live[br] {
+				continue
+			}
+			wantMember := n.ParentInterface
+			if n.NetworkType == "vlan" {
+				wantMember = netcfg.VLANIfaceName(n.ParentInterface, n.VLANID)
+			}
+			if got := a.bridgeMemberOf(br); got != "" && got != wantMember {
+				return fmt.Errorf("bridge %s is attached to %s but this configuration says %s: "+
+					"a client network's VLAN or port cannot be changed underneath its bridge, "+
+					"and the live network has not been touched", br, got, wantMember)
+			}
+		}
+	}
 
 	if !a.dryRun {
 		// Create missing bridges/VLANs.
@@ -53,15 +86,25 @@ func (a *applier) applyBundle(ctx context.Context, revID string, intent []netcfg
 				}
 			}
 		}
+		// ...and converge the addressing of the bridges that were ALREADY there, which createNetwork never
+		// touches. Without this an edited subnet or gateway is applied everywhere except on the wire.
+		if err := a.reconcileAddresses(ctx, revID, intent); err != nil {
+			return err
+		}
 	}
 	a.st.Event(ctx, revID, "l2l3", true, map[string]any{"bridges": len(desired)})
 
 	// Persistence: write the netplan file + validate (no apply — the live
 	// state is already correct via ip commands).
-	if err := os.WriteFile(a.netplanFile, netcfg.RenderNetplan(managed), 0o600); err != nil {
-		return fmt.Errorf("write netplan: %w", err)
-	}
+	//
+	// A DRY RUN WRITES NOTHING. The netplan file and the Unbound fragment below were written outside the dryRun
+	// guard, so a run that promised no side effects rewrote the two files that decide what the appliance brings
+	// up after its next reboot -- and then skipped `netplan generate`, leaving the YAML and the generated units
+	// describing different networks.
 	if !a.dryRun {
+		if err := os.WriteFile(a.netplanFile, netcfg.RenderNetplan(managed), 0o600); err != nil {
+			return fmt.Errorf("write netplan: %w", err)
+		}
 		if err := a.run(ctx, "netplan", "generate"); err != nil {
 			return fmt.Errorf("netplan generate: %w", err)
 		}
@@ -131,11 +174,16 @@ func (a *applier) applyBundle(ctx context.Context, revID string, intent []netcfg
 	}
 	a.st.Event(ctx, revID, "kea", true, nil)
 
-	// Unbound fragment + apply.
-	if err := os.WriteFile(a.unboundFrag, netcfg.RenderUnbound(intent), 0o644); err != nil {
-		return fmt.Errorf("write unbound: %w", err)
+	// Unbound fragment + apply. Not written on a dry run, for the reason given at the netplan write above.
+	if !a.dryRun {
+		if err := os.WriteFile(a.unboundFrag, netcfg.RenderUnbound(intent), 0o644); err != nil {
+			return fmt.Errorf("write unbound: %w", err)
+		}
 	}
-	a.applyUnbound(ctx)
+	if err := a.applyUnbound(ctx); err != nil {
+		a.st.Event(ctx, revID, "unbound", false, map[string]any{"error": err.Error()})
+		return fmt.Errorf("guest resolver: %w", err)
+	}
 	a.st.Event(ctx, revID, "unbound", true, nil)
 	return nil
 }
@@ -148,16 +196,25 @@ func (a *applier) applyBundle(ctx context.Context, revID string, intent []netcfg
 // portal never triggers because captive-detection DNS fails). Guarded by
 // unbound-checkconf so a bad fragment never takes DNS down; falls back to a reload
 // if the restart command is unavailable.
-func (a *applier) applyUnbound(ctx context.Context) {
+// applyUnbound validates and reloads the guest resolver, AND SAYS WHEN IT COULD NOT.
+//
+// All three steps used to be discarded, and the caller then recorded "unbound ok=true". No health check looks at
+// DNS, so a guest network whose resolver never came up produced a completely green apply -- and the guests on it
+// could not resolve anything, which on a captive portal means the portal itself never appears.
+func (a *applier) applyUnbound(ctx context.Context) error {
 	if a.dryRun {
-		return
+		return nil
 	}
 	if err := a.run(ctx, "unbound-checkconf"); err != nil {
-		return
+		return fmt.Errorf("the guest resolver configuration was refused: %w", err)
 	}
 	if err := a.run(ctx, "systemctl", "restart", "unbound"); err != nil {
-		_ = a.run(ctx, "unbound-control", "reload")
+		// A reload is the gentler fallback, and its failure is the real answer.
+		if rerr := a.run(ctx, "unbound-control", "reload"); rerr != nil {
+			return fmt.Errorf("the guest resolver would neither restart (%v) nor reload: %w", err, rerr)
+		}
 	}
+	return nil
 }
 
 // createNetwork brings up one guest network's L2/L3 surgically.
@@ -196,13 +253,102 @@ func (a *applier) createNetwork(ctx context.Context, n netcfg.GuestNetwork) erro
 	return nil
 }
 
+// reconcileAddress makes an EXISTING managed bridge carry exactly the gateway address its intent asks for, and
+// reports whether it had to change anything.
+//
+// WHY AN APPLY USED TO LIE ABOUT THIS. applyBundle only ever called createNetwork for a bridge that was
+// MISSING, and `ip addr add` lives inside createNetwork. So an operator who edited a client network's subnet or
+// gateway -- the one addressing change the detail page offers -- had their edit written to the database,
+// rendered into the bundle, pushed to Kea... and never applied to the live bridge, which went on carrying the
+// previous address. The DHCP scope then handed out addresses in a subnet the gateway was not on.
+//
+// It is reconciled here instead: the desired address is added if absent and every other address this bridge
+// carries is removed, so the live interface ends up with exactly what the intent says. Only bridges in the
+// desired managed set are ever touched -- liveGuestBridges() returns br-g* only, and the management and WAN
+// interfaces are never in it.
+func (a *applier) reconcileAddress(ctx context.Context, n netcfg.GuestNetwork) (bool, error) {
+	want := fmt.Sprintf("%s/%d", n.GatewayIP, n.PrefixLen)
+	have := a.ifaceAddrsOf(n.BridgeName)
+	changed := false
+	found := false
+	for _, c := range have {
+		if c == want {
+			found = true
+			continue
+		}
+		changed = true
+		// A FAILED REMOVAL IS A FAILED APPLY. This used to be discarded, and the consequence was precise: the
+		// bridge kept BOTH the previous gateway and the new one, the apply reported "readdress ok", and the
+		// gateway_up health check only asserts that the wanted address is PRESENT -- never that the old one is
+		// gone. The appliance then answered ARP for a gateway that no DHCP scope and no nftables rule described,
+		// and the old leases went on routing through it. Returning the error rolls the apply back instead.
+		if err := a.run(ctx, "ip", "addr", "del", c, "dev", n.BridgeName); err != nil {
+			return true, fmt.Errorf("remove stale address %s from %s: %w", c, n.BridgeName, err)
+		}
+	}
+	if !found {
+		changed = true
+		if err := a.run(ctx, "ip", "addr", "add", want, "dev", n.BridgeName); err != nil {
+			return true, fmt.Errorf("address %s on %s: %w", want, n.BridgeName, err)
+		}
+	}
+	return changed, nil
+}
+
+// reconcileAddresses converges every enabled managed bridge that already exists onto its intent's addressing.
+func (a *applier) reconcileAddresses(ctx context.Context, revID string, intent []netcfg.GuestNetwork) error {
+	if a.dryRun {
+		return nil
+	}
+	live, err := a.liveGuestBridges()
+	if err != nil {
+		return err
+	}
+	var readdressed []string
+	for _, n := range a.netdManaged(intent) {
+		if !n.Enabled || !live[n.BridgeName] {
+			continue
+		}
+		changed, err := a.reconcileAddress(ctx, n)
+		if err != nil {
+			return err
+		}
+		if changed {
+			readdressed = append(readdressed, n.BridgeName)
+		}
+	}
+	if len(readdressed) > 0 {
+		a.event(ctx, revID, "readdress", true, map[string]any{"bridges": readdressed})
+	}
+	return nil
+}
+
 // destroyBridge tears down a managed guest bridge and its VLAN sub-interface.
+//
+// IT REPORTS FAILURE, WHICH IT DID NOT USED TO. Both deletes were discarded and the function returned nil
+// unconditionally, which made applyBundle's "destroy %s" error path dead code. The consequence of a failed
+// `ip link del` -- EBUSY, a restricted unit, a busy netlink socket -- was a guest network REMOVED from the
+// intent, and therefore removed from netplan, from nftables and from Kea, whose bridge was still up and still
+// carrying its gateway address. Its clients kept an L2/L3 path with no isolation, no NAT policy and no DHCP,
+// and the revision recorded a clean success. Nothing in netd would ever have noticed: the health checks and
+// the address reconciler both iterate the INTENT, and a bridge that should not exist is not in it.
+//
+// It also refuses to touch the management or WAN interface by name. Every caller already passes a br-g* name
+// from liveGuestBridges(), so this cannot trigger today -- it is here because the only thing standing between
+// this function and the appliance's own connectivity was a string prefix computed somewhere else.
 func (a *applier) destroyBridge(ctx context.Context, bridge string) error {
+	if bridge == "" || bridge == a.topo.MgmtInterface || bridge == a.topo.WANInterface || bridge == a.legacyBridge {
+		return fmt.Errorf("refusing to delete %q: it is not a managed guest bridge", bridge)
+	}
 	// find VLAN member (if any) before deleting the bridge
-	member := bridgeMember(bridge)
-	_ = a.run(ctx, "ip", "link", "del", bridge)
+	member := a.bridgeMemberOf(bridge)
+	if err := a.run(ctx, "ip", "link", "del", bridge); err != nil {
+		return fmt.Errorf("delete bridge %s: %w", bridge, err)
+	}
 	if member != "" && strings.Contains(member, ".") {
-		_ = a.run(ctx, "ip", "link", "del", member)
+		if err := a.run(ctx, "ip", "link", "del", member); err != nil {
+			return fmt.Errorf("delete VLAN interface %s of %s: %w", member, bridge, err)
+		}
 	}
 	return nil
 }
@@ -239,9 +385,46 @@ func (a *applier) ReconcileActiveOnBoot(ctx context.Context) {
 	}
 	// Ensure managed bridges/VLANs exist (netplan should recreate them on boot,
 	// but a surgical create is idempotent and covers a generate-only apply).
+	var bootProblems []string
 	for _, n := range a.netdManaged(intent) {
 		if n.Enabled && !ifaceExists(n.BridgeName) {
-			_ = a.createNetwork(ctx, n)
+			if cerr := a.createNetwork(ctx, n); cerr != nil {
+				// Recorded rather than discarded: a boot reconcile that could not rebuild a guest network used
+				// to report ok=true, so the appliance came up serving fewer networks than its confirmed
+				// revision describes and nothing said so.
+				bootProblems = append(bootProblems, "create "+n.BridgeName+": "+cerr.Error())
+			}
+		}
+	}
+	// ...AND REMOVE WHAT SHOULD NOT EXIST, AND CORRECT WHAT IS ADDRESSED WRONGLY.
+	//
+	// Boot reconcile used to do neither, and both gaps were reachable from one crash. If netd died between
+	// createNetwork and MarkPending, the bridge it had just built stayed up forever: no revision described it,
+	// so no apply would ever remove it, and its clients kept an L2 path with no nftables rules and no DHCP.
+	// And a bridge left carrying the previous subnet's gateway was corrected only on the apply path, never
+	// here -- so the very defect reconcileAddress exists to fix survived a reboot.
+	//
+	// Both are now asserted against the CONFIRMED revision's own intent, which is the only thing netd trusts.
+	if live, lerr := a.liveGuestBridges(); lerr != nil {
+		bootProblems = append(bootProblems, "list live bridges: "+lerr.Error())
+	} else {
+		desired := map[string]bool{}
+		for _, n := range a.netdManaged(intent) {
+			if n.Enabled {
+				desired[n.BridgeName] = true
+			}
+		}
+		for br := range live {
+			if !desired[br] {
+				if derr := a.destroyBridge(ctx, br); derr != nil {
+					bootProblems = append(bootProblems, "destroy stray "+br+": "+derr.Error())
+				} else {
+					bootProblems = append(bootProblems, "destroyed stray bridge "+br+" (no confirmed revision describes it)")
+				}
+			}
+		}
+		if aerr := a.reconcileAddresses(ctx, id, intent); aerr != nil {
+			bootProblems = append(bootProblems, "addressing: "+aerr.Error())
 		}
 	}
 	// nftables: converge to what THIS binary renders.
@@ -266,14 +449,21 @@ func (a *applier) ReconcileActiveOnBoot(ctx context.Context) {
 			// Re-install the Unbound fragment.
 			if raw, err := os.ReadFile(filepath.Join(bundle, "stayconnect-guest.conf")); err == nil {
 				_ = os.WriteFile(a.unboundFrag, raw, 0o644)
-				a.applyUnbound(ctx)
+				if uerr := a.applyUnbound(ctx); uerr != nil {
+					bootProblems = append(bootProblems, "guest resolver: "+uerr.Error())
+				}
 			}
 		}
 	}
-	a.event(ctx, id, "boot_reconcile", true, map[string]any{
+	// THE RECORDED OUTCOME IS THE REAL OUTCOME. This used to be an unconditional ok=true, which is how a boot
+	// that failed to rebuild a network, or left a stray bridge forwarding, looked identical to a clean one.
+	a.event(ctx, id, "boot_reconcile", len(bootProblems) == 0, map[string]any{
 		"bundle": bundle, "nft_changed": res.Changed, "carried_elements": res.Carried,
-		"desired_fp": res.DesiredFP, "live_fp_before": res.LiveFP,
+		"desired_fp": res.DesiredFP, "live_fp_before": res.LiveFP, "problems": bootProblems,
 	})
+	if len(bootProblems) > 0 {
+		slog.Error("netd boot reconcile did not fully converge", "revision", id, "problems", bootProblems)
+	}
 }
 
 // rollback restores the previous active revision (its bundle re-applied) or, if
@@ -281,10 +471,47 @@ func (a *applier) ReconcileActiveOnBoot(ctx context.Context) {
 // throughout (mgmt/legacy interfaces are never touched here).
 func (a *applier) rollback(ctx context.Context, failedID, reason string) {
 	a.event(ctx, failedID, "rollback", true, map[string]any{"reason": reason})
+
+	// IS THIS REVISION STILL ROLLBACKABLE? ASKED FIRST, FOR EVERY BRANCH.
+	//
+	// This check used to live inside the factory-clean branch below, so it only ever ran on an appliance with
+	// no earlier revision -- which is to say, almost never. On every appliance that had applied anything
+	// before, the ordinary branch ran with no state check at all, and lost this race:
+	//
+	//   watchdogLoop sees revision R overdue and calls us; we read R's predecessor P, still active;
+	//   the operator's /confirm commits in the gap -- R becomes active, P becomes superseded;
+	//   we carry on rolling back to P, destroy every bridge R created, and then cannot rebuild P's
+	//   (ActiveIntent looks for an ACTIVE revision other than R, and P is superseded now), so nothing is
+	//   rebuilt, nftables is left holding R's ruleset, and MarkRolledBack stamps over R's 'active'.
+	//
+	// The appliance was then left with NO active revision, no guest bridges, and a boot reconcile that could
+	// never find an intent to assert -- after telling the operator their change was confirmed. Asking here, for
+	// both branches, makes the confirm and the rollback mutually exclusive whichever arrives first.
+	switch state, err := a.revisionState(ctx, failedID); {
+	case err != nil:
+		// Fail closed: not knowing is not permission to change the live network.
+		a.event(ctx, failedID, "rollback", false, map[string]any{
+			"refused": "the revision state could not be re-read before rolling back", "error": err.Error()})
+		return
+	case state == "active":
+		a.event(ctx, failedID, "rollback", false, map[string]any{
+			"refused": "the revision was CONFIRMED between the decision to roll back and this point; " +
+				"undoing a configuration an operator has just kept is not a rollback",
+			"state": state})
+		return
+	case state != "applying" && state != "pending_confirmation":
+		// Already failed, already rolled back, or superseded: someone else has decided its fate and the live
+		// network has already been reconciled to that decision. Doing it again is how the watchdog used to
+		// restart Unbound every five seconds forever.
+		a.event(ctx, failedID, "rollback", false, map[string]any{
+			"refused": "the revision is no longer in flight", "state": state})
+		return
+	}
+
 	prevBundle, _ := a.previousBundle(ctx, failedID)
 
 	if prevBundle == "" {
-		// THE TEAR-DOWN IS ONLY CORRECT FOR A REVISION THAT IS NOT ACTIVE, AND THAT IS RE-CHECKED HERE.
+		// THE TEAR-DOWN IS ONLY CORRECT FOR A REVISION THAT IS NOT ACTIVE, AND THAT IS RE-CHECKED ABOVE.
 		//
 		// Both callers decide to roll back BEFORE this function looks for a target, and a confirmation can
 		// land in the gap:
@@ -301,22 +528,6 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) {
 		// The check belongs here rather than in either caller, because there are two callers and the
 		// watchdog's race predates the operator guard entirely. A revision that is ACTIVE has, by
 		// definition, been confirmed, and the factory-clean path is for a first apply that never was.
-		if state, err := a.revisionState(ctx, failedID); err != nil {
-			// Fail closed: not knowing is not permission to destroy the guest network.
-			a.event(ctx, failedID, "rollback", false, map[string]any{
-				"refused": "the revision state could not be re-read before the factory-clean tear-down",
-				"error":   err.Error(),
-			})
-			return
-		} else if state == "active" {
-			a.event(ctx, failedID, "rollback", false, map[string]any{
-				"refused": "the revision was CONFIRMED between the decision to roll back and this point; " +
-					"tearing down every guest network is not the correct answer to a confirmed revision",
-				"state": state,
-			})
-			return
-		}
-
 		// No prior good revision: tear down everything managed and clear.
 		//
 		// A FACTORY-CLEAN APPLIANCE HAS TO COME BACK FACTORY-CLEAN. This is the path the very first guest
@@ -324,13 +535,32 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) {
 		// STARTED Kea — because there is no other way to configure it. Tearing down the bridge, the netplan
 		// and the unbound fragment while leaving Kea running, enabled, and serving DHCP for a network that
 		// no longer exists is not a rollback.
-		for br := range a.liveGuestBridges() {
-			_ = a.destroyBridge(ctx, br)
+		if live, lerr := a.liveGuestBridges(); lerr != nil {
+			// Not knowing what exists is not permission to declare the appliance clean.
+			a.event(ctx, failedID, "rollback", false, map[string]any{
+				"error": "the live bridges could not be listed: " + lerr.Error()})
+			return
+		} else if !a.dryRun {
+			// A DRY RUN MAY NOT DESTROY ANYTHING. This branch had no dryRun guard at all, so a dry-run apply
+			// that failed tore down every guest bridge and deleted the netplan and Unbound files for real --
+			// while the non-factory branch below was guarded, which made the asymmetry a bug rather than a
+			// decision.
+			var refused []string
+			for br := range live {
+				if derr := a.destroyBridge(ctx, br); derr != nil {
+					refused = append(refused, br+": "+derr.Error())
+				}
+			}
+			_ = os.Remove(a.netplanFile)
+			_ = os.Remove(a.unboundFrag)
+			if len(refused) > 0 {
+				// Recorded, and the rollback still finishes what it can: leaving Kea serving a network whose
+				// bridge survived would be worse than an incomplete tear-down that says so.
+				a.event(ctx, failedID, "rollback_bridges", false, map[string]any{"not_destroyed": refused})
+			}
 		}
-		_ = os.Remove(a.netplanFile)
-		_ = os.Remove(a.unboundFrag)
 		a.restoreKeaBootstrap(ctx)
-		_ = a.markRolledBack(ctx, failedID, reason)
+		a.recordRolledBack(ctx, failedID, reason)
 		return
 	}
 	// Reconcile bridges to the previous good revision's managed set: destroy any
@@ -339,9 +569,34 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) {
 	// liveGuestBridges(), so they cannot be touched here.
 	prevBridges := a.bridgesInBundle(prevBundle)
 	if !a.dryRun {
-		for br := range a.liveGuestBridges() {
+		live, lerr := a.liveGuestBridges()
+		if lerr != nil {
+			a.event(ctx, failedID, "rollback", false, map[string]any{
+				"error": "the live bridges could not be listed: " + lerr.Error()})
+			return
+		}
+		var refused []string
+		for br := range live {
 			if !prevBridges[br] {
-				_ = a.destroyBridge(ctx, br)
+				if derr := a.destroyBridge(ctx, br); derr != nil {
+					refused = append(refused, br+": "+derr.Error())
+				}
+			}
+		}
+		if len(refused) > 0 {
+			a.event(ctx, failedID, "rollback_bridges", false, map[string]any{"not_destroyed": refused})
+		}
+		// ...AND RECREATE what the failed apply removed. A revision that deleted or replaced a network
+		// destroyed that network's bridge; rolling back used to leave it destroyed until the next boot
+		// reconcile, so a refused replacement took the OLD network down too. The previous good revision's
+		// own intent says which bridges must exist; any that are missing are rebuilt exactly as an apply
+		// builds them, before nftables, DHCP and DNS are restored for them below.
+		a.recreateMissingBridges(ctx, failedID)
+		// A failed apply may also have RE-ADDRESSED a bridge it kept. The previous confirmed intent says what
+		// each bridge should carry, so the same reconciliation puts the addressing back.
+		if prevIntent, ierr := a.previousActiveIntent(ctx, failedID); ierr == nil && prevIntent != nil {
+			if rerr := a.reconcileAddresses(ctx, failedID, prevIntent); rerr != nil {
+				a.event(ctx, failedID, "rollback_addresses", false, map[string]any{"error": rerr.Error()})
 			}
 		}
 	}
@@ -391,13 +646,53 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) {
 		}
 		if raw, err := os.ReadFile(filepath.Join(prevBundle, "stayconnect-guest.conf")); err == nil {
 			_ = os.WriteFile(a.unboundFrag, raw, 0o644)
-			a.applyUnbound(ctx)
+			if uerr := a.applyUnbound(ctx); uerr != nil {
+				a.event(ctx, failedID, "rollback_unbound", false, map[string]any{"error": uerr.Error()})
+			}
 		}
 	}
 	if raw, err := os.ReadFile(filepath.Join(prevBundle, "50-stayconnect-guest.yaml")); err == nil {
-		_ = os.WriteFile(a.netplanFile, raw, 0o600)
+		// AND REGENERATE. Restoring the YAML without re-running `netplan generate` left the generated networkd
+		// units describing the FAILED revision, so the next reboot recreated the bridges the rollback had just
+		// destroyed -- a rollback that undid itself at the next power cut.
+		if werr := os.WriteFile(a.netplanFile, raw, 0o600); werr != nil {
+			a.event(ctx, failedID, "rollback_netplan", false, map[string]any{"error": werr.Error()})
+		} else if gerr := a.run(ctx, "netplan", "generate"); gerr != nil {
+			a.event(ctx, failedID, "rollback_netplan", false, map[string]any{
+				"error": "the restored netplan could not be regenerated: " + gerr.Error()})
+		}
 	}
-	_ = a.markRolledBack(ctx, failedID, reason)
+	a.recordRolledBack(ctx, failedID, reason)
+}
+
+// recreateMissingBridges rebuilds every enabled, netd-managed bridge of the previous ACTIVE revision that is
+// not live. Each failure is recorded as a rollback event and the rest continue: one bridge that cannot be
+// rebuilt must not stop the others from coming back.
+func (a *applier) recreateMissingBridges(ctx context.Context, failedID string) {
+	prevIntent, err := a.previousActiveIntent(ctx, failedID)
+	if err != nil || prevIntent == nil {
+		return // the nft step below records why the previous revision could not be read
+	}
+	live, lerr := a.liveGuestBridges()
+	if lerr != nil {
+		a.event(ctx, failedID, "rollback_bridges", false, map[string]any{
+			"error": "the live bridges could not be listed, so none were rebuilt: " + lerr.Error()})
+		return
+	}
+	var rebuilt, failed []string
+	for _, n := range a.netdManaged(prevIntent) {
+		if !n.Enabled || live[n.BridgeName] {
+			continue
+		}
+		if err := a.createNetwork(ctx, n); err != nil {
+			failed = append(failed, n.BridgeName+": "+err.Error())
+			continue
+		}
+		rebuilt = append(rebuilt, n.BridgeName)
+	}
+	if len(rebuilt) > 0 || len(failed) > 0 {
+		a.event(ctx, failedID, "rollback_bridges", len(failed) == 0, map[string]any{"rebuilt": rebuilt, "failed": failed})
+	}
 }
 
 func (a *applier) pushKeaFile(raw []byte) error {
@@ -483,21 +778,51 @@ func (a *applier) bridgesInBundle(bundle string) map[string]bool {
 	return out
 }
 
-func (a *applier) liveGuestBridges() map[string]bool {
+// liveGuestBridges answers which managed guest bridges exist right now.
+//
+// AN UNREADABLE /sys IS NOT AN EMPTY APPLIANCE. The directory read used to be discarded, so any failure became
+// an empty map -- which every caller reads as "no guest bridges exist". That silently disabled the entire L2/L3
+// reconciler in one move: nothing was destroyed, every bridge was skipped by the address reconciler, and a
+// rollback decided every previous bridge needed recreating. The error is returned so the apply fails instead.
+func (a *applier) liveGuestBridges() (map[string]bool, error) {
+	if a.liveBridgesFn != nil {
+		return a.liveBridgesFn(), nil
+	}
+	entries, err := os.ReadDir("/sys/class/net")
+	if err != nil {
+		return nil, fmt.Errorf("list network interfaces: %w", err)
+	}
 	out := map[string]bool{}
-	entries, _ := os.ReadDir("/sys/class/net")
 	for _, e := range entries {
 		name := e.Name()
 		if strings.HasPrefix(name, "br-g") && name != a.legacyBridge {
 			out[name] = true
 		}
 	}
-	return out
+	return out, nil
 }
 
 func ifaceExists(name string) bool {
 	_, err := os.Stat("/sys/class/net/" + name)
 	return err == nil
+}
+
+// ifaceAddrs lists the IPv4 CIDRs configured on an interface ("10.20.0.1/24"), newest kernel order.
+func ifaceAddrs(name string) []string {
+	out, err := exec.Command("ip", "-o", "-4", "addr", "show", "dev", name).Output()
+	if err != nil {
+		return nil
+	}
+	var cidrs []string
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Fields(line)
+		for i, tok := range f {
+			if tok == "inet" && i+1 < len(f) {
+				cidrs = append(cidrs, f[i+1])
+			}
+		}
+	}
+	return cidrs
 }
 
 func ifaceHasIP(name, ip string) bool {
@@ -516,12 +841,18 @@ func ifaceHasAnyIP(name string) bool {
 	return strings.Contains(string(out), "inet ")
 }
 
+// bridgeMember names the single interface enslaved to a bridge, or "" when that cannot be answered.
+//
+// It returns "" for an unreadable directory AND for a bridge with more than one member, because both mean "this
+// is not the one-VLAN-interface-per-bridge shape netd creates" and neither justifies acting on entries[0] --
+// which is what it used to do, so a bridge with two members had one of them picked arbitrarily for deletion.
+// Every caller treats "" as "nothing to assert", which is the safe reading.
 func bridgeMember(bridge string) string {
-	entries, _ := os.ReadDir("/sys/class/net/" + bridge + "/brif")
-	if len(entries) > 0 {
-		return entries[0].Name()
+	entries, err := os.ReadDir("/sys/class/net/" + bridge + "/brif")
+	if err != nil || len(entries) != 1 {
+		return ""
 	}
-	return ""
+	return entries[0].Name()
 }
 
 func tcpListening(port int) bool {
@@ -532,4 +863,28 @@ func tcpListening(port int) bool {
 	}
 	_ = c.Close()
 	return true
+}
+
+// recordRolledBack writes the rolled_back state and SAYS SO WHEN IT CANNOT.
+//
+// Both rollback exits used to discard this error. If the write failed the revision stayed
+// pending_confirmation, so five seconds later the watchdog found it overdue again and rolled it back again --
+// rebuilding bridges, re-pushing Kea and restarting Unbound on every pass, for as long as the appliance ran.
+// A refusal (someone else already decided this revision's fate) is not an error worth shouting about; a failure
+// to write is, because it is the one that loops.
+func (a *applier) recordRolledBack(ctx context.Context, id, reason string) {
+	err := a.markRolledBack(ctx, id, reason)
+	if err == nil {
+		return
+	}
+	if errors.Is(err, errNotRollbackable) {
+		a.event(ctx, id, "rollback", false, map[string]any{
+			"note":  "the revision had already left the in-flight states; its recorded fate is left alone",
+			"error": err.Error()})
+		return
+	}
+	slog.Error("netd could not record a rollback; the revision will be retried by the watchdog",
+		"revision", id, "err", err)
+	a.event(ctx, id, "rollback", false, map[string]any{
+		"error": "the rolled_back state could not be recorded: " + err.Error()})
 }

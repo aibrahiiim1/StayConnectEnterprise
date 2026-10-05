@@ -19,6 +19,9 @@ import { portalHTML as renderLanding } from "./portal-page";
 const UNIFORM_MESSAGE =
   "We could not verify your stay. Please check your details or contact the site team for assistance.";
 
+// What the page shows when the server never answered at all (err.service, operator-editable in Portal Settings).
+const TRANSPORT_MESSAGE = "Something went wrong. Please try again.";
+
 // renderLanding comes from ./portal-page now.
 //
 // IT USED TO BE A COPY IN THIS FILE, one of five, each ending `.replace(/\{\{[^}]*\}\}/g, "")` -- strip every
@@ -170,7 +173,15 @@ test("every failure looks identical to the guest", async ({ page }) => {
   }
 });
 
-test("a server that answers with nothing at all is still the same message", async ({ page }) => {
+// A REQUEST THAT NEVER REACHED THE SERVER IS NOT A GUEST WHO TYPED THE WRONG THING.
+//
+// This case used to assert the uniform CREDENTIAL sentence for an aborted request, on the anti-enumeration
+// reasoning that every non-success must look alike. Product-Owner decision (2026-10-03) reverses that for this
+// one case, and the reasoning does not reach it anyway: with no server response there is nothing about this
+// guest, this room or this property to leak, and the outcome is identical for everyone in the building at that
+// moment whatever they typed. Meanwhile the cost was real -- a guest whose phone had dropped off the Wi-Fi was
+// told to re-check a room number and family name that were correct, and telling them again would not help.
+test("a request that never reaches the server shows a connection error, not credential advice", async ({ page }) => {
   const calls: Call[] = [];
   const html = renderLanding();
   await page.route("**/portal", (r: Route) =>
@@ -183,7 +194,9 @@ test("a server that answers with nothing at all is still the same message", asyn
 
   await page.goto("http://localhost/portal");
   await submitStay(page, "412", "Okonkwo");
-  await expect(page.locator("#pms-err")).toHaveText(UNIFORM_MESSAGE);
+  // The technical/retry sentence, and explicitly NOT the one that sends a correct guest back to their details.
+  await expect(page.locator("#pms-err")).toHaveText(TRANSPORT_MESSAGE);
+  await expect(page.locator("#pms-err")).not.toHaveText(UNIFORM_MESSAGE);
   expect(calls).toHaveLength(0);
 });
 

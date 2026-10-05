@@ -336,7 +336,10 @@ func (h *handler) activateEnforced(r *http.Request, sess commerceSession, entitl
 	if ip == nil {
 		return "", activateNoDevice
 	}
-	mac, ok := h.arpCache(ip)
+	// The hardware address comes from the kernel's neighbour table, never from the client, and the kernel is
+	// ASKED to resolve it rather than only consulted (arp_resolve.go): a cold cache is not evidence that a
+	// device is off the guest network. Same mechanism, same guarantee, on every sign-in path.
+	mac, ok := h.deviceMAC(r.Context(), ip)
 	if !ok {
 		return "", activateNoDevice
 	}

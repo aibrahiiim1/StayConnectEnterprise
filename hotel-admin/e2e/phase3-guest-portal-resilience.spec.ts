@@ -28,6 +28,9 @@ import { portalHTML as renderLanding } from "./portal-page";
 const UNIFORM_MESSAGE =
   "We could not verify your stay. Please check your details or contact the site team for assistance.";
 
+// What the page shows when the server never answered at all (err.service, operator-editable in Portal Settings).
+const TRANSPORT_MESSAGE = "Something went wrong. Please try again.";
+
 // renderLanding comes from ./portal-page now.
 //
 // IT USED TO BE A COPY IN THIS FILE, one of five, each ending `.replace(/\{\{[^}]*\}\}/g, "")` -- strip every
@@ -104,8 +107,15 @@ test("tapping Connect again after a refusal is a new attempt with a new request 
 });
 
 test("a dropped connection leaves the page able to try again", async ({ page }) => {
-  // The fetch itself throws — no response at all. The guest cannot tell this from a wrong room, and must not
-  // be able to.
+  // The fetch itself throws — no response at all.
+  //
+  // IT USED TO SHOW THE CREDENTIAL SENTENCE, on the reasoning that a guest "cannot tell this from a wrong room,
+  // and must not be able to". Product-Owner decision (2026-10-03) reverses that, and the anti-enumeration
+  // reasoning does not reach this case: with no server response there is nothing about this guest, this room or
+  // this property to leak, and the outcome is identical for everyone in the building at that moment whatever
+  // they typed. What it cost was a guest whose phone had dropped off the Wi-Fi being told to re-check a room
+  // number and family name that were correct. The subject of this case is unchanged — the page must still be
+  // able to try again, under a NEW request id — and that is what the assertions below hold.
   //
   // The old contract retried under the SAME id, so that a resolution recorded just before the drop would be
   // replayed rather than duplicated. That is the case the correction gives up, deliberately: the client
@@ -117,7 +127,9 @@ test("a dropped connection leaves the page able to try again", async ({ page }) 
 
   await page.goto("http://localhost/portal");
   await submitStay(page, "412", "Okonkwo");
-  await expect(page.locator("#pms-err")).toHaveText(UNIFORM_MESSAGE);
+  // The technical/retry sentence, and explicitly NOT the one that sends a correct guest back to their details.
+  await expect(page.locator("#pms-err")).toHaveText(TRANSPORT_MESSAGE);
+  await expect(page.locator("#pms-err")).not.toHaveText(UNIFORM_MESSAGE);
 
   await page.getByRole("button", { name: "Submit" }).click();
   await expect(page.getByRole("heading", { name: "You are online" })).toBeVisible();

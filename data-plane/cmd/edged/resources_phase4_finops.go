@@ -109,6 +109,32 @@ func scanSettlement(row interface{ Scan(...any) error }, e *settlementRow) error
 		&e.AmountMinor, &e.Currency, &e.Exponent, &e.PackageName, &e.At, &e.Source, &e.Room)
 }
 
+// settlementViews are the screen's views of the list, applied in SQL so a view pages over every payment rather
+// than over the page on screen. They are the definitions the screen used when it filtered in the browser.
+var settlementViews = map[string]string{
+	"attention": `v.status IN ('MANUAL_REVIEW','FAILED','REQUIRED','IN_PROGRESS') AND v.method <> 'NOT_REQUIRED'`,
+	"paid":      `v.method IN ('ONLINE_PAYMENT','PMS_POSTING')`,
+	"voucher":   `v.method = 'PREPAID'`,
+	"free":      `v.method = 'NOT_REQUIRED'`,
+}
+
+type settlementCollected struct {
+	Currency    string `json:"currency"`
+	Exponent    int16  `json:"currency_exponent"`
+	AmountMinor int64  `json:"amount_minor"`
+}
+
+// settlementsSummary describes every payment the status filter selects -- not the page and not the view, so
+// the view counts stay put while the operator moves between views.
+type settlementsSummary struct {
+	All       int                   `json:"all"`
+	Attention int                   `json:"attention"`
+	Paid      int                   `json:"paid"`
+	Voucher   int                   `json:"voucher"`
+	Free      int                   `json:"free"`
+	Collected []settlementCollected `json:"collected"`
+}
+
 func (s *server) listSettlements(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -116,9 +142,65 @@ func (s *server) listSettlements(w http.ResponseWriter, r *http.Request) {
 	if v := strings.TrimSpace(r.URL.Query().Get("status")); v != "" {
 		statusArg = v
 	}
-	rows, err := s.db.Query(ctx, settlementSelect+`
- WHERE v.tenant_id=$1 AND v.site_id=$2 AND ($3::text IS NULL OR v.status=$3::text)
- ORDER BY coalesce(q.consumed_at, e.activated_at) DESC NULLS LAST, v.settlement_id LIMIT 200`, s.tenantID, s.siteID, statusArg)
+	viewClause := "true"
+	if v := strings.TrimSpace(r.URL.Query().Get("view")); v != "" {
+		c, ok := settlementViews[v]
+		if !ok {
+			jsonErr(w, http.StatusBadRequest, "bad_request", "view must be attention, paid, voucher or free")
+			return
+		}
+		viewClause = c
+	}
+	// PAGED. The list used to stop at the newest 200, and its counts and totals counted those 200.
+	pg, ok := readPage(w, r, 0)
+	if !ok {
+		return
+	}
+	scope := `
+ WHERE v.tenant_id=$1 AND v.site_id=$2 AND ($3::text IS NULL OR v.status=$3::text)`
+
+	// The counts and the collected totals read the view alone: no join is needed to classify a payment.
+	sum := settlementsSummary{Collected: []settlementCollected{}}
+	var total int
+	if err := s.db.QueryRow(ctx, `SELECT count(*)::int,
+	       count(*) FILTER (WHERE `+settlementViews["attention"]+`)::int,
+	       count(*) FILTER (WHERE `+settlementViews["paid"]+`)::int,
+	       count(*) FILTER (WHERE `+settlementViews["voucher"]+`)::int,
+	       count(*) FILTER (WHERE `+settlementViews["free"]+`)::int,
+	       count(*) FILTER (WHERE `+viewClause+`)::int
+	  FROM iam_v2.v_financial_settlements v`+scope, s.tenantID, s.siteID, statusArg).
+		Scan(&sum.All, &sum.Attention, &sum.Paid, &sum.Voucher, &sum.Free, &total); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	crows, err := s.db.Query(ctx, `SELECT coalesce(v.currency,''), coalesce(max(v.currency_exponent),0)::int2,
+	       coalesce(sum(v.amount_minor),0)::bigint
+	  FROM iam_v2.v_financial_settlements v`+scope+`
+	   AND v.status = 'SETTLED' AND `+settlementViews["paid"]+`
+	 GROUP BY 1 ORDER BY 1`, s.tenantID, s.siteID, statusArg)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	for crows.Next() {
+		var c settlementCollected
+		if err := crows.Scan(&c.Currency, &c.Exponent, &c.AmountMinor); err != nil {
+			crows.Close()
+			jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
+			return
+		}
+		sum.Collected = append(sum.Collected, c)
+	}
+	crows.Close()
+	if err := crows.Err(); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+
+	rows, err := s.db.Query(ctx, settlementSelect+scope+`
+   AND `+viewClause+`
+ ORDER BY coalesce(q.consumed_at, e.activated_at) DESC NULLS LAST, v.settlement_id
+ LIMIT $4 OFFSET $5`, s.tenantID, s.siteID, statusArg, pg.Fetch(), pg.Offset())
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
@@ -133,7 +215,16 @@ func (s *server) listSettlements(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, e)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"settlements": out, "limit": 200})
+	if err := rows.Err(); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	out, more := trimPage(out, pg)
+	// "settlements" and "limit" are the keys this answer always had; limit is now the page size.
+	writeJSON(w, http.StatusOK, map[string]any{
+		"settlements": out, "limit": pg.Size,
+		"page": pg.Page, "page_size": pg.Size, "meta": listMeta{HasMore: more}, "total": total, "summary": sum,
+	})
 }
 
 type finopsPaymentRow struct {

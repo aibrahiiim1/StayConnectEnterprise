@@ -130,6 +130,42 @@ describe("InternetPackagesPage — packages", () => {
     expect(within(sheet).queryByText("500 USD")).toBeNull();
   });
 
+  // THE GUIDANCE ON A STALE PLAN PIN MUST DESCRIBE WHAT THE PRODUCT ACTUALLY DOES.
+  //
+  // It used to say "Choose Edit and save to bring it up to date". Saving a package KEEPS the service-plan
+  // revision it is pinned to when the plan selection has not changed -- decideSave does that deliberately, so
+  // that renaming a package cannot apply a technical change nobody approved on this screen (see
+  // lib/package-save.ts, and the decideSave cases in test/package-save.test.ts). The operator would therefore
+  // follow the instruction, read "Changes saved", and the package would still be on the old revision with
+  // nothing to tell them it had not worked. The supported action lives on Service plans and asks which
+  // packages should move, one at a time.
+  it("directs a stale plan pin to Service plans, not to Edit and save", async () => {
+    routes({ "/commercial-packages": list([{ ...PKG, plan_has_newer_revision: true }]) });
+    render(<InternetPackagesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Free WiFi" }));
+    const sheet = await screen.findByRole("dialog");
+    // Located by the new sentence, which is unique; the heading text also appears on the row badge.
+    const callout = (await within(sheet).findByText(/will not move it/i)).closest("div")!;
+
+    // The instruction that cannot work is gone...
+    expect(within(sheet).queryByText(/edit and save to bring it up to date/i)).toBeNull();
+    // ...and is replaced by one that names the supported action and links to where it is.
+    expect(callout.textContent).toMatch(/Apply current settings/);
+    const link = within(sheet).getByRole("link", { name: /service\s*plans/i });
+    expect(link).toHaveAttribute("href", "/service-plans");
+    // ...and it keeps the promise the revision model actually makes.
+    expect(callout.textContent).toMatch(/already online keep what they have/i);
+  });
+
+  // ...and it is not shown when the package is already on the plan's current settings.
+  it("says nothing about plan settings when the pin is current", async () => {
+    routes({ "/commercial-packages": list([{ ...PKG, plan_has_newer_revision: false }]) });
+    render(<InternetPackagesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Free WiFi" }));
+    const sheet = await screen.findByRole("dialog");
+    expect(within(sheet).queryByText(/service plan has newer settings/i)).toBeNull();
+  });
+
   it("shows how many guests are on each package now", async () => {
     routes({
       "/commercial-packages": list([PKG]),

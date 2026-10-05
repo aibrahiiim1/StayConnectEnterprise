@@ -85,3 +85,15 @@ GRANT EXECUTE ON FUNCTION iam_v2.apply_entitlement_transition(uuid, text, timest
 -- statement that turns "this guest has an entitlement" into "this laptop may use it", so without EXECUTE the
 -- grant fails one step past the entitlement transition, again after the Purchase is durable.
 GRANT EXECUTE ON FUNCTION iam_v2.authorize_entitlement_device(uuid, uuid, timestamptz) TO svc_scd;
+
+-- ---- the client-network LINEAGE view (0106) --------------------------------
+-- A package REVISION is immutable and names client networks by id. Replacing a client network -- a VLAN id, a
+-- port, a subnet -- gives it a NEW id, so every SITE_NETWORK rule in every EXISTING revision stopped matching
+-- the guests sitting on that very network. The current revision can be republished forward; a PINNED one
+-- cannot, and an unused printed voucher redeems its pinned revision directly and deliberately. Without this
+-- grant the lineage read fails with "permission denied for view guest_network_lineage" and -- because losing
+-- the lineage silently narrows eligibility -- the guest path fails closed rather than quietly offering less.
+--
+-- The VIEW only. iam_v2.guest_network_replacements behind it carries the operator who asked, the reason they
+-- typed and the staged addressing; no guest path has any business reading those.
+GRANT SELECT ON iam_v2.guest_network_lineage TO svc_scd;

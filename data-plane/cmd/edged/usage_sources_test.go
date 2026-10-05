@@ -22,7 +22,7 @@ import (
 // usageSQLUnderTest is every statement the usage explorer's access-source views run.
 func usageSQLUnderTest() map[string]string {
 	out := map[string]string{
-		"source list":    usageSourceListSQL(50),
+		"source list":    usageSourceListSQL(51, 50),
 		"stay header":    stayHeaderSQL,
 		"account header": accountHeaderSQL,
 		"voucher header": voucherHeaderSQL,

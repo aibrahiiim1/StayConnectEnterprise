@@ -9,6 +9,7 @@
 // records a new permanent version.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { AlertTriangle, Ban, CheckCircle2, Gauge, Package, Pencil, Plus, Trash2, Users } from "lucide-react";
 import { api, ListResp } from "@/lib/api";
 import {
@@ -407,10 +408,23 @@ export function PackagesTab({
                     { label: "Clients now", value: activeBy ? (activeBy[p.package_id] ?? 0) : "—" },
                   ]} />
 
+                  {/* THIS USED TO TELL THE OPERATOR TO DO SOMETHING THE PRODUCT DELIBERATELY REFUSES.
+                      It said "Choose Edit and save to bring it up to date". Saving a package KEEPS the service-plan
+                      revision it is pinned to when the plan selection has not changed -- decideSave does that on
+                      purpose, because advancing the pin just because someone renamed a package would apply a
+                      technical change nobody approved on this screen. So the operator would edit, save, read
+                      "Changes saved", and the package would still be on the old revision with nothing to say the
+                      instruction had not worked. The supported action already exists on Service plans, where it
+                      asks which packages should move, one by one. */}
                   {p.plan_has_newer_revision && (
                     <Callout tone="warning" title="The service plan has newer settings">
                       The <strong>{p.service_plan_code}</strong> service plan has newer settings that this package
-                      does not use yet. Choose Edit and save to bring it up to date.
+                      does not use yet. Editing and saving this package will not move it: a package keeps the
+                      version of the plan it was pinned to.{" "}
+                      To move it, open <Link href="/service-plans" className="font-medium underline">Service
+                      plans</Link>, choose <strong>{p.service_plan_code}</strong> and use <strong>Apply current
+                      settings</strong> — that asks which packages should move. Clients already online keep what
+                      they have; the change applies to clients who connect afterwards.
                     </Callout>
                   )}
 

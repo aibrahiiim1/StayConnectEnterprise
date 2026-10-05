@@ -604,7 +604,7 @@ type usageSourceRow struct {
 // $1 tenant, $2 site, $3 from, $4 to, $5 source type (empty for every type), $6 the search text, LIKE-escaped.
 // The search matches what each source can honestly be searched by: a stay by room or reservation, an account
 // by username, a voucher by the start of its card reference.
-func usageSourceListSQL(limit int) string {
+func usageSourceListSQL(limit, offset int) string {
 	return `
 		WITH src AS (
 		  SELECT CASE WHEN e.stay_id IS NOT NULL THEN 'stay'
@@ -655,7 +655,7 @@ func usageSourceListSQL(limit int) string {
 		        OR (u.kind = 'voucher' AND u.subject_id::text ILIKE $6 || '%')
 		        OR (u.kind = 'open'    AND u.subject_id::text ILIKE $6 || '%'))
 		 ORDER BY (u.down + u.up) DESC, u.last_started DESC NULLS LAST, u.kind, u.subject_id
-		 LIMIT ` + strconv.Itoa(limit)
+		 LIMIT ` + strconv.Itoa(limit) + ` OFFSET ` + strconv.Itoa(offset)
 }
 
 // parseSourceType reads a source type. An empty value (or "all") means every type; anything unknown is
@@ -687,10 +687,15 @@ func (s *server) listUsageSources(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	from, to := parseWindow(r)
-	limit := queryLimit(r, 50, 200)
+	// PAGED: ?page and ?page_size, with an older client's ?limit= still sizing the page (up to the 200 it always
+	// allowed). The list is ordered by use and then by identity, so a page boundary is stable.
+	pg, ok := readPage(w, r, 200)
+	if !ok {
+		return
+	}
 	q := likeEscape(normaliseSourceQuery(r.URL.Query().Get("q")))
 
-	rows, err := s.db.Query(r.Context(), usageSourceListSQL(limit),
+	rows, err := s.db.Query(r.Context(), usageSourceListSQL(pg.Fetch(), pg.Offset()),
 		s.tenantID, s.siteID, from, to, kind, q)
 	if err != nil {
 		slog.Error("usage source list failed", "err", err)
@@ -719,7 +724,8 @@ func (s *server) listUsageSources(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "the usage records could not be read")
 		return
 	}
-	writeList(w, out)
+	out, more := trimPage(out, pg)
+	writeJSON(w, http.StatusOK, newPagedList(out, more, pg, nil))
 }
 
 // finishSourceRow clears every field that does not belong to the row's type, so a stay field can never

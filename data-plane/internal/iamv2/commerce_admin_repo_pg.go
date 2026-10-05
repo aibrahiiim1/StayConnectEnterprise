@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -374,6 +375,14 @@ func (t *pgCommerceAdminTx) PlanRevisionBelongs(ctx context.Context, tenantID, s
 	return ok, err
 }
 
+// packageTypeOr defaults an unstated package type to the kind every authored package has.
+func packageTypeOr(t string) string {
+	if strings.TrimSpace(t) == "" {
+		return "GENERAL"
+	}
+	return strings.TrimSpace(t)
+}
+
 // InsertPackageRevision writes a FREE (price 0 / settlement NOT_REQUIRED), non-PMS immutable revision.
 func (t *pgCommerceAdminTx) InsertPackageRevision(ctx context.Context, spec PackagePublishSpec, packageID string, revNo int) (string, error) {
 	display, _ := json.Marshal(orEmptyObj(spec.Display))
@@ -390,17 +399,29 @@ func (t *pgCommerceAdminTx) InsertPackageRevision(ctx context.Context, spec Pack
 			alloc = &s
 		}
 	}
+	// plan_overrides keeps the NULL/absent distinction for the same reason data_allocation_policy does: a
+	// revision that carries no overrides must be byte-identical to one published before anything could set them.
+	var overrides *string
+	if len(spec.PlanOverrides) > 0 {
+		b, _ := json.Marshal(spec.PlanOverrides)
+		s := string(b)
+		overrides = &s
+	}
 	var id string
 	err := t.tx.QueryRow(ctx,
 		`INSERT INTO iam_v2.internet_package_revisions
 		   (tenant_id, site_id, package_id, revision_no, service_plan_revision_id, package_type,
 		    price_minor, currency, currency_exponent, settlement_methods, duration_policy,
-		    visible_from, visible_until, display, data_allocation_policy)
-		 VALUES ($1,$2,$3,$4,$5,'GENERAL',$11,$12,$13,$14::text[],$6::jsonb,$7,$8,$9::jsonb,$10::jsonb)
+		    visible_from, visible_until, display, data_allocation_policy,
+		    plan_overrides, renewable, max_purchases_per_stay)
+		 VALUES ($1,$2,$3,$4,$5,$15,$11,$12,$13,$14::text[],$6::jsonb,$7,$8,$9::jsonb,$10::jsonb,
+		         $16::jsonb,$17,$18)
 		 RETURNING id::text`,
 		spec.TenantID, spec.SiteID, packageID, revNo, spec.ServicePlanRevisionID,
 		duration, spec.VisibleFrom, spec.VisibleUntil, display, alloc,
-		spec.PriceMinor, spec.Currency, spec.CurrencyExponent, spec.AcquisitionMethods).Scan(&id)
+		spec.PriceMinor, spec.Currency, spec.CurrencyExponent, spec.AcquisitionMethods,
+		packageTypeOr(spec.PackageType),
+		overrides, spec.Renewable, spec.MaxPurchasesPerStay).Scan(&id)
 	return id, err
 }
 
@@ -803,31 +824,49 @@ func (t *pgGraceProvisionTx) DefaultPlanRevisionForGrace(ctx context.Context, te
 // Read-only. It resolves nothing and decides nothing; the revision chain is untouched.
 func (r *PgCommerceAdminRepository) GetPackageCurrent(ctx context.Context, tenantID, siteID, packageID string) (PackageCurrent, error) {
 	var c PackageCurrent
-	var display, duration, alloc []byte
+	var display, duration, alloc, overrides []byte
 	err := r.db.QueryRow(ctx,
 		`SELECT p.id::text, p.code, p.active, cur.id::text, cur.revision_no,
 		        cur.service_plan_revision_id::text, cur.package_type, cur.price_minor,
 		        COALESCE(cur.currency,''), COALESCE(cur.settlement_methods, ARRAY[]::text[]),
 		        COALESCE(cur.display,'{}'::jsonb), COALESCE(cur.duration_policy,'{}'::jsonb),
-		        cur.visible_from::text, cur.visible_until::text,
-		        COALESCE(cur.data_allocation_policy,'{}'::jsonb), cur.currency_exponent::int
+		        -- RFC3339, not timestamptz::text. ::text renders "2026-01-01 00:00:00+00", which is not
+		        -- RFC3339: handing it back to a *time.Time field failed to decode (repin answered 400 for
+		        -- every package with a sale window), and the republish a client-network replacement performs
+		        -- parsed it with time.RFC3339, got an error, and DROPPED the window -- making a seasonal
+		        -- package permanently visible. Rendered here once, in the format every consumer states.
+		        to_char(cur.visible_from  AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+		        to_char(cur.visible_until AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+		        COALESCE(cur.data_allocation_policy,'{}'::jsonb), cur.currency_exponent::int,
+		        cur.plan_overrides, cur.renewable, cur.max_purchases_per_stay
 		   FROM iam_v2.internet_packages p
 		   JOIN iam_v2.internet_package_revisions cur ON cur.id = p.current_revision_id
 		  WHERE p.tenant_id=$1 AND p.site_id=$2 AND p.id=$3 AND p.is_system = false`,
 		tenantID, siteID, packageID).Scan(&c.PackageID, &c.Code, &c.Active, &c.RevisionID, &c.RevisionNo,
 		&c.ServicePlanRevisionID, &c.PackageType, &c.PriceMinor, &c.Currency, &c.SettlementMethods,
-		&display, &duration, &c.VisibleFrom, &c.VisibleUntil, &alloc, &c.CurrencyExponent)
+		&display, &duration, &c.VisibleFrom, &c.VisibleUntil, &alloc, &c.CurrencyExponent,
+		&overrides, &c.Renewable, &c.MaxPurchasesPerStay)
 	if err != nil {
 		return PackageCurrent{}, err
 	}
+	// EVERY jsonb FIELD IS DECODED NUMBER-AWARE, for the reason spelled out on the conditions loop below: this
+	// struct is handed straight back to PublishRevision, whose validators accept json.Number and refuse
+	// float64 so that a non-integer cannot be silently coerced. Plain Unmarshal produces float64 for every
+	// JSON number, which made a stored value fail the gate that had already accepted it — "VALIDITY_WINDOW
+	// needs a positive bounded duration_seconds" for the 86400 sitting in the row. Since nearly every package
+	// carries a VALIDITY_WINDOW duration, nothing that read a package back could republish it: not the
+	// operator's own re-pin, and not the forward publish a client-network replacement performs.
+	if len(overrides) > 0 {
+		c.PlanOverrides = unmarshalNumberAware(overrides)
+	}
 	if len(display) > 0 {
-		_ = json.Unmarshal(display, &c.Display)
+		c.Display = unmarshalNumberAware(display)
 	}
 	if len(duration) > 0 {
-		_ = json.Unmarshal(duration, &c.DurationPolicy)
+		c.DurationPolicy = unmarshalNumberAware(duration)
 	}
 	if len(alloc) > 0 {
-		_ = json.Unmarshal(alloc, &c.DataAllocationPolicy)
+		c.DataAllocationPolicy = unmarshalNumberAware(alloc)
 	}
 
 	// THE CONDITIONS COME THROUGH THE SCOPED READER, NOT FROM THE TABLES.
@@ -852,10 +891,15 @@ func (r *PgCommerceAdminRepository) GetPackageCurrent(ctx context.Context, tenan
 		if err := rows.Scan(&kind, &ruleType, &tierOrder, &raw); err != nil {
 			return PackageCurrent{}, wrapIfDenied(err)
 		}
-		var val map[string]any
-		if len(raw) > 0 {
-			_ = json.Unmarshal(raw, &val)
-		}
+		// UseNumber, NOT plain Unmarshal. A grant tier's numbers are validated by asInt64, which accepts
+		// json.Number and int and REFUSES float64 on purpose — a bandwidth cap of 5.5 Mbps must not be
+		// silently coerced. Plain Unmarshal produces float64 for every JSON number, so a tier read back
+		// through this reader could never be republished: "grant down_kbps must be a non-negative integer
+		// within bounds" for a value of 5000 that the database had happily stored. That broke republishing
+		// ANY package with a bandwidth override — the operator's own re-pin as much as the automatic forward
+		// publish a client-network replacement performs. Both other decoders of this JSON already set
+		// UseNumber for exactly this reason (commerce_repo_pg.go, edged's decodeJSON); this one was missed.
+		val := unmarshalNumberAware(raw)
 		switch kind {
 		case "RULE":
 			if ruleType != nil {

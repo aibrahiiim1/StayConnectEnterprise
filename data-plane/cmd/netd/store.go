@@ -240,12 +240,21 @@ func (s *store) SetRevisionValidation(ctx context.Context, id string, v netcfg.V
 	return err
 }
 
+// MarkApplying takes the single in-flight slot (ncr_single_inflight) and RECORDS THE CONFIRM DEADLINE.
+//
+// The deadline used to be accepted and then not written -- the query bound three parameters and ignored the
+// fourth -- so confirm_deadline stayed NULL until MarkPending wrote it. That is the difference between a
+// recoverable appliance and a wedged one: if anything failed between here and MarkPending, the row stayed
+// 'applying' with a NULL deadline, PendingRevision only ever looks for 'pending_confirmation', and so the
+// watchdog could never reclaim it. The one in-flight slot was then held forever and EVERY later apply failed on
+// the unique index with a raw Postgres error. Writing it here means an apply that dies mid-flight is overdue
+// like any other and gets rolled back.
 func (s *store) MarkApplying(ctx context.Context, id, bundlePath, appliedBy string, confirmDeadline any) error {
 	by := uuidOrNil(appliedBy)
 	_, err := s.db.Exec(ctx, `
         UPDATE network_config_revisions
-           SET state='applying', bundle_path=$2, applied_by=$3, applied_at=now()
-         WHERE id=$1`, id, bundlePath, by)
+           SET state='applying', bundle_path=$2, applied_by=$3, applied_at=now(), confirm_deadline=$4
+         WHERE id=$1`, id, bundlePath, by, confirmDeadline)
 	return err
 }
 
@@ -257,33 +266,41 @@ func (s *store) MarkPending(ctx context.Context, id string, deadline any) error 
 
 var errNotPending = errors.New("revision is not pending confirmation")
 
-// MarkActive confirms a revision. When requirePending is true it refuses to
-// activate a revision that is not currently pending_confirmation (so a
-// rolled-back/failed revision can never be forced active by a stray confirm).
+// MarkActive confirms a revision, and IS THE ONLY WAY A REVISION BECOMES ACTIVE.
+//
+// It refuses anything that is not currently pending_confirmation, which can only be reached by an apply that
+// rendered the configuration, put it on the wire and passed its health checks. That is the whole provenance
+// guarantee of this subsystem: the active revision is, by construction, one the appliance has actually applied
+// and verified -- which matters because netd's boot reconcile treats the active revision's intent as the truth
+// about what this appliance is supposed to be forwarding.
+//
+// THERE USED TO BE A SECOND WAY IN, and it had none of that. markActiveAdopt took a `requirePending=false`
+// variant of this function for POST /v1/adopt, which read the EDITABLE guest_networks rows -- the rows the Hotel
+// Admin UI writes directly, which may hold a draft nobody has applied -- created a revision from them, and
+// declared it active. No ValidateSet, no apply, no health check, no confirmation window, and not one check that
+// the live Linux network resembled what it had just recorded as live. An unapplied edit could therefore become
+// the appliance's definition of reality at the next reboot, with no apply record and nothing to roll back to.
+//
+// It was reachable only by calling the API directly: no screen, script, runbook, test or capability contract
+// referenced it, and across the whole life of the only appliance it had been used zero times (no revision with
+// an adopt summary, no network.adopt audit entry). It also could not be made honest: proving that the live
+// network matches an intent means inspecting bridges, addressing, nftables, Kea and DNS and reacting when they
+// differ, which is precisely what apply and its health checks do. An adopt that proves all of that IS an apply;
+// one that proves none of it is the defect. So it is retired, the parameter is gone, and the invariant is
+// structural rather than a flag a future caller could pass as false.
 func (s *store) MarkActive(ctx context.Context, id, confirmedBy string) error {
-	return s.markActive(ctx, id, confirmedBy, true)
-}
-
-// markActiveAdopt is the internal path used by adopt (no pending gate).
-func (s *store) markActiveAdopt(ctx context.Context, id, confirmedBy string) error {
-	return s.markActive(ctx, id, confirmedBy, false)
-}
-
-func (s *store) markActive(ctx context.Context, id, confirmedBy string, requirePending bool) error {
 	by := uuidOrNil(confirmedBy)
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if requirePending {
-		var state string
-		if err := tx.QueryRow(ctx, `SELECT state FROM network_config_revisions WHERE id=$1 FOR UPDATE`, id).Scan(&state); err != nil {
-			return err
-		}
-		if state != "pending_confirmation" {
-			return errNotPending
-		}
+	var state string
+	if err := tx.QueryRow(ctx, `SELECT state FROM network_config_revisions WHERE id=$1 FOR UPDATE`, id).Scan(&state); err != nil {
+		return err
+	}
+	if state != "pending_confirmation" {
+		return errNotPending
 	}
 	// supersede the previous active revision
 	if _, err := tx.Exec(ctx, `UPDATE network_config_revisions SET state='superseded' WHERE state='active' AND id<>$1`, id); err != nil {
@@ -302,10 +319,40 @@ func (s *store) MarkFailed(ctx context.Context, id, reason string) error {
 	return err
 }
 
+// errNotRollbackable means the revision is no longer in a state a rollback may finish against.
+var errNotRollbackable = errors.New("revision is no longer rollbackable")
+
+// MarkRolledBack moves an in-flight revision to rolled_back, AND ONLY AN IN-FLIGHT ONE.
+//
+// IT USED TO BE AN UNGUARDED UPDATE, which lost a race that cost everything. The watchdog reads a pending
+// revision, finds it overdue and begins rolling back; the operator confirms in the same moment; markActive
+// (which IS guarded) legitimately moves the revision to 'active' and supersedes its predecessor; and then the
+// watchdog's rollback arrived here and stamped 'rolled_back' over that 'active' row. The appliance was then left
+// with NO active revision at all, so CurrentActiveIntent failed and boot reconcile reconciled nothing, for
+// good -- while the operator had been told, truthfully at the time, that their change was confirmed.
+//
+// Requiring 'applying' or 'pending_confirmation' makes the two racers mutually exclusive: whichever commits
+// first wins, and the loser is told so instead of overwriting it. The caller must treat errNotRollbackable as
+// "someone else already decided this revision's fate" and stop -- not retry.
 func (s *store) MarkRolledBack(ctx context.Context, id, reason string) error {
-	_, err := s.db.Exec(ctx,
-		`UPDATE network_config_revisions SET state='rolled_back', failure_reason=$2 WHERE id=$1`, id, reason)
-	return err
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var state string
+	if err := tx.QueryRow(ctx,
+		`SELECT state FROM network_config_revisions WHERE id=$1 FOR UPDATE`, id).Scan(&state); err != nil {
+		return err
+	}
+	if state != "applying" && state != "pending_confirmation" {
+		return fmt.Errorf("%w: it is %s", errNotRollbackable, state)
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE network_config_revisions SET state='rolled_back', failure_reason=$2 WHERE id=$1`, id, reason); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // CurrentActive returns the id + bundle path of the active revision (used for

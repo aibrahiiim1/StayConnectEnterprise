@@ -119,8 +119,9 @@ export default function PMSInterfacesPage() {
   const networksFor = useCallback((i: PmsConnection): string[] | null => {
     if (!routes) return null;
     return routes
-      .filter((r) => r.pms_interface_id === i.id ||
-        (r.routing_mode === "ALL_ACTIVE_INTERFACES" && i.lifecycle_state === "ACTIVE"))
+      // A client network is served by the interface it is ROUTED to, whatever routing_mode a row carries: the
+      // resolver only ever consults the mapped interface (see pms-routing).
+      .filter((r) => r.pms_interface_id === i.id)
       .map((r) => r.guest_network_name || "Unnamed network");
   }, [routes]);
 

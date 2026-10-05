@@ -126,6 +126,11 @@ run_step "card checkout"           "${GO[@]}" -run "TestCheckout|TestSaveAccount
 # collides with itself when it shares a database with another suite. That is a pre-existing fixture defect
 # in a test unrelated to the grant writer, and widening this step would be testing the fixture.
 run_step "phase-2 free grant path" "${GO[@]}"   -run "TestC2QuoteAndFreePurchase|TestC2ConcurrentSingleWinner|TestC4ImmutabilityAndPinTrigger"   ./internal/iamv2/
+# A PRINTED VOUCHER OUTLIVES A CABLING CHANGE. A card is pinned to the immutable package revision it was issued
+# against; replacing its client network gives that network a new id, and the pinned SITE_NETWORK rule named the
+# old one forever. These cover the lineage that keeps the successor the same LOGICAL network, and that it is
+# scoped to replacements which actually took effect.
+run_step "voucher survives a network replacement" "${GO[@]}" -run "TestAnUnusedVoucherStillRedeemsAfterItsClientNetworkWasReplaced|TestLineageIsTransitiveAcrossSeveralReplacements" ./internal/iamv2/
 run_step "observability"           "${GO[@]}" -run IntegrationHealth ./internal/payment/ "$@"
 run_step "recovery"                "${GO[@]}" -run IntegrationRecovery ./internal/payment/ "$@"
 run_step "definer abuse"           "${GO[@]}" -run IntegrationDefinerAbuse ./internal/payment/ "$@"

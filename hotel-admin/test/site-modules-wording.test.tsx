@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { fakeAudit } from "./fake-paged";
 
 // A SITE DOES NOT LOOK LIKE A HOTEL UNLESS HOSPITALITY IS AVAILABLE, does not look like it takes cards unless
 // Card payment is, and does not offer an optional sign-in method unless its identity module is (Product Owner
@@ -49,7 +50,9 @@ function routes(map: Record<string, unknown>) {
     const path = pathOf(raw);
     if (path === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"], operator_id: "me" });
     for (const [prefix, body] of Object.entries(map)) {
-      if (path === prefix || path.startsWith(prefix + "?") || path.startsWith(prefix + "/")) return Promise.resolve(body);
+      if (path === prefix || path.startsWith(prefix + "?") || path.startsWith(prefix + "/")) {
+        return Promise.resolve(typeof body === "function" ? body(path) : body);
+      }
     }
     return Promise.resolve({ data: [], meta: { has_more: false } });
   });
@@ -95,7 +98,8 @@ describe("Active sessions", () => {
   });
 
   it("keeps the room filter when a room session is in the list, whatever the licence says", async () => {
-    routes({ "/sessions": { data: [{ ...VOUCHER_SESSION, subject_kind: "room", room: "318" }], meta: { has_more: false } } });
+    routes({ "/sessions": { data: [{ ...VOUCHER_SESSION, subject_kind: "room", room: "318" }], meta: { has_more: false }, total: 1,
+      summary: { devices_online: 1, clients_online: 1, rooms_online: 1, bytes_total: 2, kinds: { room: 1 } } } });
     const { default: Page } = await import("@/app/(app)/sessions/page");
     render(<Page />);
     await screen.findByText("Room 318");
@@ -127,11 +131,11 @@ describe("Usage explorer", () => {
 });
 
 // -------------------------------------------------------------------------------------------- activity log
-const HOTEL_ENTRY = { data: [{ ts: "2026-09-20T10:00:00Z", actor_type: "system", action: "pms_interface.created" }] };
+const HOTEL_ENTRY = fakeAudit([{ ts: "2026-09-20T10:00:00Z", actor_type: "system", action: "pms_interface.created" }]);
 
 describe("Activity", () => {
   it("has no Hotel category without hospitality history", async () => {
-    routes({ "/audit": { data: [{ ts: "2026-09-20T10:00:00Z", actor_type: "system", action: "health.recheck" }] } });
+    routes({ "/audit": fakeAudit([{ ts: "2026-09-20T10:00:00Z", actor_type: "system", action: "health.recheck" }]) });
     const { default: Page } = await import("@/app/(app)/audit/page");
     render(<Page />);
     await screen.findByText("1 entry");
@@ -142,7 +146,7 @@ describe("Activity", () => {
 
   it("offers Hotel where hospitality has history, and wherever a Hotel entry is on screen", async () => {
     MODS.history = ["hospitality"];
-    routes({ "/audit": { data: [] } });
+    routes({ "/audit": fakeAudit([]) });
     const { default: Page } = await import("@/app/(app)/audit/page");
     const first = render(<Page />);
     expect(within(await screen.findByRole("radiogroup", { name: "Show" })).getByRole("radio", { name: /^Hotel/ })).toBeTruthy();

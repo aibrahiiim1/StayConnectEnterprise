@@ -37,6 +37,17 @@ type EligibilitySubject struct {
 	GuestNetworkID            string
 	HasPriorPurchaseOfPackage bool
 
+	// GuestNetworkLineage is the client networks GuestNetworkID is the continuation of: the ones it replaced,
+	// transitively, from iam_v2.guest_network_lineage (0106). It exists because a package REVISION is immutable
+	// and names client networks by id, while a replacement — moving a port onto a tagged trunk, changing a VLAN
+	// id, re-addressing a subnet — gives the network a NEW id. Without lineage every pinned revision's
+	// SITE_NETWORK rule stopped matching the guests sitting on that very network the moment the cable moved,
+	// and an unused printed voucher pinned to such a revision became unredeemable.
+	//
+	// It only ever widens BACKWARD, to networks this one actually succeeded. It is server-derived, like
+	// GuestNetworkID itself, and empty is the normal case.
+	GuestNetworkLineage []string
+
 	// Stay is the authoritative Stay evidence for a PMS-authenticated subject. Nil for every other method,
 	// which is what keeps a voucher guest from matching a room-type rule.
 	Stay *StayEvidence
@@ -246,6 +257,16 @@ func evalTypedCondition(ctype string, v map[string]any, s EligibilitySubject) (b
 		}
 		if set[strings.ToLower(strings.TrimSpace(s.GuestNetworkID))] {
 			return true, ""
+		}
+		// ...OR A CLIENT NETWORK THIS ONE IS THE CONTINUATION OF. A rule is written against the network an
+		// operator chose; a replacement (0105) gives that network a new id for reasons — a VLAN id, a port, a
+		// subnet — that have nothing to do with who may buy what. The lineage is server-derived (0106) and only
+		// ever reaches backward, to networks this one actually succeeded, so this widens eligibility to exactly
+		// the devices the rule's author meant and to no others.
+		for _, prior := range s.GuestNetworkLineage {
+			if set[strings.ToLower(strings.TrimSpace(prior))] {
+				return true, ""
+			}
 		}
 		return false, "guest_network_not_allowed"
 	default:

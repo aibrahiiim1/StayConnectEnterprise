@@ -10,6 +10,7 @@ import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 import { ManualReviewView } from "@/components/phase4/manual-review-view";
 import { SettlementsView } from "@/components/phase4/settlements-view";
+import { fakeSettlements } from "./fake-paged";
 
 const get = vi.fn();
 const post = vi.fn();
@@ -20,8 +21,10 @@ vi.mock("@/lib/api", async (orig) => {
 
 function route(map: Record<string, any>) {
   get.mockImplementation(async (path: string) => {
-    if (!(path in map)) throw new Error(`unexpected GET ${path}`);
-    return map[path];
+    // A paged list carries ?page=&page_size= (and filters); the route is the path without them.
+    const key = path.split("?")[0];
+    if (!(key in map)) throw new Error(`unexpected GET ${path}`);
+    return typeof map[key] === "function" ? map[key](path) : map[key];
   });
 }
 
@@ -178,8 +181,7 @@ describe("manual review", () => {
   });
 });
 
-const SETTLEMENTS = {
-  settlements: [
+const SETTLEMENT_ROWS = [
     { settlement_id: "s1", purchase_id: "pu1", method: "ONLINE_PAYMENT", status: "SETTLED",
       purchase_state: "GRANTED", amount_minor: 1000, currency: "USD", currency_exponent: 2,
       package_name: "One Day Package", at: "2026-09-30T07:47:42Z", source: "ROOM", room: "14340" },
@@ -192,16 +194,16 @@ const SETTLEMENTS = {
     { settlement_id: "s4", purchase_id: "pu4", method: "PREPAID", status: "SETTLED",
       purchase_state: "GRANTED", amount_minor: 0, currency: "USD", currency_exponent: 2,
       package_name: "Free Internet Package", at: "2026-09-29T18:00:00Z", source: "VOUCHER", room: null },
-  ],
-};
+];
+const SETTLEMENTS = fakeSettlements(SETTLEMENT_ROWS);
 const SETTLEMENT_DETAIL = {
-  settlement: SETTLEMENTS.settlements[0],
+  settlement: SETTLEMENT_ROWS[0],
   payments: [{ payment_id: "x1", transaction_type: "CHARGE", status: "CAPTURED", provider: "test-double",
     amount_minor: 1000, currency: "USD", currency_exponent: 2, parent_transaction_id: null }],
   available_actions: [],
   note: "Refund and chargeback initiation are NOT available from this surface in Phase 4.",
 };
-const REVIEW_DETAIL = { ...SETTLEMENT_DETAIL, settlement: SETTLEMENTS.settlements[1], payments: [] };
+const REVIEW_DETAIL = { ...SETTLEMENT_DETAIL, settlement: SETTLEMENT_ROWS[1], payments: [] };
 
 describe("package payments", () => {
   it("says in words who got which package, how it was paid and whether it needs attention", async () => {

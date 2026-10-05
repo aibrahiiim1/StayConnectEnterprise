@@ -15,7 +15,7 @@
 // from this screen. The detail renders its affordances from the API's own available_actions list. A payment that
 // needs a decision is decided on Manual review, and the detail links there.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowUpRight, BedDouble, CreditCard, Gift, Receipt, Ticket } from "lucide-react";
 import { api, FinancialPayment, FinancialSettlement, surfaceUnavailableMessage } from "@/lib/api";
@@ -28,7 +28,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { PageHeader, PageShell, StatCard } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
-import { FilterChips, KeyValueGrid } from "@/components/ui/data";
+import { FilterChips, KeyValueGrid, Pagination } from "@/components/ui/data";
+import { useServerPage, type PagedFields } from "@/lib/use-server-page";
 import { Skeleton, SkeletonRows } from "@/components/ui/misc";
 import { Sheet, SheetBody, SheetContent, SheetFooter, SheetHeader, SheetSection } from "@/components/ui/sheet";
 import { humanize, money } from "./format";
@@ -93,18 +94,19 @@ const ACCESS_WORDS: Record<string, string> = {
   FAILED: "No access given",
   CANCELLED: "Cancelled",
 };
-
+// The views are applied by edged (?view=), with the definitions this screen used when it filtered in the
+// browser: attention = waiting, in progress, failed or to review (and not free); paid = card or room charge;
+// voucher = prepaid; free = nothing to pay.
 type View = "" | "attention" | "paid" | "voucher" | "free";
 
-function inView(r: FinancialSettlement, v: View): boolean {
-  switch (v) {
-    case "attention": return ["MANUAL_REVIEW", "FAILED", "REQUIRED", "IN_PROGRESS"].includes(r.status) && r.method !== "NOT_REQUIRED";
-    case "paid": return r.method === "ONLINE_PAYMENT" || r.method === "PMS_POSTING";
-    case "voucher": return r.method === "PREPAID";
-    case "free": return r.method === "NOT_REQUIRED";
-    default: return true;
-  }
-}
+type SettlementsResp = PagedFields & {
+  settlements?: FinancialSettlement[];
+  /** Counts and collected totals over every payment -- not the page, and not narrowed by the view. */
+  summary?: {
+    all?: number; attention?: number; paid?: number; voucher?: number; free?: number;
+    collected?: { currency: string; currency_exponent: number; amount_minor: number }[];
+  };
+};
 
 type Detail = {
   settlement: FinancialSettlement;
@@ -114,24 +116,20 @@ type Detail = {
 };
 
 export function SettlementsView() {
-  const [rows, setRows] = useState<FinancialSettlement[] | null>(null);
   const [view, setView] = useState<View>("");
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
-  const [err, setErr] = useState<string | null>(null);
   const [detailErr, setDetailErr] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const r = await api.get<{ settlements: FinancialSettlement[] }>("/financial-ops/settlements");
-      setRows(r.settlements ?? []);
-      setErr(null);
-    } catch (e: any) {
-      setErr(surfaceUnavailableMessage(e, "Package payments"));
-    }
-  }, []);
-
-  useEffect(() => { void load(); }, [load]);
+  // PAGED ON THE SERVER. The list used to stop at the newest 200 payments, and its counts and the collected
+  // total counted those 200. A view change starts again at the first page.
+  const list = useServerPage<SettlementsResp>({
+    path: view ? `/financial-ops/settlements?view=${view}` : "/financial-ops/settlements",
+    rowsOf: (r) => r.settlements,
+  });
+  const { resp, current } = list;
+  const err = list.err ? surfaceUnavailableMessage(list.err as any, "Package payments") : null;
+  const rows = current && resp ? resp.settlements ?? [] : null;
 
   async function open(id: string) {
     setSelected(id);
@@ -144,29 +142,18 @@ export function SettlementsView() {
     }
   }
 
-  const counts = useMemo(() => {
-    const c = { attention: 0, paid: 0, voucher: 0, free: 0, all: rows?.length ?? 0 };
-    for (const r of rows ?? []) {
-      if (inView(r, "attention")) c.attention++;
-      if (inView(r, "paid")) c.paid++;
-      if (inView(r, "voucher")) c.voucher++;
-      if (inView(r, "free")) c.free++;
-    }
-    return c;
-  }, [rows]);
-
-  const collected = useMemo(() => {
-    const by = new Map<string, { minor: number; exp: number }>();
-    for (const r of rows ?? []) {
-      if (r.status !== "SETTLED" || !(r.method === "ONLINE_PAYMENT" || r.method === "PMS_POSTING")) continue;
-      const cur = by.get(r.currency) ?? { minor: 0, exp: r.currency_exponent };
-      cur.minor += r.amount_minor;
-      by.set(r.currency, cur);
-    }
-    return [...by.entries()].map(([c, v]) => money(v.minor, c, v.exp)).join(" · ") || "0.00";
-  }, [rows]);
-
-  const visible = (rows ?? []).filter((r) => inView(r, view));
+  const sum = resp?.summary;
+  const counts = {
+    attention: sum?.attention ?? 0,
+    paid: sum?.paid ?? 0,
+    voucher: sum?.voucher ?? 0,
+    free: sum?.free ?? 0,
+    all: sum?.all ?? 0,
+  };
+  const collected = (sum?.collected ?? [])
+    .map((c) => money(c.amount_minor, c.currency, c.currency_exponent)).join(" · ") || "0.00";
+  const haveSummary = !!sum;
+  const visible = rows ?? [];
   const s = detail?.settlement;
   const state = s ? paymentState(s.method, s.status) : null;
 
@@ -207,19 +194,19 @@ export function SettlementsView() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Needs your attention"
-          value={rows ? counts.attention.toLocaleString() : "—"}
+          value={haveSummary ? counts.attention.toLocaleString() : "—"}
           icon={<AlertTriangle />}
           tone={counts.attention > 0 ? "err" : "ok"}
           hint={counts.attention > 0 ? "Payments waiting, in progress, failed or to review" : "Nothing to do"}
         />
         <StatCard
           label="Collected (card and room charge)"
-          value={rows ? collected : "—"}
+          value={haveSummary ? collected : "—"}
           icon={<CreditCard />}
           hint={`${counts.paid.toLocaleString()} paid package${counts.paid === 1 ? "" : "s"}`}
         />
-        <StatCard label="Vouchers used" value={rows ? counts.voucher.toLocaleString() : "—"} icon={<Ticket />} />
-        <StatCard label="Free packages" value={rows ? counts.free.toLocaleString() : "—"} icon={<Gift />} />
+        <StatCard label="Vouchers used" value={haveSummary ? counts.voucher.toLocaleString() : "—"} icon={<Ticket />} />
+        <StatCard label="Free packages" value={haveSummary ? counts.free.toLocaleString() : "—"} icon={<Gift />} />
       </div>
 
       <Card>
@@ -236,7 +223,7 @@ export function SettlementsView() {
               { value: "free", label: "Free", count: counts.free },
             ]}
           />
-          {rows && <p className="text-xs text-muted-foreground tabular">Newest first · last 200</p>}
+          {rows && <p className="text-xs text-muted-foreground tabular">Newest first</p>}
         </div>
         <CardBody className="p-0">
           {!rows ? (
@@ -244,8 +231,8 @@ export function SettlementsView() {
           ) : visible.length === 0 ? (
             <EmptyState
               icon={<Receipt />}
-              title={rows.length === 0 ? "No package has been given yet" : "Nothing here"}
-              hint={rows.length === 0
+              title={counts.all === 0 ? "No package has been given yet" : "Nothing here"}
+              hint={counts.all === 0
                 ? "A line appears here each time a client receives an Internet package."
                 : view === "attention" ? "No payment needs your attention." : "Choose another view, or show all."}
               action={view ? <Button variant="secondary" size="sm" onClick={() => setView("")}>Show all</Button> : undefined}
@@ -294,6 +281,18 @@ export function SettlementsView() {
             </Table>
           )}
         </CardBody>
+        {rows && rows.length > 0 && (list.offset > 0 || list.hasMore) && (
+          <CardBody className="border-t border-border py-3">
+            <Pagination
+              offset={list.offset}
+              limit={list.pageSize}
+              shown={rows.length}
+              total={list.total}
+              hasMore={list.hasMore}
+              onChange={list.setOffset}
+            />
+          </CardBody>
+        )}
       </Card>
 
       <Sheet open={selected !== null} onOpenChange={(v) => { if (!v) { setSelected(null); setDetail(null); } }}>

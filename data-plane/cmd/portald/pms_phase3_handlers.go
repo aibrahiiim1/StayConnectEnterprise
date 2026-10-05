@@ -153,17 +153,27 @@ func (h *handler) authPMSPhase3(w http.ResponseWriter, r *http.Request) {
 	// THESE TWO ARE TECHNICAL, and the distinction is not cosmetic. A device the appliance cannot place on a
 	// guest network has a networking problem, not a typing problem; telling that guest to re-read their
 	// surname would send them round a loop they cannot escape, because nothing they type will ever help.
+	// A REFUSAL HERE USED TO LEAVE NO EVIDENCE ANYWHERE, which is the other half of the defect this closes.
+	// portald answered both of these itself and never called scd, so nothing was written to the sign-in attempt
+	// log -- the one screen the front desk opens to find out why a guest was turned away showed NOTHING, while
+	// the guest had been told to contact the front desk. Measured on PRE-LIVE: two such requests produced the
+	// technical sentence and zero rows.
+	//
+	// Both are now forwarded to scd with whatever identity this appliance could establish, and scd refuses and
+	// RECORDS, through the same classifier every other refusal goes through (deviceFailure). It is not a
+	// weakening: scd re-derives the guest network from the source address itself and refuses an address that
+	// belongs to no enabled network, exactly as before. The only change is that the refusal is now visible.
 	ip := clientIP(r)
-	if ip == nil {
-		h.phase3Fail(w, r, b, "no_source_address", classTechnical)
-		return
+	device := map[string]string{"ip": "", "mac": ""}
+	if ip != nil {
+		device["ip"] = ipString(ip)
+		// The hardware address comes from the kernel's neighbour table, never from the client, and the kernel is
+		// now ASKED to resolve it rather than only consulted (arp_resolve.go). A cold cache is not evidence that
+		// a device is off the guest network.
+		if mac, ok := h.deviceMAC(b.ctx, ip); ok {
+			device["mac"] = mac.String()
+		}
 	}
-	mac, ok := h.arpCache(ip)
-	if !ok {
-		h.phase3Fail(w, r, b, "device_not_on_guest_network", classTechnical)
-		return
-	}
-	device := map[string]string{"ip": ipString(ip), "mac": mac.String()}
 
 	// SECOND CALL: the guest already proved who they are and has now chosen a package.
 	if strings.TrimSpace(in.AuthContextID) != "" {

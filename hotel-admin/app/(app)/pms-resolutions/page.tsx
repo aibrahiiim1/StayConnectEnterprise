@@ -21,9 +21,11 @@
 // staying at the property, which is precisely what the guest-facing uniform failure message exists to prevent.
 // The per-guest view is a separate, role-gated screen. That is a constraint on this page, not an oversight.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { api, ListResp, PmsResolution } from "@/lib/api";
+import type { PmsResolution } from "@/lib/api";
+import { useServerPage, type PagedFields } from "@/lib/use-server-page";
+import { Pagination } from "@/components/ui/data";
 import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
@@ -110,57 +112,49 @@ const outcome = (code: string) =>
     tone: "warn" as const,
   };
 
+type ResolutionsResp = PagedFields & {
+  data?: PmsResolution[];
+  /** The server's summary of the most recent `window` checks: what is happening now, not a year of history. */
+  summary?: {
+    window?: number;
+    total?: number;
+    verified?: number;
+    newest_resolved_at?: string;
+    outcomes?: { outcome_code: string; count: number }[];
+    networks?: { guest_network_id: string; guest_network_name?: string; total: number; verified: number }[];
+  };
+};
+
 export default function PMSResolutionsPage() {
-  const [rows, setRows] = useState<PmsResolution[] | null>(null);
-  const [err, setErr] = useState<unknown>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
 
-  const load = useCallback(async (manual = false) => {
-    if (manual) setRefreshing(true);
-    try {
-      const r = await api.get<ListResp<PmsResolution>>("/pms-resolutions");
-      setRows(r.data ?? []);
-      setErr(null);
-      setUpdatedAt(Date.now());
-    } catch (e) {
-      setErr(e);
-      setRows((prev) => prev ?? []);
-    } finally {
-      if (manual) setRefreshing(false);
-    }
-  }, []);
-
-  useEffect(() => { void load(); }, [load]);
+  // THE TABLE PAGES THROUGH EVERY CHECK, on the server; it used to stop at the newest 200. The breakdown above
+  // it still describes the most recent checks, counted by the server, because the question it answers is what
+  // is failing now.
+  const list = useServerPage<ResolutionsResp>({ path: "/pms-resolutions" });
+  const { resp, current, err, loading: refreshing } = list;
+  const rows = current && resp ? resp.data ?? [] : err && !resp ? [] : null;
+  useEffect(() => { if (current && resp) setUpdatedAt(Date.now()); }, [current, resp]);
+  const load = (_manual?: boolean) => void list.reload();
 
   const summary = useMemo(() => {
-    if (!rows) return null;
-    const byOutcome = new Map<string, number>();
+    const s = resp?.summary;
+    if (!s) return null;
     // Grouped by NAME where there is one, so the per-network breakdown is readable. Networks that have been
     // deleted since a check ran keep their id, which is the honest label for a network that no longer exists.
-    const byNetwork = new Map<string, { name: string; total: number; verified: number }>();
-    let verified = 0;
-    for (const r of rows) {
-      byOutcome.set(r.outcome_code, (byOutcome.get(r.outcome_code) ?? 0) + 1);
-      if (r.resolved) verified += 1;
-      const key = r.guest_network_id;
-      const cur = byNetwork.get(key) ?? {
-        name: r.guest_network_name || "Network no longer configured",
-        total: 0,
-        verified: 0,
-      };
-      cur.total += 1;
-      if (r.resolved) cur.verified += 1;
-      byNetwork.set(key, cur);
-    }
     return {
-      total: rows.length,
-      verified,
-      outcomes: [...byOutcome.entries()].sort((a, b) => b[1] - a[1]),
-      networks: [...byNetwork.entries()].sort((a, b) => b[1].total - a[1].total),
-      newest: rows[0]?.resolved_at,
+      window: s.window ?? 0,
+      total: s.total ?? 0,
+      verified: s.verified ?? 0,
+      outcomes: (s.outcomes ?? []).map((o) => [o.outcome_code, o.count] as [string, number]),
+      networks: (s.networks ?? []).map((n) => [n.guest_network_id, {
+        name: n.guest_network_name || "Network no longer configured",
+        total: n.total,
+        verified: n.verified,
+      }] as [string, { name: string; total: number; verified: number }]),
+      newest: s.newest_resolved_at,
     };
-  }, [rows]);
+  }, [resp]);
 
   // THE PATTERN WORTH SURFACING. One network failing while the others succeed is a routing problem, and it is the
   // single most common cause of "the Wi-Fi doesn't work in the annexe" — so it is called out rather than left to
@@ -216,9 +210,12 @@ export default function PMSResolutionsPage() {
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
             label="Checks recorded"
-            value={summary.total.toLocaleString()}
+            value={(list.total ?? summary.total).toLocaleString()}
             icon={<ShieldCheck />}
-            hint={summary.newest ? `Most recent ${formatRelative(summary.newest)}` : undefined}
+            hint={[
+              summary.newest ? `Most recent ${formatRelative(summary.newest)}` : "",
+              list.total !== null && list.total > summary.total ? `figures below cover the latest ${summary.total.toLocaleString()}` : "",
+            ].filter(Boolean).join(" · ") || undefined}
           />
           <StatCard
             label="Let online"
@@ -325,7 +322,7 @@ export default function PMSResolutionsPage() {
       <Card className={cn("overflow-hidden", refreshing && refreshingClass)}>
         <CardHeader>
           <CardTitle>Recent attempts</CardTitle>
-          <span className="text-xs text-muted-foreground">Newest first · up to 200</span>
+          <span className="text-xs text-muted-foreground">Newest first</span>
         </CardHeader>
         <CardBody className="p-0">
           {rows === null ? (
@@ -387,6 +384,18 @@ export default function PMSResolutionsPage() {
             </Table>
           )}
         </CardBody>
+        {rows && rows.length > 0 && (
+          <CardBody className="border-t border-border py-3">
+            <Pagination
+              offset={list.offset}
+              limit={list.pageSize}
+              shown={rows.length}
+              total={list.total}
+              hasMore={list.hasMore}
+              onChange={list.setOffset}
+            />
+          </CardBody>
+        )}
       </Card>
     </PageShell>
   );

@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // scdStub answers the two Phase-3 hops with whatever the test wants.
@@ -250,21 +251,46 @@ func TestPhase3ForwardsScdsClassVerbatim(t *testing.T) {
 	}
 }
 
-// A device the appliance cannot place on a guest network never reaches scd at all: there is no scope to
-// resolve in, and forwarding it would ask scd to trust an address portald could not verify.
-func TestPhase3UnknownDeviceNeverReachesScd(t *testing.T) {
-	stub := &scdStub{resolve: map[string]any{"outcome": "VERIFIED"}}
+// A DEVICE THE APPLIANCE CANNOT PLACE IS STILL RECORDED, AND STILL TOLD THE TECHNICAL ANSWER.
+//
+// This case used to assert that such a request never reached scd, on the reasoning that forwarding it "would
+// ask scd to trust an address portald could not verify". That reasoning does not hold: the address is the TCP
+// peer's, which portald can verify, and scd re-derives the guest network from it and refuses an address on no
+// enabled network regardless. What portald could not establish was the HARDWARE address, not the address.
+//
+// Meanwhile the cost was real and was found on PRE-LIVE: because portald answered alone, the refusal was written
+// NOWHERE. The guest was told to contact the front desk, and the front desk opened the sign-in attempt log --
+// the screen that exists for this exact question -- and saw nothing at all. Two such requests were measured
+// producing the technical sentence and zero rows.
+//
+// So it is forwarded, and scd refuses and records through the same classifier as every other refusal. The
+// property that mattered is kept and is asserted below: the guest is told the TECHNICAL answer, never to
+// re-check typing that was never the problem.
+func TestPhase3UnplaceableDeviceIsForwardedSoItIsRecorded(t *testing.T) {
+	stub := &scdStub{resolve: map[string]any{
+		"outcome": "NOT_VERIFIED", "failure_class": "TECHNICAL", "reason_code": "ROUTING_OR_INTERFACE_FAILURE"}}
 	h := stubHandler(t, stub)
 	h.arpCache = func(net.IP) (net.HardwareAddr, bool) { return nil, false }
-
+	h.arpNudge = func(net.IP) {}        // no network in a test
+	h.arpSleep = func(time.Duration) {} // and no real waiting
 	raw, _ := json.Marshal(map[string]any{"room": "412", "last_name": "Okonkwo", "request_id": "r"})
 	req := httptest.NewRequest(http.MethodPost, "/auth/pms/phase3", bytes.NewReader(raw))
 	req.RemoteAddr = "10.77.0.25:51000"
 	rec := httptest.NewRecorder()
 	h.authPMSPhase3(rec, req)
 
-	if len(stub.calls) != 0 {
-		t.Fatalf("an unplaceable device was forwarded to scd: %v", stub.calls)
+	// IT REACHES scd, which is the only component that records an attempt.
+	if len(stub.calls) == 0 {
+		t.Fatal("an unplaceable device was refused without being recorded anywhere")
+	}
+	// ...carrying the source address it could establish, and NO hardware address it could not. A MAC is never
+	// taken from the client, so an empty one is the honest thing to send.
+	dev, _ := stub.bodies[0]["device"].(map[string]any)
+	if dev == nil || dev["ip"] != "10.77.0.25" {
+		t.Fatalf("the source address was not forwarded for the record: %v", stub.bodies[0]["device"])
+	}
+	if mac, _ := dev["mac"].(string); mac != "" {
+		t.Fatalf("a hardware address was invented for a device the kernel could not place: %q", mac)
 	}
 	var out phase3Out
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
@@ -272,6 +298,37 @@ func TestPhase3UnknownDeviceNeverReachesScd(t *testing.T) {
 	// problem, and nothing the guest types will ever fix it.
 	if out.OK || out.Message != guestAuthTechnicalMessage {
 		t.Fatalf("an unplaceable device was told to re-check what it typed: %s", rec.Body.String())
+	}
+}
+
+// ...AND A COLD NEIGHBOUR CACHE IS NOT AN UNPLACEABLE DEVICE. A client that has just taken a DHCP lease and
+// submitted immediately has no cache entry yet; the kernel is asked, the entry appears, and the sign-in goes
+// through. Before this, that guest was refused and sent to Reception for a reason that was not about them.
+func TestPhase3AColdNeighbourCacheIsResolvedNotRefused(t *testing.T) {
+	stub := &scdStub{resolve: map[string]any{"outcome": "VERIFIED"}}
+	h := stubHandler(t, stub)
+	appeared := false
+	h.arpCache = func(net.IP) (net.HardwareAddr, bool) {
+		if !appeared {
+			return nil, false // cold: nothing cached yet
+		}
+		mac, _ := net.ParseMAC("02:00:00:ab:cd:01")
+		return mac, true
+	}
+	h.arpNudge = func(net.IP) { appeared = true } // the kernel resolves it once asked
+	h.arpSleep = func(time.Duration) {}
+	raw, _ := json.Marshal(map[string]any{"room": "412", "last_name": "Okonkwo", "request_id": "r"})
+	req := httptest.NewRequest(http.MethodPost, "/auth/pms/phase3", bytes.NewReader(raw))
+	req.RemoteAddr = "10.77.0.25:51000"
+	rec := httptest.NewRecorder()
+	h.authPMSPhase3(rec, req)
+
+	if len(stub.calls) == 0 {
+		t.Fatal("a resolvable device never reached scd")
+	}
+	dev, _ := stub.bodies[0]["device"].(map[string]any)
+	if dev == nil || dev["mac"] != "02:00:00:ab:cd:01" {
+		t.Fatalf("the kernel-resolved hardware address was not forwarded: %v", stub.bodies[0]["device"])
 	}
 }
 

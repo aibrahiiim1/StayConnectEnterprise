@@ -231,7 +231,6 @@ func main() {
 	r.Post("/v1/apply", srv.apply)
 	r.Post("/v1/confirm", srv.confirm)
 	r.Post("/v1/rollback", srv.rollback)
-	r.Post("/v1/adopt", srv.adopt)
 	r.Get("/v1/leases", srv.leases)
 	r.Get("/v1/pending", srv.pending)
 	// System (WAN/LAN) network management — the appliance's own base networking.
@@ -454,32 +453,12 @@ func (s *server) rollback(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]string{"state": "rolled_back"})
 }
 
-// adopt records the current DB intent as an already-active revision WITHOUT
-// applying anything — used for legacy import (the running system already
-// matches) and to seed the first known-good rollback target.
-func (s *server) adopt(w http.ResponseWriter, r *http.Request) {
-	var req actorReq
-	_ = json.NewDecoder(r.Body).Decode(&req)
-	intent, err := s.st.LoadIntent(r.Context())
-	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
-		return
-	}
-	id, seq, err := s.st.CreateRevision(r.Context(), req.Summary+" (adopt)", intent, req.Actor)
-	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
-		return
-	}
-	bundle := s.ap.generatedDir + "/revision-" + pad6(seq)
-	if err := s.ap.generate(bundle, intent); err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
-		return
-	}
-	_ = s.st.MarkApplying(r.Context(), id, bundle, req.Actor, nil)
-	_ = s.st.markActiveAdopt(r.Context(), id, req.Actor)
-	writeJSON(w, 200, map[string]any{"revision_id": id, "seq": seq, "state": "active", "adopted": true})
-}
-
+// RETIRED: POST /v1/adopt used to live here. It recorded the current DB intent as an already-active revision
+// WITHOUT applying anything, for two reasons that no longer exist: importing a legacy running system that
+// already matched (the edge-first migration is long finished, and nothing has used this route since -- zero
+// adopted revisions and zero audit entries over the whole life of the appliance), and seeding a first
+// known-good rollback target (rollback handles having none: see its prevBundle == "" branch and
+// TestAFirstApplyThatExpiresStillComesBackFactoryClean). store.MarkActive carries the full reasoning.
 func (s *server) leases(w http.ResponseWriter, r *http.Request) {
 	leases, err := s.kea.Leases()
 	if err != nil {
@@ -514,14 +493,6 @@ func (s *server) watchdogLoop(ctx context.Context) {
 			}
 		}
 	}
-}
-
-func pad6(n int64) string {
-	s := strconv.FormatInt(n, 10)
-	for len(s) < 6 {
-		s = "0" + s
-	}
-	return s
 }
 
 func extractDhcp4(raw []byte) (map[string]any, error) {

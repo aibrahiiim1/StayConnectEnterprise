@@ -85,18 +85,66 @@ func (p *phase3Auth) stayEvidenceFor(ctx context.Context, stayID string) (*iamv2
 	return &e, nil
 }
 
+// networkLineage reads the client networks this one is the continuation of (iam_v2.guest_network_lineage, 0106).
+//
+// A read failure is an ERROR, not an empty lineage. Losing it would silently narrow the offer set back to the
+// defect this closes, and svc_scd's grant on the view is the kind of thing a Gate-P reconcile can take away --
+// the same class of mistake that once made a replacement report "no packages affected" because the reader had
+// no SELECT. Failing loudly is what makes that visible.
+func (p *phase3Auth) networkLineage(ctx context.Context, guestNetworkID string) ([]string, error) {
+	if strings.TrimSpace(guestNetworkID) == "" {
+		return nil, nil
+	}
+	rows, err := p.srv.db.Query(ctx, `
+		SELECT ancestor_id::text FROM iam_v2.guest_network_lineage
+		 WHERE tenant_id=$1 AND site_id=$2 AND network_id=$3 ORDER BY depth`,
+		p.srv.tenID, p.srv.siteID, guestNetworkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // offersFor computes the exact set this verified Stay qualifies for.
-func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID string, now time.Time) ([]offerDecision, error) {
+//
+// guestNetworkID is the client network the appliance itself derived for this device from the source IP
+// (resolveNetwork, netcontext.go) — never anything the guest sent. It was already proven non-empty before this
+// handler could proceed, already used to scope the PMS resolver, and is written onto the Auth Context a few
+// lines later. It is passed HERE because it was not, and that was a defect with one plain consequence: a
+// SITE_NETWORK rule tests the subject's network id, an empty id matches no configured id, and so EVERY package
+// carrying a "this client network only" condition was dropped from the offer set of EVERY room sign-in. A
+// verified guest in a correctly configured room was then told "verified, but no eligible package", while the
+// voucher, client-account, OTP, social and open paths — which read the same id back off the Auth Context —
+// offered that package normally. The network must decide the same thing whoever the guest proved they are.
+func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID, guestNetworkID string, now time.Time) ([]offerDecision, error) {
 	evidence, err := p.stayEvidenceFor(ctx, stayID)
 	if err != nil {
 		return nil, err
 	}
+	// ...AND THE NETWORKS IT CONTINUES. A client network that was safely replaced for VLAN/port/addressing
+	// reasons (0105) keeps its logical identity (0106): a rule written against the retired id is satisfied by a
+	// device on its successor. Without this a cabling change would quietly narrow the offer set of every
+	// pinned revision — including the one an unused printed voucher redeems.
+	lineage, err := p.networkLineage(ctx, guestNetworkID)
+	if err != nil {
+		return nil, err
+	}
 	subject := iamv2.EligibilitySubject{
-		Now:            now,
-		AuthMethod:     iamv2.Method("PMS"),
-		Kind:           iamv2.SubjectKind("PRINCIPAL"),
-		GuestNetworkID: "",
-		Stay:           evidence,
+		Now:                 now,
+		AuthMethod:          iamv2.Method("PMS"),
+		Kind:                iamv2.SubjectKind("PRINCIPAL"),
+		GuestNetworkID:      guestNetworkID,
+		GuestNetworkLineage: lineage,
+		Stay:                evidence,
 	}
 
 	// Only CURRENT revisions of ACTIVE, non-system, visible, zero-price packages are even candidates. The

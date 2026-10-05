@@ -19,9 +19,10 @@ import { KeyValueGrid } from "@/components/ui/data";
 import { MonoId, Skeleton, SkeletonRows } from "@/components/ui/misc";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
-import { ArrowLeft, Network, Pencil, Plus, Save, Trash2, X, Pin } from "lucide-react";
+import { ArrowLeft, Network, Pencil, Plus, Save, Trash2, X, Pin, Shuffle } from "lucide-react";
 import { cn, errMsg } from "@/lib/utils";
 import { HelpList, HelpSection } from "@/components/help";
+import { ReplaceTopologyDialog, type ReplaceResult } from "@/components/network/replace-topology-dialog";
 import {
   AddReservationDialog, EditReservationDialog, RemoveReservationDialog, SwitchRow,
   DhcpModeBadge, networkTypeLabel, useNetworkAccess,
@@ -38,6 +39,8 @@ export default function EditGuestNetworkPage() {
   const [err, setErr] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [replacing, setReplacing] = useState(false);
+  const [replaced, setReplaced] = useState<ReplaceResult | null>(null);
   const toast = useToast();
 
   // editable form state
@@ -167,8 +170,9 @@ export default function EditGuestNetworkPage() {
             </HelpSection>
             <HelpSection title="What cannot be edited">
               <p>
-                The type, VLAN and parent interface are fixed when the network is created. To change them, delete the
-                network and create a new one.
+                The type, VLAN and port cannot be edited in place. Use <strong>Change VLAN or port</strong>: it creates a
+                replacement with the new topology that keeps this network&rsquo;s addressing, DHCP pools, reservations,
+                settings and PMS route, and disables this one. Nothing changes until you apply and confirm.
               </p>
             </HelpSection>
             <HelpSection title="DHCP reservations">
@@ -210,12 +214,41 @@ export default function EditGuestNetworkPage() {
       ) : (
         <>
           {/* read-only topology + status */}
+          {replaced && (
+            <Callout tone="success" title="Change recorded — nothing has changed yet">
+              <p>
+                This network is still serving its clients. When you{" "}
+                <Link href="/network" className="font-medium underline">apply the configuration</Link> and confirm it, the
+                replacement takes over carrying {replaced.carries.pools} DHCP pool(s),{" "}
+                {replaced.carries.reservations} reservation(s) and {replaced.carries.pms_routes} PMS route(s).
+              </p>
+              {!!replaced.packages?.length && (
+                <p className="mt-1">
+                  Internet packages limited to this network ({replaced.packages.join(", ")}) are moved onto the
+                  replacement automatically when you confirm. If one of them cannot be moved, the change is not
+                  kept and you are told which package and why.
+                </p>
+              )}
+              {/* THE QUESTION AN OPERATOR WOULD OTHERWISE HAVE TO GUESS. A printed voucher is pinned to the
+                  package revision it was issued against, so the obvious fear is that a cabling change kills
+                  every card in the drawer. It does not: the replacement continues this network's identity. */}
+              <p className="mt-1">
+                Vouchers already printed for those packages keep working. The replacement counts as this same
+                client network, so there is nothing to reissue.
+              </p>
+            </Callout>
+          )}
           <Card>
             <CardHeader>
               <div className="space-y-1">
                 <CardTitle>Status &amp; topology</CardTitle>
-                <CardDescription>Fixed when the network was created.</CardDescription>
+                <CardDescription>Not editable in place — change it with a replacement.</CardDescription>
               </div>
+              {writable && enabled && !replaced && (
+                <Button variant="secondary" onClick={() => setReplacing(true)}>
+                  <Shuffle /> Change VLAN or port
+                </Button>
+              )}
             </CardHeader>
             <CardBody>
               <KeyValueGrid
@@ -233,6 +266,16 @@ export default function EditGuestNetworkPage() {
               />
             </CardBody>
           </Card>
+
+          {replacing && (
+            <ReplaceTopologyDialog
+              open={replacing}
+              onOpenChange={setReplacing}
+              network={{ id: net.id, name: net.name, network_type: net.network_type, parent_interface: net.parent_interface,
+                vlan_id: net.vlan_id ?? null, subnet_cidr: net.subnet_cidr, gateway_ip: net.gateway_ip }}
+              onReplaced={(r) => { setReplacing(false); setReplaced(r); void loadStatus(); }}
+            />
+          )}
 
           {/* editable settings */}
           <form
