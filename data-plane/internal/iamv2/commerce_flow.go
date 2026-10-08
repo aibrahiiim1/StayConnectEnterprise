@@ -139,16 +139,20 @@ func (e *CommerceEngine) CreateQuote(ctx context.Context, req QuoteRequest) (Quo
 			return aerr
 		}
 		subj := EligibilitySubject{Now: now, AuthMethod: ac.Method, Kind: ac.Subject.Kind,
-			GuestNetworkID: ac.GuestNetworkID, GuestNetworkLineage: ancestors}
-		prior, err := tx.HasPriorPurchase(ctx, req.TenantID, req.SiteID, pkg.ID, ac.Subject)
-		if err != nil {
-			return err
-		}
-		subj.HasPriorPurchaseOfPackage = prior
+			GuestNetworkID: ac.GuestNetworkID, GuestNetworkLineage: ancestors, ClientGroupID: ac.ClientGroupID}
 
 		rules, err := tx.LoadEligibilityRules(ctx, pkg.ID)
 		if err != nil {
 			return err
+		}
+		// The prior-purchase history is keyed on the PACKAGE under the revision's own policy (contract §5),
+		// exactly as the list did -- a quote must never pass what the list withheld.
+		if pol := PriorPurchasePolicyOf(rules, pkg.PriceMinor); pol.Present {
+			prior, err := tx.HasPriorPurchase(ctx, req.TenantID, req.SiteID, PriorPurchaseQuery{PackageID: pkg.PackageID, Subject: ac.Subject, Policy: pol})
+			if err != nil {
+				return err
+			}
+			subj.HasPriorPurchaseOfPackage = prior
 		}
 		if ok, why := EvaluatePackageEligible(rules, subj); !ok {
 			res = quoteDeny("ineligible:" + why)

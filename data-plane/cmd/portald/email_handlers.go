@@ -129,9 +129,17 @@ func (h *handler) authOTPVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
+	payload, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	// A VERIFIED CODE IS AUTHENTICATION, NOT ACCESS. The IAM-v2 reply carries an auth context, and the Client
+	// still has to join their live access or choose a package. This used to copy the reply through, and the
+	// page -- reading the legacy session_id shape -- sent the Client to /success?s=&t=0. Now the same commerce
+	// session the voucher and account forms get is issued here, and the page is told where to go next.
+	if resp.StatusCode == http.StatusOK && h.tryIAMv2AuthMode(w, r, payload, true) {
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
+	_, _ = w.Write(payload)
 }
 
 // ---- helpers ----------------------------------------------------------------

@@ -453,3 +453,11 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.guest_network_replacements TO svc
 -- network the continuation of the one it replaced, so an immutable package revision naming the retired id keeps
 -- meaning what its author meant.
 GRANT SELECT ON iam_v2.guest_network_lineage TO svc_edged;
+
+-- 0107 — Client Groups.
+--
+-- The Admin Console owns a site's groups and their membership rules, and records every change in the
+-- append-only history. It still reads NO identity table: who is in a group is decided by scd at sign-in, and
+-- the Admin Console's API is deliberately not granted guest_principals or guest_principal_identities.
+GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.client_groups, iam_v2.client_group_rules TO svc_edged;
+GRANT SELECT, INSERT ON iam_v2.client_group_changes TO svc_edged;

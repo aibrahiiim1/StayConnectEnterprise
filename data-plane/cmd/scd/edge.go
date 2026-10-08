@@ -17,6 +17,7 @@ import (
 
 	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
 	"github.com/stayconnect/enterprise/data-plane/internal/nft"
+	"github.com/stayconnect/enterprise/data-plane/internal/social"
 	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
 	lic "github.com/stayconnect/enterprise/license"
 )
@@ -238,6 +239,11 @@ func (s *server) reconcileWalledGarden(ctx context.Context) (int, error) {
 	for _, d := range s.paymentGardenDomains(ctx) {
 		domains = append(domains, domain{d})
 	}
+	// The identity providers' consent pages (contract §8): only providers that are deployed, licensed and
+	// switched on, with an enabled application. The token exchange is server-side and needs none of these.
+	for _, d := range s.socialGardenDomains(ctx) {
+		domains = append(domains, domain{d})
+	}
 	resolver := &net.Resolver{}
 	for _, d := range domains {
 		rctx, cancel := context.WithTimeout(ctx, 3*time.Second)
@@ -260,6 +266,45 @@ func (s *server) reconcileWalledGarden(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	return len(elems), nil
+}
+
+// socialGardenDomains lists the pre-auth host names of every social provider the site currently offers.
+func (s *server) socialGardenDomains(ctx context.Context) []string {
+	if s.db == nil {
+		return nil
+	}
+	snap := s.moduleSnapshot(ctx)
+	st := snap.Modules[lic.ModuleSocialLogin]
+	if !(st.Deployed && st.Licensed && st.Enabled) {
+		return nil
+	}
+	cfg, err := tenantcfg.Load(ctx, s.db, s.tenID)
+	if err != nil || cfg == nil {
+		return nil
+	}
+	rows, err := s.db.Query(ctx, `SELECT DISTINCT provider FROM social_oauth_providers WHERE tenant_id=$1 AND enabled`, s.tenID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	seen := map[string]bool{}
+	var out []string
+	for rows.Next() {
+		var p string
+		if rows.Scan(&p) != nil {
+			continue
+		}
+		if m := cfg.Social[p]; m == nil || !m.Enabled {
+			continue
+		}
+		for _, d := range social.PreAuthDomains(p) {
+			if !seen[d] {
+				seen[d] = true
+				out = append(out, d)
+			}
+		}
+	}
+	return out
 }
 
 func (s *server) gardenReconcileLoop(ctx context.Context) {

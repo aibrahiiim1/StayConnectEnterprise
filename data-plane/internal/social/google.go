@@ -172,10 +172,16 @@ func (g *Google) Exchange(ctx context.Context, code, redirectURI string) (*UserI
 			Name: ui.Name, Picture: ui.Picture,
 		}, ErrEmailUnverified
 	}
-	return &UserInfo{
+	info := &UserInfo{
 		Sub: ui.Sub, Email: ui.Email, EmailVerified: true,
 		Name: ui.Name, Picture: ui.Picture,
-	}, nil
+	}
+	// A Google Workspace account carries its organisation's hosted domain; a consumer account carries none.
+	// It is what an IDP_HOSTED_DOMAIN Client Group rule reads, and it is Google's assertion, not the user's.
+	if ui.HD != "" {
+		info.Claims = map[string]string{"hd": ui.HD}
+	}
+	return info, nil
 }
 
 type googleTokenResp struct {
@@ -191,6 +197,7 @@ type googleUserInfo struct {
 	EmailVerified bool   `json:"email_verified"`
 	Name          string `json:"name"`
 	Picture       string `json:"picture"`
+	HD            string `json:"hd"` // Google Workspace hosted domain (absent for consumer accounts)
 }
 
 type googleError struct {

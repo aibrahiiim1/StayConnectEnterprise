@@ -271,7 +271,7 @@ func TestHotelCSSReachesEveryPageAfterSignIn(t *testing.T) {
 		return r
 	}
 	w := httptest.NewRecorder()
-	h.renderPackages(w, req("/packages"), []guestPackage{{PackageID: "p1", Display: map[string]any{"name": "Standard"}}}, "")
+	h.renderPackages(w, req("/packages"), []guestPackage{{PackageID: "p1", Display: map[string]any{"name": "Standard"}}}, "", "", false)
 	pages["packages"] = w
 	w = httptest.NewRecorder()
 	h.renderGuestError(w, req("/auth/social/callback"), http.StatusBadGateway, "errpage.social")

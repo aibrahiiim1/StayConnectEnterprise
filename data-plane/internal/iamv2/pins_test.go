@@ -96,8 +96,14 @@ func (recordingTx) ResolveVoucherByHMAC(context.Context, string, string, []byte,
 func (recordingTx) LookupAccount(context.Context, string, string, string) (string, string, bool, *time.Time, *time.Time, *time.Time, error) {
 	return "", "", false, nil, nil, nil, nil
 }
-func (recordingTx) ResolvePrincipalByIdentity(context.Context, string, string, string, string, time.Time) (string, error) {
-	return "", nil
+func (recordingTx) ResolvePrincipalByFactors(context.Context, string, FactorClaim, []FactorClaim, time.Time) (PrincipalResolution, error) {
+	return PrincipalResolution{}, nil
+}
+func (recordingTx) LoadPrincipalFactors(context.Context, string, string) ([]FactorClaim, error) {
+	return nil, nil
+}
+func (recordingTx) LoadClientGroups(context.Context, string, string) ([]ClientGroup, error) {
+	return nil, nil
 }
 func (t *recordingTx) UpsertDevice(context.Context, string, string, string, string, string, string, time.Time) (string, error) {
 	t.r.upserts++

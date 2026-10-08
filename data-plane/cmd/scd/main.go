@@ -44,11 +44,11 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/metrics"
 	"github.com/stayconnect/enterprise/data-plane/internal/modules"
 	"github.com/stayconnect/enterprise/data-plane/internal/nft"
-	"github.com/stayconnect/enterprise/data-plane/internal/notifyloader"
 	"github.com/stayconnect/enterprise/data-plane/internal/otp"
 	"github.com/stayconnect/enterprise/data-plane/internal/otpkey"
 	"github.com/stayconnect/enterprise/data-plane/internal/pms"
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsloader"
+	"github.com/stayconnect/enterprise/data-plane/internal/sealbox"
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
 	"github.com/stayconnect/enterprise/data-plane/internal/signinattempt"
 	"github.com/stayconnect/enterprise/data-plane/internal/sms"
@@ -235,6 +235,17 @@ type server struct {
 	// openAccess issues OPEN auth contexts (open_access.go); nil when its key is missing.
 	openAccess  *iamv2.OpenAccess
 	openLimiter *recoveryLimiter
+	// resumeKey / resumeLimiter: the remembered-device credential (client_resume.go); nil = not remembered.
+	resumeKey     []byte
+	resumeLimiter *recoveryLimiter
+	// notify: the live sender trio, swappable on reload (notify_admin.go); notifyKey seals sender secrets.
+	notify         notifySet
+	notifyFallback struct {
+		mail     mail.Mailer
+		sms      sms.Sender
+		whatsapp whatsapp.Sender
+	}
+	notifyKey sealbox.Key
 
 	// PMS registry is live-reloadable (phase 5.3). All readers must go
 	// through currentPMSReg(); the reload path atomically swaps it under
@@ -785,6 +796,8 @@ func main() {
 	}
 	s.initCard(rootCtx, c.SecretsDir)
 	s.initOpenAccess(c.SecretsDir)
+	s.initClientResume(c.SecretsDir)
+	s.initNotifyKey(c.SecretsDir)
 	s.registerModuleProbes()
 	// CRASH RECOVERY FOR OFFLINE FIRST ACTIVATION. Runs after the licence state is loaded, because deciding
 	// whether an interrupted activation completed means asking whether the licence actually landed. Either
@@ -808,18 +821,10 @@ func main() {
 	// chosen impl is then wrapped with metric instrumentation so every
 	// Send() emits scd_notification_send_* and updates the DB health
 	// columns (last_success_at / last_error_at) for the admin UI.
-	{
-		nctx, ncancel := context.WithTimeout(rootCtx, 10*time.Second)
-		nloaded, err := notifyloader.Load(nctx, pool, c.TenantID, s.mail, s.sms, s.whatsapp)
-		ncancel()
-		if err != nil {
-			slog.Warn("notifyloader: load failed; using stubs", "err", err)
-		}
-		s.mail = notifyloader.WrapMailer(nloaded.Mailer, nloaded.MailerKind, s.met, pool, c.TenantID)
-		s.sms = notifyloader.WrapSender(nloaded.Sender, nloaded.SenderKind, s.met, pool, c.TenantID)
-		s.whatsapp = notifyloader.WrapWhatsApp(nloaded.WhatsApp, nloaded.WhatsAppKind, s.met, pool, c.TenantID)
-		slog.Info("notification providers loaded", "email", nloaded.MailerKind, "sms", nloaded.SenderKind, "whatsapp", nloaded.WhatsAppKind)
-	}
+	// Senders are resolved here and again on every reload (notify_admin.go), so a change in the Admin
+	// Console is live without a restart. Sealed secrets are preferred; plaintext rows still work.
+	s.notifyFallback.mail, s.notifyFallback.sms, s.notifyFallback.whatsapp = s.mail, s.sms, s.whatsapp
+	s.loadNotify(rootCtx)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -869,6 +874,10 @@ func main() {
 	r.Post("/v1/auth/otp/issue", s.otpIssue)
 	r.Post("/v1/auth/social/start", s.socialStart)
 	r.Post("/v1/sessions/authorize-social", s.authorizeSocial)
+	// The remembered device (client_resume.go): peek for the Welcome-back line, Connect, and sign-out.
+	r.Post("/v1/sessions/resume-peek", s.resumePeek)
+	r.Post("/v1/sessions/authorize-resume", s.authorizeResume)
+	r.Post("/v1/sessions/resume-revoke", s.resumeRevoke)
 	// /v1/auth/pms/verify is REMOVED. It resolved a stay and then created a public.sessions row through the
 	// superseded pipeline. The current PMS guest path is Phase 3: /v1/phase3/auth/pms/resolve then
 	// /v1/phase3/auth/pms/grant, which derives identity from the connection rather than the body and grants
@@ -901,6 +910,7 @@ func main() {
 	r.Post("/v1/license/install", s.licenseInstall)
 	r.Post("/v1/admin/pms/reload", s.pmsAdminReload)
 	r.Post("/v1/admin/walled-garden/reload", s.gardenReload)
+	s.notifyAdminRoutes(r)
 	// Hotel Admin TLS cert lifecycle: scd runs as root and drives the privileged
 	// manager here (edged is sandboxed with NoNewPrivileges and cannot). edged
 	// already enforced Hotel-IT permission + step-up before proxying to us.

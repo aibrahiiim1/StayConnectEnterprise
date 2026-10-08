@@ -206,7 +206,12 @@ func (h *handler) landing(w http.ResponseWriter, r *http.Request, errMsg string)
 	if !ok || d == nil {
 		d = map[string]any{}
 	}
-	_ = h.tmplLand.Execute(w, newLandingView(r, d, nonce, errMsg, ipStr, macStr))
+	v := newLandingView(r, d, nonce, errMsg, ipStr, macStr)
+	// The greeting is offered only on a plain visit: a refusal being rendered (errMsg) is answered as itself.
+	if errMsg == "" && r.Method == http.MethodGet {
+		v.Welcome = h.welcomeFor(r, macStr)
+	}
+	_ = h.tmplLand.Execute(w, v)
 }
 
 func (h *handler) index(w http.ResponseWriter, r *http.Request) {
@@ -397,6 +402,16 @@ func (h *handler) logout(w http.ResponseWriter, r *http.Request) {
 	req, _ := http.NewRequestWithContext(r.Context(), "POST", "http://unix/v1/sessions/revoke", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	_, _ = h.scd.Do(req)
+	// Signing out also forgets the device (contract §2.3): the next visit asks for a code again.
+	if token := h.resumeToken(r); token != "" {
+		rb, _ := json.Marshal(map[string]string{"resume_token": token})
+		rq, _ := http.NewRequestWithContext(r.Context(), "POST", "http://unix/v1/sessions/resume-revoke", bytes.NewReader(rb))
+		rq.Header.Set("Content-Type", "application/json")
+		if resp, err := h.scd.Do(rq); err == nil {
+			resp.Body.Close()
+		}
+		clearClientResumeCookie(w)
+	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
@@ -489,6 +504,9 @@ func (h *handler) routes() http.Handler {
 	r.Get("/", h.index)
 	r.Post("/auth/voucher", h.authVoucher)
 	r.Post("/auth/credentials", h.authCredentials)
+	// The remembered device: Connect, and Not-you (client_resume.go).
+	r.Post("/auth/resume", h.authResume)
+	r.Post("/auth/resume/forget", h.authResumeForget)
 	r.Post("/auth/otp/request", h.authOTPRequest)
 	r.Post("/auth/otp/verify", h.authOTPVerify)
 	r.Get("/auth/social/start", h.socialStart)

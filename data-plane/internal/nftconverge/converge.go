@@ -65,9 +65,11 @@ type Outcome struct {
 	TableWas  bool   `json:"table_existed"`
 }
 
-// AuthSets are the packet-authorization sets whose contents must survive a converge. They are the only sets
-// whose elements are runtime state rather than rendered structure.
-var AuthSets = []string{nft.AuthV4, nft.Phase3AuthV4}
+// AuthSets are the sets whose contents must survive a converge: the two packet-authorization sets, and the
+// walled garden. All three hold runtime state rather than rendered structure. The garden was missing here, so
+// every structural re-render reset it to the three baseline addresses until scd's next minute -- a sign-in
+// through an identity provider or a card payment page in progress at that moment lost its way out.
+var AuthSets = []string{nft.AuthV4, nft.Phase3AuthV4, nft.GardenV4}
 
 // tableName is the single StayConnect nft table. It is named once so that no read path can drift from the
 // table the render actually replaces.

@@ -31,8 +31,14 @@ func (spyTx) ResolveVoucherByHMAC(context.Context, string, string, []byte, time.
 func (spyTx) LookupAccount(context.Context, string, string, string) (string, string, bool, *time.Time, *time.Time, *time.Time, error) {
 	return "", "", false, nil, nil, nil, nil
 }
-func (spyTx) ResolvePrincipalByIdentity(context.Context, string, string, string, string, time.Time) (string, error) {
-	return "", nil
+func (spyTx) ResolvePrincipalByFactors(context.Context, string, FactorClaim, []FactorClaim, time.Time) (PrincipalResolution, error) {
+	return PrincipalResolution{}, nil
+}
+func (spyTx) LoadPrincipalFactors(context.Context, string, string) ([]FactorClaim, error) {
+	return nil, nil
+}
+func (spyTx) LoadClientGroups(context.Context, string, string) ([]ClientGroup, error) {
+	return nil, nil
 }
 func (spyTx) UpsertDevice(context.Context, string, string, string, string, string, string, time.Time) (string, error) {
 	return "", nil
