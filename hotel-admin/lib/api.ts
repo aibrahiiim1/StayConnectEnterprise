@@ -686,11 +686,18 @@ export type NotificationProvider = {
   id: string;
   tenant_id: string;
   channel: "email" | "sms" | "whatsapp";
-  kind: "stub" | "sendgrid" | "ses" | "twilio" | "meta_whatsapp" | "twilio_whatsapp";
+  // "ses" is no longer offered for a NEW sender (edged refuses it until an adapter exists); a stored row of
+  // that kind is still listed so it can be removed.
+  kind: "stub" | "sendgrid" | "smtp" | "ses" | "twilio" | "meta_whatsapp" | "twilio_whatsapp";
   enabled: boolean;
   display_name?: string;
   api_user?: string;       // Twilio account SID / Meta phone number ID — not a secret
-  extra?: { template_name?: string; language?: string; content_sid?: string } | null; // WhatsApp template, not secret
+  // The non-secret settings of a WhatsApp template or an SMTP relay. The secret (API key, token or SMTP
+  // password) travels as `api_key`, write-only, and is never part of this.
+  extra?: {
+    template_name?: string; language?: string; content_sid?: string;
+    host?: string; port?: string; security?: "starttls" | "tls" | "none"; username?: string; timeout_seconds?: string | number;
+  } | null;
   from_address?: string;
   from_name?: string;
   region?: string;
@@ -699,6 +706,46 @@ export type NotificationProvider = {
   last_error_at?: string;
   created_at: string;
   updated_at: string;
+};
+
+/** POST /notification-providers/{id}/test answers 200 either way; `ok` says whether the message went out. */
+export type NotificationTestResult = { ok: boolean; kind?: string; error?: string; message?: string };
+
+// ------- Client groups (GET/POST/PATCH/DELETE /edge/v1/client-groups) -------
+// docs/architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md section 3. A group is a site policy object:
+// a Client is a member when ANY rule matches, and a Client who matches several groups gets the lowest priority.
+
+export type ClientGroupRuleType = "EMAIL_DOMAIN" | "IDP_TENANT" | "IDP_HOSTED_DOMAIN";
+export type ClientGroupRule = {
+  id?: string;
+  type: ClientGroupRuleType;
+  value: {
+    domains?: string[];
+    include_subdomains?: boolean;
+    provider?: string;
+    tenant_ids?: string[];
+  };
+};
+export type ClientGroup = {
+  id: string;
+  name: string;
+  description?: string | null;
+  /** 1..1000; lower wins when a Client matches several groups. Default 100. */
+  priority: number;
+  enabled: boolean;
+  rules: ClientGroupRule[];
+  created_at: string;
+  updated_at: string;
+};
+export type ClientGroupChange = {
+  id: string;
+  group_id: string;
+  action: "CREATED" | "UPDATED" | "DELETED";
+  changed_by?: string | null;
+  reason?: string | null;
+  before?: Partial<ClientGroup> | null;
+  after?: Partial<ClientGroup> | null;
+  changed_at: string;
 };
 
 export type AuditEntry = {

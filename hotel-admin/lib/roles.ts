@@ -72,7 +72,7 @@ const MATRIX: Matrix = {
     "guest-accounts": "write",
     sessions: "write",
     usage: "read",
-    "auth-methods": "write", "walled-garden": "write",
+    "auth-methods": "write", "walled-garden": "write", "client-groups": "write",
     "portal-branding": "write", "notification-providers": "write",
     "social-providers": "write",
     // Card payment provider accounts (site-local; credentials write-only). Modules and a PMS interface's
@@ -109,7 +109,7 @@ const MATRIX: Matrix = {
     "guest-accounts": "write", sessions: "write", usage: "read",
     vouchers: "write", "voucher-codes": "write", "voucher-code-settings": "read",
     "account-password-settings": "read",
-    "auth-methods": "read", "walled-garden": "read", reports: "read", audit: "read", license: "read", backups: "read", diagnostics: "read",
+    "auth-methods": "read", "walled-garden": "read", "client-groups": "read", reports: "read", audit: "read", license: "read", backups: "read", diagnostics: "read",
   },
   guest_relations_operator: {
     "guest-signin-attempts": "read", "guest-signin-credentials": "read",
@@ -124,7 +124,7 @@ const MATRIX: Matrix = {
     vouchers: "write", "voucher-codes": "write", "voucher-code-settings": "read",
     "account-password-settings": "read",
     "auth-methods": "read", reports: "read",
-    audit: "read", license: "read", backups: "read", "walled-garden": "read", diagnostics: "read",
+    audit: "read", license: "read", backups: "read", "walled-garden": "read", "client-groups": "read", diagnostics: "read",
   },
   voucher_operator: {
     // THE DRIFT THIS FILE CARRIED: `usage: "read"` was here and is not in edged's matrix, so the sidebar
@@ -160,7 +160,7 @@ const MATRIX: Matrix = {
     "post-stay-profiles": "read", "stay-transfers": "read",
     "financial-review": "read", "financial-ops": "read",
     "guest-accounts": "read", sessions: "read", usage: "read", "auth-methods": "read",
-    "walled-garden": "read", "portal-branding": "read", "notification-providers": "read", "social-providers": "read",
+    "walled-garden": "read", "client-groups": "read", "portal-branding": "read", "notification-providers": "read", "social-providers": "read",
     "payment-providers": "read", modules: "read", audit: "read", reports: "read",
     backups: "read", license: "read", network: "read", diagnostics: "read",
     // Sees which cards exist and in what state; reads no code, for the same reason

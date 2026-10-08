@@ -465,6 +465,9 @@ type landingView struct {
 	// same two from /api/branding afterwards.
 	HotelWords template.JS
 	Configured template.JS
+	// Welcome is set when this device holds a valid remembered-device credential (client_resume.go): the page
+	// then leads with one Connect button for that Client instead of the sign-in forms.
+	Welcome *welcomeView
 }
 
 // afterSignInPrefixes are the keys only the pages after sign-in use.
@@ -573,6 +576,10 @@ type packagesView struct {
 	Packages []packageRow
 	// ReturnCode is shown once, to a client who just chose open package selection and got a new return code.
 	ReturnCode string
+	// Identity is the masked factor the Client signed in with ("" for a voucher, account or open subject).
+	Identity string
+	// FreeUsed: a free package was withheld only because this Client already had it (contract §6.1).
+	FreeUsed bool
 }
 
 // guestPackage is one package as scd lists it: an opaque id, display text, the price and every acquisition

@@ -241,34 +241,42 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 	sentBody = fmt.Sprintf("Your one-time code is: %s\n\nIt expires in %d minutes.",
 		issued.Code, int(otp.DefaultTTL.Minutes()))
 
+	// A FAILED SEND IS A FAILURE. The code used to be reported as sent while the delivery error went to the
+	// log alone, which left the client waiting for a message that was never coming. The sender's error is
+	// recorded on the provider row by the instrumented wrapper (the Delivery page shows it); the client is told
+	// the code could not be sent, with no detail that would say whether the address is known here.
+	mailer, smsSender, waSender := s.senders()
+	var sendErr error
 	switch channelLabel {
 	case "email":
-		if err := s.mail.Send(r.Context(), mail.Message{
+		sendErr = mailer.Send(r.Context(), mail.Message{
 			To:      dest,
 			Subject: "Your Wi-Fi access code",
 			Text:    sentBody,
-		}); err != nil {
-			slog.Warn("mail send", "err", err)
-		}
+		})
 	case "sms":
 		shortText := fmt.Sprintf("Wi-Fi code: %s (expires in %dm)", issued.Code, int(otp.DefaultTTL.Minutes()))
-		if err := s.sms.Send(r.Context(), sms.Message{
+		sendErr = smsSender.Send(r.Context(), sms.Message{
 			To:   dest,
 			Text: shortText,
-		}); err != nil {
-			slog.Warn("sms send", "err", err)
-		}
+		})
 	case "whatsapp":
 		// The code travels as a parameter of the provider-approved authentication template, never as text.
-		if s.whatsapp == nil {
-			slog.Warn("whatsapp send: no sender configured")
-		} else if err := s.whatsapp.Send(r.Context(), whatsapp.Message{
-			To:         dest,
-			Code:       issued.Code,
-			TTLMinutes: int(otp.DefaultTTL.Minutes()),
-		}); err != nil {
-			slog.Warn("whatsapp send", "err", err)
+		if waSender == nil {
+			sendErr = errors.New("no whatsapp sender configured")
+		} else {
+			sendErr = waSender.Send(r.Context(), whatsapp.Message{
+				To:         dest,
+				Code:       issued.Code,
+				TTLMinutes: int(otp.DefaultTTL.Minutes()),
+			})
 		}
+	}
+	if sendErr != nil {
+		slog.Warn("otp delivery failed", "channel", channelLabel, "err", sendErr)
+		s.met.OTPIssued.WithLabelValues(channelLabel + "_undelivered").Inc()
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "DELIVERY_FAILED"})
+		return
 	}
 
 	s.met.OTPIssued.WithLabelValues(channelLabel).Inc()

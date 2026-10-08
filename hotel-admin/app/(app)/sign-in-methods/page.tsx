@@ -31,20 +31,26 @@ import { GuestSignInProtectionCard } from "@/components/guest-signin-protection"
 import { roomSignInImpaired, useRoomSignInReadiness } from "@/components/room-sign-in-readiness";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Field, Select } from "@/components/ui/input";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { PageHeader, PageShell } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Skeleton, Switch } from "@/components/ui/misc";
-import { ReadOnlyNotice } from "@/components/ui/patterns";
+import { ReadOnlyNotice, SettingField } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
-import { Ticket, Hotel, KeyRound, Mail, MessageSquare, Users, ArrowUpRight, LogIn, PackageOpen, Smartphone } from "lucide-react";
+import { Ticket, Hotel, KeyRound, Mail, MessageSquare, Users, ArrowUpRight, LogIn, PackageOpen, Smartphone, Route } from "lucide-react";
 
 // The auth_methods document. Only the keys this screen owns are typed; everything else is preserved
 // untouched by the server's merge, so an unknown future method cannot be deleted by saving here.
 type Method = { enabled?: boolean };
 type PMSMethod = { enabled?: boolean; mode?: string; provider?: string; template_id?: string };
+// THE CLIENT JOURNEY (ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md §2.3, §6.2): which method the portal leads
+// with, and how long a device that has verified a code or an identity provider is remembered.
+type PrimaryMethod = "" | "pms" | "email" | "sms" | "whatsapp" | "guest_account" | "voucher";
+type PortalJourney = { primary_method?: PrimaryMethod; remember_device_days?: number };
 type AuthMethods = {
   voucher?: Method;
   guest_account?: Method;
@@ -56,6 +62,17 @@ type AuthMethods = {
   whatsapp?: Method;
   social?: Record<string, Method>;
   pms?: PMSMethod;
+  portal?: PortalJourney;
+};
+
+// Remember devices: the operational setting's default, unit and bounds (0 = always ask).
+const REMEMBER_DAYS_DEFAULT = 30;
+const REMEMBER_DAYS_MIN = 0;
+const REMEMBER_DAYS_MAX = 365;
+
+const PRIMARY_LABELS: Record<Exclude<PrimaryMethod, "">, string> = {
+  pms: "Room sign-in", email: "Email code", sms: "SMS code", whatsapp: "WhatsApp code",
+  guest_account: "Client account", voucher: "Voucher code",
 };
 
 type NotifyProvider = { channel: string; kind: string; enabled: boolean };
@@ -146,7 +163,7 @@ export default function SignInMethodsPage() {
   const header = (
     <PageHeader
       icon={<LogIn />}
-      eyebrow="Client Portal"
+      eyebrow="Client access"
       title="Sign-in methods"
       description="Each switch applies immediately. Turning a method off does not disconnect clients already online."
       help={
@@ -164,13 +181,22 @@ export default function SignInMethodsPage() {
                 <><strong>Client account</strong> — a username and password issued to the client, managed under Client accounts.</>,
                 <><strong>Choose a package without signing in</strong> — the client chooses a package with no credential. Only packages the client can actually get are listed. A client who returns later resumes the same access with the recovery code shown after they connect.</>,
                 ...(hospitality ? [<><strong>Room sign-in</strong> — the client enters their room number and one detail from their booking. OneGate checks it against the property management system for the network they are on; the client never chooses a system, and no booking details are shown back to them. Which detail is asked for is set in Room sign-in, and which system a network uses in PMS routing — both under Hotel.</>] : []),
-                ...(emailMod ? [<><strong>Email code</strong> — the client receives a one-time code by email. Available once an email sender exists and is switched on under Email &amp; SMS.</>] : []),
-                ...(smsMod ? [<><strong>SMS code</strong> — the client receives a one-time code by text message. Available once a text-message sender exists and is switched on under Email &amp; SMS.</>] : []),
-                ...(whatsappMod ? [<><strong>WhatsApp code</strong> — the client receives a one-time code on WhatsApp. Available once a WhatsApp sender exists and is switched on under Email &amp; SMS.</>] : []),
-                ...(socialMod ? [<><strong>Social login</strong> — the client signs in with an existing Google, Apple, Facebook or Microsoft account. Each provider is offered individually, because each needs its own credentials; providers are set up under Social login.</>] : []),
+                ...(emailMod ? [<><strong>Email code</strong> — the client receives a one-time code by email. Available once an email sender exists and is switched on under Delivery.</>] : []),
+                ...(smsMod ? [<><strong>SMS code</strong> — the client receives a one-time code by text message. Available once a text-message sender exists and is switched on under Delivery.</>] : []),
+                ...(whatsappMod ? [<><strong>WhatsApp code</strong> — the client receives a one-time code on WhatsApp. Available once a WhatsApp sender exists and is switched on under Delivery.</>] : []),
+                ...(socialMod ? [<><strong>Identity providers</strong> — the client signs in with an existing Google, Apple, Facebook or Microsoft account. Each provider is offered individually, because each needs its own credentials; providers are set up under Identity providers.</>] : []),
               ]}
             />
             <p className="text-muted-foreground">Methods that belong to a module this site is not licensed for are not shown.</p>
+          </HelpSection>
+          <HelpSection title="The client journey">
+            <p>
+              The portal leads with one <strong>primary method</strong>; identity providers appear as quick sign-in
+              buttons above it, and every other method is offered under &ldquo;Or sign in with&rdquo;. A device that
+              verified a code or an identity provider is <strong>remembered</strong> for the number of days set here,
+              and reconnects with one tap. Knowing an email address is never enough: the device must have proved
+              the code or the provider before.
+            </p>
           </HelpSection>
           {hospitality && (
           <HelpSection title="Client sign-in protection">
@@ -296,7 +322,7 @@ export default function SignInMethodsPage() {
           ready={emailReady}
           notReadyReason="Not available until an email sender exists and is switched on, so codes cannot be sent yet."
           manageHref="/notifications"
-          manageLabel="Email & SMS"
+          manageLabel="Delivery"
         />
         )}
 
@@ -312,7 +338,7 @@ export default function SignInMethodsPage() {
           ready={smsReady}
           notReadyReason="Not available until a text-message sender exists and is switched on, so codes cannot be sent yet."
           manageHref="/notifications"
-          manageLabel="Email & SMS"
+          manageLabel="Delivery"
         />
         )}
 
@@ -328,7 +354,7 @@ export default function SignInMethodsPage() {
             ready={whatsappReady}
             notReadyReason="Not available until a WhatsApp sender exists and is switched on, so codes cannot be sent yet."
             manageHref="/notifications"
-            manageLabel="Email & SMS"
+            manageLabel="Delivery"
           />
         )}
 
@@ -336,7 +362,7 @@ export default function SignInMethodsPage() {
         <Card className="md:col-span-2">
           <CardHeader className="items-start">
             <div className="min-w-0 space-y-1">
-              <CardTitle className="flex items-center gap-2 [&_svg]:size-4"><Users aria-hidden /> Social login</CardTitle>
+              <CardTitle className="flex items-center gap-2 [&_svg]:size-4"><Users aria-hidden /> Identity providers</CardTitle>
               <CardDescription>
                 The client signs in with an existing account such as Google.
               </CardDescription>
@@ -346,9 +372,9 @@ export default function SignInMethodsPage() {
             {socialReady.length === 0 ? (
               <div className="flex flex-wrap items-center gap-2 text-sm">
                 <Badge tone="default">Not available</Badge>
-                <span className="text-muted-foreground">No social provider is configured.</span>
+                <span className="text-muted-foreground">No identity provider is configured.</span>
                 <Link href="/social-providers" className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2 hover:decoration-2">
-                  Set one up in Social login <ArrowUpRight className="size-3.5" aria-hidden />
+                  Set one up in Identity providers <ArrowUpRight className="size-3.5" aria-hidden />
                 </Link>
               </div>
             ) : (
@@ -385,12 +411,116 @@ export default function SignInMethodsPage() {
         )}
       </div>
 
+      {/* THE JOURNEY. Which method leads, and whether a device is remembered, are decided once the methods
+          themselves are chosen -- so the card follows the grid rather than leading it. */}
+      <ClientJourneyCard
+        cfg={cfg}
+        writable={writable}
+        busy={busy === "Client journey"}
+        hospitality={hospitality}
+        onSave={(portal) => save({ portal }, "Client journey")}
+      />
+
       {/* The numbers are about guests signing in, and this is the screen an operator is already on when they
           decide that five attempts is too few for their property. */}
       {/* Sign-in protection counts wrong ROOM details (it is enforced on Room sign-in only), so it belongs to
           Hospitality and is neither shown nor asked for on a site without it. */}
       {hospitality && <GuestSignInProtectionCard canWrite={mayChangeProtection} />}
     </PageShell>
+  );
+}
+
+// ClientJourneyCard — the portal's primary method and the remembered-device window, saved together as the one
+// `portal` key (the server merges per top-level key, so nothing else on this screen is touched by the save).
+//
+// A FORM WITH A SAVE, unlike the switches above it: a number of days is typed, and saving every keystroke would
+// write "3", then "30", then "300" to the appliance. Nothing is sent until the operator says so, and the button
+// stays disabled until something actually changed.
+function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
+  cfg: AuthMethods; writable: boolean; busy: boolean; hospitality: boolean;
+  onSave: (portal: Required<PortalJourney>) => void;
+}) {
+  const stored = cfg.portal ?? {};
+  const storedPrimary: PrimaryMethod = stored.primary_method ?? "";
+  const storedDays = typeof stored.remember_device_days === "number" ? stored.remember_device_days : REMEMBER_DAYS_DEFAULT;
+  const [primary, setPrimary] = useState<PrimaryMethod>(storedPrimary);
+  const [days, setDays] = useState(String(storedDays));
+  // Follow a save (or a refused one that re-read the server): the inputs show what the appliance holds.
+  useEffect(() => { setPrimary(storedPrimary); setDays(String(storedDays)); }, [storedPrimary, storedDays]);
+
+  // Only a method that is switched on can lead: offering "Email code" first while it is off would show a form
+  // the client cannot use. A stored choice that has since been switched off is still listed, named as such,
+  // so the operator can see why the portal fell back to the automatic order.
+  const enabledMethods = useMemo(() => {
+    const on: Exclude<PrimaryMethod, "">[] = [];
+    if (hospitality && cfg.pms?.enabled) on.push("pms");
+    if (cfg.email?.enabled) on.push("email");
+    if (cfg.sms?.enabled) on.push("sms");
+    if (cfg.whatsapp?.enabled) on.push("whatsapp");
+    if (cfg.guest_account?.enabled) on.push("guest_account");
+    if (cfg.voucher?.enabled) on.push("voucher");
+    return on;
+  }, [cfg, hospitality]);
+  const storedOff = storedPrimary !== "" && !enabledMethods.includes(storedPrimary);
+
+  const n = Number(days);
+  const daysValid = days.trim() !== "" && Number.isInteger(n) && n >= REMEMBER_DAYS_MIN && n <= REMEMBER_DAYS_MAX;
+  const dirty = primary !== storedPrimary || (daysValid && n !== storedDays);
+
+  return (
+    <Card>
+      <CardHeader className="items-start">
+        <div className="min-w-0 space-y-1">
+          <CardTitle className="flex items-center gap-2 [&_svg]:size-4"><Route aria-hidden /> Client journey</CardTitle>
+          <CardDescription>
+            What the client sees first on the portal, and whether a device they have already verified is asked for a code again.
+          </CardDescription>
+        </div>
+      </CardHeader>
+      <CardBody>
+        <form
+          className="grid gap-4 md:grid-cols-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!daysValid || !writable) return;
+            onSave({ primary_method: primary, remember_device_days: n });
+          }}
+        >
+          <Field
+            label="Primary method"
+            hint="The method shown first on the Client Portal. Identity providers appear as quick sign-in buttons above it; every other enabled method is offered under 'Or sign in with'."
+          >
+            <Select value={primary} disabled={!writable || busy} onChange={(e) => setPrimary(e.target.value as PrimaryMethod)}>
+              <option value="">Automatic</option>
+              {enabledMethods.map((m) => <option key={m} value={m}>{PRIMARY_LABELS[m]}</option>)}
+              {storedOff && <option value={storedPrimary}>{PRIMARY_LABELS[storedPrimary]} (switched off)</option>}
+            </Select>
+          </Field>
+          <SettingField
+            label="Remember devices"
+            value={days}
+            onChange={setDays}
+            unit="days"
+            min={REMEMBER_DAYS_MIN}
+            max={REMEMBER_DAYS_MAX}
+            defaultValue={REMEMBER_DAYS_DEFAULT}
+            readOnly={!writable || busy}
+            explanation="After a client verifies a code or an identity provider on a device, that device can reconnect without another code for this long. 0 = always ask."
+          />
+          {storedOff && (
+            <p className="text-xs text-warning-subtle-foreground md:col-span-2" role="status">
+              {PRIMARY_LABELS[storedPrimary]} is the stored primary method but is switched off, so the portal uses the automatic order until it is switched on or another method is chosen.
+            </p>
+          )}
+          {writable && (
+            <div className="flex items-center gap-3 md:col-span-2">
+              <Button type="submit" disabled={!dirty || !daysValid || busy}>{busy ? "Saving…" : "Save journey"}</Button>
+              {dirty && !busy && <span className="text-xs text-muted-foreground">Not saved yet.</span>}
+            </div>
+          )}
+        </form>
+      </CardBody>
+    </Card>
   );
 }
 

@@ -171,8 +171,8 @@ export default function SocialProvidersPage() {
     <PageShell>
       <PageHeader
         icon={<AtSign />}
-        eyebrow="Client Portal"
-        title="Social login"
+        eyebrow="Client access"
+        title="Identity providers"
         description="Let clients sign in with an account they already have."
         help={
           <>
@@ -209,7 +209,7 @@ export default function SocialProvidersPage() {
           ) : rows.length === 0 ? (
             <EmptyState
               icon={<KeyRound />}
-              title="No social login is configured"
+              title="No identity provider is configured"
               hint="Clients can still sign in with a room number, a voucher or an account."
               action={writable ? <Button onClick={openNew}><Plus /> Add a provider</Button> : undefined}
             />
@@ -251,7 +251,7 @@ export default function SocialProvidersPage() {
       <DialogForm
         open={mode !== "closed"}
         onOpenChange={(v) => { if (!v) { setMode("closed"); setEditing(null); } }}
-        title={mode === "edit" ? `Edit ${editing?.display_name || PROVIDER_LABELS[editing?.provider ?? ""] || "provider"}` : "Add a social login provider"}
+        title={mode === "edit" ? `Edit ${editing?.display_name || PROVIDER_LABELS[editing?.provider ?? ""] || "provider"}` : "Add an identity provider"}
         description="These values come from the OAuth application you registered with the provider."
         submitLabel={mode === "edit" ? "Save changes" : "Add provider"}
         busy={busy}
@@ -332,7 +332,7 @@ export default function SocialProvidersPage() {
       <ConfirmDialog
         open={deleting !== null}
         onOpenChange={(v) => !v && setDeleting(null)}
-        title="Remove this social login?"
+        title="Remove this identity provider?"
         description={
           deleting
             ? `Clients will no longer be offered ${deleting.display_name || PROVIDER_LABELS[deleting.provider] || deleting.provider} on the sign-in page. The stored client secret is deleted with it, so re-adding means registering it again.`

@@ -50,6 +50,13 @@ type PackageListResult struct {
 	Disabled bool
 	Packages []PackageListItem
 	Reason   string
+	// FreeAllowanceUsed is the ONE withheld reason that is safe to show: a free package the Client could
+	// otherwise see was withheld only because their own history says they already had it. Every other
+	// exclusion stays silent. This is what turns "no packages" into "you have used your free access; here
+	// are the paid ones" (contract §6.1).
+	FreeAllowanceUsed bool
+	// ClientGroupID is the group pinned on the context, for the page to show (never decides anything here).
+	ClientGroupID string
 }
 
 // ListEligiblePackages returns — read-only, in one transaction, WITHOUT creating any quote/purchase/
@@ -111,12 +118,16 @@ func (e *CommerceEngine) ListEligiblePackages(ctx context.Context, req PackageLi
 		}
 		site := e.siteMethods(ctx)
 		var items []PackageListItem
+		freeUsed := false
 		for _, pkg := range pkgs {
-			snap, display, eligible, herr := e.evalPackageForSubject(ctx, tx, now, req, ac, pkg)
+			snap, display, eligible, why, herr := e.evalPackageForSubject(ctx, tx, now, req, ac, pkg)
 			if herr != nil {
 				return herr
 			}
 			if !eligible {
+				if why == "forbids_prior_purchase" && pkg.PriceMinor == 0 {
+					freeUsed = true
+				}
 				continue // silently excluded — never reveals an ineligible package
 			}
 			_ = snap
@@ -127,7 +138,7 @@ func (e *CommerceEngine) ListEligiblePackages(ctx context.Context, req PackageLi
 			items = append(items, PackageListItem{PackageID: pkg.PackageID, Display: display, Methods: methods,
 				PriceMinor: pkg.PriceMinor, Currency: pkg.Currency, CurrencyExponent: pkg.CurrencyExponent})
 		}
-		res = PackageListResult{Packages: items, Reason: "ok"}
+		res = PackageListResult{Packages: items, Reason: "ok", FreeAllowanceUsed: freeUsed, ClientGroupID: ac.ClientGroupID}
 		return nil
 	})
 	if err != nil {
@@ -140,10 +151,10 @@ func (e *CommerceEngine) ListEligiblePackages(ctx context.Context, req PackageLi
 // passes, returns the resolved grant snapshot + guest-safe display. A gate failure returns eligible=false
 // (never an error) so the caller silently excludes the package. Only a repository/read error is a hard
 // error. This mirrors the CreateQuote pipeline exactly, minus any write.
-func (e *CommerceEngine) evalPackageForSubject(ctx context.Context, tx CommerceTx, now time.Time, req PackageListRequest, ac AuthContextRow, pkg PackageRevisionRow) (GrantSnapshot, map[string]any, bool, error) {
+func (e *CommerceEngine) evalPackageForSubject(ctx context.Context, tx CommerceTx, now time.Time, req PackageListRequest, ac AuthContextRow, pkg PackageRevisionRow) (GrantSnapshot, map[string]any, bool, string, error) {
 	isVoucher := ac.Subject.Kind == SubjectVoucher
 	if !isVoucher && (!pkg.PackageActive || !pkg.IsCurrent) {
-		return GrantSnapshot{}, nil, false, nil
+		return GrantSnapshot{}, nil, false, "", nil
 	}
 	// A VOUCHER IS OFFERED WHAT IT WAS PRINTED FOR, AND NOTHING ELSE.
 	//
@@ -153,68 +164,70 @@ func (e *CommerceEngine) evalPackageForSubject(ctx context.Context, tx CommerceT
 	// mismatch in the grant kernel regardless; this is what keeps a guest from being shown a choice that
 	// would then fail, and an operator from believing a card grants something it does not.
 	if ok, err := e.voucherMayHavePackage(ctx, tx, req, ac, pkg); err != nil || !ok {
-		return GrantSnapshot{}, nil, false, err
+		return GrantSnapshot{}, nil, false, "", err
 	}
 	// The sale window governs OFFERS; a voucher already issued is not an offer and is not re-windowed.
 	if !isVoucher && pkg.VisibleFrom != nil && now.Before(*pkg.VisibleFrom) {
-		return GrantSnapshot{}, nil, false, nil
+		return GrantSnapshot{}, nil, false, "", nil
 	}
 	if !isVoucher && pkg.VisibleUntil != nil && !now.Before(*pkg.VisibleUntil) {
-		return GrantSnapshot{}, nil, false, nil
+		return GrantSnapshot{}, nil, false, "", nil
 	}
 	if _, err := ValidateCurrency(pkg.Currency, pkg.CurrencyExponent); err != nil {
-		return GrantSnapshot{}, nil, false, nil
+		return GrantSnapshot{}, nil, false, "", nil
 	}
 	plan, err := tx.LoadPlanRevision(ctx, req.TenantID, req.SiteID, pkg.PlanRevisionID)
 	if err != nil {
 		// a missing/broken plan revision is a config gap, not a guest-visible fact: exclude, don't error
 		if isNotFound(err) {
-			return GrantSnapshot{}, nil, false, nil
+			return GrantSnapshot{}, nil, false, "", nil
 		}
-		return GrantSnapshot{}, nil, false, err
+		return GrantSnapshot{}, nil, false, "", err
 	}
 	// ...and the client networks this one continues (0106), so a replaced network keeps its logical identity.
 	ancestors, aerr := tx.GuestNetworkAncestors(ctx, req.TenantID, req.SiteID, ac.GuestNetworkID)
 	if aerr != nil {
-		return GrantSnapshot{}, nil, false, aerr
+		return GrantSnapshot{}, nil, false, "", aerr
 	}
 	subj := EligibilitySubject{Now: now, AuthMethod: ac.Method, Kind: ac.Subject.Kind,
-		GuestNetworkID: ac.GuestNetworkID, GuestNetworkLineage: ancestors}
-	// rules / tiers / prior-purpose are keyed on the RESOLVED package revision id (pkg.ID), exactly as
-	// CreateQuote does — not the package id.
-	prior, err := tx.HasPriorPurchase(ctx, req.TenantID, req.SiteID, pkg.ID, ac.Subject)
-	if err != nil {
-		return GrantSnapshot{}, nil, false, err
-	}
-	subj.HasPriorPurchaseOfPackage = prior
+		GuestNetworkID: ac.GuestNetworkID, GuestNetworkLineage: ancestors, ClientGroupID: ac.ClientGroupID}
+	// Rules and tiers are keyed on the RESOLVED package revision id (pkg.ID), exactly as CreateQuote does.
+	// The prior-purchase history is keyed on the PACKAGE, under the revision's own policy (contract §5).
 	rules, err := tx.LoadEligibilityRules(ctx, pkg.ID)
 	if err != nil {
-		return GrantSnapshot{}, nil, false, err
+		return GrantSnapshot{}, nil, false, "", err
 	}
-	if ok, _ := EvaluatePackageEligible(rules, subj); !ok {
-		return GrantSnapshot{}, nil, false, nil
+	if pol := PriorPurchasePolicyOf(rules, pkg.PriceMinor); pol.Present {
+		prior, err := tx.HasPriorPurchase(ctx, req.TenantID, req.SiteID, PriorPurchaseQuery{PackageID: pkg.PackageID, Subject: ac.Subject, Policy: pol})
+		if err != nil {
+			return GrantSnapshot{}, nil, false, "", err
+		}
+		subj.HasPriorPurchaseOfPackage = prior
+	}
+	if ok, why := EvaluatePackageEligible(rules, subj); !ok {
+		return GrantSnapshot{}, nil, false, why, nil
 	}
 	tiers, err := tx.LoadGrantTiers(ctx, pkg.ID)
 	if err != nil {
-		return GrantSnapshot{}, nil, false, err
+		return GrantSnapshot{}, nil, false, "", err
 	}
 	tier, matched := FirstMatchTier(tiers, subj)
 	if !matched {
-		return GrantSnapshot{}, nil, false, nil
+		return GrantSnapshot{}, nil, false, "", nil
 	}
 	snap, err := BuildGrantSnapshot(tier, plan, pkg)
 	if err != nil {
-		return GrantSnapshot{}, nil, false, nil
+		return GrantSnapshot{}, nil, false, "", nil
 	}
 	endMode, window, derr := ResolveEndPolicy(pkg.DurationPolicy, now)
 	if derr != nil {
-		return GrantSnapshot{}, nil, false, nil
+		return GrantSnapshot{}, nil, false, "", nil
 	}
 	snap.EndMode = endMode
 	if window != nil {
 		snap.WindowEndsAt = window.UTC().Format(time.RFC3339)
 	}
-	return snap, guestDisplay(snap, pkg), true, nil
+	return snap, guestDisplay(snap, pkg), true, "", nil
 }
 
 // isNotFound reports whether err is a typed not-found domain error (missing plan/package config).

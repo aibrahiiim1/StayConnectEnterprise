@@ -252,7 +252,8 @@ Each is enforced in the SQL grant entry point, which is the only path to the ent
   currency and the vendor attestation, approved by a site administrator with step-up — the vendor-confirmed answer
   meanings per interface, and readiness per interface. A stay's posting permission and block history are shown on
   the stay; only `ADMIN_BLOCK` is operator-controlled.
-* **Client Portal → Sign-in methods:** "Choose a package without signing in" (open package selection).
+* **Client access → Sign-in methods:** "Choose a package without signing in" (open package selection); the section was
+  renamed from *Client Portal* by the client-access delivery (`ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md` §9).
 * Navigation follows `/capabilities`, which reports module-owned surfaces only while their module is manageable
   and falls back to the core when module state is unreadable.
 
@@ -368,7 +369,9 @@ and reviewable but never offered.
   `language`, Twilio `content_sid`). A verified WhatsApp code proves the phone number exactly as SMS does.
 * Social: Google, Microsoft and Apple are verified OpenID Connect `id_token`s (signature, issuer, audience,
   expiry; Microsoft tenant rules; Apple ES256 client secret minted per exchange from the `.p8` key). Facebook uses
-  the Graph API with `appsecret_proof`. Only a verified email signs a client in. Apple returns by `form_post`.
+  the Graph API with `appsecret_proof`. The provider's stable subject is the identity and a trusted issuer's
+  verified email is a second factor on the same Client (`ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md` §2); a
+  Facebook sign-in that returns no email still signs the client in by its subject. Apple returns by `form_post`.
 * **Redirect URI.** The redirect URI saved on a social provider is the one registered with that provider and is
   used for both the authorize request and the code exchange. It must be `https://<portal name>/auth/social/callback`
   (edged refuses anything else). Only when a provider has none does the portal derive its own URL; behind the

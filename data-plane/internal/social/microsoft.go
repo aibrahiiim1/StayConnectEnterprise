@@ -237,7 +237,10 @@ func (m *Microsoft) Exchange(ctx context.Context, code, redirectURI string) (*Us
 		sub = tid + ":" + oid
 	}
 	email, verified := emailFromClaims(c, tid)
-	info := &UserInfo{Sub: sub, Email: email, EmailVerified: verified, Name: c.str("name")}
+	info := &UserInfo{Sub: sub, Email: email, EmailVerified: verified, Name: c.str("name"),
+		// The directory tenant is the organisation: it is what an IDP_TENANT Client Group rule reads. It came
+		// out of a verified id_token, so it is Microsoft's assertion about the account, not the user's.
+		Claims: map[string]string{"tid": tid, "oid": c.str("oid")}}
 	if !verified {
 		// Caller maps this to ErrEmailUnverified for a friendlier message at
 		// the portal layer, as with Google.

@@ -47,7 +47,7 @@ var (
 type IssueParams struct {
 	TenantID    string
 	ApplianceID string
-	TemplateID  string // ticket_template to apply on successful verify
+	TemplateID  string // kept for callers; auth_otps lost its template_id column in migration 0049 and it is no longer stored
 	Channel     string // "email" or "sms"
 	Destination string // email address or phone number
 	IP          string // source IP of requester (for forensics)
@@ -119,15 +119,15 @@ func Issue(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, p IssuePara
 		var id string
 		if err := db.QueryRow(ctx, `
         INSERT INTO auth_otps
-          (tenant_id, appliance_id, template_id, channel, destination,
+          (tenant_id, appliance_id, channel, destination,
            code_hash, expires_at, max_attempts, ip, user_agent)
         VALUES
-          ($1, NULLIF($2,'')::uuid, NULLIF($3,'')::uuid, $4, $5,
-           $6, $7, $8,
-           CASE WHEN $9 = '' THEN NULL ELSE $9::inet END,
-           NULLIF($10,''))
+          ($1, NULLIF($2,'')::uuid, $3, $4,
+           $5, $6, $7,
+           CASE WHEN $8 = '' THEN NULL ELSE $8::inet END,
+           NULLIF($9,''))
         RETURNING id
-    `, p.TenantID, p.ApplianceID, p.TemplateID, p.Channel, dest,
+    `, p.TenantID, p.ApplianceID, p.Channel, dest,
 			salt+":"+hash, expires, DefaultMaxAttempts, p.IP, p.UserAgent).Scan(&id); err != nil {
 			return nil, fmt.Errorf("otp: insert: %w", err)
 		}
@@ -148,14 +148,14 @@ func Issue(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, p IssuePara
 	}
 	if _, err := db.Exec(ctx, `
         INSERT INTO auth_otps
-          (id, tenant_id, appliance_id, template_id, channel, destination,
+          (id, tenant_id, appliance_id, channel, destination,
            code_hash, otp_key_generation, expires_at, max_attempts, ip, user_agent)
         VALUES
-          ($1::uuid, $2, NULLIF($3,'')::uuid, NULLIF($4,'')::uuid, $5, $6,
-           $7, $8, $9, $10,
-           CASE WHEN $11 = '' THEN NULL ELSE $11::inet END,
-           NULLIF($12,''))
-    `, id, p.TenantID, p.ApplianceID, p.TemplateID, p.Channel, dest,
+          ($1::uuid, $2, NULLIF($3,'')::uuid, $4, $5,
+           $6, $7, $8, $9,
+           CASE WHEN $10 = '' THEN NULL ELSE $10::inet END,
+           NULLIF($11,''))
+    `, id, p.TenantID, p.ApplianceID, p.Channel, dest,
 		digestHex, gen, expires, DefaultMaxAttempts, p.IP, p.UserAgent); err != nil {
 		return nil, fmt.Errorf("otp: insert: %w", err)
 	}
@@ -197,17 +197,17 @@ func Verify(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, challengeI
 		// Legacy SELECT — does not reference otp_key_generation (pre-0008 safe).
 		err = tx.QueryRow(ctx, `
         SELECT tenant_id::text, channel, destination, code_hash,
-               template_id::text, expires_at, attempts, max_attempts, consumed_at
+               expires_at, attempts, max_attempts, consumed_at
           FROM auth_otps WHERE id = $1 FOR UPDATE
     `, challengeID).Scan(&tenantID, &channel, &destination, &codeHash,
-			&templateID, &expiresAt, &attempts, &maxAttempts, &consumedAt)
+			&expiresAt, &attempts, &maxAttempts, &consumedAt)
 	} else {
 		err = tx.QueryRow(ctx, `
         SELECT tenant_id::text, channel, destination, code_hash,
-               template_id::text, expires_at, attempts, max_attempts, consumed_at, otp_key_generation
+               expires_at, attempts, max_attempts, consumed_at, otp_key_generation
           FROM auth_otps WHERE id = $1 FOR UPDATE
     `, challengeID).Scan(&tenantID, &channel, &destination, &codeHash,
-			&templateID, &expiresAt, &attempts, &maxAttempts, &consumedAt, &keyGen)
+			&expiresAt, &attempts, &maxAttempts, &consumedAt, &keyGen)
 	}
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

@@ -89,7 +89,7 @@ func TestRenderPortalShots(t *testing.T) {
 			h.landing(w, req("/auth/voucher", lang), "Voucher AUTH_DENIED.")
 			write("landingerr-"+v.name+"-"+lang+".html", w.Body.String())
 			w = httptest.NewRecorder()
-			h.renderPackages(w, req("/packages", lang), pkgs, "")
+			h.renderPackages(w, req("/packages", lang), pkgs, "", "", false)
 			write("packages-"+v.name+"-"+lang+".html", w.Body.String())
 			w = httptest.NewRecorder()
 			h.renderGuestError(w, req("/auth/social/callback", lang), http.StatusBadGateway, "errpage.social")
@@ -129,7 +129,7 @@ func TestRenderPortalShots(t *testing.T) {
 		sh.routes().ServeHTTP(w, req("/success?s=abc&t=8100", lang))
 		write("hotelcss-success-"+lang+".html", w.Body.String())
 		w = httptest.NewRecorder()
-		sh.renderPackages(w, req("/packages", lang), pkgs, "")
+		sh.renderPackages(w, req("/packages", lang), pkgs, "", "", false)
 		write("hotelcss-packages-"+lang+".html", w.Body.String())
 
 		// The online page with the (dark) commerce panel switched on.

@@ -72,6 +72,9 @@ var guestPrefixes = []string{
 	"/v1/commerce/",
 	"/v1/sessions/activate",
 	"/v1/sessions/authorize",
+	// The remembered device (client_resume.go): portald asks "is this device remembered" on the landing page
+	// and revokes on sign-out; Connect itself is /v1/sessions/authorize-resume, under the prefix above.
+	"/v1/sessions/resume-",
 	"/v1/sessions/status",
 	"/v1/sessions/revoke",
 	"/v1/auth/otp/",

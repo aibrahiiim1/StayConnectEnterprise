@@ -136,6 +136,21 @@ func (s *server) authMethodsRoutes() http.Handler {
 // validateAuthMethodsPatch refuses a patch the portal could not act on, so a bad value is reported here
 // rather than becoming a sign-in method that silently never works.
 func validateAuthMethodsPatch(patch map[string]json.RawMessage) error {
+	if rawPortal, ok := patch["portal"]; ok {
+		var p struct {
+			PrimaryMethod      *string `json:"primary_method"`
+			RememberDeviceDays *int    `json:"remember_device_days"`
+		}
+		if err := json.Unmarshal(rawPortal, &p); err != nil {
+			return errors.New("portal must be an object")
+		}
+		if p.PrimaryMethod != nil && *p.PrimaryMethod != "" && !portalPrimaryMethods[*p.PrimaryMethod] {
+			return errors.New("portal.primary_method must be pms, email, sms, whatsapp, guest_account or voucher")
+		}
+		if p.RememberDeviceDays != nil && (*p.RememberDeviceDays < 0 || *p.RememberDeviceDays > 365) {
+			return errors.New("portal.remember_device_days must be between 0 (never) and 365")
+		}
+	}
 	rawPMS, ok := patch["pms"]
 	if !ok {
 		return nil
@@ -160,6 +175,9 @@ func validateAuthMethodsPatch(patch map[string]json.RawMessage) error {
 	}
 	return nil
 }
+
+// portalPrimaryMethods are the methods that may lead the landing page (contract §6.2).
+var portalPrimaryMethods = map[string]bool{"pms": true, "email": true, "sms": true, "whatsapp": true, "guest_account": true, "voucher": true}
 
 // ----- walled garden ---------------------------------------------------------------
 

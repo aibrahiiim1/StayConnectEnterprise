@@ -1,19 +1,25 @@
 "use client";
 
-// EMAIL, SMS & WHATSAPP — how the appliance sends a guest a one-time code. WhatsApp is its own channel with its
-// own services, never a kind of SMS. A channel is offered for a new sender only when its sign-in module is
-// licensed here; an existing sender stays listed so it can be edited or removed.
+// DELIVERY — how the appliance sends a client a one-time code: email, text message or WhatsApp. WhatsApp is its
+// own channel with its own services, never a kind of SMS. A channel is offered for a new sender only when its
+// sign-in module is licensed here; an existing sender stays listed so it can be edited or removed.
 //
 // Same treatment as the other provider screens: Add and Edit are dialogs instead of cards stacked above the
-// table, the native confirm() on delete is a real confirmation that says what stops working, and a blank API key
+// table, the native confirm() on delete is a real confirmation that says what stops working, and a blank secret
 // on Edit still means "keep the one already stored" rather than "erase it".
 //
-// The one substantive addition: the Health column used to read "ok", "error" or "idle". Those are states of the
-// integration; what an operator needs is whether codes are actually reaching guests. An "idle" provider that has
-// never sent anything is not healthy — it is untested — and that is now what it says.
+// Email now has two real services: SendGrid, and the site's OWN MAIL SERVER over SMTP (host, port, STARTTLS/TLS,
+// an optional login). Amazon SES is no longer offered for a new sender -- edged refuses it until an adapter
+// exists -- but a stored row of that kind is still listed so it can be removed.
+//
+// OPERATED LIKE A PRODUCT (ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md §7.2): every sender can be TESTED from
+// here, to an address the operator types, with the stored credentials; the result and the service's own error
+// text are shown, and recorded on the row. The Health column reads from that record: "Last delivered 2 minutes
+// ago" and "Last error: … at …" are what an operator needs when a client says the code never arrived. A sender
+// that has never sent anything is not healthy -- it is untested -- and that is what it says.
 
 import { useEffect, useState } from "react";
-import { api, ListResp, Whoami, NotificationProvider } from "@/lib/api";
+import { api, ListResp, Whoami, NotificationProvider, NotificationTestResult } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody } from "@/components/ui/card";
@@ -22,7 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Field, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ErrorBanner } from "@/components/ui/error-banner";
+import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { DialogForm, ConfirmDialog } from "@/components/ui/dialog";
 import { Switch, SkeletonRows } from "@/components/ui/misc";
 import { Plus, Send, MessageSquare } from "lucide-react";
@@ -33,9 +39,10 @@ import { formatRelative } from "@/lib/utils";
 import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 
 type Channel = "email" | "sms" | "whatsapp";
+type Security = "starttls" | "tls" | "none";
 
 const KINDS: Record<Channel, string[]> = {
-  email: ["stub", "sendgrid", "ses"],
+  email: ["stub", "sendgrid", "smtp"],
   sms: ["stub", "twilio"],
   whatsapp: ["stub", "meta_whatsapp", "twilio_whatsapp"],
 };
@@ -43,7 +50,8 @@ const KINDS: Record<Channel, string[]> = {
 const KIND_LABELS: Record<string, string> = {
   stub: "Test only (nothing is sent)",
   sendgrid: "SendGrid",
-  ses: "Amazon SES",
+  smtp: "Your own mail server (SMTP)",
+  ses: "Amazon SES (no longer offered)",
   twilio: "Twilio",
   meta_whatsapp: "Meta WhatsApp Cloud API",
   twilio_whatsapp: "Twilio WhatsApp",
@@ -52,13 +60,21 @@ const KIND_LABELS: Record<string, string> = {
 const CHANNEL_LABELS: Record<Channel, string> = { email: "Email", sms: "Text message", whatsapp: "WhatsApp" };
 const CHANNEL_MODULE: Record<Channel, string> = { email: "email_otp", sms: "sms_otp", whatsapp: "whatsapp_otp" };
 
+// The port each security mode implies, stated beside the field. The server fills it in when left blank.
+const IMPLIED_PORT: Record<Security, string> = { starttls: "587", tls: "465", none: "25" };
+
+// SMTP timeout: an operational number with a default, a unit and bounds (edged validates the same range).
+const SMTP_TIMEOUT_DEFAULT = 10;
+const SMTP_TIMEOUT_MIN = 1;
+const SMTP_TIMEOUT_MAX = 120;
+
 function health(n: NotificationProvider): { tone: "ok" | "err" | "default"; label: string; detail?: string } {
   if (n.last_error_at && (!n.last_success_at || n.last_error_at > n.last_success_at)) {
     return { tone: "err", label: "Failing", detail: n.last_error ?? undefined };
   }
   if (n.last_success_at) return { tone: "ok", label: "Sending" };
   // NOT "idle". A sender that has never delivered anything is untested, and the difference matters the first time
-  // a guest cannot receive their code.
+  // a client cannot receive their code.
   return { tone: "default", label: "Never used" };
 }
 
@@ -73,18 +89,34 @@ type FormState = {
   template_name: string;
   language: string;
   content_sid: string;
+  // SMTP only. The password travels as api_key, write-only, like every other secret here.
+  host: string;
+  port: string;
+  security: Security;
+  username: string;
+  timeout_seconds: string;
   enabled: boolean;
 };
 
 const EMPTY: FormState = {
   channel: "email", kind: "sendgrid", display_name: "", api_key: "", api_user: "",
-  from_address: "", from_name: "", template_name: "", language: "", content_sid: "", enabled: true,
+  from_address: "", from_name: "", template_name: "", language: "", content_sid: "",
+  host: "", port: "", security: "starttls", username: "", timeout_seconds: "", enabled: true,
 };
 
-// The non-secret WhatsApp template settings, sent only for a WhatsApp sender (an empty value removes one).
+// The non-secret settings that live in `extra`: the WhatsApp template for a WhatsApp sender, the relay for an
+// SMTP sender (an empty value removes one; a blank port lets the server fill it from the security mode).
 function extraOf(f: FormState): Record<string, string> | undefined {
-  if (f.channel !== "whatsapp") return undefined;
-  return { template_name: f.template_name.trim(), language: f.language.trim(), content_sid: f.content_sid.trim() };
+  if (f.channel === "whatsapp") {
+    return { template_name: f.template_name.trim(), language: f.language.trim(), content_sid: f.content_sid.trim() };
+  }
+  if (f.kind === "smtp") {
+    return {
+      host: f.host.trim(), port: f.port.trim(), security: f.security,
+      username: f.username.trim(), timeout_seconds: f.timeout_seconds.trim(),
+    };
+  }
+  return undefined;
 }
 
 export default function NotificationsPage() {
@@ -99,6 +131,13 @@ export default function NotificationsPage() {
   const [editing, setEditing] = useState<NotificationProvider | null>(null);
   const [f, setF] = useState<FormState>(EMPTY);
   const [deleting, setDeleting] = useState<NotificationProvider | null>(null);
+
+  // THE TEST MESSAGE. One dialog per sender: an address, a Send, and the answer -- kept open after the answer so
+  // the service's own error text can be read, not flashed in a toast.
+  const [testing, setTesting] = useState<NotificationProvider | null>(null);
+  const [testTo, setTestTo] = useState("");
+  const [testResult, setTestResult] = useState<NotificationTestResult | null>(null);
+  const [testErr, setTestErr] = useState<unknown>(null);
 
   const writable = roles !== null && canWrite("notification-providers", roles);
   const caps = useCapabilities();
@@ -121,6 +160,7 @@ export default function NotificationsPage() {
     setEditing(null); setFormErr(null); setMode("new");
   }
   function openEdit(n: NotificationProvider) {
+    const sec = n.extra?.security;
     setF({
       channel: n.channel,
       kind: n.kind,
@@ -132,6 +172,11 @@ export default function NotificationsPage() {
       template_name: n.extra?.template_name ?? "",
       language: n.extra?.language ?? "",
       content_sid: n.extra?.content_sid ?? "",
+      host: n.extra?.host ?? "",
+      port: n.extra?.port ?? "",
+      security: sec === "tls" || sec === "none" ? sec : "starttls",
+      username: n.extra?.username ?? "",
+      timeout_seconds: n.extra?.timeout_seconds !== undefined && n.extra?.timeout_seconds !== null ? String(n.extra.timeout_seconds) : "",
       enabled: n.enabled,
     });
     setEditing(n); setFormErr(null); setMode("edit");
@@ -146,7 +191,7 @@ export default function NotificationsPage() {
           kind: f.kind,
           display_name: f.display_name.trim() || undefined,
           api_key: f.api_key || undefined,
-          api_user: f.api_user.trim() || undefined,
+          api_user: f.kind === "smtp" ? undefined : f.api_user.trim() || undefined,
           from_address: f.from_address.trim() || undefined,
           from_name: f.from_name.trim() || undefined,
           extra: extraOf(f),
@@ -155,7 +200,7 @@ export default function NotificationsPage() {
       } else if (editing) {
         const body: Record<string, unknown> = {
           display_name: f.display_name,
-          api_user: f.api_user,
+          api_user: f.kind === "smtp" ? "" : f.api_user,
           from_address: f.from_address,
           from_name: f.from_name,
           enabled: f.enabled,
@@ -165,7 +210,7 @@ export default function NotificationsPage() {
         if (f.api_key) body.api_key = f.api_key; // blank keeps the existing secret
         await api.patch(`/notification-providers/${editing.id}`, body);
       }
-      toast.success(mode === "new" ? "Sender added" : "Sender saved");
+      toast.success(mode === "new" ? "Sender added" : "Sender saved", "The change is live: no restart is needed.");
       setMode("closed"); setEditing(null);
       await load();
     } catch (e) { setFormErr(e); }
@@ -184,19 +229,41 @@ export default function NotificationsPage() {
     finally { setBusy(false); }
   }
 
+  function openTest(n: NotificationProvider) {
+    setTesting(n); setTestTo(""); setTestResult(null); setTestErr(null);
+  }
+  async function onTest() {
+    if (!testing) return;
+    setBusy(true); setTestErr(null); setTestResult(null);
+    try {
+      const r = await api.post<NotificationTestResult>(`/notification-providers/${testing.id}/test`, { to: testTo.trim() });
+      setTestResult(r ?? { ok: false, error: "no_answer", message: "The appliance gave no answer." });
+      // The row records the outcome either way; the Health column should say so without a reload.
+      await load();
+    } catch (e) { setTestErr(e); }
+    finally { setBusy(false); }
+  }
+
   // Changing channel invalidates the kind, so it follows rather than being left pointing at an SMS provider for
   // an email channel.
   function setChannel(channel: Channel) {
     setF((p) => ({ ...p, channel, kind: KINDS[channel][1] ?? KINDS[channel][0] }));
   }
 
+  const secretLabel =
+    f.kind === "smtp" ? "Password"
+      : f.kind === "meta_whatsapp" ? "Access token"
+        : f.kind === "twilio_whatsapp" || f.kind === "twilio" ? "Auth token"
+          : "API key";
+  const testIsEmail = testing?.channel === "email";
+
   return (
     <PageShell>
       <PageHeader
         icon={<MessageSquare />}
-        eyebrow="Client Portal"
-        title={channels.includes("whatsapp") ? "Email, SMS & WhatsApp" : "Email & SMS"}
-        description="Without a working sender, sign-in methods that need a code cannot be used."
+        eyebrow="Client access"
+        title="Delivery"
+        description="How one-time codes reach clients. Without a working sender, sign-in methods that need a code cannot be used."
         help={
           <>
             <HelpSection title="What a sender does">
@@ -209,10 +276,11 @@ export default function NotificationsPage() {
             <HelpSection title="Setting one up">
               <HelpList
                 items={[
-                  <>Credentials come from the sending service&apos;s own console.</>,
-                  <>The key is stored write-only and is never shown again. When editing, leave it blank to keep the one already stored.</>,
+                  <>Email can go through <strong>SendGrid</strong> or through <strong>your own mail server</strong> over SMTP (host, port, STARTTLS or TLS, and a login if the server needs one).</>,
+                  <>Credentials come from the sending service&apos;s own console. The key or password is stored write-only and is never shown again. When editing, leave it blank to keep the one already stored.</>,
                   <>The channel and service of a sender cannot be changed; remove it and add it again instead.</>,
-                  <>Whether clients are offered email, SMS or WhatsApp codes is switched on in <strong>Sign-in methods</strong>.</>,
+                  <>Use <strong>Send a test message</strong> after saving: it connects with the stored credentials and delivers one message to an address you type. The result is recorded in the Health column.</>,
+                  <>Whether clients are offered email, SMS or WhatsApp codes is switched on in <strong>Sign-in methods</strong>. A change saved here is live at once; nothing needs restarting.</>,
                   <>A WhatsApp sender needs an approved <strong>authentication template</strong> from Meta (template name and language) or Twilio (content SID); codes are sent only through that template.</>,
                 ]}
               />
@@ -239,7 +307,7 @@ export default function NotificationsPage() {
           ) : (
             <Table>
               <THead>
-                <TR><TH>Sender</TH><TH>Service</TH><TH>Sends as</TH><TH>Delivery</TH><TH>Offered</TH><TH /></TR>
+                <TR><TH>Sender</TH><TH>Service</TH><TH>Sends as</TH><TH>Health</TH><TH>Offered</TH><TH /></TR>
               </THead>
               <TBody>
                 {rows.map((n) => {
@@ -252,7 +320,12 @@ export default function NotificationsPage() {
                           {CHANNEL_LABELS[n.channel] ?? n.channel}
                         </div>
                       </TD>
-                      <TD className="text-sm">{KIND_LABELS[n.kind] ?? n.kind}</TD>
+                      <TD className="text-sm">
+                        {KIND_LABELS[n.kind] ?? n.kind}
+                        {n.kind === "smtp" && n.extra?.host && (
+                          <div className="font-mono text-xs text-muted-foreground">{n.extra.host}{n.extra.port ? `:${n.extra.port}` : ""}</div>
+                        )}
+                      </TD>
                       <TD className="text-xs text-muted-foreground">
                         {n.from_address || n.api_user || "—"}
                         {n.from_name && <div>{n.from_name}</div>}
@@ -261,12 +334,12 @@ export default function NotificationsPage() {
                         <Badge tone={h.tone} dot>{h.label}</Badge>
                         {n.last_success_at && (
                           <div className="mt-0.5 text-2xs text-muted-foreground">
-                            Last {formatRelative(n.last_success_at)}
+                            Last delivered {formatRelative(n.last_success_at)}
                           </div>
                         )}
                         {h.detail && (
                           <div className="mt-0.5 max-w-xs truncate text-2xs text-destructive" title={h.detail}>
-                            {h.detail}
+                            Last error: {h.detail}{n.last_error_at ? ` at ${formatRelative(n.last_error_at)}` : ""}
                           </div>
                         )}
                       </TD>
@@ -274,6 +347,7 @@ export default function NotificationsPage() {
                         {n.enabled ? <Badge tone="ok">In use</Badge> : <Badge tone="default">Off</Badge>}
                       </TD>
                       <TD className="whitespace-nowrap text-right">
+                        {writable && <Button size="sm" variant="ghost" onClick={() => openTest(n)}>Send a test message</Button>}
                         {writable && <Button size="sm" variant="ghost" onClick={() => openEdit(n)}>Edit</Button>}
                         {writable && (
                           <Button size="sm" variant="ghost" onClick={() => { setFormErr(null); setDeleting(n); }}>
@@ -294,7 +368,7 @@ export default function NotificationsPage() {
         open={mode !== "closed"}
         onOpenChange={(v) => { if (!v) { setMode("closed"); setEditing(null); } }}
         title={mode === "edit" ? "Edit sender" : "Add a sender"}
-        description="Credentials come from the sending service's own console. The key is stored write-only and is never shown again."
+        description="Credentials come from the sending service's own console. The key or password is stored write-only and is never shown again."
         submitLabel={mode === "edit" ? "Save changes" : "Add sender"}
         busy={busy}
         error={formErr}
@@ -324,9 +398,31 @@ export default function NotificationsPage() {
           <Field label="Name" hint="How this sender is labelled in this admin.">
             <Input value={f.display_name} onChange={(e) => set("display_name", e.target.value)} placeholder="Optional" />
           </Field>
+          {f.kind === "smtp" && (
+            <>
+              <Field label="Mail server" required hint="The SMTP host name or address.">
+                <Input value={f.host} onChange={(e) => set("host", e.target.value)} placeholder="smtp.example.com" dir="ltr" required />
+              </Field>
+              <Field label="Security" hint="STARTTLS upgrades a plain connection; TLS connects encrypted from the start. 'None' sends in the clear and is for a relay on your own network only.">
+                <Select value={f.security} onChange={(e) => set("security", e.target.value as Security)}>
+                  <option value="starttls">STARTTLS (port 587)</option>
+                  <option value="tls">TLS (port 465)</option>
+                  <option value="none">None (port 25)</option>
+                </Select>
+              </Field>
+              <Field label="Port" hint={`Leave blank for the usual port for the security chosen (${IMPLIED_PORT[f.security]}). 1–65535.`}>
+                <Input type="number" min={1} max={65535} step={1} value={f.port} onChange={(e) => set("port", e.target.value)} placeholder={IMPLIED_PORT[f.security]} />
+              </Field>
+              <Field label="Username" hint="Only if the server requires a login. A username needs a password.">
+                <Input value={f.username} onChange={(e) => set("username", e.target.value)} placeholder="Optional" autoComplete="off" />
+              </Field>
+            </>
+          )}
           <Field
-            label={f.kind === "meta_whatsapp" ? "Access token" : f.kind === "twilio_whatsapp" || f.kind === "twilio" ? "Auth token" : "API key"}
-            hint={mode === "edit" ? "Leave blank to keep the one already stored." : "From the service's console. Stored write-only."}
+            label={secretLabel}
+            hint={mode === "edit"
+              ? "Leave blank to keep the one already stored."
+              : f.kind === "smtp" ? "Required when a username is set. Stored write-only." : "From the service's console. Stored write-only."}
           >
             <Input
               type="password"
@@ -336,13 +432,15 @@ export default function NotificationsPage() {
               placeholder={mode === "edit" ? "Unchanged" : ""}
             />
           </Field>
-          <Field
-            label={f.kind === "meta_whatsapp" ? "Phone number ID" : f.channel === "email" ? "API user" : "Account SID"}
-            hint={f.kind === "meta_whatsapp" ? "The WhatsApp Business phone number ID (digits). Not a secret."
-              : f.channel === "email" ? "Only some services need this." : "Twilio's account SID. Not a secret."}
-          >
-            <Input value={f.api_user} onChange={(e) => set("api_user", e.target.value)} placeholder="Optional" />
-          </Field>
+          {f.kind !== "smtp" && (
+            <Field
+              label={f.kind === "meta_whatsapp" ? "Phone number ID" : f.channel === "email" ? "API user" : "Account SID"}
+              hint={f.kind === "meta_whatsapp" ? "The WhatsApp Business phone number ID (digits). Not a secret."
+                : f.channel === "email" ? "Only some services need this." : "Twilio's account SID. Not a secret."}
+            >
+              <Input value={f.api_user} onChange={(e) => set("api_user", e.target.value)} placeholder="Optional" />
+            </Field>
+          )}
           {f.channel === "email" && (
             <>
               <Field label="From address" hint="Clients see this as the sender.">
@@ -357,6 +455,15 @@ export default function NotificationsPage() {
                 <Input value={f.from_name} onChange={(e) => set("from_name", e.target.value)} placeholder="Wi-Fi Access" />
               </Field>
             </>
+          )}
+          {f.kind === "smtp" && (
+            <Field
+              label="Timeout"
+              hint={`Seconds to wait for the mail server before a send is reported as failed. Default ${SMTP_TIMEOUT_DEFAULT} seconds; allowed ${SMTP_TIMEOUT_MIN}–${SMTP_TIMEOUT_MAX}.`}
+            >
+              <Input type="number" min={SMTP_TIMEOUT_MIN} max={SMTP_TIMEOUT_MAX} step={1} value={f.timeout_seconds}
+                onChange={(e) => set("timeout_seconds", e.target.value)} placeholder={String(SMTP_TIMEOUT_DEFAULT)} />
+            </Field>
           )}
           {f.kind === "twilio_whatsapp" && (
             <Field label="WhatsApp sender number" hint="The approved WhatsApp sender, with the country code.">
@@ -388,6 +495,47 @@ export default function NotificationsPage() {
           </div>
           <Switch checked={f.enabled} onCheckedChange={(v) => set("enabled", v)} label="Use this sender" />
         </div>
+      </DialogForm>
+
+      <DialogForm
+        open={testing !== null}
+        onOpenChange={(v) => !v && setTesting(null)}
+        title="Send a test message"
+        description={testing
+          ? `Connects to ${testing.display_name || (KIND_LABELS[testing.kind] ?? testing.kind)} with the stored credentials and delivers one message. The outcome is recorded in the Health column.`
+          : undefined}
+        submitLabel={testResult ? "Send again" : "Send test"}
+        busy={busy}
+        error={testErr}
+        disabled={!testTo.trim()}
+        onSubmit={onTest}
+      >
+        <Field
+          label={testIsEmail ? "Send to (email address)" : "Send to (phone number)"}
+          required
+          hint={testIsEmail ? "Your own address is the usual choice." : "With the country code, for example +20 100 000 0000."}
+        >
+          <Input
+            type={testIsEmail ? "email" : "tel"}
+            value={testTo}
+            onChange={(e) => setTestTo(e.target.value)}
+            placeholder={testIsEmail ? "you@example.com" : "+20…"}
+            dir="ltr"
+            required
+          />
+        </Field>
+        {testResult && (
+          testResult.ok ? (
+            <Callout tone="success" title="Delivered">
+              The message was sent{testResult.kind ? ` through ${KIND_LABELS[testResult.kind] ?? testResult.kind}` : ""}. Check the inbox or phone; a message that was accepted by the service can still be delayed on its way.
+            </Callout>
+          ) : (
+            <Callout tone="danger" title="Not delivered">
+              {testResult.message || "The service refused the message without saying why."}
+              {testResult.error && <div className="mt-1 font-mono text-xs opacity-80">{testResult.error}</div>}
+            </Callout>
+          )
+        )}
       </DialogForm>
 
       <ConfirmDialog

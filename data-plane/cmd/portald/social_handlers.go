@@ -156,14 +156,13 @@ func (h *handler) socialCallback(w http.ResponseWriter, r *http.Request) {
 		h.renderGuestError(w, r, resp.StatusCode, "errpage.social")
 		return
 	}
-	var ok2 struct {
-		SessionID       string `json:"session_id"`
-		DurationSeconds int    `json:"duration_seconds"`
+	// The provider verified who this is; the Client still has to join their live access or choose a package.
+	// The legacy session_id shape this used to read is gone: every IAM-v2 reply goes through the same path
+	// as the voucher and account forms.
+	if h.tryIAMv2Auth(w, r, payload) {
+		return
 	}
-	_ = json.Unmarshal(payload, &ok2)
-	http.Redirect(w, r,
-		fmt.Sprintf("/success?s=%s&t=%d", ok2.SessionID, ok2.DurationSeconds),
-		http.StatusFound)
+	h.renderGuestError(w, r, http.StatusBadGateway, "err.service")
 }
 
 // ---- /api/oauth/stub/authorize — fake provider consent screen --------------

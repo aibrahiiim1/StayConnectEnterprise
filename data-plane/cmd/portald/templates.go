@@ -291,6 +291,16 @@ const landingHTML = `<!doctype html>
     </script>
     {{end}}
 
+    <!-- WELCOME BACK: this device holds a valid remembered-device credential (client_resume.go). One Connect
+         button for that Client; "Not you?" forgets the device and shows the ordinary sign-in page. -->
+    {{with .Welcome}}<div class="welcome" id="welcome" role="status">
+      <h2 data-i18n="welcome.back" data-i18n-en="Welcome back">{{index $.T "welcome.back"}}</h2>
+      <p class="welcome-id"><strong dir="ltr">{{.Label}}</strong></p>
+      <p class="welcome-lead" data-i18n="welcome.lead" data-i18n-en="This device is remembered. Tap Connect to get online.">{{index $.T "welcome.lead"}}</p>
+      <form method="post" action="/auth/resume"><button class="primary" type="submit" data-i18n="welcome.connect" data-i18n-en="Connect">{{index $.T "welcome.connect"}}</button></form>
+      <form method="post" action="/auth/resume/forget"><button class="link" type="submit" data-i18n="welcome.notyou" data-i18n-en="Not you? Sign in a different way">{{index $.T "welcome.notyou"}}</button></form>
+    </div>{{end}}
+
     <!-- OPEN PACKAGE SELECTION: choose a package without signing in, or come back with a return code. Shown only
          when the site switched it on. -->
     <div class="open-access" id="open-access" hidden>
@@ -492,9 +502,13 @@ const landingHTML = `<!doctype html>
     const ICON_CHEV = '` + iconChevNext + `';
     const ICON_EMPTY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 2l20 20M8.5 16.1a5.5 5.5 0 0 1 7 0M5 12.6a10.5 10.5 0 0 1 5.2-2.4M14.8 10.4a10.6 10.6 0 0 1 4.2 2.2M1.9 9.1A15 15 0 0 1 6.3 6.3M10.7 4.6a15 15 0 0 1 11.4 4.5M12 20h.01"/></svg>';
 
+    // ONE JOURNEY, NOT TWO DOORS. The site chooses the PRIMARY method (Sign-in methods -> Primary method); it
+    // is the form on screen. The identity providers are a quick row above it. Every other enabled method is a
+    // chip under "Or sign in with". The two-door tabs remain in the code path for a site that somehow has both
+    // a hotel door and an account door and no primary -- they are simply never two groups any more.
+    const DEFAULT_ORDER = ['pms','email','sms','whatsapp','account','voucher','poststay'];
     const Groups = {
-      guest:   { id:'guest',   label:'Client Login',  icon: ICON_DOOR, members:['pms','poststay'] },
-      account: { id:'account', label:'Account Login', icon: ICON_KEYS, members:['voucher','account','email','sms','whatsapp','social'] },
+      all: { id:'all', label:'Sign in', icon: ICON_KEYS, members: DEFAULT_ORDER },
     };
     const Tabs = {
       // Both point at the merged panel: which FORM shows is the switch's business, not the tab's.
@@ -528,8 +542,15 @@ const landingHTML = `<!doctype html>
 
     // Which METHOD is showing, within whichever group is selected.
     function setTab(id) {
-      document.querySelectorAll('.panel').forEach(el => el.classList.remove('active'));
+      // The quick row (identity providers) is always on screen; it is not a tab.
+      document.querySelectorAll('.panel:not(.quick)').forEach(el => el.classList.remove('active'));
       const t = Tabs[id]; if (t) document.getElementById(t.panel).classList.add('active');
+      // Voucher and personal account share one panel: the chip for the account form flips the switch.
+      const cb = document.getElementById('use-personal');
+      if (cb && (id === 'account' || id === 'voucher')) {
+        const want = id === 'account';
+        if (cb.checked !== want) { cb.checked = want; cb.dispatchEvent(new Event('change')); }
+      }
     }
     // Which GROUP is selected. Shows that group's first available method, and any others as alternatives
     // beneath it. The tabs are a real tablist: the selected tab is the one in the tab order, and the region
@@ -1046,10 +1067,12 @@ const landingHTML = `<!doctype html>
       if (cfg.phase5_poststay) {
         enabled.push('poststay');
       }
+      // QUICK SIGN-IN: the identity providers are one row above the primary form, not a tab among tabs.
+      let hasSocial = false;
       if (cfg.social) {
         const providers = Object.keys(cfg.social).filter(k => cfg.social[k] && cfg.social[k].enabled);
         if (providers.length > 0) {
-          enabled.push('social');
+          hasSocial = true;
           const host = document.getElementById('social-providers');
           providers.forEach(p => {
             const a = document.createElement('a');
@@ -1060,7 +1083,22 @@ const landingHTML = `<!doctype html>
             a.textContent = t('social.' + p) === ('social.' + p) ? a.dataset.i18nEn : t('social.' + p);
             host.appendChild(a);
           });
+          const quick = document.getElementById('panel-social');
+          quick.classList.add('quick', 'active');
+          tabsEl.parentNode.insertBefore(quick, tabsEl);
         }
+      }
+      // THE PRIMARY METHOD LEADS. The site's choice when it is enabled; otherwise the default order, which
+      // puts the hotel's Room sign-in first and a printed voucher last.
+      const PRIMARY_MAP = { pms:'pms', email:'email', sms:'sms', whatsapp:'whatsapp', guest_account:'account', account:'account', voucher:'voucher' };
+      const chosen = PRIMARY_MAP[(cfg.portal && cfg.portal.primary_method) || ''];
+      enabled.sort((a, b) => DEFAULT_ORDER.indexOf(a) - DEFAULT_ORDER.indexOf(b));
+      if (chosen && enabled.indexOf(chosen) > 0) { enabled.splice(enabled.indexOf(chosen), 1); enabled.unshift(chosen); }
+      // A REMEMBERED CLIENT sees one button (server-rendered); the forms stay in the page for "Not you?".
+      if (document.getElementById('welcome')) {
+        ['open-access', 'tabs', 'signin-panel'].forEach(function (id) { const el = document.getElementById(id); if (el) el.hidden = true; });
+        const q = document.getElementById('panel-social'); if (q) q.hidden = true;
+        return;
       }
       // THE EXPIRY NOTICE. Asked once, on load, and only ever renders a message the SERVER chose from its
       // two-sentence vocabulary. Any failure is silent: the ordinary sign-in page is the correct fallback.
@@ -1092,8 +1130,8 @@ const landingHTML = `<!doctype html>
       document.querySelectorAll('[data-help-method]').forEach(function (el) {
         el.hidden = enabled.indexOf(el.dataset.helpMethod) < 0;
       });
-      if (enabled.length === 0 && openOn) {
-        // Open selection is the only way in: no tabs, no empty sign-in panel.
+      if (enabled.length === 0 && (openOn || hasSocial)) {
+        // Open selection and/or the identity providers are the only ways in: no tabs, no empty sign-in panel.
         tabsEl.style.display = 'none';
         document.getElementById('signin-panel').style.display = 'none';
         return;
@@ -1164,8 +1202,9 @@ const landingHTML = `<!doctype html>
     function otpMessage(stage, j) {
       const e = String((j && j.error) || '').toLowerCase();
       if (e === 'too_many_attempts' || e.indexOf('too many requests') === 0) return t('err.attempts');
-      if (e === 'device not on this Wi-Fi network') return t('err.device.network');
+      if (e === 'device not on this wi-fi network') return t('err.device.network');
       if (stage === 'dest') {
+        if (e === 'delivery_failed') return t('err.otp.delivery');
         if (e === 'invalid email' || e.indexOf('invalid phone') === 0) return t('err.otp.dest');
         if (e === 'wait before requesting another code') return t('err.otp.wait');
         return t('err.otp.send');
@@ -1214,9 +1253,10 @@ const landingHTML = `<!doctype html>
             body: JSON.stringify({ challenge_id: challenges[channel], code })
           });
           const j = await r.json().catch(() => ({}));
-          if (!r.ok) { errEl.textContent = otpMessage('code', j); return; }
-          window.location = '/success?s=' + encodeURIComponent(j.session_id || '') +
-                            '&t=' + encodeURIComponent(j.duration_seconds || 0);
+          // A refusal AFTER the code was right (a device limit, a licence, no packages) arrives with the key of
+          // its translated sentence; a wrong code arrives as the short phrase otpMessage knows.
+          if (!r.ok) { errEl.textContent = (j && j.key && t(j.key) !== j.key) ? t(j.key) : otpMessage('code', j); return; }
+          window.location = j.next || '/packages';
         } catch (err) {
           errEl.textContent = t('err.service');
         } finally { btn.disabled = false; }
@@ -1570,7 +1610,8 @@ const packagesHTML = guestHead + `
 <main class="card card--page">` + guestBrandblock + `
 <div class="sc-body">
   <h1 class="page-title">{{index .T "pkg.title"}}</h1>
-  <p class="page-lead">{{index .T "pkg.subtitle"}}</p>
+  <p class="page-lead">{{index .T "pkg.subtitle"}}{{with .Identity}} <span class="signed-in">{{index $.T "pkg.signedin"}} <strong dir="ltr">{{.}}</strong></span>{{end}}</p>
+  {{if .FreeUsed}}<div class="notice show" role="status">{{index .T "pkg.freeused"}}</div>{{end}}
   {{with .ReturnCode}}<div class="notice show" role="status"><strong>{{index $.T "open.code.title"}}: <span dir="ltr" class="return-code">{{.}}</span></strong><br>{{index $.T "open.code.lead"}}</div>{{end}}
   <div class="choice-list">
   {{range .Packages}}<form method="post" action="/packages/acquire">

@@ -45,7 +45,7 @@ const CONTRACT = JSON.parse(readFileSync(join(process.cwd(), "capability-contrac
 
 /** Every surface PRE-LIVE reports today. Used as a realistic, complete capability answer. */
 const SERVED = [
-  "audit", "auth-methods", "backups", "checkout-grace",
+  "audit", "auth-methods", "backups", "checkout-grace", "client-groups",
   "commercial-packages", "diagnostics", "guest-accounts", "guest-signin-attempts", "guest-signin-credentials",
   "guest-signin-protection", "guest-signin-restrictions", "license", "network", "notification-providers",
   "operational-alerts", "operators", "pms-events", "pms-interfaces", "pms-reconciliation", "pms-resolutions",
@@ -66,9 +66,19 @@ describe("the navigation contract", () => {
   it("optional sign-in provider screens appear only with their module", async () => {
     CAPS.modules = { hospitality: ALL_MODULES.hospitality };
     await renderNavWith(SERVED, ["site_admin"]);
-    expect(screen.queryByText("Social login")).toBeNull();
-    expect(screen.queryByText("Email & SMS")).toBeNull();
+    expect(screen.queryByText("Identity providers")).toBeNull();
+    expect(screen.queryByText("Delivery")).toBeNull();
     expect(screen.getByText("Sign-in methods")).toBeInTheDocument();
+    // Client groups are core: an email-domain group needs no identity-provider module.
+    expect(screen.getByText("Client groups")).toBeInTheDocument();
+  });
+
+  it("orders Client access as the job is done", async () => {
+    // Sign-in methods, groups, providers, delivery, then the portal's look and reach (the contract's §9 order).
+    await renderNavWith(SERVED, ["site_admin"]);
+    const links = Array.from(document.querySelectorAll("a[href]")).map((a) => a.getAttribute("href"));
+    const access = ["/sign-in-methods", "/client-groups", "/social-providers", "/notifications", "/portal-branding", "/walled-garden"];
+    expect(links.filter((h) => access.includes(h ?? ""))).toEqual(access);
   });
 
   it("offers every destination the contract requires, on an appliance that serves it", async () => {
@@ -209,7 +219,7 @@ describe("the Hotel module in the navigation", () => {
   it("orders the sections core-first, then Hotel", async () => {
     const { NAV_SECTION_OF } = await import("@/components/nav");
     expect([...new Set(Object.values(NAV_SECTION_OF))]).toEqual([
-      "Overview", "Internet offering", "Clients", "Client Portal", "Hotel", "Networking", "System",
+      "Overview", "Internet offering", "Clients", "Client access", "Hotel", "Networking", "System",
     ]);
   });
 

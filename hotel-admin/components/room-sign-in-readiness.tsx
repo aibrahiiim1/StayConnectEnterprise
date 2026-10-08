@@ -4,7 +4,7 @@
 // question as whether it is switched on.
 //
 // Shared by two screens: Hotel → Room sign-in carries the full callout (which guest networks are affected and
-// why), and Client Portal → Sign-in methods carries a one-line warning beside the switch, so an operator
+// why), and Client access → Sign-in methods carries a one-line warning beside the switch, so an operator
 // turning the method on during an outage is not left believing it works. The data is loaded here once, by the
 // same rule for both, so the two screens cannot disagree about whether there is an outage.
 //

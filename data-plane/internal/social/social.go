@@ -22,6 +22,29 @@ type UserInfo struct {
 	EmailVerified bool
 	Name          string
 	Picture       string
+	// Claims are verified organisation claims the provider asserted and nothing else: Google "hd" (Workspace
+	// hosted domain), Microsoft "tid" (directory tenant) and "oid". They are what Client Group rules read.
+	Claims map[string]string
+}
+
+// PreAuthDomains lists the host names a client browser must reach to complete a provider's consent page
+// before it has internet access. The token exchange is server-side and needs none of these. Providers pull
+// page assets from a changing set of hosts; this is the documented minimum and the Admin Console's Allowed
+// sites page is where a site adds what a provider changes.
+func PreAuthDomains(provider string) []string {
+	switch provider {
+	case "google":
+		return []string{"accounts.google.com", "accounts.youtube.com", "ssl.gstatic.com", "www.gstatic.com",
+			"fonts.gstatic.com", "fonts.googleapis.com", "apis.google.com", "play.google.com", "lh3.googleusercontent.com"}
+	case "microsoft":
+		return []string{"login.microsoftonline.com", "login.live.com", "aadcdn.msftauth.net", "aadcdn.msauth.net",
+			"logincdn.msftauth.net", "login.microsoft.com", "account.live.com"}
+	case "apple":
+		return []string{"appleid.apple.com", "appleid.cdn-apple.com", "idmsa.apple.com", "gsa.apple.com"}
+	case "facebook":
+		return []string{"www.facebook.com", "m.facebook.com", "facebook.com", "static.xx.fbcdn.net", "connect.facebook.net"}
+	}
+	return nil
 }
 
 type Provider interface {

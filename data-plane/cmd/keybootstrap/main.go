@@ -94,6 +94,15 @@ func main() {
 	}
 	log.Printf("keybootstrap: anonymous-access key ready at %s", anonPath)
 
+	// 2e) Notification-secret key: seals SMTP passwords, API keys and access tokens of the site's email, SMS
+	// and WhatsApp senders (iam_v2.notification_provider_secret_generations). Without it a sender whose secret
+	// was sealed cannot send and the method is not offered; nothing else is affected. Load-only at runtime.
+	notifyPath := filepath.Join(secretsDir, "notify_dek.key")
+	if _, err := localkeys.CreateKeyIfAbsent(notifyPath); err != nil {
+		log.Fatalf("keybootstrap: notification-secret key: %v", err)
+	}
+	log.Printf("keybootstrap: notification-secret sealing key ready at %s", notifyPath)
+
 	// 3) OTP generation-1 key + DB lifecycle metadata, validated together.
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {

@@ -319,3 +319,17 @@ GRANT EXECUTE ON FUNCTION iam_v2.p4_stay_room_charge_open(uuid) TO svc_scd;
 -- Whether the interface is fresh enough to offer Room charge (migration 0101): one boolean through a definer, and
 -- NOT SELECT on iam_v2.pms_interface_runtime, for the reason given above p3_guest_network_mirror_state.
 GRANT EXECUTE ON FUNCTION iam_v2.p4_room_charge_interface_fresh(uuid,uuid,uuid) TO svc_scd;
+
+-- ---- 0107: one identity, client groups, the remembered device, sealed notification secrets -------------
+-- Contract: docs/architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md.
+-- A factor's verified claims (Google hd, Microsoft tid) may be refreshed on a later sign-in; nothing else on an
+-- identity row is ever updated by scd, hence the column-level grant.
+GRANT UPDATE (attrs) ON iam_v2.guest_principal_identities TO svc_scd;
+-- Client Group membership is decided by scd at sign-in from the Client's verified factors and pinned on the
+-- auth context scd creates. scd reads policy; it never writes a group.
+GRANT SELECT ON iam_v2.client_groups, iam_v2.client_group_rules TO svc_scd;
+-- The remembered-device credential is issued after a verified sign-in, consumed (last_used_at) on a
+-- reconnection from the same device, and revoked by scd.
+GRANT SELECT, INSERT, UPDATE ON iam_v2.principal_device_credentials TO svc_scd;
+-- Notification secrets are sealed and opened by scd alone; edged forwards a secret once and never reads it back.
+GRANT SELECT, INSERT, UPDATE ON iam_v2.notification_provider_secret_generations TO svc_scd;

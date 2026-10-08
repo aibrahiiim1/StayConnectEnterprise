@@ -14,6 +14,10 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { PackageForm, type PlanOption } from "@/app/(app)/internet-packages/package-form";
 import { FORBIDDEN_RULE_TYPES, SUPPORTED_RULE_TYPES } from "@/lib/commerce-form";
 
+// The Free access device switch is a Radix Switch, which measures itself; jsdom has no ResizeObserver.
+class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
+(globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverStub;
+
 const plans: PlanOption[] = [
   {
     plan_id: "plan-gold", code: "GOLD", name: "Gold", current_revision_id: "rev-gold-4",
@@ -118,8 +122,182 @@ describe("PackageForm", () => {
     fireEvent.click(screen.getByText("Add condition"));
     const typeSelect = screen.getByTestId("rule-type-0") as HTMLSelectElement;
     const offered = Array.from(typeSelect.options).map((o) => o.value);
-    expect(offered.sort()).toEqual([...SUPPORTED_RULE_TYPES].sort());
+    // The audience is a dedicated control, not a row; every other supported type is a row.
+    expect(offered.sort()).toEqual([...SUPPORTED_RULE_TYPES].filter((t) => t !== "CLIENT_GROUP").sort());
     for (const pms of FORBIDDEN_RULE_TYPES) expect(offered).not.toContain(pms);
+  });
+
+  // THE AUDIENCE AND THE FREE ALLOWANCE (ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md §4, §5). Each is one
+  // ordinary eligibility rule presented as a named control, and each must round-trip through Edit: a stored
+  // audience read back, shown, and republished unchanged by a rename.
+  describe("Audience", () => {
+    const groups = [
+      { id: "g-emp", name: "Employees", enabled: true, priority: 10 },
+      { id: "g-par", name: "Partners", enabled: true, priority: 50 },
+    ];
+    const ready = () => {
+      fireEvent.change(screen.getByTestId("code"), { target: { value: "X" } });
+      fireEvent.change(screen.getByTestId("service-plan"), { target: { value: "plan-gold" } });
+    };
+
+    it("starts at Everyone and publishes no audience rule", () => {
+      const onSave = vi.fn();
+      render(<PackageForm mode="add" plans={plans} onSave={onSave} clientGroups={groups} />);
+      expect((screen.getByTestId("audience") as HTMLSelectElement).value).toBe("everyone");
+      ready();
+      fireEvent.click(screen.getByRole("button", { name: /add package/i }));
+      expect(onSave.mock.calls[0][0].payload.eligibility_rules).toEqual([]);
+    });
+
+    it("Only these groups publishes one CLIENT_GROUP rule with the ticked ids", () => {
+      const onSave = vi.fn();
+      render(<PackageForm mode="add" plans={plans} onSave={onSave} clientGroups={groups} />);
+      fireEvent.change(screen.getByTestId("audience"), { target: { value: "groups" } });
+      fireEvent.click(screen.getByTestId("audience-group-g-emp"));
+      ready();
+      fireEvent.click(screen.getByRole("button", { name: /add package/i }));
+      expect(onSave.mock.calls[0][0].payload.eligibility_rules).toEqual([
+        { type: "CLIENT_GROUP", value: { group_ids: ["g-emp"] } },
+      ]);
+    });
+
+    it("refuses Only these groups with nothing ticked, in words", () => {
+      const onSave = vi.fn();
+      render(<PackageForm mode="add" plans={plans} onSave={onSave} clientGroups={groups} />);
+      fireEvent.change(screen.getByTestId("audience"), { target: { value: "groups" } });
+      ready();
+      fireEvent.click(screen.getByRole("button", { name: /add package/i }));
+      expect(onSave).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert").textContent).toMatch(/at least one client group/);
+    });
+
+    it("Public clients only and These groups and public clients map to the public flag", () => {
+      const onSave = vi.fn();
+      render(<PackageForm mode="add" plans={plans} onSave={onSave} clientGroups={groups} />);
+      fireEvent.change(screen.getByTestId("audience"), { target: { value: "public" } });
+      ready();
+      fireEvent.click(screen.getByRole("button", { name: /add package/i }));
+      expect(onSave.mock.calls[0][0].payload.eligibility_rules).toEqual([{ type: "CLIENT_GROUP", value: { public: true } }]);
+
+      fireEvent.change(screen.getByTestId("audience"), { target: { value: "groups_public" } });
+      fireEvent.click(screen.getByTestId("audience-group-g-par"));
+      fireEvent.click(screen.getByRole("button", { name: /add package/i }));
+      expect(onSave.mock.calls[1][0].payload.eligibility_rules).toEqual([
+        { type: "CLIENT_GROUP", value: { group_ids: ["g-par"], public: true } },
+      ]);
+    });
+
+    it("EDIT reads a stored audience back and republishes it unchanged, without a row for it", () => {
+      const onSave = vi.fn();
+      render(<PackageForm mode="edit" plans={plans} onSave={onSave} clientGroups={groups} initial={{
+        ...initial,
+        rules: [{ type: "CLIENT_GROUP", group_ids: ["g-emp", "g-par"], public: true }, { type: "AUTH_METHOD", methods: "voucher" }],
+      }} />);
+      expect((screen.getByTestId("audience") as HTMLSelectElement).value).toBe("groups_public");
+      expect((screen.getByTestId("audience-group-g-emp") as HTMLInputElement).checked).toBe(true);
+      expect((screen.getByTestId("audience-group-g-par") as HTMLInputElement).checked).toBe(true);
+      // The audience is not also a generic condition row; the sign-in condition still is.
+      expect(screen.queryByTestId("rule-type-0")).toBeNull();
+      expect((screen.getByTestId("rule-type-1") as HTMLSelectElement).value).toBe("AUTH_METHOD");
+      fireEvent.change(screen.getByTestId("name"), { target: { value: "Renamed" } });
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+      expect(onSave.mock.calls[0][0].payload.eligibility_rules).toEqual([
+        { type: "CLIENT_GROUP", value: { group_ids: ["g-emp", "g-par"], public: true } },
+        { type: "AUTH_METHOD", value: { methods: ["voucher"] } },
+      ]);
+    });
+
+    it("says where to create a group when the site has none", () => {
+      render(<PackageForm mode="add" plans={plans} onSave={() => {}} clientGroups={[]} />);
+      fireEvent.change(screen.getByTestId("audience"), { target: { value: "groups" } });
+      expect(screen.getByRole("link", { name: /Create one under Client access/ })).toHaveAttribute("href", "/client-groups");
+    });
+  });
+
+  describe("Free access", () => {
+    const ready = () => {
+      fireEvent.change(screen.getByTestId("code"), { target: { value: "X" } });
+      fireEvent.change(screen.getByTestId("service-plan"), { target: { value: "plan-gold" } });
+    };
+
+    it("Once per client, ever publishes forbids_prior and counts the device on a Free package", () => {
+      const onSave = vi.fn();
+      render(<PackageForm mode="add" plans={plans} onSave={onSave} />);
+      expect((screen.getByTestId("free-access") as HTMLSelectElement).value).toBe("unlimited");
+      fireEvent.change(screen.getByTestId("free-access"), { target: { value: "once" } });
+      expect(screen.getByRole("switch", { name: "Count the device too" })).toHaveAttribute("aria-checked", "true");
+      ready();
+      fireEvent.click(screen.getByRole("button", { name: /add package/i }));
+      expect(onSave.mock.calls[0][0].payload.eligibility_rules).toEqual([
+        { type: "PRIOR_PURCHASE", value: { forbids_prior: true, also_by_device: true } },
+      ]);
+    });
+
+    it("Once every N hours publishes within_hours, and the device switch can be turned off", () => {
+      const onSave = vi.fn();
+      render(<PackageForm mode="add" plans={plans} onSave={onSave} />);
+      fireEvent.change(screen.getByTestId("free-access"), { target: { value: "every" } });
+      expect((screen.getByTestId("free-access-hours") as HTMLInputElement).value).toBe("24");
+      fireEvent.change(screen.getByTestId("free-access-hours"), { target: { value: "12" } });
+      fireEvent.click(screen.getByRole("switch", { name: "Count the device too" }));
+      ready();
+      fireEvent.click(screen.getByRole("button", { name: /add package/i }));
+      expect(onSave.mock.calls[0][0].payload.eligibility_rules).toEqual([
+        { type: "PRIOR_PURCHASE", value: { forbids_prior: true, within_hours: 12, also_by_device: false } },
+      ]);
+    });
+
+    it("refuses a window outside one hour to one year", () => {
+      // The field carries the bounds itself, so the browser refuses before the form does (and the message the
+      // form would give is held in commerce-form.test.ts, validateRule).
+      const onSave = vi.fn();
+      render(<PackageForm mode="add" plans={plans} onSave={onSave} />);
+      fireEvent.change(screen.getByTestId("free-access"), { target: { value: "every" } });
+      const hours = screen.getByTestId("free-access-hours") as HTMLInputElement;
+      expect(hours.min).toBe("1");
+      expect(hours.max).toBe("8760");
+      fireEvent.change(hours, { target: { value: "9000" } });
+      ready();
+      fireEvent.click(screen.getByRole("button", { name: /add package/i }));
+      expect(onSave).not.toHaveBeenCalled();
+      expect(hours.checkValidity()).toBe(false);
+    });
+
+    it("EDIT reads a stored allowance back, and requires_prior stays an ordinary row", () => {
+      const onSave = vi.fn();
+      render(<PackageForm mode="edit" plans={plans} onSave={onSave} initial={{
+        ...initial,
+        rules: [
+          { type: "PRIOR_PURCHASE", mode: "forbids_prior", within_hours: "24", also_by_device: false },
+          { type: "PRIOR_PURCHASE", mode: "requires_prior" },
+        ],
+      }} />);
+      expect((screen.getByTestId("free-access") as HTMLSelectElement).value).toBe("every");
+      expect((screen.getByTestId("free-access-hours") as HTMLInputElement).value).toBe("24");
+      expect(screen.getByRole("switch", { name: "Count the device too" })).toHaveAttribute("aria-checked", "false");
+      expect(screen.queryByTestId("rule-type-0")).toBeNull();
+      expect((screen.getByTestId("rule-mode-1") as HTMLSelectElement).value).toBe("requires_prior");
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+      expect(onSave.mock.calls[0][0].payload.eligibility_rules).toEqual([
+        { type: "PRIOR_PURCHASE", value: { forbids_prior: true, within_hours: 24, also_by_device: false } },
+        { type: "PRIOR_PURCHASE", value: { requires_prior: true } },
+      ]);
+    });
+
+    it("a stored allowance that never named the device switch is republished without pinning one", () => {
+      // The server's default (true on a free package) stays the server's: the form shows it as on, and does
+      // not write a value the operator never set.
+      const onSave = vi.fn();
+      render(<PackageForm mode="edit" plans={plans} onSave={onSave} initial={{
+        ...initial, rules: [{ type: "PRIOR_PURCHASE", mode: "forbids_prior" }],
+      }} />);
+      expect((screen.getByTestId("free-access") as HTMLSelectElement).value).toBe("once");
+      expect(screen.getByRole("switch", { name: "Count the device too" })).toHaveAttribute("aria-checked", "true");
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+      expect(onSave.mock.calls[0][0].payload.eligibility_rules).toEqual([
+        { type: "PRIOR_PURCHASE", value: { forbids_prior: true } },
+      ]);
+    });
   });
 
   // A SITE WITHOUT HOSPITALITY IS NOT OFFERED HOTEL CONDITIONS OR A PER-NIGHT ALLOWANCE.

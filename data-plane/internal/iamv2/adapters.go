@@ -126,33 +126,91 @@ func (a *Authenticator) authOTPIdentity(ctx context.Context, req Request) (Resul
 	if strings.TrimSpace(req.FactorValue) == "" {
 		return deny(MethodOTP, "missing_identity"), nil
 	}
-	return a.resolvePrincipalAndFinalize(ctx, MethodOTP, ft, "", req)
+	primary := OTPFactor(ft, req.FactorValue)
+	for k, v := range req.FactorAttrs {
+		primary.Attrs[k] = v
+	}
+	return a.resolvePrincipalAndFinalize(ctx, MethodOTP, primary, req.SecondaryFactors, req)
 }
 
-// authSocialIdentity resolves/creates a principal from a verified social identity (issuer-scoped).
-// The Stub provider is refused in production before this is reached.
+// authSocialIdentity resolves/creates a principal from a verified social identity: the (issuer, sub) subject
+// is the identity; a trusted issuer's verified email is a second factor on the same Client and is what links
+// a Google sign-in to the Client an email code created (identity.go). The Stub provider is refused in
+// production before this is reached.
 func (a *Authenticator) authSocialIdentity(ctx context.Context, req Request) (Result, error) {
 	if strings.TrimSpace(req.FactorIssuer) == "" || strings.TrimSpace(req.FactorValue) == "" {
 		return deny(MethodSocial, "missing_identity"), nil
 	}
-	return a.resolvePrincipalAndFinalize(ctx, MethodSocial, "SOCIAL_SUBJECT", req.FactorIssuer, req)
+	primary := FactorClaim{Type: "SOCIAL_SUBJECT", Issuer: strings.ToLower(strings.TrimSpace(req.FactorIssuer)),
+		Value: strings.TrimSpace(req.FactorValue), Attrs: map[string]string{"source": strings.ToLower(strings.TrimSpace(req.FactorIssuer))}}
+	for k, v := range req.FactorAttrs {
+		primary.Attrs[k] = v
+	}
+	return a.resolvePrincipalAndFinalize(ctx, MethodSocial, primary, req.SecondaryFactors, req)
 }
 
-func (a *Authenticator) resolvePrincipalAndFinalize(ctx context.Context, m Method, factorType, issuer string, req Request) (Result, error) {
+// authResumedIdentity mints an auth context for a Client whose device-bound resume credential scd has already
+// verified (contract §2.3). No factor is re-proven here; the Client's STORED factors decide the group, so a
+// remembered device gets exactly the eligibility a fresh code would.
+func (a *Authenticator) authResumedIdentity(ctx context.Context, req Request) (Result, error) {
 	now := a.now()
 	var res Result
 	err := a.repo.WithTx(ctx, func(tx Tx) error {
-		pid, err := tx.ResolvePrincipalByIdentity(ctx, req.TenantID, factorType, issuer,
-			strings.ToLower(strings.TrimSpace(req.FactorValue)), now)
+		factors, err := tx.LoadPrincipalFactors(ctx, req.TenantID, req.ResumedPrincipalID)
 		if err != nil {
 			return err
 		}
-		if pid == "" {
+		if len(factors) == 0 {
+			res = deny(req.Method, "subject_resolve") // a principal with no verified factor is not a Client
+			return nil
+		}
+		res, err = a.finalizeWithGroup(ctx, tx, req.Method, req.ResumedPrincipalID, factors, req, now)
+		return err
+	})
+	if err != nil {
+		return Result{}, &Error{Code: ErrRepo, Msg: string(req.Method)}
+	}
+	res.Reason = "resumed"
+	return res, nil
+}
+
+func (a *Authenticator) resolvePrincipalAndFinalize(ctx context.Context, m Method, primary FactorClaim, secondary []FactorClaim, req Request) (Result, error) {
+	now := a.now()
+	var res Result
+	err := a.repo.WithTx(ctx, func(tx Tx) error {
+		rs, err := tx.ResolvePrincipalByFactors(ctx, req.TenantID, primary, secondary, now)
+		if err != nil {
+			return err
+		}
+		if rs.PrincipalID == "" {
 			res = deny(m, "subject_resolve")
 			return nil
 		}
-		res, err = a.finalize(ctx, tx, m, Subject{PrincipalID: pid}, req, now)
-		return err
+		factors, err := tx.LoadPrincipalFactors(ctx, req.TenantID, rs.PrincipalID)
+		if err != nil {
+			return err
+		}
+		if len(factors) == 0 {
+			// The repository contract says the primary factor is stored by now; a fake that stores nothing
+			// still gets a usable answer from the factor just proven.
+			factors = []FactorClaim{primary}
+		}
+		res, err = a.finalizeWithGroup(ctx, tx, m, rs.PrincipalID, factors, req, now)
+		if err != nil {
+			return err
+		}
+		res.IdentityLabel = MaskIdentity(primary)
+		res.IdentityLinked, res.IdentityConflicts = rs.Linked, rs.Conflicts
+		if rs.Created {
+			a.obs.Event("iamv2.identity.created", map[string]string{"factor": primary.Key()})
+		}
+		for _, l := range rs.Linked {
+			a.obs.Event("iamv2.identity.linked", map[string]string{"factor": l, "via": primary.Key()})
+		}
+		for _, c := range rs.Conflicts {
+			a.obs.Event("iamv2.identity.link_conflict", map[string]string{"factor": c, "via": primary.Key()})
+		}
+		return nil
 	})
 	if err != nil {
 		return Result{}, &Error{Code: ErrRepo, Msg: string(m)}
@@ -160,8 +218,59 @@ func (a *Authenticator) resolvePrincipalAndFinalize(ctx context.Context, m Metho
 	return res, nil
 }
 
+// finalizeWithGroup decides the Client Group from the Client's verified factors, then creates the auth context
+// with that decision pinned on it. A group lookup failure is a repository error (fail closed), never "Public".
+func (a *Authenticator) finalizeWithGroup(ctx context.Context, tx Tx, m Method, principalID string, factors []FactorClaim, req Request, now time.Time) (Result, error) {
+	groups, err := tx.LoadClientGroups(ctx, req.TenantID, req.SiteID)
+	if err != nil {
+		return Result{}, err
+	}
+	var spec groupPin
+	if d, ok := EvaluateClientGroup(groups, factors); ok {
+		spec = groupPin{id: d.GroupID, name: d.GroupName, evidence: d.Evidence}
+	}
+	res, err := a.finalizeWithPin(ctx, tx, m, Subject{PrincipalID: principalID}, req, now, spec)
+	if err != nil {
+		return Result{}, err
+	}
+	if len(factors) > 0 && res.IdentityLabel == "" {
+		res.IdentityLabel = MaskIdentity(primaryFactorFor(m, factors))
+	}
+	return res, nil
+}
+
+type groupPin struct {
+	id, name string
+	evidence map[string]any
+}
+
+// primaryFactorFor picks the factor to label a resumed Client by: the kind the method proved.
+func primaryFactorFor(m Method, factors []FactorClaim) FactorClaim {
+	want := "SOCIAL_SUBJECT"
+	if m == MethodOTP {
+		want = "EMAIL"
+	}
+	for _, f := range factors {
+		if f.Type == want {
+			return f
+		}
+	}
+	for _, f := range factors {
+		if m == MethodOTP && f.Type == "PHONE" {
+			return f
+		}
+	}
+	return factors[0]
+}
+
 // finalize upserts the device and creates the one-time auth_context, returning an allow Result.
 func (a *Authenticator) finalize(ctx context.Context, tx Tx, m Method, subj Subject, req Request, now time.Time) (Result, error) {
+	return a.finalizeWithPin(ctx, tx, m, subj, req, now, groupPin{})
+}
+
+// finalizeWithPin is finalize with a Client Group decision pinned on the context (empty for subjects that have
+// no identity factors: voucher, account, open selection).
+func (a *Authenticator) finalizeWithPin(ctx context.Context, tx Tx, m Method, subj Subject, req Request, now time.Time, pin groupPin) (Result, error) {
 	// Validate the caller-supplied pins (tenant/site/device/guest-network/TTL/subject) up front so a
 	// bad request never reaches the DB as a NOT NULL / FK violation. A device MAC and guest network are
 	// mandatory because auth_contexts pins both NOT NULL.
@@ -185,6 +294,7 @@ func (a *Authenticator) finalize(ctx context.Context, tx Tx, m Method, subj Subj
 	spec := AuthContextSpec{
 		TenantID: req.TenantID, SiteID: req.SiteID, Method: m, Subject: subj,
 		DeviceID: deviceID, GuestNetworkID: req.Device.GuestNetworkID, TTL: a.ttl, Now: now,
+		ClientGroupID: pin.id, ClientGroupEvidence: pin.evidence,
 	}
 	if err := spec.validate(); err != nil {
 		return Result{}, err
@@ -194,7 +304,8 @@ func (a *Authenticator) finalize(ctx context.Context, tx Tx, m Method, subj Subj
 		return Result{}, err
 	}
 	a.obs.Event("iamv2.allow", map[string]string{"method": string(m)})
-	return Result{Decision: DecisionAllow, Method: m, Subject: subj, DeviceID: deviceID, AuthContextID: acID, Reason: "ok"}, nil
+	return Result{Decision: DecisionAllow, Method: m, Subject: subj, DeviceID: deviceID, AuthContextID: acID, Reason: "ok",
+		ClientGroupID: pin.id, ClientGroupName: pin.name}, nil
 }
 
 func deny(m Method, reason string) Result {

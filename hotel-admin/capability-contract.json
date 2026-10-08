@@ -12,6 +12,7 @@
       "/audit",
       "/backups",
       "/checkout-grace",
+      "/client-groups",
       "/commercial-packages",
       "/dashboard",
       "/guest-accounts",
@@ -132,12 +133,17 @@
         "surface": "walled-garden"
       },
       {
-        "label": "Social login",
+        "label": "Client groups",
+        "route": "/client-groups",
+        "surface": "client-groups"
+      },
+      {
+        "label": "Identity providers",
         "route": "/social-providers",
         "surface": "social-providers"
       },
       {
-        "label": "Email & SMS",
+        "label": "Delivery",
         "route": "/notifications",
         "surface": "notification-providers"
       },

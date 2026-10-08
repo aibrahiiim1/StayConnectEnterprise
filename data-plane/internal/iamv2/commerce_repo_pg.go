@@ -92,17 +92,18 @@ func (t *pgCommerceTx) LockAuthContextForUpdate(ctx context.Context, tenantID, s
 func (t *pgCommerceTx) loadAuthContext(ctx context.Context, tenantID, siteID, id string, lock bool) (AuthContextRow, error) {
 	q := `SELECT id::text, tenant_id::text, site_id::text, method,
 	             guest_account_id::text, voucher_id::text, guest_principal_id::text, stay_id::text,
-	             device_id::text, guest_network_id::text, expires_at, consumed_at, anonymous_subject_id::text
+	             device_id::text, guest_network_id::text, expires_at, consumed_at, anonymous_subject_id::text,
+	             client_group_id::text
 	        FROM iam_v2.auth_contexts WHERE tenant_id=$1 AND site_id=$2 AND id=$3`
 	if lock {
 		q += " FOR UPDATE"
 	}
 	var row AuthContextRow
-	var acct, vouch, princ, stay, anon *string
+	var acct, vouch, princ, stay, anon, group *string
 	var consumed *time.Time
 	var method string
 	err := t.tx.QueryRow(ctx, q, tenantID, siteID, id).Scan(&row.ID, &row.TenantID, &row.SiteID, &method,
-		&acct, &vouch, &princ, &stay, &row.DeviceID, &row.GuestNetworkID, &row.ExpiresAt, &consumed, &anon)
+		&acct, &vouch, &princ, &stay, &row.DeviceID, &row.GuestNetworkID, &row.ExpiresAt, &consumed, &anon, &group)
 	if err == pgx.ErrNoRows {
 		return AuthContextRow{}, &Error{Code: ErrACNotFound, Msg: "auth_context"}
 	}
@@ -113,6 +114,9 @@ func (t *pgCommerceTx) loadAuthContext(ctx context.Context, tenantID, siteID, id
 	row.Consumed = consumed != nil
 	if stay != nil {
 		row.StayID = *stay
+	}
+	if group != nil {
+		row.ClientGroupID = *group
 	}
 	switch {
 	case vouch != nil:
@@ -334,33 +338,47 @@ func (t *pgCommerceTx) LoadGrantTiers(ctx context.Context, packageRevisionID str
 	return out, rows.Err()
 }
 
-func (t *pgCommerceTx) HasPriorPurchase(ctx context.Context, tenantID, siteID, packageRevisionID string, subj CommerceSubject) (bool, error) {
-	// AN ANONYMOUS SUBJECT IS NEW EVERY TIME A DEVICE HAS NO LIVE ACCESS, so a package limit evaluated against
-	// the subject alone would reset on every visit. It is evaluated against the DEVICE the auth context was
-	// issued to: the device's own acquisition history, through purchase -> auth context -> device. The device
-	// is not the subject; it is what makes "once per client" mean something for a client with no identity.
-	if subj.Kind == SubjectAnonymous {
-		var exists bool
-		err := t.tx.QueryRow(ctx,
-			`SELECT EXISTS(
-			    SELECT 1 FROM iam_v2.entitlements e
-			      JOIN iam_v2.purchases pu     ON pu.id = e.purchase_id
-			      JOIN iam_v2.auth_contexts ac ON ac.id = pu.auth_context_id
-			     WHERE e.tenant_id=$1 AND e.site_id=$2 AND e.package_revision_id=$3
-			       AND ac.device_id = $4::uuid)`,
-			tenantID, siteID, packageRevisionID, nullable(subj.DeviceID)).Scan(&exists)
-		return exists, err
+func (t *pgCommerceTx) HasPriorPurchase(ctx context.Context, tenantID, siteID string, q PriorPurchaseQuery) (bool, error) {
+	// KEYED ON THE PACKAGE, NOT THE REVISION. A republish (a wording change, a plan repin) used to hand every
+	// Client a fresh free allowance because the history was looked up by revision id. The package is what the
+	// operator means by "this package"; its revisions are its history.
+	//
+	// AN ANONYMOUS SUBJECT IS NEW EVERY TIME A DEVICE HAS NO LIVE ACCESS, so its history is the DEVICE's own,
+	// through purchase -> auth context -> device (open selection, contract 6.5). For an identified Client the
+	// subject's own history counts, and -- when the policy says so -- the device's too, so a second email on
+	// the same phone is not a second free allowance. The device is never the subject.
+	// The window is measured from the grant (activated_at); a grant still pending counts as now.
+	var since *time.Time
+	if q.Policy.WithinHours > 0 {
+		s := time.Now().Add(-time.Duration(q.Policy.WithinHours) * time.Hour)
+		since = &s
 	}
-	v, a, p := subjectCols(subj)
+	bySubject := `SELECT 1 FROM iam_v2.entitlements e
+	                JOIN iam_v2.internet_package_revisions r ON r.id = e.package_revision_id
+	               WHERE e.tenant_id=$1 AND e.site_id=$2 AND r.package_id=$3::uuid
+	                 AND ($8::timestamptz IS NULL OR COALESCE(e.activated_at, now()) >= $8::timestamptz)
+	                 AND ( ($4::uuid IS NOT NULL AND e.voucher_id=$4::uuid)
+	                    OR ($5::uuid IS NOT NULL AND e.guest_account_id=$5::uuid)
+	                    OR ($6::uuid IS NOT NULL AND e.guest_principal_id=$6::uuid) )`
+	byDevice := `SELECT 1 FROM iam_v2.entitlements e
+	               JOIN iam_v2.internet_package_revisions r ON r.id = e.package_revision_id
+	               JOIN iam_v2.purchases pu     ON pu.id = e.purchase_id
+	               JOIN iam_v2.auth_contexts ac ON ac.id = pu.auth_context_id
+	              WHERE e.tenant_id=$1 AND e.site_id=$2 AND r.package_id=$3::uuid
+	                AND ($8::timestamptz IS NULL OR COALESCE(e.activated_at, now()) >= $8::timestamptz)
+	                AND $7::uuid IS NOT NULL AND ac.device_id = $7::uuid`
+	v, a, p := subjectCols(q.Subject)
+	var dev *string
+	useDevice := q.Subject.Kind == SubjectAnonymous || q.Policy.AlsoByDevice
+	if useDevice {
+		dev = nullable(q.Subject.DeviceID)
+	}
+	sql := `SELECT EXISTS(` + bySubject + `)`
+	if useDevice {
+		sql = `SELECT EXISTS(` + bySubject + `) OR EXISTS(` + byDevice + `)`
+	}
 	var exists bool
-	err := t.tx.QueryRow(ctx,
-		`SELECT EXISTS(
-		    SELECT 1 FROM iam_v2.entitlements e
-		     WHERE e.tenant_id=$1 AND e.site_id=$2 AND e.package_revision_id=$3
-		       AND ( ($4::uuid IS NOT NULL AND e.voucher_id=$4::uuid)
-		          OR ($5::uuid IS NOT NULL AND e.guest_account_id=$5::uuid)
-		          OR ($6::uuid IS NOT NULL AND e.guest_principal_id=$6::uuid) ))`,
-		tenantID, siteID, packageRevisionID, v, a, p).Scan(&exists)
+	err := t.tx.QueryRow(ctx, sql, tenantID, siteID, q.PackageID, v, a, p, dev, since).Scan(&exists)
 	return exists, err
 }
 

@@ -90,9 +90,19 @@ type Request struct {
 	Secret       string // ACCOUNT password / VOUCHER code / OTP code (never logged)
 	FactorType   string // OTP: EMAIL|PHONE ; SOCIAL: SOCIAL_SUBJECT
 	FactorIssuer string // SOCIAL issuer
-	FactorValue  string // OTP verified email/phone ; SOCIAL subject
+	FactorValue  string // OTP verified email/phone ; SOCIAL subject (the provider's sub)
 	Provider     string // SOCIAL provider name (Stub is refused in production)
-	Device       DeviceContext
+	// FactorAttrs are verified claims about the primary factor (hd, tid, email, source), written to the
+	// identity row's attrs. Never populated from anything the browser sent.
+	FactorAttrs map[string]string
+	// SecondaryFactors are further factors the same proof established (a trusted issuer's verified email),
+	// used to find and link an existing Client (identity.go). Optional.
+	SecondaryFactors []FactorClaim
+	// ResumedPrincipalID is set ONLY by the remembered-device path: scd has already verified a device-bound
+	// resume credential for this principal, so no factor is re-proven; the Client's stored factors decide the
+	// group and an ordinary auth context is minted for the method the credential was issued under.
+	ResumedPrincipalID string
+	Device             DeviceContext
 }
 
 // DeviceContext is the device/network the request arrived on. MAC identifies a device, never a person.
@@ -118,6 +128,14 @@ type Result struct {
 	DeviceID      string
 	AuthContextID string // set when an auth_context was created (scratch/enabled path)
 	Reason        string // deterministic, non-sensitive reason code
+	// ClientGroupID / ClientGroupName: the effective Client Group pinned on the context ("" = Public).
+	ClientGroupID   string
+	ClientGroupName string
+	// IdentityLabel is the masked primary factor for guest pages (a•••@example.com); never the full value.
+	IdentityLabel string
+	// IdentityLinked / IdentityConflicts report what resolution did, for logs and metrics (factor keys only).
+	IdentityLinked    []string
+	IdentityConflicts []string
 }
 
 // Repository is the iam_v2 data-access boundary. In production it is NEVER invoked (flags OFF); a
@@ -133,8 +151,13 @@ type Tx interface {
 	// LookupAccount returns the account row needed for validation, scoped to (tenant, site). An
 	// account on a different site returns "" (treated like a nonexistent account).
 	LookupAccount(ctx context.Context, tenantID, siteID, username string) (id, passwordHash string, enabled bool, validFrom, validUntil *time.Time, lockedUntil *time.Time, err error)
-	// ResolvePrincipalByIdentity finds or creates a principal for a verified factor identity.
-	ResolvePrincipalByIdentity(ctx context.Context, tenantID, factorType, issuer, valueNorm string, now time.Time) (principalID string, err error)
+	// ResolvePrincipalByFactors finds or creates the Client for a verified primary factor, linking the
+	// secondary factors the same proof established (identity.go). Deterministic; never merges two Clients.
+	ResolvePrincipalByFactors(ctx context.Context, tenantID string, primary FactorClaim, secondary []FactorClaim, now time.Time) (PrincipalResolution, error)
+	// LoadPrincipalFactors returns every verified factor of a Client (type, issuer, value, attrs).
+	LoadPrincipalFactors(ctx context.Context, tenantID, principalID string) ([]FactorClaim, error)
+	// LoadClientGroups returns a site's groups with their rules (enabled and disabled alike).
+	LoadClientGroups(ctx context.Context, tenantID, siteID string) ([]ClientGroup, error)
 	// UpsertDevice resolves a device by (tenant, mac) and records the network appearance.
 	UpsertDevice(ctx context.Context, tenantID, siteID, applianceID, mac, guestNetworkID, ip string, now time.Time) (deviceID string, err error)
 	// CreateAuthContext writes a one-time auth_context (method<->subject enforced by DB CHECKs).
@@ -154,6 +177,10 @@ type AuthContextSpec struct {
 	GuestNetworkID string
 	TTL            time.Duration
 	Now            time.Time
+	// ClientGroupID is the effective Client Group decided for this sign-in ("" = Public), with its evidence.
+	// Pinned here so eligibility reads a recorded decision rather than re-deriving one.
+	ClientGroupID       string
+	ClientGroupEvidence map[string]any
 }
 
 // subjectFor returns the single subject identifier a method requires, and whether the subject shape is
@@ -283,9 +310,13 @@ func (a *Authenticator) Authenticate(ctx context.Context, req Request) (Result, 
 		return a.authVoucher(ctx, req)
 	case MethodAccount:
 		return a.authAccount(ctx, req)
-	case MethodOTP:
-		return a.authOTPIdentity(ctx, req)
-	case MethodSocial:
+	case MethodOTP, MethodSocial:
+		if req.ResumedPrincipalID != "" {
+			return a.authResumedIdentity(ctx, req)
+		}
+		if req.Method == MethodOTP {
+			return a.authOTPIdentity(ctx, req)
+		}
 		return a.authSocialIdentity(ctx, req)
 	default:
 		return Result{}, &Error{Code: ErrConfig, Msg: "unknown method " + string(req.Method)}

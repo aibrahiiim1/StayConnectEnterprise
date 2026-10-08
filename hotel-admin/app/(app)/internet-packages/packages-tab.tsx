@@ -31,7 +31,7 @@ import { MonoId, SkeletonRows } from "@/components/ui/misc";
 import { useToast } from "@/components/ui/toast";
 import { DeleteDialog } from "@/components/commerce/delete-dialog";
 import { focusSheetItself } from "@/components/commerce/sheet-focus";
-import { PackageForm, type PackageFormInitial, type PackageFormValue, type PlanOption } from "./package-form";
+import { PackageForm, type ClientGroupOption, type PackageFormInitial, type PackageFormValue, type PlanOption } from "./package-form";
 import { decideSave, saveOutcomeMessage } from "@/lib/package-save";
 import { formatSpeed, formatData, formatDuration, formatDevices, DEVICE_LIMIT_POLICIES } from "@/lib/units";
 import { allocationFromPolicy, stayLengthWarnings, readStayLength, type PackageStayRange } from "@/lib/stay-packages";
@@ -78,11 +78,17 @@ export function PackagesTab({
   // null = loading; "error" = could not be read, which the form treats as not selectable (fail closed).
   const [modules, setModules] = useState<ModulesReport | "error" | null>(null);
   const [roomIfaces, setRoomIfaces] = useState<RoomChargeInterface[] | "error" | null>(null);
+  // THE CLIENT GROUPS AN AUDIENCE CAN NAME, read with the module state for the same reason: a group created in
+  // another tab must be offered the next time the form opens, not the next time the page loads.
+  const [clientGroups, setClientGroups] = useState<ClientGroupOption[] | "error" | null>(null);
   const formOpen = adding || editing !== null;
   useEffect(() => {
     if (!formOpen) return;
     let live = true;
-    setModules(null); setRoomIfaces(null);
+    setModules(null); setRoomIfaces(null); setClientGroups(null);
+    api.get<ListResp<ClientGroupOption>>("/client-groups")
+      .then((g) => { if (live) setClientGroups(g?.data ?? []); })
+      .catch(() => { if (live) setClientGroups("error"); });
     // The PMS interfaces room charge can map to are asked for only when Room charge is licensed: a site
     // without it never calls the room-charge surface.
     api.get<ModulesReport>("/modules")
@@ -496,7 +502,7 @@ export function PackagesTab({
           <DialogBody className="space-y-4">
             <ErrorBanner err={formErr} />
             <PackageForm mode="add" plans={plans} busy={busy} onSave={(v) => save(v, "add")} onCancel={() => setAdding(false)}
-              modules={modules} roomChargeInterfaces={roomIfaces} />
+              modules={modules} roomChargeInterfaces={roomIfaces} clientGroups={clientGroups} />
           </DialogBody>
         </DialogContent>
       </Dialog>
@@ -514,7 +520,7 @@ export function PackagesTab({
             <ErrorBanner err={formErr} />
             {editing && (
               <PackageForm mode="edit" initial={editing} plans={plans} busy={busy} onSave={(v) => save(v, "edit")}
-                onCancel={() => setEditing(null)} modules={modules} roomChargeInterfaces={roomIfaces} />
+                onCancel={() => setEditing(null)} modules={modules} roomChargeInterfaces={roomIfaces} clientGroups={clientGroups} />
             )}
           </DialogBody>
         </DialogContent>

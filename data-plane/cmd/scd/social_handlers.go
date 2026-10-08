@@ -267,10 +267,20 @@ func (s *server) authorizeSocial(w http.ResponseWriter, r *http.Request) {
 	// What was REMOVED is the superseded pipeline that followed: a legacy access-plan lookup for duration
 	// and shaping, a public.sessions row, and direct nft/shaping calls. Access comes from the package the
 	// guest selects after authenticating, not from the credential they used.
+	//
+	// THE SUBJECT IS THE IDENTITY (contract §2.1). The previous code stored the email string as the social
+	// subject and discarded info.Sub, which contradicted the Phase-0 contract ("issuer-scoped social subject")
+	// and made an email change at the provider a brand-new Client. The provider's sub is now the factor; a
+	// TRUSTED issuer's verified email is a second factor on the same Client (identity.go), which is what joins a
+	// Google sign-in to the Client an email code created. Facebook asserts no verification and links nothing.
+	primary, secondary := iamv2.SocialFactors(req.Provider, info.Sub, info.Email, info.EmailVerified, info.Claims)
 	s.authorizeViaIAMv2(w, r, iamv2.MethodSocial, iamv2.Request{
-		FactorIssuer: req.Provider,
-		FactorValue:  info.Email,
-		Device:       iamv2.DeviceContext{MAC: mac.String()},
+		Provider:         req.Provider,
+		FactorIssuer:     primary.Issuer,
+		FactorValue:      primary.Value,
+		FactorAttrs:      primary.Attrs,
+		SecondaryFactors: secondary,
+		Device:           iamv2.DeviceContext{MAC: mac.String()},
 	}, ip)
 }
 

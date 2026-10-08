@@ -36,6 +36,9 @@ type EligibilitySubject struct {
 	Kind                      SubjectKind
 	GuestNetworkID            string
 	HasPriorPurchaseOfPackage bool
+	// ClientGroupID is the effective Client Group pinned on the auth context ("" = Public). It is a recorded
+	// decision (client_groups.go), never re-derived here.
+	ClientGroupID string
 
 	// GuestNetworkLineage is the client networks GuestNetworkID is the continuation of: the ones it replaced,
 	// transitively, from iam_v2.guest_network_lineage (0106). It exists because a package REVISION is immutable
@@ -101,8 +104,12 @@ const (
 	RuleDateWindow    = "DATE_WINDOW"    // {from, until} RFC3339 (either bound optional)
 	RuleAuthMethod    = "AUTH_METHOD"    // {methods: ["ACCOUNT","VOUCHER","OTP","SOCIAL"]}
 	RuleSubjectKind   = "SUBJECT_KIND"   // {kinds: ["ACCOUNT","VOUCHER","PRINCIPAL"]}
-	RulePriorPurchase = "PRIOR_PURCHASE" // {requires_prior|forbids_prior: bool}
-	RuleSiteNetwork   = "SITE_NETWORK"   // {guest_network_ids: [uuid,...]}
+	RulePriorPurchase = "PRIOR_PURCHASE" // {requires_prior|forbids_prior: bool, within_hours?: int, also_by_device?: bool}
+	// CLIENT_GROUP is the package's AUDIENCE: {group_ids: [uuid], public: bool}. It passes for a member of a
+	// listed group, or -- with public -- for a Client in no group. It is how "employees free, partners
+	// discounted, public normal price" is written without coupling the offer to the sign-in method.
+	RuleClientGroup = "CLIENT_GROUP"
+	RuleSiteNetwork = "SITE_NETWORK" // {guest_network_ids: [uuid,...]}
 )
 
 // The PMS rule types. Phase 2 recognised them and refused to evaluate them, because there was no
@@ -250,6 +257,22 @@ func evalTypedCondition(ctype string, v map[string]any, s EligibilitySubject) (b
 			return false, "forbids_prior_purchase"
 		}
 		return true, ""
+	case RuleClientGroup:
+		ids := stringSet(v["group_ids"])
+		pub, _ := v["public"].(bool)
+		if len(ids) == 0 && !pub {
+			return false, "malformed_client_group_rule"
+		}
+		if s.ClientGroupID == "" {
+			if pub {
+				return true, ""
+			}
+			return false, "client_group_not_allowed"
+		}
+		if ids[strings.ToLower(strings.TrimSpace(s.ClientGroupID))] {
+			return true, ""
+		}
+		return false, "client_group_not_allowed"
 	case RuleSiteNetwork:
 		set := stringSet(v["guest_network_ids"])
 		if len(set) == 0 {
@@ -272,6 +295,33 @@ func evalTypedCondition(ctype string, v map[string]any, s EligibilitySubject) (b
 	default:
 		return false, "unknown_rule_type" // fail closed
 	}
+}
+
+// PriorPurchasePolicy is how a package's PRIOR_PURCHASE rule wants the Client's history read (contract §5).
+type PriorPurchasePolicy struct {
+	Present      bool
+	WithinHours  int  // 0 = ever
+	AlsoByDevice bool // the device's own history counts too (default true on a free package)
+}
+
+// PriorPurchasePolicyOf reads the policy from a revision's rules. Defaults: once per Client, ever; the device
+// counts when the package is free (price 0), because that is the case "sign in again with another email on the
+// same phone" is aimed at.
+func PriorPurchasePolicyOf(rules []EligibilityRule, priceMinor int64) PriorPurchasePolicy {
+	for _, r := range rules {
+		if strings.ToUpper(strings.TrimSpace(r.Type)) != RulePriorPurchase {
+			continue
+		}
+		p := PriorPurchasePolicy{Present: true, AlsoByDevice: priceMinor == 0}
+		if n, present, ok := parseIntField(r.Value, "within_hours"); present && ok && n > 0 {
+			p.WithinHours = n
+		}
+		if b, ok := r.Value["also_by_device"].(bool); ok {
+			p.AlsoByDevice = b
+		}
+		return p
+	}
+	return PriorPurchasePolicy{}
 }
 
 // parseTimeField returns (time, present, valid). A field that is absent/empty is (_, false, _). A field

@@ -105,6 +105,13 @@ type iamv2GuestResult struct {
 	// per-entitlement device slots. Before this, every sign-in bought again and the new grant superseded the
 	// old one, knocking the guest's other devices offline.
 	LiveEntitlementID string `json:"live_entitlement_id,omitempty"`
+	// ResumeToken is the remembered-device credential issued after a verified OTP / SOCIAL sign-in
+	// (client_resume.go); the portal stores it in an HttpOnly cookie. Absent when devices are not remembered.
+	ResumeToken string `json:"resume_token,omitempty"`
+	// IdentityLabel is the masked factor the Client proved (a•••@example.com), for guest pages only.
+	IdentityLabel string `json:"identity_label,omitempty"`
+	// ClientGroupName is the effective Client Group pinned on the context ("" = Public).
+	ClientGroupName string `json:"client_group_name,omitempty"`
 }
 
 // iamv2MethodEnabled reports whether IAM-v2 is the configured authority for a
@@ -174,14 +181,25 @@ func (s *server) authorizeViaIAMv2(w http.ResponseWriter, r *http.Request,
 		if s.met != nil && s.met.AuthContextsCreated != nil {
 			s.met.AuthContextsCreated.WithLabelValues(string(method)).Inc()
 		}
-		writeJSON(w, http.StatusOK, iamv2GuestResult{
+		out := iamv2GuestResult{
 			AuthContextID:     res.AuthContextID,
 			DeviceID:          res.DeviceID,
 			GuestNetworkID:    nc.NetworkID,
 			Method:            string(method),
 			Authority:         "iam_v2",
 			LiveEntitlementID: s.liveEntitlementForContext(r.Context(), res.AuthContextID),
-		})
+			IdentityLabel:     res.IdentityLabel,
+			ClientGroupName:   res.ClientGroupName,
+		}
+		// A verified factor on this device earns the device a resume credential (contract §2.3). A resumed
+		// sign-in already holds one and gets no second.
+		if req.ResumedPrincipalID == "" && res.Subject.PrincipalID != "" {
+			out.ResumeToken = s.issueResumeCredential(r.Context(), res.Subject.PrincipalID, res.DeviceID, method)
+		}
+		if len(res.IdentityConflicts) > 0 {
+			slog.Info("iamv2 identity link conflict", "method", string(method), "factors", res.IdentityConflicts)
+		}
+		writeJSON(w, http.StatusOK, out)
 		return true
 
 	case iamv2.DecisionDisabled:

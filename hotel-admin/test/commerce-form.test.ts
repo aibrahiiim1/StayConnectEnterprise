@@ -4,6 +4,7 @@ import {
   FORBIDDEN_RULE_TYPES,
   isSupportedRuleType,
   serializeRule,
+  validateRule,
   validateDuration,
   serializeDuration,
   validateSaleWindow,
@@ -17,10 +18,10 @@ describe("supported / forbidden rule types", () => {
   // withheld while the engine recognised them but could not evaluate them, because a control that silently
   // does nothing is worse than an absent one. The engine evaluates every one of them against server-pinned
   // Stay evidence and refuses when that evidence is missing, so the reason for withholding them has gone.
-  it("offers the non-PMS types AND the six approved stay dimensions", () => {
+  it("offers the non-PMS types, the audience, AND the six approved stay dimensions", () => {
     expect([...SUPPORTED_RULE_TYPES].sort()).toEqual(
       [
-        "AUTH_METHOD", "DATE_WINDOW", "PRIOR_PURCHASE", "SITE_NETWORK", "SUBJECT_KIND",
+        "AUTH_METHOD", "DATE_WINDOW", "PRIOR_PURCHASE", "SITE_NETWORK", "SUBJECT_KIND", "CLIENT_GROUP",
         "STAY_LENGTH", "ROOM_TYPE", "RATE_PLAN", "VIP", "TRAVEL_AGENT", "PMS_INTERFACE",
       ].sort(),
     );
@@ -43,9 +44,36 @@ describe("serializeRule — only supported types", () => {
     expect(serializeRule({ type: "SUBJECT_KIND", kinds: "ACCOUNT" }))
       .toEqual({ type: "SUBJECT_KIND", value: { kinds: ["ACCOUNT"] } });
   });
-  it("PRIOR_PURCHASE emits exactly one boolean", () => {
+  it("PRIOR_PURCHASE emits exactly one boolean when nothing else was set", () => {
     expect(serializeRule({ type: "PRIOR_PURCHASE", mode: "forbids_prior" }))
       .toEqual({ type: "PRIOR_PURCHASE", value: { forbids_prior: true } });
+  });
+  // THE FREE ALLOWANCE (ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md §5): a window and a device switch, sent
+  // only when set -- and an explicit false IS set, because the server's default for a free package is true.
+  it("PRIOR_PURCHASE carries the window and the device switch, and only on forbids_prior", () => {
+    expect(serializeRule({ type: "PRIOR_PURCHASE", mode: "forbids_prior", within_hours: "24", also_by_device: true }))
+      .toEqual({ type: "PRIOR_PURCHASE", value: { forbids_prior: true, within_hours: 24, also_by_device: true } });
+    expect(serializeRule({ type: "PRIOR_PURCHASE", mode: "forbids_prior", within_hours: "", also_by_device: false }))
+      .toEqual({ type: "PRIOR_PURCHASE", value: { forbids_prior: true, also_by_device: false } });
+    expect(serializeRule({ type: "PRIOR_PURCHASE", mode: "requires_prior", within_hours: "24", also_by_device: true }))
+      .toEqual({ type: "PRIOR_PURCHASE", value: { requires_prior: true } });
+  });
+  it("CLIENT_GROUP names the groups and widens to the public only when asked", () => {
+    expect(serializeRule({ type: "CLIENT_GROUP", group_ids: ["g1", "g2"], public: false }))
+      .toEqual({ type: "CLIENT_GROUP", value: { group_ids: ["g1", "g2"] } });
+    expect(serializeRule({ type: "CLIENT_GROUP", group_ids: [], public: true }))
+      .toEqual({ type: "CLIENT_GROUP", value: { public: true } });
+    expect(serializeRule({ type: "CLIENT_GROUP", group_ids: ["g1"], public: true }))
+      .toEqual({ type: "CLIENT_GROUP", value: { group_ids: ["g1"], public: true } });
+  });
+  it("refuses an audience that names nobody, and a window outside one hour to one year", () => {
+    expect(validateRule({ type: "CLIENT_GROUP", group_ids: [], public: false })).toMatch(/at least one client group/);
+    expect(validateRule({ type: "CLIENT_GROUP", group_ids: [], public: true })).toBeNull();
+    expect(validateRule({ type: "PRIOR_PURCHASE", mode: "forbids_prior", within_hours: "0" })).toMatch(/between 1 and 8760/);
+    expect(validateRule({ type: "PRIOR_PURCHASE", mode: "forbids_prior", within_hours: "8761" })).toMatch(/between 1 and 8760/);
+    expect(validateRule({ type: "PRIOR_PURCHASE", mode: "forbids_prior", within_hours: "1.5" })).toMatch(/whole number/);
+    expect(validateRule({ type: "PRIOR_PURCHASE", mode: "forbids_prior", within_hours: "24" })).toBeNull();
+    expect(validateRule({ type: "PRIOR_PURCHASE", mode: "forbids_prior" })).toBeNull();
   });
   it("throws on a forbidden/unknown type (defensive)", () => {
     // @ts-expect-error — intentionally forcing a forbidden type
