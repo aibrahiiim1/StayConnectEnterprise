@@ -252,7 +252,8 @@ Each is enforced in the SQL grant entry point, which is the only path to the ent
   currency and the vendor attestation, approved by a site administrator with step-up — the vendor-confirmed answer
   meanings per interface, and readiness per interface. A stay's posting permission and block history are shown on
   the stay; only `ADMIN_BLOCK` is operator-controlled.
-* **Client Portal → Sign-in methods:** "Choose a package without signing in" (open package selection).
+* **Client access → Sign-in methods:** "Choose a package without signing in" (open package selection); the section was
+  renamed from *Client Portal* by the client-access delivery (`ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md` §9).
 * Navigation follows `/capabilities`, which reports module-owned surfaces only while their module is manageable
   and falls back to the core when module state is unreadable.
 
