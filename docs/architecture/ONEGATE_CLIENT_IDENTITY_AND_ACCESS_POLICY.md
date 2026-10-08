@@ -368,7 +368,9 @@ devices` live in `tenants.auth_methods.portal` and are audited with the other sw
 Migration **0107** is additive. On a live site it is applied through `scripts/edge-migrate.sh` as
 `iam_v2_owner` (`--target-kind live-site`, SHA pinned), which owns nothing in `public`; therefore:
 
-1. apply `0107_a_client_is_one_identity_with_groups_and_a_remembered_device` with the runner;
+1. apply `0107_a_client_is_one_identity_with_groups_and_a_remembered_device` and then
+   `0108_deleting_a_client_group_clears_only_the_pin` with the runner (0108 corrects 0107's pin constraint so
+   deleting a group clears only `client_group_id`);
 2. run `deploy/scripts/extend-notification-kinds-smtp.sql` as the table owner (`stayconnect`) — it widens
    `public.notification_providers.kind` to accept `smtp` and refuses to run before 0107 is in the ledger;
 3. reconcile Gate-P with `scripts/gatep-reconcile.sh` from the same revision (the 0107 grants are in

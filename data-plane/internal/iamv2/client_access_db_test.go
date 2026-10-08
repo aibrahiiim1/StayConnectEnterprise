@@ -167,6 +167,36 @@ func TestTheGroupIsDecidedFromVerifiedFactorsAndPinnedOnTheContext(t *testing.T)
 		}
 		return nil
 	})
+	// DELETING THE GROUP CLEARS ONLY THE PIN: the context survives as Public with its evidence intact, and the
+	// referential action is allowed under the auth_context operation scope (what edged opens).
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('auth_context')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM iam_v2.client_groups WHERE id=$1::uuid`, gid); err != nil {
+		t.Fatalf("deleting a pinned group must be allowed: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var pinAfter *string
+	var evAfter string
+	if err := db.QueryRow(ctx, `SELECT client_group_id::text, client_group_evidence::text FROM iam_v2.auth_contexts WHERE id=$1`, staff.AuthContextID).Scan(&pinAfter, &evAfter); err != nil {
+		t.Fatal(err)
+	}
+	if pinAfter != nil || !strings.Contains(evAfter, "Employees") {
+		t.Fatalf("after delete: pin %v evidence %q", pinAfter, evAfter)
+	}
+	if err := db.QueryRow(ctx, `INSERT INTO iam_v2.client_groups (tenant_id, site_id, name, priority) VALUES ($1,$2,'Employees',10) RETURNING id::text`, testTenant, testSite).Scan(&gid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(ctx, `INSERT INTO iam_v2.client_group_rules (tenant_id, site_id, group_id, rule_type, rule_value)
+		VALUES ($1,$2,$3::uuid,'EMAIL_DOMAIN','{"domains":["example.com"]}'::jsonb)`, testTenant, testSite, gid); err != nil {
+		t.Fatal(err)
+	}
 	// A remembered device resumes with the SAME decision, from stored factors.
 	resumed, err := a.Authenticate(ctx, Request{Method: MethodOTP, TenantID: testTenant, SiteID: testSite,
 		ResumedPrincipalID: staff.Subject.PrincipalID,
