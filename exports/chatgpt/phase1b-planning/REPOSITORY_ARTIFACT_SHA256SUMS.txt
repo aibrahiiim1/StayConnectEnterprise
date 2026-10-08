@@ -1,18 +1,18 @@
-# cited committed source, not packaged. Verify at SOURCE_COMMIT 24f4c734.
-e7b1a63be9b9fc5b43984a148351b8c54c9d931a764fdfd018cb1014d1c09edd  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
+# cited committed source, not packaged. Verify at SOURCE_COMMIT 10a4181b.
+1e3d0c912c0946c8f85dbad861e4f783813c73fbd114861a66030c8df153d1d0  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
 d7ffc726816e4ed6a677d35cf0b645b79278ea2a48ed4eb561008fcebb640e3d  docs/architecture/Phase1B-Privilege-Matrix.md
 bb6281470a81df07fc8060b559eb55cf1e9265c536e6fe43d8258f78072a93d0  data-plane/internal/pmsguard/guard.go
-568953632f510a6a17ef5fca45ffdf5407e25747fba3590da329b034bea71a9c  data-plane/cmd/scd/main.go
+d2a03cf88fc9d4bf3e440ae8579c355910380da2d4782d1dca9f8d6e7a7b140a  data-plane/cmd/scd/main.go
 c734289e25e66a4f2f4b21328526b2af8b50c07e7de5efc59fdb213078ecdf6f  data-plane/cmd/acctd/main.go
-3520b77d1af32b66638a3a1992dd434e2d5bd653165d8433238cdf930551e0f3  data-plane/cmd/edged/main.go
+ee5c031b5193d0d077ff5db5b6b15ff7532367ec32dbed9fb2229b5c255d7673  data-plane/cmd/edged/main.go
 8802eb07b28ecb887e4532a1a24ace2fbaf2a756ecbb75b1cb470b58575fd0a6  data-plane/cmd/netd/main.go
-1dd2aa5ef97ed8e8c01d02a059bc89a86df8e1cd95be7b865a28e662a3b06731  data-plane/cmd/portald/main.go
+fd0c73d8247efb30440f186db7d3ce1dddfd783f5a5a45e517b4e9f58d59903b  data-plane/cmd/portald/main.go
 MISSING  data-plane/internal/session/session.go
 MISSING  data-plane/internal/voucher/voucher.go
-3b40443df98a1daf833d2380f5cf60a2e420d26049e4e203712c573ec2873e91  data-plane/internal/otp/otp.go
+0148cee900ab122972cd200296d38c45e7d9e5a4f8da9719b22b131d93809741  data-plane/internal/otp/otp.go
 e7ed71ae4820f902f37863654565bdb53c3f45f5ad4ceef0918857cafefba5e1  data-plane/cmd/scd/credentials_handlers.go
-80f1bb951a819a9ba0b92eca8758998dbdbfc321e02e7cf62f259b1a30dbdeb0  data-plane/cmd/scd/otp_handlers.go
-28026303aecbc896f3405d82de0e8ebd59bb67e703e11f52d1af7bdb23c45fe9  data-plane/cmd/scd/social_handlers.go
+308014cc7f960a1bd6cf329b3514f32ee6c1ba9d110f39aac2c977919919d7aa  data-plane/cmd/scd/otp_handlers.go
+94e4ac791e04bfe9dd4f8e2d29f3b3e5b371b591703e945e80b4dc321d9efd9b  data-plane/cmd/scd/social_handlers.go
 MISSING  data-plane/cmd/scd/pms_handlers.go
 3420c8c0a824a7fa054b16af8381e61256bc4ff3764785a88235c3cf995a8237  iam_v2_scratch/roles.sql
 a3a0e72be03017b92de567588d0e6f58e1ae787fcddb1a55dc342fa660004033  iam_v2_scratch/migrations/mg1_pms_interface_core.sql

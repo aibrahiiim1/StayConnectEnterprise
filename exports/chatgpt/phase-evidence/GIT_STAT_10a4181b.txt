@@ -1,0 +1,4 @@
+commit 10a4181b92ba34db1b02cb6bf60c297ed55e2601
+Date:   Thu Oct 8 22:13:12 2026 +0300
+
+    Governance: T0214 records the client-access deployment to PRE-LIVE, with the exact provenance
