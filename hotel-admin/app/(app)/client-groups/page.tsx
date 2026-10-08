@@ -39,6 +39,7 @@ import { canWrite } from "@/lib/roles";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { formatDate, formatRelative } from "@/lib/utils";
+import { ruleSummary } from "./rule-summary";
 
 // Priority: an operational number with a default, bounds and an explanation (lower wins).
 const PRIORITY_DEFAULT = 100;
@@ -91,22 +92,6 @@ function ruleFromForm(f: RuleForm): ClientGroupRule {
     case "IDP_HOSTED_DOMAIN":
       return { type: "IDP_HOSTED_DOMAIN", value: { provider: "google", domains: splitList(f.list, true) } };
   }
-}
-
-/** "company.com, company.ae · Microsoft tenant" — the group's rules in one line for the table. */
-export function ruleSummary(rules: ClientGroupRule[] | null | undefined): string {
-  if (!rules || rules.length === 0) return "No rules — matches nobody";
-  return rules.map((r) => {
-    switch (r.type) {
-      case "EMAIL_DOMAIN": {
-        const d = (r.value.domains ?? []).join(", ");
-        return r.value.include_subdomains ? `${d} (and subdomains)` : d;
-      }
-      case "IDP_TENANT": return (r.value.tenant_ids ?? []).length > 1 ? `${r.value.tenant_ids!.length} Microsoft tenants` : "Microsoft tenant";
-      case "IDP_HOSTED_DOMAIN": return `Google Workspace ${(r.value.domains ?? []).join(", ")}`;
-      default: return String((r as { type: string }).type);
-    }
-  }).join(" · ");
 }
 
 type FormState = {

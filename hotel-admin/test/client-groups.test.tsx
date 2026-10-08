@@ -30,7 +30,7 @@ vi.mock("@/lib/api", () => ({
 vi.mock("next/link", () => ({ default: ({ href, children }: { href: string; children: React.ReactNode }) => <a href={href}>{children}</a> }));
 
 import ClientGroupsPage from "@/app/(app)/client-groups/page";
-import { ruleSummary } from "@/app/(app)/client-groups/page";
+import { ruleSummary } from "@/app/(app)/client-groups/rule-summary";
 
 const list = <T,>(data: T[]) => ({ data, meta: { has_more: false } });
 
