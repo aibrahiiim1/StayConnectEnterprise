@@ -61,6 +61,21 @@ The model is [`ONEGATE_MODULES_AND_ACQUISITION.md`](architecture/ONEGATE_MODULES
 There is no **Cash** method, and OneGate has no refund feature: a refund or chargeback the provider reports is
 recorded, never initiated.
 
+## Client access
+
+The model is [`ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md`](architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md).
+
+| Use | Meaning |
+|---|---|
+| **Client access** | The Admin Console section that holds sign-in methods, client groups, identity providers, delivery, portal settings and allowed sites (formerly *Client Portal*). |
+| **Client group** | A site's business group (Employees, Partners, VIP …) decided from a client's **verified** identity — a verified email domain, a Microsoft organisation (Entra tenant) or a Google Workspace domain — and used as a package's **audience**. A client in no group is a **public client**. |
+| **Audience** | Who an Internet Package is offered to: everyone, only certain client groups, or public clients only. The sign-in method never decides the offer. |
+| **Free access** (on a package) | The free-allowance policy: once per client, or once every *N* hours; the device may count too. Keyed to the package, not to a version of it. |
+| **Identity providers** | Google, Apple, Microsoft and Facebook sign-in (formerly *Social login*). A client is identified by the provider's own account identifier, never by the email string alone. |
+| **Delivery** | How one-time codes reach clients: email (SendGrid or the site's own SMTP server), SMS, WhatsApp (formerly *Email & SMS*). |
+| **Primary method** | The sign-in method shown first on the Client Portal; identity providers are the *quick sign-in* row above it, everything else sits under *Or sign in with*. |
+| **Remembered device** | A device that verified a code or an identity provider may reconnect without another code for the site's *Remember devices* period ("Welcome back"). It replaces the code, never the package or quota rules. |
+
 ## The Hotel module
 
 The Admin Console's **Hotel** section holds every screen whose meaning depends on hospitality or a PMS. It
