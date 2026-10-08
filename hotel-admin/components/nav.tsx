@@ -13,7 +13,7 @@ import {
   PanelLeftClose, PanelLeftOpen, ClipboardCheck, Ticket,
   DoorOpen, DoorClosed, BedDouble, Plug, Route, Inbox, ShieldCheck, UserX, Layers, ArrowLeftRight, HeartPulse, Receipt,
   LifeBuoy, Globe, AtSign, MessageSquare, Stethoscope, Bell, Hourglass, CalendarClock, ChartColumn,
-  CreditCard, BedSingle, Blocks,
+  CreditCard, BedSingle, Blocks, UsersRound,
 } from "lucide-react";
 import { BySemantics, OneGateLockup } from "@/components/brand";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -106,15 +106,21 @@ const SECTIONS: Section[] = [
     ],
   },
   {
-    title: "Client Portal",
+    // CLIENT ACCESS, ordered as the job is done (docs/architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md
+    // §9): which methods are on, who the clients are (groups), the providers behind the methods, how codes are
+    // delivered, then what the portal looks like and what it may reach. "Client Portal" stays in the keywords so
+    // the filter still finds every one of these under the old name.
+    title: "Client access",
     items: [
-      // Sign-in methods leads the group: which ways a guest may prove who they are is the first thing an
+      // Sign-in methods leads the group: which ways a client may prove who they are is the first thing an
       // operator sets up on the portal, and it was previously not settable anywhere in the product.
-      { href: "/sign-in-methods",  label: "Sign-in methods", icon: LogIn,    resource: "auth-methods", keywords: "room number voucher otp sms email social guest portal" },
-      { href: "/portal-branding",  label: "Portal settings", icon: Paintbrush, resource: "portal-branding", keywords: "branding logo background colours terms languages translations guest portal" },
-      { href: "/walled-garden",    label: "Allowed sites", icon: Globe,     resource: "walled-garden", keywords: "whitelist domains before login guest portal" },
-      { href: "/social-providers", label: "Social login",  icon: AtSign,   resource: "social-providers", modules: ["social_login"], keywords: "google apple facebook microsoft oauth guest portal" },
-      { href: "/notifications",    label: "Email & SMS",   icon: MessageSquare,       resource: "notification-providers", modules: ["email_otp", "sms_otp", "whatsapp_otp"], keywords: "sendgrid twilio ses otp whatsapp delivery guest portal" },
+      { href: "/sign-in-methods",  label: "Sign-in methods", icon: LogIn,    resource: "auth-methods", keywords: "room number voucher otp sms email social primary method remember device client portal guest portal" },
+      // Groups are core, not module-owned: an email-domain group needs no identity-provider module.
+      { href: "/client-groups",    label: "Client groups",   icon: UsersRound, resource: "client-groups", keywords: "employees partners organisation domain microsoft google workspace vip group audience client portal" },
+      { href: "/social-providers", label: "Identity providers", icon: AtSign, resource: "social-providers", modules: ["social_login"], keywords: "google apple facebook microsoft oauth social login client portal guest portal" },
+      { href: "/notifications",    label: "Delivery",        icon: MessageSquare, resource: "notification-providers", modules: ["email_otp", "sms_otp", "whatsapp_otp"], keywords: "sendgrid twilio otp whatsapp smtp mail server email sms delivery client portal guest portal" },
+      { href: "/portal-branding",  label: "Portal settings", icon: Paintbrush, resource: "portal-branding", keywords: "branding logo background colours terms languages translations client portal guest portal" },
+      { href: "/walled-garden",    label: "Allowed sites",   icon: Globe,     resource: "walled-garden", keywords: "whitelist domains before login client portal guest portal" },
     ],
   },
   {

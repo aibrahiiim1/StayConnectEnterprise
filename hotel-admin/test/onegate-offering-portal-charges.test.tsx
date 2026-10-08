@@ -127,7 +127,8 @@ describe("a read-only role is offered no write control", () => {
     routes(["front_office_operator"]);
     render(<SignInMethodsPage />);
     expect(await screen.findByText(/can see which sign-in methods are offered but not change them/i)).toBeInTheDocument();
-    expect(screen.getByText("Voucher code")).toBeInTheDocument();
+    // Also an <option> of the Client journey's Primary method select, so more than one match is expected.
+    expect(screen.getAllByText("Voucher code").length).toBeGreaterThan(0);
     expect(screen.queryAllByRole("switch")).toHaveLength(0);
     // Guest sign-in protection is read-only for the desk too: the numbers show, no Save.
     expect(await screen.findByText(/can see these settings but not change them/i)).toBeInTheDocument();

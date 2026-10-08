@@ -122,7 +122,7 @@ export default function WalledGardenPage() {
     <PageShell>
       <PageHeader
         icon={<Globe />}
-        eyebrow="Client Portal"
+        eyebrow="Client access"
         title="Allowed sites"
         description="Addresses reachable before sign-in, without any authentication — keep the list to what the sign-in page needs."
         help={

@@ -301,7 +301,7 @@ export default function PortalSettingsPage() {
   if (!saved) {
     return (
       <PageShell width="wide">
-        <PageHeader icon={<Palette />} eyebrow="Client Portal" title="Portal settings"
+        <PageHeader icon={<Palette />} eyebrow="Client access" title="Portal settings"
           description="Design the Wi-Fi sign-in page clients see." help={pageHelp(hospitality)} />
         {loadErr ? <ErrorBanner err={loadErr} /> : (
           <div className="space-y-3" aria-label="Loading portal settings">
@@ -335,7 +335,7 @@ export default function PortalSettingsPage() {
     <PageShell width="wide">
       <PageHeader
         icon={<Palette />}
-        eyebrow="Client Portal"
+        eyebrow="Client access"
         title="Portal settings"
         description="Design the Wi-Fi sign-in page clients see. Clients see your changes as soon as you save."
         help={pageHelp(hospitality)}

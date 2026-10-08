@@ -2,7 +2,7 @@
 
 // ROOM SIGN-IN — what a guest types besides their room number, configured in the Hotel module
 // (docs/PRODUCT_TERMINOLOGY.md, "The Hotel module"). Its meaning depends on the PMS stay record, so it lives
-// here; the on/off switch for the method stays with the other methods in Client Portal → Sign-in methods, and
+// here; the on/off switch for the method stays with the other methods in Client access → Sign-in methods, and
 // this screen only reports that state.
 //
 // THE CHOICES ARE EXACTLY THE SERVER CONTRACT. edged accepts room_any, room_lastname, room_firstname and
@@ -128,7 +128,7 @@ export default function RoomSignInPage() {
             </p>
             <p>
               A choice applies immediately — the next guest to open the sign-in page sees it. It does not switch
-              room sign-in on or off; that switch is in Client Portal → Sign-in methods, with the other methods.
+              room sign-in on or off; that switch is in Client access → Sign-in methods, with the other methods.
             </p>
           </HelpSection>
           <HelpSection title="The choices">
@@ -193,7 +193,7 @@ export default function RoomSignInPage() {
             href="/sign-in-methods"
             className="inline-flex items-center gap-0.5 text-sm text-primary underline-offset-4 hover:underline"
           >
-            Switch it on or off in Client Portal → Sign-in methods <ArrowUpRight className="size-3.5" aria-hidden />
+            Switch it on or off in Client access → Sign-in methods <ArrowUpRight className="size-3.5" aria-hidden />
           </Link>
         </CardBody>
       </Card>

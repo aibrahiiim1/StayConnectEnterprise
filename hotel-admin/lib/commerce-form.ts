@@ -19,6 +19,7 @@ export const SUPPORTED_RULE_TYPES = [
   "DATE_WINDOW",
   "PRIOR_PURCHASE",
   "SITE_NETWORK",
+  "CLIENT_GROUP",
   "STAY_LENGTH",
   "ROOM_TYPE",
   "RATE_PLAN",
@@ -27,6 +28,17 @@ export const SUPPORTED_RULE_TYPES = [
   "PMS_INTERFACE",
 ] as const;
 export type RuleType = (typeof SUPPORTED_RULE_TYPES)[number];
+
+// RULES WITH A CONTROL OF THEIR OWN. The audience (CLIENT_GROUP) and the free allowance (PRIOR_PURCHASE with
+// forbids_prior) are the two conditions nearly every site sets, so the package editor presents each as a named
+// control rather than as a row in the generic condition list (ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md §4,
+// §5). The wire shape is unchanged: both are still ordinary eligibility rules, and the generic rows keep every
+// other type.
+export const DEDICATED_RULE_TYPES = ["CLIENT_GROUP"] as const;
+export function isDedicatedRule(r: { type: string; mode?: string }): boolean {
+  if ((DEDICATED_RULE_TYPES as readonly string[]).includes(r.type)) return true;
+  return r.type === "PRIOR_PURCHASE" && r.mode === "forbids_prior";
+}
 
 // Rule types that must never be selectable: recognised nowhere in the engine, so a package carrying one would
 // be permanently ineligible for everybody. Exported for tests.
@@ -58,8 +70,14 @@ export type EligibilityRuleForm =
   | { type: "AUTH_METHOD"; methods: string }
   | { type: "SUBJECT_KIND"; kinds: string }
   | { type: "DATE_WINDOW"; from: string; until: string }
-  | { type: "PRIOR_PURCHASE"; mode: "requires_prior" | "forbids_prior" }
+  // THE FREE ALLOWANCE (forbids_prior). `within_hours` ("once every N hours", 1..8760, empty = once ever) and
+  // `also_by_device` (the device's own history counts too) are sent only when set, so a rule that never named
+  // them keeps the server's defaults -- and the switch an operator turned OFF is sent as an explicit false.
+  | { type: "PRIOR_PURCHASE"; mode: "requires_prior" | "forbids_prior"; within_hours?: string; also_by_device?: boolean }
   | { type: "SITE_NETWORK"; guest_network_ids: string }
+  // THE AUDIENCE. Group ids are a list (never comma text: they are uuids chosen from a picker), and `public`
+  // widens the rule to Clients who are in no group at all.
+  | { type: "CLIENT_GROUP"; group_ids: string[]; public: boolean }
   // Either bound may be left empty: "8 nights or more" and "up to 7 nights" are both real rules, and the
   // backend contract permits an open end. What it does not permit is BOTH empty, which constrains nothing.
   | { type: "STAY_LENGTH"; min_nights: string; max_nights: string }
@@ -116,10 +134,24 @@ export function serializeRule(r: EligibilityRuleForm): { type: string; value: Re
       if (r.until) value.until = new Date(r.until).toISOString();
       return { type: "DATE_WINDOW", value };
     }
-    case "PRIOR_PURCHASE":
-      return { type: "PRIOR_PURCHASE", value: { [r.mode]: true } };
+    case "PRIOR_PURCHASE": {
+      const value: Record<string, unknown> = { [r.mode]: true };
+      // The allowance fields belong to forbids_prior only; "requires prior" has no window or device dimension.
+      if (r.mode === "forbids_prior") {
+        if (r.within_hours !== undefined && r.within_hours !== "") value.within_hours = Number(r.within_hours);
+        if (typeof r.also_by_device === "boolean") value.also_by_device = r.also_by_device;
+      }
+      return { type: "PRIOR_PURCHASE", value };
+    }
     case "SITE_NETWORK":
       return { type: "SITE_NETWORK", value: { guest_network_ids: asList(r.guest_network_ids) } };
+    case "CLIENT_GROUP": {
+      const value: Record<string, unknown> = {};
+      const ids = nameList(r.group_ids);
+      if (ids.length) value.group_ids = ids;
+      if (r.public) value.public = true;
+      return { type: "CLIENT_GROUP", value };
+    }
     case "STAY_LENGTH": {
       // An empty bound is OMITTED, never sent as 0. {min_nights: 0} reads as "at least zero nights", which
       // is a rule that constrains nothing while looking like one that does.
@@ -141,6 +173,28 @@ export function serializeRule(r: EligibilityRuleForm): { type: string; value: Re
     default:
       throw new Error(`unsupported rule type: ${(r as { type: string }).type}`);
   }
+}
+
+// THE BOUNDS OF THE FREE ALLOWANCE WINDOW, mirroring edged (1 hour to one year). Exported so the editor can
+// state them beside the field rather than discover them on save.
+export const WITHIN_HOURS_MIN = 1;
+export const WITHIN_HOURS_MAX = 8760;
+
+// validateRule says, in the operator's words, why a dedicated-control rule cannot be published as it stands.
+// The server re-validates; this stops the two conditions that are easy to leave half-set from reaching it.
+export function validateRule(r: EligibilityRuleForm): string | null {
+  if (r.type === "CLIENT_GROUP") {
+    if (nameList(r.group_ids).length === 0 && !r.public) {
+      return "Audience: choose at least one client group, or set the audience to Everyone.";
+    }
+  }
+  if (r.type === "PRIOR_PURCHASE" && r.mode === "forbids_prior" && r.within_hours !== undefined && r.within_hours !== "") {
+    const h = Number(r.within_hours);
+    if (!Number.isInteger(h) || h < WITHIN_HOURS_MIN || h > WITHIN_HOURS_MAX) {
+      return `Free access: the number of hours must be a whole number between ${WITHIN_HOURS_MIN} and ${WITHIN_HOURS_MAX}.`;
+    }
+  }
+  return null;
 }
 
 // validateDuration returns a client-side error string (or null). PMS/checkout modes are not representable
@@ -218,6 +272,8 @@ export function buildPublishPayload(s: PublishFormState): { payload?: PublishPay
   if (winErr) return { error: winErr };
   for (const r of s.rules) {
     if (!isSupportedRuleType(r.type)) return { error: `unsupported rule type: ${r.type}` };
+    const err = validateRule(r);
+    if (err) return { error: err };
   }
   const payload: PublishPayload = {
     code: s.code.trim(),
@@ -252,6 +308,7 @@ export const RULE_TYPE_LABELS: Record<RuleType, string> = {
   DATE_WINDOW: "Only between two dates",
   PRIOR_PURCHASE: "Whether they already had a package",
   SITE_NETWORK: "Only on certain client networks",
+  CLIENT_GROUP: "Client group (audience)",
   STAY_LENGTH: "How many nights they are staying",
   ROOM_TYPE: "Room type",
   RATE_PLAN: "Rate plan",

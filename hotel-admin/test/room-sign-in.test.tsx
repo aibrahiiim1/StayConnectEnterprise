@@ -79,7 +79,7 @@ describe("Hotel → Room sign-in", () => {
     render(<RoomSignInPage />);
     expect(await screen.findByText(/room sign-in is switched off/i)).toBeInTheDocument();
     expect(screen.queryAllByRole("switch")).toHaveLength(0);
-    expect(screen.getByRole("link", { name: /client portal → sign-in methods/i })).toHaveAttribute("href", "/sign-in-methods");
+    expect(screen.getByRole("link", { name: /client access → sign-in methods/i })).toHaveAttribute("href", "/sign-in-methods");
   });
 
   it("saves a choice as a merge of the pms key, keeping the switch as it was", async () => {
@@ -120,7 +120,7 @@ describe("Hotel → Room sign-in", () => {
   });
 });
 
-describe("Client Portal → Sign-in methods keeps only the Room sign-in switch", () => {
+describe("Client access → Sign-in methods keeps only the Room sign-in switch", () => {
   it("offers the switch and a link to the Hotel screen, and no credential choice", async () => {
     routes(["site_admin"], { enabled: true, mode: "room_any" });
     render(<SignInMethodsPage />);
