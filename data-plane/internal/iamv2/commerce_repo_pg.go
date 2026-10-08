@@ -347,6 +347,7 @@ func (t *pgCommerceTx) HasPriorPurchase(ctx context.Context, tenantID, siteID st
 	// through purchase -> auth context -> device (open selection, contract 6.5). For an identified Client the
 	// subject's own history counts, and -- when the policy says so -- the device's too, so a second email on
 	// the same phone is not a second free allowance. The device is never the subject.
+	// The window is measured from the grant (activated_at); a grant still pending counts as now.
 	var since *time.Time
 	if q.Policy.WithinHours > 0 {
 		s := time.Now().Add(-time.Duration(q.Policy.WithinHours) * time.Hour)
@@ -355,7 +356,7 @@ func (t *pgCommerceTx) HasPriorPurchase(ctx context.Context, tenantID, siteID st
 	bySubject := `SELECT 1 FROM iam_v2.entitlements e
 	                JOIN iam_v2.internet_package_revisions r ON r.id = e.package_revision_id
 	               WHERE e.tenant_id=$1 AND e.site_id=$2 AND r.package_id=$3::uuid
-	                 AND ($8::timestamptz IS NULL OR e.created_at >= $8::timestamptz)
+	                 AND ($8::timestamptz IS NULL OR COALESCE(e.activated_at, now()) >= $8::timestamptz)
 	                 AND ( ($4::uuid IS NOT NULL AND e.voucher_id=$4::uuid)
 	                    OR ($5::uuid IS NOT NULL AND e.guest_account_id=$5::uuid)
 	                    OR ($6::uuid IS NOT NULL AND e.guest_principal_id=$6::uuid) )`
@@ -364,7 +365,7 @@ func (t *pgCommerceTx) HasPriorPurchase(ctx context.Context, tenantID, siteID st
 	               JOIN iam_v2.purchases pu     ON pu.id = e.purchase_id
 	               JOIN iam_v2.auth_contexts ac ON ac.id = pu.auth_context_id
 	              WHERE e.tenant_id=$1 AND e.site_id=$2 AND r.package_id=$3::uuid
-	                AND ($8::timestamptz IS NULL OR e.created_at >= $8::timestamptz)
+	                AND ($8::timestamptz IS NULL OR COALESCE(e.activated_at, now()) >= $8::timestamptz)
 	                AND $7::uuid IS NOT NULL AND ac.device_id = $7::uuid`
 	v, a, p := subjectCols(q.Subject)
 	var dev *string

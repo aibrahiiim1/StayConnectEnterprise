@@ -181,7 +181,7 @@ var rolePerms = map[string]map[string]perm{
 		"sessions":       permWrite,
 		// The Usage Explorer only ever READS durable accounting; there is no write to grant.
 		"usage":        permRead,
-		"auth-methods": permWrite, "walled-garden": permWrite,
+		"auth-methods": permWrite, "walled-garden": permWrite, "client-groups": permWrite,
 		"portal-branding": permWrite, "portal-assets": permWrite, "notification-providers": permWrite,
 		"social-providers": permWrite,
 		// Card payment provider accounts (site-local; secrets write-only and sealed). Replaces the retired
@@ -286,7 +286,7 @@ var rolePerms = map[string]map[string]perm{
 		"stay-transfers":   permWrite,
 		"financial-review": permRead,
 		"financial-ops":    permRead,
-		"auth-methods":     permRead, "walled-garden": permRead, "reports": permRead, "audit": permRead, "license": permRead, "backups": permRead,
+		"auth-methods":     permRead, "walled-garden": permRead, "client-groups": permRead, "reports": permRead, "audit": permRead, "license": permRead, "backups": permRead,
 		// Phase 6 (DARK): the desk may SEE whether the property offers guest device self-service -- it is
 		// the answer to "why can't I remove my old phone" -- but changing a property capability is not a
 		// desk action.
@@ -312,7 +312,7 @@ var rolePerms = map[string]map[string]perm{
 		"pms-reconciliation": permRead, "pms-roster-reconciliation": permRead,
 		"post-stay-profiles": permWrite,
 		"stay-transfers":     permWrite,
-		"auth-methods":       permRead, "reports": permRead,
+		"auth-methods":       permRead, "reports": permRead, "client-groups": permRead,
 		"audit": permRead, "license": permRead, "backups": permRead, "walled-garden": permRead,
 		// Phase 6 (DARK): same readership as the front desk, for the same reason -- guest relations answers
 		// the same question and changes no property capability.
@@ -358,7 +358,7 @@ var rolePerms = map[string]map[string]perm{
 		// evidence of the same kind they read everywhere else — and acts on neither.
 		"guest-signin-protection": permRead, "guest-signin-restrictions": permRead,
 		"guest-accounts": permRead, "sessions": permRead, "usage": permRead, "auth-methods": permRead,
-		"walled-garden": permRead, "portal-branding": permRead, "portal-assets": permRead, "notification-providers": permRead, "social-providers": permRead,
+		"walled-garden": permRead, "client-groups": permRead, "portal-branding": permRead, "portal-assets": permRead, "notification-providers": permRead, "social-providers": permRead,
 		"payment-providers": permRead, "modules": permRead, "audit": permRead, "reports": permRead,
 		"backups": permRead, "license": permRead, "network": permRead, "diagnostics": permRead,
 		"commercial-packages": permRead,

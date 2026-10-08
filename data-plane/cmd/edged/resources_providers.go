@@ -12,11 +12,13 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/stayconnect/enterprise/data-plane/internal/mail"
 	"github.com/stayconnect/enterprise/data-plane/internal/social"
 	"github.com/stayconnect/enterprise/data-plane/internal/socialloader"
 )
@@ -32,14 +34,31 @@ import (
 // ----- notification providers ----------------------------------------------------
 
 // WhatsApp is its own channel with its own provider kinds; it is never an SMS kind.
+//
+// "ses" is no longer offered: edged accepted it while scd had no adapter for it, so an operator could save a
+// sender that silently fell back to the stub. A row that already carries it is still read and validated.
 var notifyAllowedKinds = map[string]map[string]bool{
-	"email":    {"stub": true, "sendgrid": true, "ses": true},
+	"email":    {"stub": true, "sendgrid": true, "smtp": true},
 	"sms":      {"stub": true, "twilio": true},
 	"whatsapp": {"stub": true, "meta_whatsapp": true, "twilio_whatsapp": true},
 }
 
 // whatsappExtraKeys are the non-secret settings a WhatsApp provider keeps in notification_providers.extra.
 var whatsappExtraKeys = map[string]bool{"template_name": true, "language": true, "content_sid": true}
+
+// smtpExtraKeys are the non-secret settings of the site's own mail server (contract §7.1). The password is
+// the sealed secret, never a column.
+var smtpExtraKeys = map[string]bool{"host": true, "port": true, "security": true, "username": true, "timeout_seconds": true}
+
+func extraKeysFor(channel, kind string) map[string]bool {
+	switch {
+	case channel == "whatsapp":
+		return whatsappExtraKeys
+	case channel == "email" && kind == "smtp":
+		return smtpExtraKeys
+	}
+	return map[string]bool{}
+}
 
 var (
 	reMetaPhoneID   = regexp.MustCompile(`^[0-9]{5,32}$`)
@@ -92,7 +111,7 @@ func publicExtra(raw string) map[string]string {
 	}
 	out := map[string]string{}
 	for k, v := range m {
-		if sv, ok := v.(string); ok && whatsappExtraKeys[k] {
+		if sv, ok := v.(string); ok && (whatsappExtraKeys[k] || smtpExtraKeys[k]) {
 			out[k] = sv
 		}
 	}
@@ -125,9 +144,43 @@ type notifyProviderShape struct {
 // validateNotifyProvider returns a readable message for a provider that cannot work, or "" when it can.
 // Only WhatsApp providers are checked field by field; email and SMS keep their historical rules.
 func validateNotifyProvider(p notifyProviderShape) string {
+	if p.Channel == "email" && p.Kind == "smtp" {
+		for k := range p.Extra {
+			if !smtpExtraKeys[k] {
+				return fmt.Sprintf("unknown SMTP setting %q (allowed: host, port, security, username, timeout_seconds)", k)
+			}
+		}
+		port, _ := strconv.Atoi(strings.TrimSpace(p.Extra["port"]))
+		sec := mail.SMTPSecurity(strings.TrimSpace(p.Extra["security"]))
+		if sec == "" {
+			sec = mail.SMTPStartTLS
+		}
+		if port == 0 {
+			port = mail.DefaultSMTPPort(sec)
+		}
+		timeout := 0
+		if t := strings.TrimSpace(p.Extra["timeout_seconds"]); t != "" {
+			n, err := strconv.Atoi(t)
+			if err != nil || n < 1 || n > 120 {
+				return "timeout_seconds must be a whole number of seconds from 1 to 120"
+			}
+			timeout = n
+		}
+		password := ""
+		if p.HasAPIKey {
+			password = "set"
+		}
+		cfg := mail.SMTPConfig{Host: strings.TrimSpace(p.Extra["host"]), Port: port, Security: sec,
+			Username: strings.TrimSpace(p.Extra["username"]), Password: password, FromAddress: strings.TrimSpace(p.FromAddress),
+			Timeout: time.Duration(timeout) * time.Second}
+		if msg := mail.ValidateSMTPConfig(cfg); msg != "" {
+			return msg
+		}
+		return ""
+	}
 	if p.Channel != "whatsapp" {
 		if len(p.Extra) > 0 {
-			return "extra settings apply only to WhatsApp providers"
+			return "extra settings apply only to WhatsApp and SMTP providers"
 		}
 		return ""
 	}
@@ -191,7 +244,52 @@ func (s *server) notificationProvidersRoutes() http.Handler {
 	r.Get("/{id}", s.getNotifyProvider)
 	r.Patch("/{id}", s.patchNotifyProvider)
 	r.Delete("/{id}", s.deleteNotifyProvider)
+	// "Send a test message": scd builds the sender exactly as the loader does and delivers one message.
+	r.Post("/{id}/test", s.testNotifyProvider)
 	return r
+}
+
+// storeNotifySecret hands a secret to scd, which seals it under the appliance key and clears the plaintext
+// column (contract §7.3). edged never holds the key. ok=false with the operator-readable reason on failure.
+func (s *server) storeNotifySecret(r *http.Request, id, secret string) (bool, string) {
+	status, body, err := s.scd.call(r.Context(), http.MethodPost, "/v1/admin/notify/providers/"+id+"/secret",
+		map[string]string{"secret": secret})
+	if err != nil {
+		return false, "the secret could not be stored: the service is unavailable"
+	}
+	if status != http.StatusOK {
+		var e struct {
+			Message string `json:"message"`
+			Error   string `json:"error"`
+		}
+		_ = json.Unmarshal(body, &e)
+		if e.Message != "" {
+			return false, e.Message
+		}
+		return false, "the secret could not be stored (" + e.Error + ")"
+	}
+	return true, ""
+}
+
+// testNotifyProvider proxies the test to scd and returns its verdict verbatim.
+func (s *server) testNotifyProvider(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var in struct {
+		To string `json:"to"`
+	}
+	if err := decodeJSON(r, &in); err != nil || strings.TrimSpace(in.To) == "" {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "a recipient is required")
+		return
+	}
+	status, body, err := s.scd.call(r.Context(), http.MethodPost, "/v1/admin/notify/providers/"+id+"/test", map[string]string{"to": strings.TrimSpace(in.To)})
+	if err != nil {
+		jsonErr(w, http.StatusBadGateway, "scd_unavailable", "the service is unavailable")
+		return
+	}
+	s.audit(r, "notification_provider.tested", "notification_provider", id, map[string]any{"status": status})
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(body)
 }
 
 func (s *server) listNotifyProviders(w http.ResponseWriter, r *http.Request) {
@@ -268,6 +366,8 @@ func (s *server) createNotifyProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
+	// THE SECRET NEVER TOUCHES THE PLAINTEXT COLUMN. The row is written without it, the secret is handed to
+	// scd to seal, and a row whose secret could not be sealed is removed again rather than left half-made.
 	var n edgeNotificationProvider
 	err := scanNotify(s.db.QueryRow(ctx, `
         INSERT INTO notification_providers(
@@ -275,11 +375,11 @@ func (s *server) createNotifyProvider(w http.ResponseWriter, r *http.Request) {
             api_key, api_user, from_address, from_name, region, extra
         ) VALUES (
             $1, $2, $3, $4, NULLIF($5,''),
-            NULLIF($6,''), NULLIF($7,''), NULLIF($8,''), NULLIF($9,''), NULLIF($10,''), $11::jsonb
+            NULL, NULLIF($6,''), NULLIF($7,''), NULLIF($8,''), NULLIF($9,''), $10::jsonb
         )
         RETURNING `+notifyCols,
 		s.tenantID, in.Channel, in.Kind, enabled, strDeref(in.DisplayName),
-		strDeref(in.APIKey), strDeref(in.APIUser),
+		strDeref(in.APIUser),
 		strDeref(in.FromAddress), strDeref(in.FromName), strDeref(in.Region), string(extraJSON),
 	), &n)
 	if err != nil {
@@ -290,9 +390,17 @@ func (s *server) createNotifyProvider(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "insert failed")
 		return
 	}
+	if secret := strings.TrimSpace(strDeref(in.APIKey)); secret != "" {
+		if ok, msg := s.storeNotifySecret(r, n.ID, secret); !ok {
+			_, _ = s.db.Exec(ctx, `DELETE FROM notification_providers WHERE id=$1 AND tenant_id=$2`, n.ID, s.tenantID)
+			jsonErr(w, http.StatusBadGateway, "secret_not_stored", msg)
+			return
+		}
+	}
 	s.audit(r, "notification_provider.created", "notification_provider", n.ID, map[string]any{
 		"channel": in.Channel, "kind": in.Kind,
 	})
+	s.pokeSCD(r, "/v1/admin/notify/reload")
 	writeJSON(w, http.StatusCreated, n)
 }
 
@@ -328,8 +436,15 @@ func (s *server) patchNotifyProvider(w http.ResponseWriter, r *http.Request) {
 	if in.FromAddress != nil {
 		cur.FromAddress = *in.FromAddress
 	}
+	// HasAPIKey means "a secret exists somewhere": the plaintext column (rows written before 0107), a sealed
+	// generation (rows written since), or the one arriving in this request.
 	if strings.TrimSpace(strDeref(in.APIKey)) != "" {
 		cur.HasAPIKey = true
+	} else if !cur.HasAPIKey {
+		var sealed bool
+		_ = s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM iam_v2.notification_provider_secret_generations
+		     WHERE tenant_id=$1 AND provider_id=$2::uuid AND superseded_at IS NULL)`, s.tenantID, id).Scan(&sealed)
+		cur.HasAPIKey = sealed
 	}
 	var extraArg *string
 	if len(in.Extra) > 0 {
@@ -337,9 +452,9 @@ func (s *server) patchNotifyProvider(w http.ResponseWriter, r *http.Request) {
 		b, _ := json.Marshal(cur.Extra)
 		sb := string(b)
 		extraArg = &sb
-	} else if cur.Channel == "whatsapp" {
+	} else if cur.Channel == "whatsapp" || cur.Kind == "smtp" {
 		cur.Extra = publicExtra(curExtra)
-	} // stored extras on email/SMS rows are left exactly as they are
+	} // stored extras on other rows are left exactly as they are
 	if msg := validateNotifyProvider(cur); msg != "" {
 		jsonErr(w, http.StatusBadRequest, "bad_request", msg)
 		return
@@ -350,18 +465,17 @@ func (s *server) patchNotifyProvider(w http.ResponseWriter, r *http.Request) {
         UPDATE notification_providers SET
             enabled      = COALESCE($3, enabled),
             display_name = COALESCE($4, display_name),
-            api_key      = COALESCE(NULLIF($5,''), api_key),
-            api_user     = COALESCE($6, api_user),
-            from_address = COALESCE($7, from_address),
-            from_name    = COALESCE($8, from_name),
-            region       = COALESCE($9, region),
-            extra        = COALESCE($10::jsonb, extra),
+            api_user     = COALESCE($5, api_user),
+            from_address = COALESCE($6, from_address),
+            from_name    = COALESCE($7, from_name),
+            region       = COALESCE($8, region),
+            extra        = COALESCE($9::jsonb, extra),
             updated_at   = now()
          WHERE id = $1 AND tenant_id = $2
          RETURNING `+notifyCols,
 		id, s.tenantID,
 		in.Enabled, in.DisplayName,
-		strDeref(in.APIKey), in.APIUser, in.FromAddress, in.FromName, in.Region, extraArg,
+		in.APIUser, in.FromAddress, in.FromName, in.Region, extraArg,
 	), &n)
 	if isNoRows(err) {
 		jsonErr(w, http.StatusNotFound, "not_found", "provider not found")
@@ -375,7 +489,14 @@ func (s *server) patchNotifyProvider(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "update failed")
 		return
 	}
+	if secret := strings.TrimSpace(strDeref(in.APIKey)); secret != "" {
+		if ok, msg := s.storeNotifySecret(r, id, secret); !ok {
+			jsonErr(w, http.StatusBadGateway, "secret_not_stored", msg)
+			return
+		}
+	}
 	s.audit(r, "notification_provider.updated", "notification_provider", id, nil)
+	s.pokeSCD(r, "/v1/admin/notify/reload")
 	writeJSON(w, http.StatusOK, n)
 }
 
@@ -394,6 +515,7 @@ func (s *server) deleteNotifyProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(r, "notification_provider.deleted", "notification_provider", id, nil)
+	s.pokeSCD(r, "/v1/admin/notify/reload")
 	w.WriteHeader(http.StatusNoContent)
 }
 

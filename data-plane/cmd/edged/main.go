@@ -413,6 +413,8 @@ func main() {
 			// management system, and the older one could start a competing connector. See resources_providers.go.
 			mountResource(r, s, "auth-methods", s.authMethodsRoutes)
 			mountResource(r, s, "walled-garden", s.walledGardenRoutes)
+			// Client Groups: who a Client is, kept apart from what they may have (contract §3). Core, never a module.
+			mountResource(r, s, "client-groups", s.clientGroupsRoutes)
 			mountResource(r, s, "portal-branding", s.brandingRoutes)
 			mountResource(r, s, "portal-assets", s.portalAssetRoutes)
 			// payments is REMOVED. It was a read-only list over public.payments, a Stripe-session record

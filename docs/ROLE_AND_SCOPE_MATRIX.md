@@ -58,6 +58,7 @@ the keys are unchanged, [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md)). Legen
 
 | guest-signin-restrictions (`Release_Guest_SignIn_Restriction`) | W | **W** | **W** | **W** | – | – | R |
 | walled-garden | W | W | R | R | – | R | R |
+| client-groups | W | W | R | R | – | – | R |
 | portal-branding | W | W | R | R | – | R | R |
 | payments (view) | W | W | R | R | – | **W** | R |
 | payments **refunds** | W | **–** | – | – | – | **W** | – |
