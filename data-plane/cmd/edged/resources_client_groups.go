@@ -339,13 +339,18 @@ func (s *server) patchClientGroup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, after[0])
 }
 
-// packagesNamingGroup lists the current package revisions whose audience names this group.
+// packagesNamingGroup lists the active packages whose CURRENT revision names this group as its audience.
+//
+// Through the scoped reader iam_v2.p2_package_current_conditions, never a direct read of
+// package_eligibility_rules: edged holds INSERT on that table for publishing and deliberately no SELECT, so a
+// direct join is a permission error that would have made every group undeletable (found live).
 func (s *server) packagesNamingGroup(ctx context.Context, q rowQuerier, groupID string) ([]string, error) {
 	rows, err := q.Query(ctx, `
-		SELECT DISTINCT p.code FROM iam_v2.package_eligibility_rules r
-		  JOIN iam_v2.internet_packages p ON p.current_revision_id = r.package_revision_id
-		 WHERE p.tenant_id=$1 AND p.site_id=$2 AND r.rule_type='CLIENT_GROUP'
-		   AND r.rule_value->'group_ids' ? $3
+		SELECT p.code FROM iam_v2.internet_packages p
+		 WHERE p.tenant_id=$1 AND p.site_id=$2 AND p.active AND COALESCE(p.is_system,false)=false
+		   AND p.current_revision_id IS NOT NULL
+		   AND EXISTS (SELECT 1 FROM iam_v2.p2_package_current_conditions($1,$2,p.id) c
+		                WHERE c.kind='RULE' AND c.rule_type='CLIENT_GROUP' AND c.value->'group_ids' ? $3)
 		 ORDER BY 1`, s.tenantID, s.siteID, groupID)
 	if err != nil {
 		return nil, err
