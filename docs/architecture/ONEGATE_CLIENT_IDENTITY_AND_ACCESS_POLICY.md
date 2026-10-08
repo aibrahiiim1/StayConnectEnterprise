@@ -363,12 +363,29 @@ devices` live in `tenants.auth_methods.portal` and are audited with the other sw
   and nothing else. Voucher, Client account, Room sign-in and open selection never depend on the Internet.
 * **Fail closed** everywhere a lookup fails: no group, no credential, no linking.
 
-## 11. What stays inactive until separately authorised
+## 11. Upgrading an existing appliance
+
+Migration **0107** is additive. On a live site it is applied through `scripts/edge-migrate.sh` as
+`iam_v2_owner` (`--target-kind live-site`, SHA pinned), which owns nothing in `public`; therefore:
+
+1. apply `0107_a_client_is_one_identity_with_groups_and_a_remembered_device` with the runner;
+2. run `deploy/scripts/extend-notification-kinds-smtp.sql` as the table owner (`stayconnect`) — it widens
+   `public.notification_providers.kind` to accept `smtp` and refuses to run before 0107 is in the ledger;
+3. reconcile Gate-P with `scripts/gatep-reconcile.sh` from the same revision (the 0107 grants are in
+   `svc-scd-iamv2-guest-auth-grants.sql` and `svc-edged-phase345-admin-grants.sql`);
+4. install the new `keybootstrap` and run it once (`KEYBOOTSTRAP_DSN=…`): it creates `notify_dek.key`
+   (0600) and touches nothing that exists;
+5. install `scd`, `edged`, `portald`, `netd` and the Admin Console bundle and restart them.
+
+Nothing here rewrites a row. Existing senders keep working from `api_key` until their secret is re-saved;
+existing social Clients keep their identity through the lookup-only legacy claim (§2.2).
+
+## 12. What stays inactive until separately authorised
 
 LIVE-mode provider transactions, real PMS posting on any appliance other than PRE-LIVE (D47), Go-Live, and
 real social-provider validation (needs the public portal hostname decision).
 
-## 12. Recommended next decisions (not implemented)
+## 13. Recommended next decisions (not implemented)
 
 1. **Public Client Portal hostname and certificate** — blocks every real IdP.
 2. **OneGate-managed email relay** — a Central service with per-site sending identity; the appliance side is
