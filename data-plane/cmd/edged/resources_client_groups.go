@@ -401,6 +401,14 @@ func (s *server) deleteClientGroup(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "history failed")
 		return
 	}
+	// Deleting the group sets client_group_id to NULL on every auth context that still carries it (the FK's
+	// ON DELETE SET NULL): those contexts fall back to Public, and their evidence keeps the group's name. That
+	// referential action is an UPDATE on auth_contexts, which the Phase-3 writer guard refuses unless the
+	// auth_context operation scope is open in this transaction -- found live as a bare "delete failed".
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('auth_context')`); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "delete failed (scope)")
+		return
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM iam_v2.client_groups WHERE tenant_id=$1 AND site_id=$2 AND id=$3::uuid`, s.tenantID, s.siteID, id); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "delete failed")
 		return
