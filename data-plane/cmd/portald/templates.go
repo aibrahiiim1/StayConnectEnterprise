@@ -363,6 +363,8 @@ const landingHTML = `<!doctype html>
         <input id="email-code" name="code" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" required maxlength="6" placeholder="••••••" dir="ltr">
       </div>
       <button class="primary" type="submit"><span data-i18n="btn.verify" data-i18n-en="Verify">{{index .T "btn.verify"}}</span></button>
+      <p class="hint" data-i18n="otp.pending.hint" data-i18n-en="You can open your mail app and come back: this box will still be here. Or tap the link in the email.">{{index .T "otp.pending.hint"}}</p>
+      <button type="button" class="link" data-again data-i18n="otp.again" data-i18n-en="Send the code again">{{index .T "otp.again"}}</button>
       <button type="button" class="link" data-resend data-i18n="otp.retry.email" data-i18n-en="Try a different email">{{index .T "otp.retry.email"}}</button>
       <div class="err" id="email-code-err" role="alert" data-for="email-code"></div>
     </form>
@@ -1192,6 +1194,7 @@ const landingHTML = `<!doctype html>
         }
       })();
       setGroup(shown[0], groupMembers);
+      restorePending(cfg);
     }).catch(() => { setTab('voucher'); });
 
     function panel(channel) { return document.getElementById('panel-' + channel); }
@@ -1266,7 +1269,38 @@ const landingHTML = `<!doctype html>
         destForm.style.display = 'block';
         destForm.querySelector('input[name=dest]').focus();
         delete challenges[channel];
+        fetch('/auth/otp/forget', {method:'POST'}).catch(() => {});
       });
+      // SEND AGAIN: the address the device gave earlier, held by the server and never echoed here.
+      const again = codeForm.querySelector('[data-again]');
+      if (again) again.addEventListener('click', async () => {
+        const errEl = codeForm.querySelector('.err');
+        errEl.textContent = ''; again.disabled = true;
+        try {
+          const r = await fetch('/auth/otp/resend', {method:'POST'});
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) { errEl.textContent = otpMessage('dest', j); return; }
+          challenges[channel] = j.challenge_id;
+          codeForm.querySelector('input[name=code]').value = '';
+          codeForm.querySelector('input[name=code]').focus();
+        } catch (err) {
+          errEl.textContent = t('err.service');
+        } finally { again.disabled = false; }
+      });
+    }
+    // A CODE ALREADY IN FLIGHT FOR THIS DEVICE (the captive browser was dismissed to read it): reopen the
+    // code box for that channel, naming the masked address, and make that channel the one on screen.
+    function restorePending(cfg) {
+      const p = cfg && cfg.pending_otp;
+      if (!p || !p.challenge_id || !panel(p.channel)) return false;
+      challenges[p.channel] = p.challenge_id;
+      const destForm = form(p.channel, 'dest'), codeForm = form(p.channel, 'code');
+      codeForm.querySelector('.dest').textContent = p.dest_masked || '';
+      destForm.style.display = 'none';
+      codeForm.style.display = 'block';
+      setTab(p.channel);
+      codeForm.querySelector('input[name=code]').focus();
+      return true;
     }
     attach('email');
     attach('sms');

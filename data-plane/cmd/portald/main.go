@@ -62,6 +62,9 @@ type handler struct {
 	tmplLand *template.Template
 	tmplSucc *template.Template
 	arpCache arpLookup
+	// pendingOTP holds each device's in-flight one-time code so the landing page can reopen on the code box
+	// after the captive browser was dismissed (otp_pending.go).
+	pendingOTP *pendingOTPStore
 	// arpNudge asks the kernel to resolve a neighbour the cache does not have yet (arp_resolve.go). A seam, so
 	// a test can drive resolution without a network.
 	arpNudge arpNudge
@@ -110,6 +113,7 @@ func newHandler(c cfg) (*handler, error) {
 		tmplLand:    tland,
 		tmplSucc:    tsucc,
 		arpCache:    defaultArp,
+		pendingOTP:  newPendingOTPStore(),
 		arpNudge:    defaultArpNudge,
 		commerceCfg: commCfg,
 		designs:     &designCache{},
@@ -508,6 +512,11 @@ func (h *handler) routes() http.Handler {
 	r.Post("/auth/resume", h.authResume)
 	r.Post("/auth/resume/forget", h.authResumeForget)
 	r.Post("/auth/otp/request", h.authOTPRequest)
+	// The pending code survives the captive browser (otp_pending.go): resend, forget, and the email's link.
+	r.Post("/auth/otp/resend", h.authOTPResend)
+	r.Post("/auth/otp/forget", h.authOTPForget)
+	r.Get("/connect", h.connectPage)
+	r.Post("/auth/otp/link", h.authOTPLink)
 	r.Post("/auth/otp/verify", h.authOTPVerify)
 	r.Get("/auth/social/start", h.socialStart)
 	r.Get("/auth/social/callback", h.socialCallback)

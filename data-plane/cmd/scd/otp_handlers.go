@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -110,6 +111,22 @@ type otpIssueReq struct {
 	Channel     string `json:"channel"`     // "email" | "sms" | "whatsapp"
 	Destination string `json:"destination"` // email address, or a phone number (normalised to E.164)
 	IP          string `json:"ip"`
+	// PortalBase is the origin the device reached the portal by (portald, from the connection). When present
+	// and well-formed the email also carries a tap-to-connect link into the device's real browser.
+	PortalBase string `json:"portal_base,omitempty"`
+}
+
+// otpLinkBase accepts only a plain http(s) origin: scheme and host (with an optional port), nothing else.
+func otpLinkBase(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || len(raw) > 255 {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 type otpIssueResp struct {
@@ -240,6 +257,13 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 
 	sentBody = fmt.Sprintf("Your one-time code is: %s\n\nIt expires in %d minutes.",
 		issued.Code, int(otp.DefaultTTL.Minutes()))
+	// THE LINK THE CLIENT CAN TAP FROM THE MAIL APP. It opens the portal in the phone's real browser -- reachable
+	// before sign-in -- on a page with one Connect button; nothing is verified by merely opening it. The code in
+	// it is the same secret this email already carries, single-use and ten minutes long.
+	if base := otpLinkBase(req.PortalBase); base != "" && channelLabel == "email" {
+		sentBody += fmt.Sprintf("\n\nOr tap to connect this device:\n%s/connect?c=%s&k=%s", base,
+			url.QueryEscape(issued.ChallengeID), url.QueryEscape(issued.Code))
+	}
 
 	// A FAILED SEND IS A FAILURE. The code used to be reported as sent while the delivery error went to the
 	// log alone, which left the client waiting for a message that was never coming. The sender's error is
