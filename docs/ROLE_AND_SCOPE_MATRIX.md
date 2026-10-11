@@ -50,6 +50,8 @@ the keys are unchanged, [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md)). Legen
 | guests | W | W | **W** | **W** | – | R | R |
 | pms-providers (+test/cache/health) | W | W | R | R | – | R | R |
 | auth-methods | W | W | R | R | – | R | R |
+| code-requests (list; W lets one device try again) | W | W | W | W | – | – | R |
+| code-reveal (W reads a live code to its client) | W | W | W | – | – | – | – |
 | guest-device-self-service | W | W | R | R | – | R | R |
 | guest-signin-attempts (`View_Guest_SignIn_Attempts`) | W | R | **R** | **R** | – | – | R |
 | guest-signin-credentials (`View_Guest_SignIn_Credentials`) | W | R | **R** | **R** | – | – | **–** |
@@ -81,6 +83,8 @@ the keys are unchanged, [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md)). Legen
   departure event, so replaying an old one is not something the product can do — and a write permission would
   promise a power it does not have.
 * `guest-signin-restrictions` — **W** releases ONE device's wait early, with a mandatory reason.
+* `code-requests` — **R** lists recent code requests and temporary-internet windows; **W** lets ONE device try again (its ended windows stop counting; nothing deleted, no access granted), with password and reason (2026-10-12).
+* `code-reveal` — **W** reads a LIVE one-time code to the client it was sent to, with password and reason. Separate from `code-requests` because it lets the desk vouch for an address the client did not prove (contract §6.7).
 
 The blast radii are not comparable. A release affects one device for the remainder of one wait; a policy
 change affects every guest on the site until somebody changes it back. So the client-services desk holds the

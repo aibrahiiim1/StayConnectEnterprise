@@ -26,8 +26,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, ListResp, Whoami } from "@/lib/api";
-import { canWrite } from "@/lib/roles";
+import { canRead, canWrite } from "@/lib/roles";
 import { GuestSignInProtectionCard } from "@/components/guest-signin-protection";
+import { CodeRequestsCard } from "@/components/code-requests";
 import { roomSignInImpaired, useRoomSignInReadiness } from "@/components/room-sign-in-readiness";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -50,7 +51,7 @@ type Method = { enabled?: boolean };
 // unit and bounds -- the same table edged validates against (tenantcfg.TemporaryAccessBounds).
 type TemporaryAccess = {
   enabled?: boolean; minutes?: number; down_kbps?: number; up_kbps?: number; data_mb?: number;
-  per_device_daily?: number; per_destination_daily?: number; max_concurrent?: number;
+  per_device_daily?: number; per_destination_daily?: number; max_concurrent?: number; retry_after_minutes?: number;
 };
 type EmailMethod = Method & { temporary_access?: TemporaryAccess };
 const TEMP_ACCESS_FIELDS: { key: Exclude<keyof TemporaryAccess, "enabled">; label: string; unit: string; def: number; min: number; max: number; explanation: string }[] = [
@@ -60,6 +61,7 @@ const TEMP_ACCESS_FIELDS: { key: Exclude<keyof TemporaryAccess, "enabled">; labe
   { key: "data_mb", label: "Data allowance", unit: "MB", def: 25, min: 1, max: 200, explanation: "Upload and download combined. The window ends when it is used." },
   { key: "per_device_daily", label: "Windows per device", unit: "per 24 hours", def: 3, min: 1, max: 10, explanation: "Asking again while a window is open reuses it; this limits new windows for the same device." },
   { key: "per_destination_daily", label: "Windows per email address", unit: "per 24 hours", def: 3, min: 1, max: 10, explanation: "Limits windows for the same address, whatever device asks — so changing devices does not reset it." },
+  { key: "retry_after_minutes", label: "Wait before another window", unit: "minutes", def: 30, min: 0, max: 1440, explanation: "If a client still has no code when the window ends, their device may have another after this long. Changing to a different address does not start it. 0 = straight away (the daily limits still apply)." },
   { key: "max_concurrent", label: "Open windows at once", unit: "devices", def: 50, min: 1, max: 500, explanation: "The most devices on a window at the same time across the site." },
 ];
 type PMSMethod = { enabled?: boolean; mode?: string; provider?: string; template_id?: string };
@@ -441,6 +443,9 @@ export default function SignInMethodsPage() {
           onSave={(ta) => save({ email: { ...(cfg.email ?? {}), temporary_access: ta } }, "Temporary internet")}
         />
       )}
+
+      {/* CODE REQUESTS: staff help for a client who cannot get their code (contract §6.7). */}
+      {emailMod && roles !== null && canRead("code-requests", roles) && <CodeRequestsCard roles={roles} />}
 
       {/* READING THE CODE. A client who asked for an email code has to open their mail app before they have
           internet; the services switched on here are reachable through the walled garden while Email code is on. */}

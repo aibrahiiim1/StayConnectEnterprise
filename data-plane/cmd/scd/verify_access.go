@@ -160,16 +160,24 @@ func (s *server) grantVerifyAccess(ctx context.Context, mac string, ip net.IP, c
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		// History an operator CLEARED (0113) stays in the ledger but no longer counts: the device and its address
+		// start again. The wait before another window counts from the device's last uncleared window that ended
+		// other than by choosing a different address -- a client correcting a mistyped address is not held back.
 		var perDevice, perDest, live int
+		var waitLeft float64
 		if err := tx.QueryRow(ctx, `SELECT
-		      count(*) FILTER (WHERE device_mac=$3::macaddr AND started_at > now() - interval '24 hours'),
-		      count(*) FILTER (WHERE destination_digest=$4 AND started_at > now() - interval '24 hours'),
-		      count(*) FILTER (WHERE ended_at IS NULL AND expires_at > now())
+		      count(*) FILTER (WHERE device_mac=$3::macaddr AND cleared_at IS NULL AND started_at > now() - interval '24 hours'),
+		      count(*) FILTER (WHERE destination_digest=$4 AND cleared_at IS NULL AND started_at > now() - interval '24 hours'),
+		      count(*) FILTER (WHERE ended_at IS NULL AND expires_at > now()),
+		      COALESCE(EXTRACT(EPOCH FROM (max(ended_at) FILTER (WHERE device_mac=$3::macaddr AND cleared_at IS NULL
+		                 AND end_reason <> 'CANCELLED') + make_interval(mins => $5) - now())), 0)
 		    FROM iam_v2.verification_access_grants WHERE tenant_id=$1 AND site_id=$2`,
-			s.tenID, s.siteID, mac, digest).Scan(&perDevice, &perDest, &live); err != nil {
+			s.tenID, s.siteID, mac, digest, set.RetryAfterMinutes).Scan(&perDevice, &perDest, &live, &waitLeft); err != nil {
 			return err
 		}
 		switch {
+		case waitLeft > 0:
+			refused = "device_retry_wait"
 		case perDevice >= set.PerDeviceDaily:
 			refused = "device_daily_limit"
 		case perDest >= set.PerDestinationDaily:
@@ -378,8 +386,11 @@ func (s *server) reconcileVerifyAccess(ctx context.Context) {
 func (s *server) verifyAccessLoop(ctx context.Context) {
 	t := time.NewTicker(2 * time.Second)
 	defer t.Stop()
-	for {
+	for tick := 0; ; tick++ {
 		s.reconcileVerifyAccess(ctx)
+		if tick%15 == 0 { // every 30 s: code copies that can no longer be used
+			s.pruneOTPEscrow(ctx)
+		}
 		select {
 		case <-ctx.Done():
 			return

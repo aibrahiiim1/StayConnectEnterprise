@@ -56,7 +56,7 @@ describe("Temporary internet while reading the code", () => {
     await waitFor(() => expect(put).toHaveBeenCalledWith("/auth-methods", {
       email: {
         enabled: true,
-        temporary_access: { enabled: true, minutes: 15, down_kbps: 2000, up_kbps: 1000, data_mb: 25, per_device_daily: 3, per_destination_daily: 3, max_concurrent: 50 },
+        temporary_access: { enabled: true, minutes: 15, down_kbps: 2000, up_kbps: 1000, data_mb: 25, per_device_daily: 3, per_destination_daily: 3, retry_after_minutes: 30, max_concurrent: 50 },
       },
     }));
   });

@@ -344,6 +344,12 @@ GRANT SELECT, INSERT, DELETE ON iam_v2.otp_device_bindings TO svc_scd;
 -- them for reporting and never writes one.
 GRANT SELECT, INSERT, UPDATE ON iam_v2.verification_access_grants TO svc_scd;
 
+-- ---- 0113: staff may clear a window history, and read a live code -------------------------------------
+-- scd seals a copy of each sent code, opens it for an operator holding the code-reveal permission, and deletes
+-- it when the code is used or expires. Nothing else reads the table. (Clearing a window history is an UPDATE
+-- of verification_access_grants, already granted above.)
+GRANT SELECT, INSERT, DELETE ON iam_v2.otp_code_escrow TO svc_scd;
+
 -- ---- 0112: provider-managed card currency conversion ----------------------------------------------------
 -- scd marks an account provider-converts through one definer setter (Stripe only; audited in its own log) and
 -- reads the mark to decide which package currencies a card can be offered in.

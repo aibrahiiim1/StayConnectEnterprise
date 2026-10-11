@@ -166,8 +166,8 @@ func TestIntegration_TheWindowIsRestoredWithWhatIsLeftAndEndsOnSignIn(t *testing
 }
 
 func TestIntegration_RepeatedRequestsCannotFarmWindows(t *testing.T) {
-	two := 2
-	s, _, pool := verifyFixture(t, &tenantcfg.TemporaryAccess{PerDeviceDaily: &two, PerDestinationDaily: &two})
+	two, noWait := 2, 0 // the wait before another window has its own test
+	s, _, pool := verifyFixture(t, &tenantcfg.TemporaryAccess{PerDeviceDaily: &two, PerDestinationDaily: &two, RetryAfterMinutes: &noWait})
 	ctx := context.Background()
 	end := func() {
 		_, _ = pool.Exec(ctx, `UPDATE iam_v2.verification_access_grants SET ended_at=now(), end_reason='EXPIRED' WHERE tenant_id=$1 AND ended_at IS NULL`, s.tenID)

@@ -29,6 +29,9 @@ type TemporaryAccess struct {
 	PerDeviceDaily      *int  `json:"per_device_daily,omitempty"`
 	PerDestinationDaily *int  `json:"per_destination_daily,omitempty"`
 	MaxConcurrent       *int  `json:"max_concurrent,omitempty"`
+	// RetryAfterMinutes is how long a device waits after a window ends before it may be given another (the
+	// client may still not have the code). A window ended by choosing a different address does not start it.
+	RetryAfterMinutes *int `json:"retry_after_minutes,omitempty"`
 }
 
 // TemporaryAccessBound is one setting's default and inclusive bounds.
@@ -44,6 +47,9 @@ var TemporaryAccessBounds = map[string]TemporaryAccessBound{
 	"per_device_daily":      {3, 1, 10},
 	"per_destination_daily": {3, 1, 10},
 	"max_concurrent":        {50, 1, 500},
+	// Product Owner, 2026-10-12: a client who still has no code may have the internet again after 30 minutes.
+	// 0 = immediately (the daily limits still apply).
+	"retry_after_minutes": {30, 0, 1440},
 }
 
 // TemporaryAccessEffective is the setting as enforced.
@@ -51,6 +57,7 @@ type TemporaryAccessEffective struct {
 	Enabled                                            bool
 	Minutes, DownKbps, UpKbps, DataMB                  int
 	PerDeviceDaily, PerDestinationDaily, MaxConcurrent int
+	RetryAfterMinutes                                  int
 }
 
 func clampSetting(name string, v *int) int {
@@ -80,7 +87,8 @@ func (t *TemporaryAccess) Effective() TemporaryAccessEffective {
 		Enabled: on, Minutes: clampSetting("minutes", t.Minutes), DownKbps: clampSetting("down_kbps", t.DownKbps),
 		UpKbps: clampSetting("up_kbps", t.UpKbps), DataMB: clampSetting("data_mb", t.DataMB),
 		PerDeviceDaily: clampSetting("per_device_daily", t.PerDeviceDaily), PerDestinationDaily: clampSetting("per_destination_daily", t.PerDestinationDaily),
-		MaxConcurrent: clampSetting("max_concurrent", t.MaxConcurrent),
+		MaxConcurrent:     clampSetting("max_concurrent", t.MaxConcurrent),
+		RetryAfterMinutes: clampSetting("retry_after_minutes", t.RetryAfterMinutes),
 	}
 }
 

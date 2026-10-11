@@ -248,6 +248,9 @@ type server struct {
 		whatsapp whatsapp.Sender
 	}
 	notifyKey sealbox.Key
+	// otpEscrowKey seals the staff-readable copy of a live code (temp_access_admin.go); same local key file,
+	// its own domain.
+	otpEscrowKey sealbox.Key
 
 	// PMS registry is live-reloadable (phase 5.3). All readers must go
 	// through currentPMSReg(); the reload path atomically swaps it under
@@ -914,6 +917,7 @@ func main() {
 	r.Post("/v1/admin/pms/reload", s.pmsAdminReload)
 	r.Post("/v1/admin/walled-garden/reload", s.gardenReload)
 	s.notifyAdminRoutes(r)
+	s.tempAccessAdminRoutes(r)
 	// Hotel Admin TLS cert lifecycle: scd runs as root and drives the privileged
 	// manager here (edged is sandboxed with NoNewPrivileges and cannot). edged
 	// already enforced Hotel-IT permission + step-up before proxying to us.

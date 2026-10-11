@@ -412,6 +412,10 @@ func main() {
 			// PMS Interface surface below; keeping both meant two operator screens configuring one property
 			// management system, and the older one could start a competing connector. See resources_providers.go.
 			mountResource(r, s, "auth-methods", s.authMethodsRoutes)
+			// Staff help for clients who asked for a code (contract §6.7): the list and "try again" on one key, reading a
+			// live code on its own key -- see resources_code_requests.go.
+			mountResource(r, s, "code-requests", s.codeRequestsRoutes)
+			mountResource(r, s, "code-reveal", s.codeRevealRoutes)
 			mountResource(r, s, "walled-garden", s.walledGardenRoutes)
 			// Client Groups: who a Client is, kept apart from what they may have (contract §3). Core, never a module.
 			mountResource(r, s, "client-groups", s.clientGroupsRoutes)

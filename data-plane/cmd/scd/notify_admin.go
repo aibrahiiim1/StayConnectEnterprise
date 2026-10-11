@@ -64,6 +64,9 @@ func (s *server) initNotifyKey(secretsDir string) {
 		return
 	}
 	s.notifyKey = k
+	if ek, err := sealbox.NewKey(otpEscrowDomain, raw); err == nil {
+		s.otpEscrowKey = ek
+	}
 }
 
 // openNotifySecret is the loader's SecretOpener.

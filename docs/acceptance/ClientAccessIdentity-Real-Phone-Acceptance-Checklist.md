@@ -12,7 +12,7 @@ line says so — ideally one iPhone and one Android — and an email address you
 
 | # | Check | Expected |
 |---|---|---|
-| 0.1 | Admin Console → Sign-in methods: Email code is on; *Temporary internet while reading the code* is on with its defaults | 10 min · 2000/1000 kbps · 25 MB · 3 per device · 3 per address · 50 at once |
+| 0.1 | Admin Console → Sign-in methods: Email code is on; *Temporary internet while reading the code* is on with its defaults | 10 min · 2000/1000 kbps · 25 MB · 3 per device · 3 per address · 50 at once · wait 30 min before another window |
 | 0.2 | Admin Console → Delivery: the site's email sender is enabled and *Send a test email* reaches you | message arrives |
 | 0.3 | Admin Console → Payment methods: the Stripe account is ACTIVE, TEST mode | conversion shows *off* unless you are running section 6 |
 | 0.4 | On each phone: forget the Wi-Fi network first, so no remembered device carries over | — |
@@ -47,7 +47,21 @@ line says so — ideally one iPhone and one Android — and an email address you
 | 3.4 | Wait past 10 minutes without entering the code | internet stops; the portal comes back |
 | 3.5 | Enter the code (or sign in any other way) | the window ends at once; normal package access takes over |
 | 3.6 | *Use a different address* on the pending page | the window ends |
-| 3.7 | Request more than 3 windows from the same phone in 24 h | the code is still sent; no further window is opened |
+| 3.7 | Let a window run out (or use up its data) without entering the code, then ask for a new code at once | the code is sent, but **no new window** until 30 minutes after the last one ended |
+| 3.8 | After 30 minutes, ask for a code again | a new window opens |
+| 3.9 | End a window by *Use a different address*, then ask with the right address | a new window opens at once (changing address does not start the wait) |
+| 3.10 | Request more than 3 windows from the same phone in 24 h | the code is still sent; no further window is opened |
+
+## 3A. Staff help (Sign-in methods → Code requests)
+
+| # | Step | Expected |
+|---|---|---|
+| 3A.1 | After 3.7, open Code requests in the Admin Console | the request is listed with the address, the device, "Waiting for the code" and "next window in … min" |
+| 3A.2 | *Let them try again* (reason + your password) | the phone's next code request opens a window at once; the audit log shows who and why |
+| 3A.3 | While a code is waiting, *Show code* (reason + your password) as an IT manager or front-desk user | the code is shown; typing it on the phone that asked signs in |
+| 3A.4 | Type that same code on a **different** phone | refused: requested from another device |
+| 3A.5 | After the client has signed in, look for *Show code* on that row | not offered (the code is used) |
+| 3A.6 | Sign in as a guest-relations or viewer user | guest relations: *Let them try again* only; viewer: the list only |
 
 ## 4. Packages and acquisition
 
@@ -92,6 +106,8 @@ line says so — ideally one iPhone and one Android — and an email address you
   Device binding, single use, the ten-minute lifetime, *GET never verifies* and log redaction limit what that
   exposes; serving the portal over HTTPS needs a public certificate decision. Contract §10.2.
 * **A refunded charge does not end access.** Contract §9; a Product-Owner decision.
+* **Showing a code is the desk vouching for the client.** The client has not proved the address by reading their
+  own mail. Contract §6.7.
 * **A phone that changes its hardware address** (private / random Wi-Fi address) is a new device to the network:
   it gets its own window, within the per-address and site limits. Contract §6.6.
 * **Pre-sign-in DNS is throttled, not blocked.** Contract §10.1.

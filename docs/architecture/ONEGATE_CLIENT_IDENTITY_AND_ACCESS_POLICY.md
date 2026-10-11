@@ -327,6 +327,7 @@ entitlement:
 | Windows per device | 3 per 24 h | 1–10 |
 | Windows per email address | 3 per 24 h | 1–10 |
 | Open windows at once (site) | 50 | 1–500 |
+| Wait before another window (added 2026-10-12) | 30 minutes | 0–1440 |
 
 Stored in `tenants.auth_methods.email.temporary_access`, validated by edged against
 `tenantcfg.TemporaryAccessBounds`, audited with old and new values.
@@ -345,10 +346,42 @@ from the ledger over a rolling 24 h, so they survive restarts; the address is ke
 reconcile every 2 s restores a live window after an scd, netd or appliance restart with **what is left** of it
 (time and bytes), ends what is due, and removes strays. The code's own validity (10 minutes) is independent.
 
+**The wait before another window** (Product Owner, 2026-10-12). A client may still have no code when a window ends
+(the mail is slow, went to spam, or the data ran out). The device may be given another window once the wait has
+passed since its last window ended; a window ended by choosing a different address does not start the wait, so
+a mistyped address is not punished. The daily limits still apply on top. A refused window never affects the
+code itself.
+
 **What it cannot do:** a device that changes its hardware address is a new device to the network; it still
 needs a fresh address within the per-address limit, a deliverable code, and a free site slot. Anonymous abuse
 is bounded, not eliminated. While a window is open the phone's captive check succeeds, so the system sheet may
 close; the client returns to the portal (the pending code box, §6.2) or taps the email link.
+
+### 6.7 Staff help for a client who cannot get their code (Product-Owner decision, 2026-10-12; migration 0113)
+
+**Sign-in methods → Code requests** lists the code requests of the last 24 hours: when, the address it was sent
+to, the device that asked, the code's state (waiting, signed in, expired, too many wrong tries) and the device's
+temporary internet (online now, data used, how it ended, the wait, the daily limit). Two actions, each behind
+the operator's **password** and a **reason**, each recorded in the audit log by edged:
+
+| Action | Permission | Effect |
+|---|---|---|
+| **Let them try again** | `code-requests` (write) | the device's ENDED windows are marked cleared (`cleared_at`, `cleared_by`); they stay on record but no longer count towards the per-device / per-address limits or the wait. A live window is untouched. **No access is granted**: the client still signs in with a code. |
+| **Show code** | `code-reveal` (write) | reads a **live** code (unused, unexpired, not locked) so staff can tell it to the client. |
+
+Roles: site admin, IT manager and front desk hold both; guest relations may let a device try again but not show
+a code; a site viewer reads the list only; voucher and payments operators have neither.
+
+**How a code can be shown at all.** A code is stored as a keyed hash and cannot be read back. Each code that was
+**sent** also gets a sealed copy in `iam_v2.otp_code_escrow` (AES-256-GCM under the appliance's local key, its
+own domain `otp-code-escrow:v1`, bound to tenant, site and challenge). Only scd can open it, only for an operator
+edged has authorised; the copy is deleted when the code is used and pruned once it has expired, been used or been
+locked. The code never appears in the audit record, the logs or the list.
+
+**What showing a code means.** The code still works only on the device that asked (§6.5), once, within its ten
+minutes. But a client signed in this way has not proved the address by reading their own mail: **the operator
+is vouching for it.** That is the Product Owner's decision; the desk should show a code only to a client who is
+present or on the phone, and the audit record names who did it and why.
 
 ---
 

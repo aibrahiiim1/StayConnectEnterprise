@@ -320,6 +320,9 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.met.OTPIssued.WithLabelValues(channelLabel).Inc()
+	// A sealed copy of the SENT code, readable only by an operator holding the code-reveal permission, for a
+	// client whose message does not arrive (contract §6.7). Gone when the code is used or expires.
+	s.escrowOTPCode(r.Context(), issued.ChallengeID, issued.Code, issued.ExpiresAt)
 	out := otpIssueResp{
 		ChallengeID: issued.ChallengeID,
 		TTLSeconds:  int(time.Until(issued.ExpiresAt).Seconds()),
@@ -403,6 +406,7 @@ func (s *server) authorizeOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.met.OTPVerify.WithLabelValues(v.Channel, "ok").Inc()
+	s.dropOTPEscrow(r.Context(), req.ChallengeID)
 
 	// THE CHALLENGE IS VERIFIED; THE IDENTITY IS IAM-v2's.
 	//
