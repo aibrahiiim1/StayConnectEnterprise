@@ -579,3 +579,18 @@ func TestStripeConvertsOnlyBetweenSupportedCurrencies(t *testing.T) {
 		t.Error("the rate is kept only as a plain number")
 	}
 }
+
+// A refusal without a code carries Stripe's sentence, with anything key-like or card-like removed.
+func TestProviderCodeCarriesARedactedSentenceWhenStripeGivesNoCode(t *testing.T) {
+	got := providerCode([]byte(`{"error":{"type":"invalid_request_error","message":"In order to use Checkout, you must set an account or business name at https://dashboard.stripe.com/account."}}`))
+	if !strings.Contains(got, "message=In order to use Checkout, you must set an account or business name") {
+		t.Fatalf("got %q", got)
+	}
+	got = providerCode([]byte(`{"error":{"type":"invalid_request_error","message":"Invalid API Key provided: sk_test_51AbCdEf****E123 for card 4242 4242 4242 4242"}}`))
+	if strings.Contains(got, "sk_test") || strings.Contains(got, "4242 4242") {
+		t.Fatalf("secret material leaked: %q", got)
+	}
+	if got := providerCode([]byte(`{"error":{"type":"card_error","code":"card_declined","message":"Your card was declined."}}`)); got != "card_error/card_declined" {
+		t.Fatalf("a coded refusal stays a code: %q", got)
+	}
+}

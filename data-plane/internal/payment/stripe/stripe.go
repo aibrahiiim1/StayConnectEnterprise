@@ -320,9 +320,10 @@ var safeParamRE = regexp.MustCompile(`^[a-z0-9_\[\]]{1,96}$`)
 func providerCode(b []byte) string {
 	var e struct {
 		Error struct {
-			Type  string `json:"type"`
-			Code  string `json:"code"`
-			Param string `json:"param"`
+			Type    string `json:"type"`
+			Code    string `json:"code"`
+			Param   string `json:"param"`
+			Message string `json:"message"`
 		} `json:"error"`
 	}
 	if json.Unmarshal(b, &e) != nil {
@@ -339,10 +340,33 @@ func providerCode(b []byte) string {
 	if safeParamRE.MatchString(e.Error.Param) {
 		parts = append(parts, "param="+e.Error.Param)
 	}
+	// Stripe's own sentence, when it gave no code to name the refusal by (an account setting, typically). Any
+	// key-like token and any long digit run is removed first, so no credential or card number can pass.
+	if e.Error.Code == "" && e.Error.Param == "" {
+		if m := redactProviderMessage(e.Error.Message); m != "" {
+			parts = append(parts, "message="+m)
+		}
+	}
 	if len(parts) == 0 {
 		return "unspecified"
 	}
 	return strings.Join(parts, "/")
+}
+
+var (
+	keyLikeRE   = regexp.MustCompile(`(?i)\b(sk|pk|rk|whsec|acct|cus|pi|ch|cs)_[A-Za-z0-9_*]+`)
+	longDigitRE = regexp.MustCompile(`[0-9][0-9 -]{6,}[0-9]`)
+)
+
+// redactProviderMessage keeps a provider's sentence readable while removing anything that could identify a
+// credential, an account or a card, and bounds its length.
+func redactProviderMessage(m string) string {
+	m = strings.TrimSpace(keyLikeRE.ReplaceAllString(m, "[redacted]"))
+	m = longDigitRE.ReplaceAllString(m, "[redacted]")
+	if len(m) > 200 {
+		m = m[:200]
+	}
+	return m
 }
 
 // refusedWithoutObject lists the HTTP statuses at which Stripe refuses a create before any object exists:
