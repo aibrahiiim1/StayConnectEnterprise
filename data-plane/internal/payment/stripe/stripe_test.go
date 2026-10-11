@@ -626,10 +626,10 @@ func TestCreateCheckoutOnAManagedPaymentsAccount(t *testing.T) {
 		if calls != want {
 			t.Fatalf("%s: %d calls, want %d", accepts, calls, want)
 		}
-		for _, r := range f.requests {
-			if r.Header.Get("Idempotency-Key") != ref {
-				t.Fatalf("every attempt carries the same idempotency key")
-			}
+		// Stripe records a refused request against its key: each variant has its own, derived from the
+		// reference; the first attempt keeps the reference itself.
+		if f.requests[0].Header.Get("Idempotency-Key") != ref || f.requests[1].Header.Get("Idempotency-Key") != ref+"-v1" {
+			t.Fatalf("keys: %q %q", f.requests[0].Header.Get("Idempotency-Key"), f.requests[1].Header.Get("Idempotency-Key"))
 		}
 		last := f.forms[len(f.forms)-1]
 		if accepts == "card_only" && (last.Get("payment_method_types[0]") != "card" || last.Get("managed_payments[enabled]") != "false") {

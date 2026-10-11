@@ -21,8 +21,10 @@ package stripe
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +35,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/payment"
@@ -84,6 +87,8 @@ type Adapter struct {
 	baseURL string
 	timeout time.Duration
 	now     func() time.Time
+	// variants remembers, per account (a key fingerprint), which checkout variant Stripe accepts.
+	variants sync.Map
 }
 
 var _ payment.HostedCheckoutProvider = (*Adapter)(nil)
@@ -443,21 +448,34 @@ func (a *Adapter) CreateCheckout(ctx context.Context, r payment.CheckoutRequest)
 	}
 	f.Set("expires_at", strconv.FormatInt(exp.Unix(), 10))
 
-	resp, err := a.call(ctx, http.MethodPost, "/v1/checkout/sessions", f, key, r.ClientRef)
 	// MANAGED PAYMENTS. On a Stripe account where Managed Payments is enabled (the default for new accounts,
-	// found live on PRE-LIVE 2026-10-11), Stripe refuses `payment_method_types` with a 400 -- a refusal before
-	// any object exists, which Stripe does not record against the idempotency key. Retry once asking Stripe to
-	// keep the session card-only (managed_payments[enabled]=false); only if that is refused too, let Stripe
-	// choose the methods (card is always among them). Each retry is the same reference and key; nothing is
-	// created twice, because a refused create created nothing.
-	if err == nil && resp.status == http.StatusBadRequest && managedPaymentsRefusal(resp.body) {
-		f.Set("managed_payments[enabled]", "false")
-		resp, err = a.call(ctx, http.MethodPost, "/v1/checkout/sessions", f, key, r.ClientRef)
-		if err == nil && resp.status == http.StatusBadRequest {
-			f.Del("managed_payments[enabled]")
-			f.Del("payment_method_types[0]")
-			resp, err = a.call(ctx, http.MethodPost, "/v1/checkout/sessions", f, key, r.ClientRef)
+	// found live on PRE-LIVE 2026-10-11), Stripe refuses `payment_method_types` with a 400 before any object
+	// exists. The variants are tried in order -- card-only as before; card-only with Managed Payments off; then
+	// Stripe's own choice of methods (card is always among them) -- and the one an account accepts is
+	// remembered for that account. Stripe records a refused request against its idempotency key, so each
+	// variant carries its own key derived from the reference; that is safe because a refused create created
+	// nothing, and the engine never creates again (it resolves an ambiguous create by client reference).
+	acct := keyFingerprint(key)
+	start := 0
+	if v, ok := a.variants.Load(acct); ok {
+		start = v.(int)
+	}
+	var resp response
+
+	for v := start; v < len(checkoutVariants); v++ {
+		checkoutVariants[v](f)
+		idem := r.ClientRef
+		if v > 0 {
+			idem = fmt.Sprintf("%s-v%d", r.ClientRef, v)
 		}
+		resp, err = a.call(ctx, http.MethodPost, "/v1/checkout/sessions", f, key, idem)
+		if err == nil && resp.status == http.StatusBadRequest && managedPaymentsRefusal(resp.body) && v+1 < len(checkoutVariants) {
+			continue
+		}
+		if err == nil && resp.status >= 200 && resp.status <= 299 {
+			a.variants.Store(acct, v)
+		}
+		break
 	}
 	if err != nil {
 		var te *transportError
@@ -903,4 +921,20 @@ func (a *Adapter) ConvertsPresentment(presentment, settlement string) bool {
 func managedPaymentsRefusal(body []byte) bool {
 	b := strings.ToLower(string(body))
 	return strings.Contains(b, "managed payments") || strings.Contains(b, "managed_payments")
+}
+
+// checkoutVariants are the ways a checkout's payment methods are asked for, in order of preference.
+var checkoutVariants = []func(url.Values){
+	func(f url.Values) { f.Set("payment_method_types[0]", "card"); f.Del("managed_payments[enabled]") },
+	func(f url.Values) {
+		f.Set("payment_method_types[0]", "card")
+		f.Set("managed_payments[enabled]", "false")
+	},
+	func(f url.Values) { f.Del("payment_method_types[0]"); f.Del("managed_payments[enabled]") },
+}
+
+// keyFingerprint names an account for the variant memory without holding its key.
+func keyFingerprint(key string) string {
+	h := sha256.Sum256([]byte("stripe-variant:" + key))
+	return hex.EncodeToString(h[:8])
 }
