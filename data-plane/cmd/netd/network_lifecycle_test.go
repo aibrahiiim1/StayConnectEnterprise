@@ -350,3 +350,28 @@ func TestRollback_LeavesALiveBridgeAlone(t *testing.T) {
 		t.Fatal("nothing was rebuilt, so no rebuild event may be recorded")
 	}
 }
+
+// THE GUEST RESOLVER IS REBUILT FROM THE CURRENT RENDERER ON BOOT, not replayed from the stored bundle: an
+// upgraded appliance gains the current resolver configuration (the DNS abuse limits, for one) on its next start
+// rather than at its next network change, and the bundle is updated to say the same.
+func TestBootReconcile_RendersTheResolverFragmentFromTheCurrentRenderer(t *testing.T) {
+	k := newFakeKernel(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(dir+"/stayconnect-guest.conf", []byte("# an older binary's fragment\nserver:\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rev := &fakeRevisions{id: "rev-confirmed", intent: confirmedIntent(), bundle: dir}
+	a := newLifecycleApplier(t, k, rev)
+	a.unboundFrag = t.TempDir() + "/live.conf"
+	a.ReconcileActiveOnBoot(context.Background())
+	want := string(netcfg.RenderUnbound(confirmedIntent()))
+	for _, p := range []string{a.unboundFrag, dir + "/stayconnect-guest.conf"} {
+		got, err := os.ReadFile(p)
+		if err != nil || string(got) != want {
+			t.Fatalf("%s is not the current rendering:\n%s", p, got)
+		}
+	}
+	if !strings.Contains(want, "ip-ratelimit: 100") {
+		t.Fatal("the current rendering carries the DNS limits")
+	}
+}

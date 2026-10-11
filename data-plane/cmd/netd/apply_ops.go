@@ -446,9 +446,15 @@ func (a *applier) ReconcileActiveOnBoot(ctx context.Context) {
 			if raw, err := os.ReadFile(filepath.Join(bundle, "kea-dhcp4.json")); err == nil {
 				_ = a.pushKeaFile(raw)
 			}
-			// Re-install the Unbound fragment.
-			if raw, err := os.ReadFile(filepath.Join(bundle, "stayconnect-guest.conf")); err == nil {
-				_ = os.WriteFile(a.unboundFrag, raw, 0o644)
+			// Re-install the Unbound fragment FROM THE CURRENT RENDERER, exactly as the nft structure above: the
+			// stored copy is a record of whatever binary applied the revision, so replaying it would keep an
+			// upgraded appliance on an older resolver configuration (it would never gain the DNS abuse limits,
+			// for one) until the next network change. The bundle is updated to match. applyUnbound validates
+			// with unbound-checkconf first, so a fragment the resolver refuses never takes DNS down.
+			if _, err := os.ReadFile(filepath.Join(bundle, "stayconnect-guest.conf")); err == nil {
+				frag := netcfg.RenderUnbound(intent)
+				_ = os.WriteFile(filepath.Join(bundle, "stayconnect-guest.conf"), frag, 0o644)
+				_ = os.WriteFile(a.unboundFrag, frag, 0o644)
 				if uerr := a.applyUnbound(ctx); uerr != nil {
 					bootProblems = append(bootProblems, "guest resolver: "+uerr.Error())
 				}
