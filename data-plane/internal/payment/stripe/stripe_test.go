@@ -626,7 +626,7 @@ func TestCreateCheckoutOnAManagedPaymentsAccount(t *testing.T) {
 			t.Fatalf("keys: %q %q", f.requests[0].Header.Get("Idempotency-Key"), f.requests[1].Header.Get("Idempotency-Key"))
 		}
 		for _, fm := range f.forms {
-			if fm.Get("payment_method_types[0]") != "card" || fm.Get("payment_method_types[1]") != "" {
+			if fm.Get("payment_method_types[0]") != "card" || fm.Get("payment_method_types[1]") != "" || fm.Get("wallet_options[link][display]") != "never" {
 				t.Fatalf("%s: every variant must ask for card only: %v", accepts, fm)
 			}
 		}

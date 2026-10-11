@@ -468,6 +468,10 @@ func (a *Adapter) CreateCheckout(ctx context.Context, r payment.CheckoutRequest)
 		f.Set("cancel_url", r.CancelURL)
 	}
 	f.Set("expires_at", strconv.FormatInt(exp.Unix(), 10))
+	// Link is a separate stored-credential wallet that Stripe may report as its own payment-method type; it
+	// is not the approved Card method, so the page never offers it. Apple Pay and Google Pay are card wallets
+	// (type "card") and stay.
+	f.Set("wallet_options[link][display]", "never")
 
 	// MANAGED PAYMENTS. On a Stripe account where Managed Payments is enabled (the default for new accounts,
 	// found live on PRE-LIVE 2026-10-11), Stripe refuses `payment_method_types` with a 400 before any object
