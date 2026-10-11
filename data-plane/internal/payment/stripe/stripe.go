@@ -313,14 +313,16 @@ func (a *Adapter) call(ctx context.Context, method, path string, form url.Values
 }
 
 var safeTokenRE = regexp.MustCompile(`^[a-z0-9_]{1,64}$`)
+var safeParamRE = regexp.MustCompile(`^[a-z0-9_\[\]]{1,96}$`)
 
 // providerCode extracts Stripe's error type/code identifiers only. Stripe's human message can quote a
 // masked key, so it is never copied into an error.
 func providerCode(b []byte) string {
 	var e struct {
 		Error struct {
-			Type string `json:"type"`
-			Code string `json:"code"`
+			Type  string `json:"type"`
+			Code  string `json:"code"`
+			Param string `json:"param"`
 		} `json:"error"`
 	}
 	if json.Unmarshal(b, &e) != nil {
@@ -331,6 +333,11 @@ func providerCode(b []byte) string {
 		if safeTokenRE.MatchString(s) {
 			parts = append(parts, s)
 		}
+	}
+	// The NAME of the field Stripe objected to (never its value): what an operator needs to fix a refusal
+	// that carries no code, e.g. "line_items[0][price_data][currency]".
+	if safeParamRE.MatchString(e.Error.Param) {
+		parts = append(parts, "param="+e.Error.Param)
 	}
 	if len(parts) == 0 {
 		return "unspecified"
