@@ -461,6 +461,35 @@ client is offered another way). Settlement, reconciliation, idempotency, UNKNOWN
 chargebacks are unchanged. **Room charge is unchanged:** the package currency must equal the pinned interface's,
 with no conversion.
 
+**Only approved payment methods are offered or accepted (2026-10-12).** The acquisition methods a package may
+list are Free, Voucher, Card and Room charge — the database refuses any other value on a revision (0095), and a
+client outside the Room sign-in path can be offered only Free, Voucher or Card (`applicableMethods`, pinned by
+`TestOnlyApprovedMethodsAreEverOffered`). `MANUAL_APPROVAL` stays dormant in the settlement contract and is never
+offered; there is no cash method. **Card means card**, at the provider too:
+
+* **Stripe.** Every Checkout Session asks for `payment_method_types = [card]` and sets
+  `wallet_options[link][display] = never`. On a Managed Payments account that refuses the explicit type, the
+  adapter retries once with Managed Payments switched off, still card only. **There is no variant that lets
+  Stripe choose the methods**: an account that refuses both is reported as *not created*, and the client is
+  told Card payment is unavailable. A created session whose `payment_method_types` is anything other than
+  exactly `[card]` is expired before any client sees it. Apple Pay and Google Pay remain, because Stripe treats
+  them as card wallets and reports them as type `card`; Link is a separate stored-credential wallet and is not
+  offered.
+* **Paymob.** The checkout offers only the integration ids the operator configured as card integrations.
+* **At capture, both adapters check the method actually used.** A charge whose method is not `card` (Stripe
+  `payment_method_details.type`, Paymob `source_data.type`) is never reported captured: it stays unresolved, and
+  after the reconciliation grace it becomes UNKNOWN and goes to financial review for a person to decide. No
+  access is granted from it automatically.
+
+Measured on PRE-LIVE (Stripe TEST mode, 2026-10-12): the site's account accepts the card-only request, and the
+hosted page offers the Card form only, with the express frame for card wallets and no Link.
+
+**A provider refund is recorded; it does not end access.** A refund or chargeback raised at the provider is
+recorded against its charge and moves the settlement to `PARTIALLY_REVERSED` / `REVERSED`. It does not
+terminate the entitlement the charge paid for — observed on PRE-LIVE, where a fully refunded sandbox charge
+left its entitlement ACTIVE until it was ended by an operator. Whether a full reversal should end or suspend
+access is an **open Product-Owner decision**; until it is made, an operator ends such access by hand.
+
 Settings follow the operational-settings rule: persisted, defaulted, bounded, audited. Group changes are
 recorded in `iam_v2.client_group_changes` (append-only) and in the audit log; `Primary method` and `Remember
 devices` live in `tenants.auth_methods.portal` and are audited with the other switches.
@@ -503,9 +532,37 @@ Decided 2026-10-11: §6.6 (a bounded, per-device window of general access) repla
 
 What the market does, as far as it is documented: captive-portal products allow pre-authentication
 destinations by domain or address list (the same mechanism, with the same CDN limitation), and some grant a
-short, time-boxed "verification" window of broader access after the code is requested. OneGate's recommended
-design is the first option above: the bounded window, restricted to the mail services, rather than a window
-of general access.
+short, time-boxed "verification" window of broader access after the code is requested.
+
+**Correction (2026-10-12).** An earlier version of this paragraph still called the window *restricted to the
+mail services* the recommended design. That was superseded the same day: the Product Owner decided a bounded
+window of **general** internet access for the device that asked (§6.6), because restricting it to mail
+services inherits exactly the shared-front-end limitation measured above. §6.6 is the implemented and binding
+design; option 1 above is kept as the record of what was considered. The mail-service allowlist of §6.5
+remains available and site-configured; it is no longer what reading the code depends on.
+
+### 10.2 Residual risk: the code link travels over plain HTTP (stated 2026-10-12)
+
+The email's *tap to connect* link is `http://<gateway>:8380/connect?c=<challenge>&k=<code>`. The portal has no
+publicly trusted certificate, so the link cannot be HTTPS without a separate certificate / Root-CA decision
+(the public portal hostname, deferred 2026-09-29). The code therefore appears in clear text in two places: in
+the email itself, and on the client network when the phone opens the link.
+
+| What protects it | Effect |
+|---|---|
+| Device binding (0110) | the code verifies only from the device that asked; any other device is refused before the code is compared, and no attempt is counted |
+| Single use, ten-minute lifetime, attempt limit | a code is spent once; a stale or guessed code fails |
+| GET never verifies | opening the link (by a mail scanner or a preview) spends nothing; only the page's Connect button verifies |
+| No logging, no Referer, not indexed | the portal's request log prints the path with the query replaced by `[redacted]`; the page sends `Referrer-Policy: no-referrer` and `X-Robots-Tag: noindex, nofollow` |
+| What it grants | a sign-in for that one device; payment, PMS and management stay behind their own checks |
+
+**What it does not protect against:** an observer who can read traffic on the same client network *and*
+present the binding device's hardware address — that is, someone already able to impersonate the device on
+the LAN — could use a code captured from the link within its ten minutes. Anyone who can read the client's
+mailbox can read the code in any case. The risk is accepted for PRE-LIVE testing and is closed only by serving
+the portal over HTTPS with a publicly trusted certificate, a separate Product-Owner decision.
+
+### 10.3 Other properties
 
 * **Server-derived device identity on every path**, including the remembered-device path.
 * **Uniform timing** for the existing PMS path is untouched; OTP verification keeps its durable throttle and
