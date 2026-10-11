@@ -111,6 +111,9 @@ type otpIssueReq struct {
 	Channel     string `json:"channel"`     // "email" | "sms" | "whatsapp"
 	Destination string `json:"destination"` // email address, or a phone number (normalised to E.164)
 	IP          string `json:"ip"`
+	// MAC is the requesting device's hardware address as portald resolved it from the kernel. The challenge is
+	// bound to it (migration 0110): the code, and the email's link that carries it, verify from this device only.
+	MAC string `json:"mac"`
 	// PortalBase is the origin the device reached the portal by (portald, from the connection). When present
 	// and well-formed the email also carries a tap-to-connect link into the device's real browser.
 	PortalBase string `json:"portal_base,omitempty"`
@@ -239,6 +242,7 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 		Destination: dest,
 		IP:          req.IP,
 		UserAgent:   r.UserAgent(),
+		DeviceMAC:   strings.TrimSpace(req.MAC),
 	})
 	if err != nil {
 		switch {
@@ -344,10 +348,16 @@ func (s *server) authorizeOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v, err := otp.Verify(r.Context(), s.db, s.otpRing, req.ChallengeID, req.Code)
+	// FROM THIS DEVICE ONLY: the challenge was bound at issue to the MAC the kernel resolved for the device that
+	// asked (migration 0110). Another device presenting the code -- or the email's link -- is refused before
+	// the code is compared, and the refusal counts as no attempt.
+	v, err := otp.VerifyFrom(r.Context(), s.db, s.otpRing, req.ChallengeID, req.Code, mac.String())
 	if err != nil {
 		result := "internal"
 		switch {
+		case errors.Is(err, otp.ErrOtherDevice):
+			result = "other_device"
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "OTHER_DEVICE"})
 		case errors.Is(err, otp.ErrNotFound):
 			result = "not_found"
 			httpErr(w, http.StatusNotFound, "challenge not found")

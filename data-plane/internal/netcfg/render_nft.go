@@ -120,7 +120,14 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	// would flush auth_ipv4 and drop every live legacy guest. Present-but-empty makes Phase-3 activation a
 	// flag flip with no packet interruption and exactly one cutover boundary.
 	b.WriteString("\tset phase3_auth_ipv4 {\n\t\ttype ifname . ipv4_addr\n\t\tflags timeout\n\t\tcomment \"Phase-3 authorized guests (netd-owned): (ingress bridge, IP)\"\n\t}\n\n")
-	b.WriteString("\tset walled_garden_ip {\n\t\ttype ipv4_addr\n\t\tflags interval\n\t\tauto-merge\n\t\telements = { 1.1.1.1, 8.8.8.8, 8.8.4.4 }\n\t}\n\n")
+	// THE WALLED GARDEN IS THREE SETS (internal/nft/garden.go). walled_garden_ip opens every port to an address
+	// -- an operator rule written without ports. The two port sets open exactly the (address, port) pairs scd
+	// reconciles into them: a rule's Ports, an email service's mail ports, an identity provider's or payment
+	// page's 443. The baseline resolvers live in the port sets at 53 only: they used to be open on every port,
+	// which made DNS-over-HTTPS to them (and whatever else those addresses serve) reachable before sign-in.
+	b.WriteString("\tset walled_garden_ip {\n\t\ttype ipv4_addr\n\t\tflags interval\n\t\tauto-merge\n\t}\n\n")
+	b.WriteString("\tset walled_garden_tcp {\n\t\ttype ipv4_addr . inet_service\n\t\tflags interval\n\t\tcomment \"pre-auth (address, TCP port) pairs; scd reconciles\"\n\t\telements = { 1.1.1.1 . 53, 8.8.8.8 . 53, 8.8.4.4 . 53 }\n\t}\n\n")
+	b.WriteString("\tset walled_garden_udp {\n\t\ttype ipv4_addr . inet_service\n\t\tflags interval\n\t\tcomment \"pre-auth (address, UDP port) pairs; scd reconciles\"\n\t\telements = { 1.1.1.1 . 53, 8.8.8.8 . 53, 8.8.4.4 . 53 }\n\t}\n\n")
 	// dynamic descriptor sets (useful for generic rules + diagnostics)
 	b.WriteString("\tset guest_interfaces {\n\t\ttype ifname\n")
 	if len(enabled) > 0 {
@@ -230,8 +237,11 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @auth_ipv4 accept comment \"authenticated guests\"\n", topo.WANInterface)
 	// The Phase-3 gate. While the set is empty this rule can never match, so a dark appliance is unaffected.
 	fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @phase3_auth_ipv4 accept comment \"phase-3 authorized guests\"\n", topo.WANInterface)
-	// walled-garden pre-auth -> WAN for any guest interface
+	// walled-garden pre-auth -> WAN for any guest interface: every port to an address-only element, and exactly
+	// the named port to a port-restricted one.
 	fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" ip daddr @walled_garden_ip accept\n", topo.WANInterface)
+	fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" ip daddr . tcp dport @walled_garden_tcp accept\n", topo.WANInterface)
+	fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" ip daddr . udp dport @walled_garden_udp accept\n", topo.WANInterface)
 	// AN UNAUTHENTICATED HTTPS ATTEMPT FAILS FAST, AND ON PURPOSE.
 	//
 	// With no TLS portal there is no redirect, and the chain's policy would simply DROP these packets. A drop
@@ -249,6 +259,9 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 
 	// --- prerouting nat (captive redirect per network to its own gateway) ---
 	b.WriteString("\tchain prerouting_nat {\n\t\ttype nat hook prerouting priority dstnat; policy accept;\n")
+	// A port-restricted garden pair on 80 or 443 is reachable as itself: accepting here ends NAT processing for
+	// the packet, so the captive redirect below (which excludes only the address-only set) never claims it.
+	b.WriteString("\t\tiifname @guest_interfaces ip daddr . tcp dport @walled_garden_tcp accept comment \"port-restricted garden: no captive redirect\"\n")
 	for _, n := range enabled {
 		if !n.CaptiveEnabled {
 			continue

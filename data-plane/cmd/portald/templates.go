@@ -1213,6 +1213,7 @@ const landingHTML = `<!doctype html>
         return t('err.otp.send');
       }
       if (e === 'incorrect code') return t('err.otp.code');
+      if (e === 'other_device') return t('err.otp.device');
       if (e === 'code expired' || e === 'challenge not found' || e === 'code already used' || e === 'too many wrong attempts') {
         return t('err.otp.expired');
       }

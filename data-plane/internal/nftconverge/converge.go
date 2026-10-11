@@ -69,7 +69,7 @@ type Outcome struct {
 // walled garden. All three hold runtime state rather than rendered structure. The garden was missing here, so
 // every structural re-render reset it to the three baseline addresses until scd's next minute -- a sign-in
 // through an identity provider or a card payment page in progress at that moment lost its way out.
-var AuthSets = []string{nft.AuthV4, nft.Phase3AuthV4, nft.GardenV4}
+var AuthSets = []string{nft.AuthV4, nft.Phase3AuthV4, nft.GardenV4, nft.GardenTCP, nft.GardenUDP}
 
 // tableName is the single StayConnect nft table. It is named once so that no read path can drift from the
 // table the render actually replaces.
@@ -292,6 +292,9 @@ func CarryOverCommands(set string, els []nft.Element) []string {
 		key := ip.String()
 		if e.Iface != "" {
 			key = fmt.Sprintf("%q . %s", e.Iface, ip.String())
+		} else if e.Port > 0 {
+			// A port-restricted garden element (`address . service`), carried as the pair it is.
+			key = fmt.Sprintf("%s . %d", ip.String(), e.Port)
 		}
 
 		switch {

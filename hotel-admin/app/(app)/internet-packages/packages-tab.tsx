@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, Ban, CheckCircle2, Gauge, Package, Pencil, Plus, Trash2, Users } from "lucide-react";
 import { api, ListResp } from "@/lib/api";
+import type { AccountsResp } from "@/lib/payment-admin";
 import {
   getActivity, getPackageDeletability, deletePackage, priceText, type PackageSummary, type RevisionInfo,
 } from "@/lib/api/commerce";
@@ -81,11 +82,15 @@ export function PackagesTab({
   // THE CLIENT GROUPS AN AUDIENCE CAN NAME, read with the module state for the same reason: a group created in
   // another tab must be offered the next time the form opens, not the next time the page loads.
   const [clientGroups, setClientGroups] = useState<ClientGroupOption[] | "error" | null>(null);
+  // THE CURRENCIES AN ACTIVE PAYMENT ACCOUNT SETTLES. A card payment is never converted, so a package priced in
+  // any other currency is not offered by card; the form says so beside the price instead of letting the
+  // operator find out from a client. null = unknown (not licensed, or not readable): no claim is made.
+  const [cardCurrencies, setCardCurrencies] = useState<string[] | null>(null);
   const formOpen = adding || editing !== null;
   useEffect(() => {
     if (!formOpen) return;
     let live = true;
-    setModules(null); setRoomIfaces(null); setClientGroups(null);
+    setModules(null); setRoomIfaces(null); setClientGroups(null); setCardCurrencies(null);
     api.get<ListResp<ClientGroupOption>>("/client-groups")
       .then((g) => { if (live) setClientGroups(g?.data ?? []); })
       .catch(() => { if (live) setClientGroups("error"); });
@@ -101,6 +106,14 @@ export function PackagesTab({
             .catch(() => { if (live) setRoomIfaces("error"); });
         } else {
           setRoomIfaces([]);
+        }
+        if (m?.modules?.card_payment?.licensed) {
+          api.get<AccountsResp>("/payment-providers/accounts")
+            .then((a) => {
+              if (!live) return;
+              setCardCurrencies(Array.from(new Set((a?.accounts ?? []).filter((x) => x.status === "ACTIVE").map((x) => (x.currency ?? "").trim().toUpperCase()).filter(Boolean))));
+            })
+            .catch(() => { /* unknown: the form makes no claim about card currencies */ });
         }
       })
       .catch(() => { if (live) { setModules("error"); setRoomIfaces([]); } });
@@ -502,7 +515,7 @@ export function PackagesTab({
           <DialogBody className="space-y-4">
             <ErrorBanner err={formErr} />
             <PackageForm mode="add" plans={plans} busy={busy} onSave={(v) => save(v, "add")} onCancel={() => setAdding(false)}
-              modules={modules} roomChargeInterfaces={roomIfaces} clientGroups={clientGroups} />
+              modules={modules} roomChargeInterfaces={roomIfaces} clientGroups={clientGroups} cardCurrencies={cardCurrencies} />
           </DialogBody>
         </DialogContent>
       </Dialog>
@@ -520,7 +533,8 @@ export function PackagesTab({
             <ErrorBanner err={formErr} />
             {editing && (
               <PackageForm mode="edit" initial={editing} plans={plans} busy={busy} onSave={(v) => save(v, "edit")}
-                onCancel={() => setEditing(null)} modules={modules} roomChargeInterfaces={roomIfaces} clientGroups={clientGroups} />
+                onCancel={() => setEditing(null)} modules={modules} roomChargeInterfaces={roomIfaces} clientGroups={clientGroups}
+                cardCurrencies={cardCurrencies} />
             )}
           </DialogBody>
         </DialogContent>

@@ -62,6 +62,36 @@ export function domainProblem(raw: string): string | null {
 
 const KIND_LABEL: Record<string, string> = { account: "Provider account", domains: "Payment domains", settings: "Timings" };
 
+type PackageCurrencyRow = { package_id: string; code: string; active?: boolean; price_minor?: number | null; currency?: string | null; settlement_methods?: string[] | null };
+
+/**
+ * CurrencyMismatchNotice — a card payment is never converted (the appliance refuses a settlement in a currency
+ * the account does not settle), so a package priced in any other currency is NOT offered by card. Found live:
+ * a GBP test account and a USD package, and the client told "card payment is not available" after choosing.
+ * This names the packages concerned next to the accounts, where the operator can fix either side.
+ */
+function CurrencyMismatchNotice({ accounts }: { accounts: AccountsResp | null }) {
+  const [pkgs, setPkgs] = useState<PackageCurrencyRow[] | null>(null);
+  useEffect(() => {
+    api.get<{ data?: PackageCurrencyRow[] } | PackageCurrencyRow[]>("/commercial-packages")
+      .then((r) => setPkgs(Array.isArray(r) ? r : r?.data ?? []))
+      .catch(() => setPkgs([]));
+  }, []);
+  const settles = useMemo(() => new Set((accounts?.accounts ?? []).filter((a) => a.status === "ACTIVE").map((a) => (a.currency ?? "").trim().toUpperCase()).filter(Boolean)), [accounts]);
+  if (!accounts || settles.size === 0 || !pkgs) return null;
+  const mismatched = pkgs.filter((p) => p.active !== false && (p.price_minor ?? 0) > 0
+    && (p.settlement_methods ?? []).includes("ONLINE_PAYMENT") && !settles.has((p.currency ?? "").trim().toUpperCase()));
+  if (mismatched.length === 0) return null;
+  return (
+    <p className="mt-3 rounded-md border border-warning/40 bg-warning-subtle px-3.5 py-2.5 text-xs text-warning-subtle-foreground" role="status" data-testid="card-currency-mismatch">
+      <strong>Not offered by card:</strong>{" "}
+      {mismatched.map((p) => `${p.code} (${(p.currency ?? "").toUpperCase()})`).join(", ")}. Your active account
+      {settles.size > 1 ? "s settle " : " settles "}{Array.from(settles).join(", ")} and a card payment is never
+      converted, so these packages are withheld from the card option until their price or the account currency matches.
+    </p>
+  );
+}
+
 function summariseDetail(detail: unknown): string {
   if (detail === null || detail === undefined || detail === "") return "—";
   if (typeof detail === "string") return detail;
@@ -291,6 +321,7 @@ function AccountsCard({
           </Table>
         )}
       </TableWrap>
+      <CurrencyMismatchNotice accounts={accounts} />
       {providers && (
         <AccountDialog
           open={dialogOpen}

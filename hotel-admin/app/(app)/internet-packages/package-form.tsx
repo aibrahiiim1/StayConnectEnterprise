@@ -13,7 +13,7 @@
 // back, which hid the wrong thing: it let a package silently author technical settings belonging to a plan
 // that other packages also use. Those fields are shown here as read-only context and edited on Service Plans.
 
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
 import { Switch } from "@/components/ui/misc";
@@ -131,6 +131,7 @@ const num = (v: unknown): number | null => {
 
 export function PackageForm({
   mode, initial, plans, busy, onSave, onCancel, modules = null, roomChargeInterfaces = null, clientGroups = null,
+  cardCurrencies = null,
 }: {
   mode: "add" | "edit";
   initial?: PackageFormInitial;
@@ -145,6 +146,8 @@ export function PackageForm({
   roomChargeInterfaces?: RoomChargeInterface[] | "error" | null;
   /** GET /client-groups: the groups an audience can name. null while loading; "error" when they cannot be read. */
   clientGroups?: ClientGroupOption[] | "error" | null;
+  /** The currencies the site's ACTIVE payment accounts settle (upper-case). null = unknown: no claim is made. */
+  cardCurrencies?: string[] | null;
 }) {
   // HOSPITALITY decides whether hotel conditions and the per-night allowance are offered at all.
   const hotel = moduleLicensedIn("hospitality", modules ?? null);
@@ -157,6 +160,11 @@ export function PackageForm({
   const [rules, setRules] = useState<EligibilityRuleForm[]>(
     initial ? (initial.rules ?? []) : [{ type: "PRIOR_PURCHASE", mode: "forbids_prior", also_by_device: true }],
   );
+  // THE DEFAULT FOLLOWS THE PRICE UNTIL THE OPERATOR DECIDES. A Free package defaults to once per client; a
+  // PRICED package defaults to repeatable (a second purchase is a sale, not a loophole). While the limit is still
+  // the untouched default, giving a new package a price drops it and making it free again restores it. The
+  // moment the operator chooses a limit themselves it is theirs, whatever the price does afterwards.
+  const [freeDefaulted, setFreeDefaulted] = useState(!initial);
   // A package with no grant tier is offered to nobody, so a new one starts with the single open tier that
   // means "everyone who is eligible". The operator never has to know that.
   const [tiers, setTiers] = useState<GrantTierForm[]>(initial?.tiers?.length ? initial.tiers : [{ order: 10 }]);
@@ -259,7 +267,15 @@ export function PackageForm({
       const rest = rs.filter((r) => !(r.type === "PRIOR_PURCHASE" && r.mode === "forbids_prior"));
       return next ? [...rest.filter((r) => r.type === "CLIENT_GROUP"), next, ...rest.filter((r) => r.type !== "CLIENT_GROUP")] : rest;
     });
+  // A new package's untouched default follows the price: once per client while Free, repeatable once priced.
+  useEffect(() => {
+    if (initial || !freeDefaulted) return;
+    if (paid && freeRule) setFreeRule(null);
+    if (!paid && !freeRule) setFreeRule({ type: "PRIOR_PURCHASE", mode: "forbids_prior", also_by_device: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paid]);
   const setFreeAccess = (v: FreeAccess) => {
+    setFreeDefaulted(false);
     if (v === "unlimited") { setFreeRule(null); return; }
     // A rule created here counts the device too on a Free package (the contract's default), and not on a
     // priced one, where a second purchase from the same phone is a sale rather than a loophole.
@@ -455,6 +471,16 @@ export function PackageForm({
       </div>
 
       <AcquisitionSection value={acq} onChange={setAcq} modules={modules} interfaces={roomChargeInterfaces} />
+      {/* A card payment is never converted: a package priced in a currency no active account settles is not
+          offered by card. Said here, beside the price, rather than discovered by a client after choosing. */}
+      {paid && acq.methods.includes("ONLINE_PAYMENT") && Array.isArray(cardCurrencies)
+        && !cardCurrencies.includes((acq.currency || "").trim().toUpperCase()) && (
+        <p className="text-xs text-warning-subtle-foreground" role="status" data-testid="card-currency-note">
+          {cardCurrencies.length === 0
+            ? "No active payment account exists yet, so this package will not be offered by card until one is added under Payment methods."
+            : `Your active payment account${cardCurrencies.length > 1 ? "s settle" : " settles"} ${cardCurrencies.join(", ")}, not ${(acq.currency || "").toUpperCase()}. A card payment is never converted, so this package will not be offered by card until the price currency or the account matches.`}
+        </p>
+      )}
 
       {/* THE AUDIENCE. Who a package is for is a question about the CLIENT -- employees, partners, the public --
           not about how they signed in. A site that wants "employees free, everyone else paid" says so here
@@ -551,6 +577,11 @@ export function PackageForm({
         {freeRule && paid && (
           <p className="mt-1.5 text-xs text-muted-foreground" data-testid="free-access-paid-note">
             This package has a price. The limit still applies — a client may buy it the stated number of times.
+          </p>
+        )}
+        {!freeRule && paid && (
+          <p className="mt-1.5 text-xs text-muted-foreground" data-testid="free-access-repeatable-note">
+            A priced package may be bought again by the same client. Choose a limit above if you want one.
           </p>
         )}
       </div>

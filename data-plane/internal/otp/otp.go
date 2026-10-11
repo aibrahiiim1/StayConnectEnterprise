@@ -42,6 +42,9 @@ var (
 	ErrAttemptsExceeded = errors.New("otp: too many wrong attempts")
 	ErrAlreadyUsed      = errors.New("otp: code already used")
 	ErrCodeMismatch     = errors.New("otp: incorrect code")
+	// ErrOtherDevice: the code (or the email's link, which carries the same code) was presented from a device
+	// other than the one it was issued to. It is not a wrong guess and does not count as one.
+	ErrOtherDevice = errors.New("otp: code was requested from another device")
 )
 
 type IssueParams struct {
@@ -52,6 +55,24 @@ type IssueParams struct {
 	Destination string // email address or phone number
 	IP          string // source IP of requester (for forensics)
 	UserAgent   string
+	// DeviceMAC is the requesting device's kernel-resolved hardware address. When set, the challenge is bound
+	// to it (iam_v2.otp_device_bindings, migration 0110) and VerifyFrom refuses any other device.
+	DeviceMAC string
+}
+
+// bindDevice records which device a challenge was issued to, and prunes bindings a day old. A failure here
+// is a failure to issue: an unbound code would be verifiable from anywhere, which is what the binding exists
+// to prevent.
+func bindDevice(ctx context.Context, db *pgxpool.Pool, challengeID, tenantID, mac string) error {
+	if strings.TrimSpace(mac) == "" {
+		return nil
+	}
+	if _, err := db.Exec(ctx, `INSERT INTO iam_v2.otp_device_bindings (challenge_id, tenant_id, device_mac)
+	     VALUES ($1::uuid, $2::uuid, $3::macaddr)`, challengeID, tenantID, mac); err != nil {
+		return fmt.Errorf("otp: bind device: %w", err)
+	}
+	_, _ = db.Exec(ctx, `DELETE FROM iam_v2.otp_device_bindings WHERE issued_at < now() - interval '1 day'`)
+	return nil
 }
 
 type Issued struct {
@@ -131,6 +152,9 @@ func Issue(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, p IssuePara
 			salt+":"+hash, expires, DefaultMaxAttempts, p.IP, p.UserAgent).Scan(&id); err != nil {
 			return nil, fmt.Errorf("otp: insert: %w", err)
 		}
+		if err := bindDevice(ctx, db, id, p.TenantID, p.DeviceMAC); err != nil {
+			return nil, err
+		}
 		return &Issued{ChallengeID: id, Code: code, ExpiresAt: expires}, nil
 	}
 
@@ -159,6 +183,9 @@ func Issue(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, p IssuePara
 		digestHex, gen, expires, DefaultMaxAttempts, p.IP, p.UserAgent); err != nil {
 		return nil, fmt.Errorf("otp: insert: %w", err)
 	}
+	if err := bindDevice(ctx, db, id, p.TenantID, p.DeviceMAC); err != nil {
+		return nil, err
+	}
 	return &Issued{ChallengeID: id, Code: code, ExpiresAt: expires}, nil
 }
 
@@ -179,6 +206,23 @@ type Verified struct {
 // ring is nil the legacy verify path runs unchanged (and does not reference otp_key_generation, so it
 // is safe against a pre-0008 database). Attempt-increment and consume are atomic in one FOR UPDATE tx.
 func Verify(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, challengeID, code string) (*Verified, error) {
+	return VerifyFrom(ctx, db, ring, challengeID, code, "")
+}
+
+// VerifyFrom is Verify from a named device: when the challenge was bound at issue (DeviceMAC) and deviceMAC
+// differs, it is refused with ErrOtherDevice BEFORE the code is compared -- no attempt is counted, nothing
+// is learned about the code. A challenge with no binding (issued before migration 0110) is verified as before.
+func VerifyFrom(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, challengeID, code, deviceMAC string) (*Verified, error) {
+	if mac := strings.TrimSpace(deviceMAC); mac != "" {
+		var bound *string
+		if err := db.QueryRow(ctx, `SELECT device_mac::text FROM iam_v2.otp_device_bindings WHERE challenge_id = $1::uuid`,
+			challengeID).Scan(&bound); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("otp: device binding: %w", err)
+		}
+		if bound != nil && !strings.EqualFold(*bound, mac) {
+			return nil, ErrOtherDevice
+		}
+	}
 	tx, err := db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return nil, err

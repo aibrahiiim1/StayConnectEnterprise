@@ -193,6 +193,7 @@ export const PORTAL_STRINGS: PortalString[] = [
   { group: "Messages", key: "err.otp.wait", english: "Please wait a moment before asking for another code.", module: OTP },
   { group: "Messages", key: "err.otp.code", english: "That code isn't right. Check it and try again.", module: OTP },
   { group: "Messages", key: "err.otp.expired", english: "That code can no longer be used. Please ask for a new one.", module: OTP },
+  { group: "Messages", key: "err.otp.device", english: "This code was requested from another device. Enter it, or tap the link, on the phone that asked for it.", module: OTP },
   { group: "Units", key: "unit.mbps", english: "{n} Mbps" },
   { group: "Units", key: "unit.h", english: "{n} h" },
   { group: "Units", key: "unit.min", english: "{n} min" },

@@ -71,6 +71,13 @@ func parseJSON(raw []byte) ([]Element, error) {
 				case map[string]any:
 					if parts, ok := val["concat"].([]any); ok {
 						for _, p := range parts {
+							// A port-restricted garden element is `address . service`: the service arrives as a JSON
+							// number. Without reading it, a carry-over would re-add a bare address to a concatenated
+							// set and the whole structural replace would be refused by nft.
+							if n, ok := p.(float64); ok && n > 0 && n <= 65535 {
+								el.Port = int(n)
+								continue
+							}
 							s, _ := p.(string)
 							if ip := net.ParseIP(s); ip != nil {
 								el.IP = ip

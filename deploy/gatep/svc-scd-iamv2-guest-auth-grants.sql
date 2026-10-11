@@ -333,3 +333,8 @@ GRANT SELECT ON iam_v2.client_groups, iam_v2.client_group_rules TO svc_scd;
 GRANT SELECT, INSERT, UPDATE ON iam_v2.principal_device_credentials TO svc_scd;
 -- Notification secrets are sealed and opened by scd alone; edged forwards a secret once and never reads it back.
 GRANT SELECT, INSERT, UPDATE ON iam_v2.notification_provider_secret_generations TO svc_scd;
+
+-- ---- 0110: a one-time code is bound to the device that asked for it ----------------------------------
+-- scd records the requesting device's kernel-resolved MAC at issue, compares it at verify, and prunes rows a
+-- day after issue. Nothing else reads the table.
+GRANT SELECT, INSERT, DELETE ON iam_v2.otp_device_bindings TO svc_scd;

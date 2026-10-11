@@ -83,10 +83,23 @@ func (h *handler) authOTPRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ip := clientIP(r)
+	if ip == nil {
+		jsonErr(w, 400, "bad ip")
+		return
+	}
+	// THE CODE IS BOUND TO THIS DEVICE. The hardware address comes from the kernel's neighbour table, never from
+	// the client, resolved rather than only consulted (arp_resolve.go) -- the same guarantee every sign-in path
+	// gives. scd records it with the challenge, and the code (or the email's link) verifies from it alone.
+	mac, ok := h.deviceMAC(r.Context(), ip)
+	if !ok {
+		jsonErr(w, 400, "device not on this Wi-Fi network")
+		return
+	}
 	body, _ := json.Marshal(map[string]string{
 		"channel":     in.Channel,
 		"destination": in.Destination,
 		"ip":          ipString(ip),
+		"mac":         mac.String(),
 		// The origin this device reached the portal by: the email's tap-to-connect link uses it.
 		"portal_base": portalLinkBase(r),
 	})

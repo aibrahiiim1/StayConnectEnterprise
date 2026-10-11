@@ -222,10 +222,12 @@ The `PRIOR_PURCHASE` rule is the free-allowance policy, extended rather than rep
 The editor exposes this as **Free access: once per client / once every N hours**, with the device switch
 underneath. `max_purchases_per_stay` and `renewable` remain stored-only; the editor no longer implies they act.
 
-**A new package starts at "once per client"** (2026-10-11). A Free package with no limit is handed out again
-every time the same Client's allowance runs out — observed on PRE-LIVE: a 100 MB free package taken at 07:15,
-exhausted at 07:24, taken again at 07:43 by the same Client on the same phone. "No limit" stays a choice the
-operator makes on purpose; an existing package keeps exactly the rules it has, and the sessions screen says how
+**A new Free package starts at "once per client"; a new priced package starts repeatable** (2026-10-11). A
+Free package with no limit is handed out again every time the same Client's allowance runs out — observed on
+PRE-LIVE: a 100 MB free package taken at 07:15, exhausted at 07:24, taken again at 07:43 by the same Client on
+the same phone. A second purchase of a priced package is a sale, not a loophole. The default follows the price
+only while it is still the untouched default: the moment the operator chooses a limit it is theirs, whatever
+the price does afterwards; an existing package keeps exactly the rules it has. The sessions screen says how
 many times a Client has had a package (§9).
 
 **No quota reset exists.** A Client's history is the entitlement ledger; nothing in this delivery deletes or
@@ -298,6 +300,16 @@ other switches. Everything else stays closed until the Client signs in.
 
 The pending-code behaviour of §6.2 stands: the code box survives leaving the captive browser, and the email's
 *tap to connect* link completes the sign-in in the phone's real browser.
+
+**A code is single-use AND device-bound** (2026-10-11, migration 0110). Reviewed at the Product Owner's
+request: the link carries the same code the email carries, over plain HTTP on the client LAN, and a code was
+single-use but verifiable from any device that obtained it. Now the challenge is bound at issue to the
+kernel-resolved MAC of the device that asked (`iam_v2.otp_device_bindings`, written by scd; the challenge
+store itself is a public-schema table the site runner does not alter), and `otp.VerifyFrom` refuses any other
+device *before* the code is compared — the refusal counts no attempt and the portal says, in six languages,
+"this code was requested from another device; enter it, or tap the link, on the phone that asked for it". The
+link page still verifies nothing on GET. A challenge issued before 0110 keeps the old behaviour for the ten
+minutes it lives. MAC identifies the device only, never a person.
 
 ---
 
@@ -388,6 +400,21 @@ counting this one — shown as a *2nd time / 3rd time* badge on the row and as a
 label is never a secret and never an identity; edged keeps its column-level grant on `auth_contexts` (0083)
 and reads both facts from the session.
 
+**The currency a card can settle is said where it is decided.** Payment methods lists, under the accounts,
+every active package priced in a currency no active account settles ("Not offered by card: OneDay (USD) —
+your active account settles GBP"), and the package editor says the same beside the price when Card is ticked.
+Nothing converts; §6.4 withholds the method.
+
+**Presentment vs settlement currency — recommendation, not built (2026-10-11).** Stripe will present a
+charge in the package's currency and settle it in the account's currency at its own rate, recording the rate,
+the fee and the net on the balance transaction; Paymob settles in the merchant's currency, with presentment in
+other currencies subject to the merchant's enablement. The safe design keeps OneGate's purchase and quote in
+the package's currency (presentment), lets the provider convert, and records on the settlement what the
+provider actually did — settlement currency, settled amount, exchange rate, fee, net, and the provider's
+balance-transaction id — read back from the authoritative status query, never computed locally. That is a
+change to the accepted financial contract and schema (`PAYMENT_ACCOUNT_CURRENCY` today refuses the mismatch
+by design) and needs the Product Owner's decision; until then the method is withheld rather than refused late.
+
 Settings follow the operational-settings rule: persisted, defaulted, bounded, audited. Group changes are
 recorded in `iam_v2.client_group_changes` (append-only) and in the audit log; `Primary method` and `Remember
 devices` live in `tenants.auth_methods.portal` and are audited with the other switches.
@@ -395,6 +422,44 @@ devices` live in `tenants.auth_methods.portal` and are audited with the other sw
 ---
 
 ## 10. Security, privacy and failure
+
+### 10.1 What a device can reach before sign-in — measured, hardened, and what remains (2026-10-11)
+
+Measured on PRE-LIVE from a client network namespace that had **not** signed in, with the Gmail preset on
+and one operator rule (`example.com`, ports `[443]`):
+
+| Finding | Before | Now |
+|---|---|---|
+| Every port was open to every garden address: port 80, UDP 443 (QUIC), any TCP port to a Google address | all ports | three sets (`walled_garden_ip` = address-only rules, every port; `walled_garden_tcp` / `walled_garden_udp` = `address . port` pairs). An email service opens TCP 443, 993, 5228, 5223 only; an identity provider or payment page TCP 443 only. |
+| A rule's **Ports** were stored and ignored (a page came back on port 80 from a rule that named 443) | ignored | enforced: the named ports, TCP and UDP; "every port" only when none is named |
+| The baseline resolvers (1.1.1.1, 8.8.8.8, 8.8.4.4) were open on every port — DNS-over-HTTPS to them worked before sign-in, and whatever else those addresses serve | all ports | port 53 only (TCP and UDP) |
+| The guest resolver (unbound on the gateway) answers any name recursively | — | unchanged and necessary: captive-portal detection resolves names. DNS tunnelling through the resolver is a known property of every captive portal; rate-limiting or filtering it is a separate decision. |
+| IPv6: no address is handed to a client and nothing is reachable over v6, but `net.ipv6.conf.all.forwarding=1` with no `ip6` rule in the StayConnect table | latent | **not changed** (host networking configuration): recommended as a decision — forward off, or an `ip6` drop policy in the render. |
+| **A name behind a shared front end**: `mail.google.com` resolves to an address that also serves YouTube, Search, Drive, Docs, Translate — all reached pre-auth by sending that host name to that address | reachable | **still reachable on 443**. The kernel filters addresses; the service is chosen by the TLS server name. No address/port rule can isolate a CDN-hosted domain. |
+
+**Why port enforcement is within the accepted model:** the sets, the forward accepts and the captive-redirect
+exclusion are the same mechanism, narrowed. `nftconverge` carries all three sets across a structural
+re-render (`address . port` elements are read back as pairs); scd syncs the three in one transaction and keeps
+syncing the address-only set on an appliance whose netd has not been re-rendered yet. Deploy order: netd (the
+render) before scd (the sync).
+
+**What the shared-front-end finding means for "Reading the code".** Opening a mail service opens the other
+services its addresses serve, to a device that has not signed in, for as long as the Email code method is on.
+Two ways to bound it, neither built here, both for the Product Owner:
+
+1. **Bounded, per-device verification access** — open the mail-service pairs only for the device that has a
+   code in flight, for the code's lifetime (a timed `saddr` set keyed by the device, written by scd at issue,
+   cleared at verify/expiry; rate-limited by the existing sign-in protection). Exposure drops from "every
+   device, always" to "one device, ten minutes, once per code". This is the design recommended; it is a change
+   to how the garden is applied (a new timed set and rule in the render) and therefore a controlled decision.
+2. **Server-name filtering** — a TLS ClientHello inspection path (SNI) for pre-auth 443, which isolates a
+   domain behind a shared address. A new enforcement component, not a narrowing of this one.
+
+What the market does, as far as it is documented: captive-portal products allow pre-authentication
+destinations by domain or address list (the same mechanism, with the same CDN limitation), and some grant a
+short, time-boxed "verification" window of broader access after the code is requested. OneGate's recommended
+design is the first option above: the bounded window, restricted to the mail services, rather than a window
+of general access.
 
 * **Server-derived device identity on every path**, including the remembered-device path.
 * **Uniform timing** for the existing PMS path is untouched; OTP verification keeps its durable throttle and

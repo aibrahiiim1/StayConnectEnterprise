@@ -221,6 +221,9 @@ func (h *handler) authOTPLink(w http.ResponseWriter, r *http.Request) {
 		key = "err.otp.code"
 	case "too_many_attempts":
 		key = "err.attempts"
+	case "other_device":
+		// The link was opened on a device other than the one that asked for the code: say which device to use.
+		key = "err.otp.device"
 	}
 	h.renderGuestNotice(w, r, http.StatusForbidden, "link.title", key, "/", "errpage.back")
 }
