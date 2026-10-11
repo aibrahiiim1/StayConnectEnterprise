@@ -97,7 +97,7 @@ func TestInterface(t *testing.T) {
 
 func TestCreateSuccess(t *testing.T) {
 	f, srv := newFake(t, func(w http.ResponseWriter, r *http.Request, form url.Values) {
-		fmt.Fprintf(w, `{"id":"cs_test_1","object":"checkout.session","url":"https://checkout.stripe.com/c/pay/cs_test_1","expires_at":%d,"client_reference_id":%q}`, fixedNow.Add(2*time.Hour).Unix(), ref)
+		fmt.Fprintf(w, `{"id":"cs_test_1","object":"checkout.session","url":"https://checkout.stripe.com/c/pay/cs_test_1","payment_method_types":["card"],"expires_at":%d,"client_reference_id":%q}`, fixedNow.Add(2*time.Hour).Unix(), ref)
 	})
 	co, err := adapter(srv).CreateCheckout(context.Background(), req())
 	if err != nil {
@@ -146,7 +146,7 @@ func TestCreateExpiryClamped(t *testing.T) {
 		{fixedNow.Add(72 * time.Hour), fixedNow.Add(maxExpiry)},
 	} {
 		f, srv := newFake(t, func(w http.ResponseWriter, r *http.Request, form url.Values) {
-			fmt.Fprint(w, `{"id":"cs_test_1","url":"https://checkout.stripe.com/x"}`)
+			fmt.Fprint(w, `{"id":"cs_test_1","url":"https://checkout.stripe.com/x","payment_method_types":["card"]}`)
 		})
 		r := req()
 		r.ExpiresAt = tc.in
@@ -254,7 +254,7 @@ func TestCreateRefusesBeforeSending(t *testing.T) {
 	}
 	// Accepted minor-unit rules.
 	ok, srv2 := newFake(t, func(w http.ResponseWriter, r *http.Request, form url.Values) {
-		fmt.Fprint(w, `{"id":"cs_test_1","url":"https://checkout.stripe.com/x"}`)
+		fmt.Fprint(w, `{"id":"cs_test_1","url":"https://checkout.stripe.com/x","payment_method_types":["card"]}`)
 	})
 	for _, c := range []struct {
 		cur string
@@ -327,7 +327,7 @@ func intent(status, charge string) string {
 }
 
 func chargeJSON(refunded int64, disputed bool) string {
-	return fmt.Sprintf(`{"id":"ch_1","status":"succeeded","paid":true,"captured":true,"amount_captured":1050,"amount_refunded":%d,"disputed":%t}`, refunded, disputed)
+	return fmt.Sprintf(`{"id":"ch_1","status":"succeeded","paid":true,"captured":true,"payment_method_details":{"type":"card"},"amount_captured":1050,"amount_refunded":%d,"disputed":%t}`, refunded, disputed)
 }
 
 func query(sessionRef string) payment.StatusQuery {
@@ -598,42 +598,85 @@ func TestProviderCodeCarriesARedactedSentenceWhenStripeGivesNoCode(t *testing.T)
 // A MANAGED PAYMENTS ACCOUNT refuses payment_method_types; the adapter retries card-only with Managed Payments
 // off, and never creates twice. Found live on PRE-LIVE with the site's Stripe TEST account.
 func TestCreateCheckoutOnAManagedPaymentsAccount(t *testing.T) {
-	for _, accepts := range []string{"card_only", "dynamic"} {
+	for _, accepts := range []string{"card_only", "neither"} {
 		var calls int
 		f, srv := newFake(t, func(w http.ResponseWriter, r *http.Request, form url.Values) {
 			calls++
 			pmt := form.Get("payment_method_types[0]")
 			mp := form.Get("managed_payments[enabled]")
 			switch {
-			case pmt != "" && mp == "":
+			case pmt == "":
+				t.Errorf("%s: a create without payment_method_types reached Stripe: %v", accepts, form)
+				fmt.Fprint(w, `{"id":"cs_dyn","url":"https://checkout.stripe.com/c/pay/cs_dyn","payment_method_types":["card","link","klarna"]}`)
+			case mp == "":
 				w.WriteHeader(400)
 				fmt.Fprint(w, `{"error":{"type":"invalid_request_error","message":"Unsupported parameter: payment_method_types. Managed Payments, which is enabled by default on your account, handles this parameter for you."}}`)
-			case pmt != "" && mp == "false" && accepts != "card_only":
+			case mp == "false" && accepts != "card_only":
 				w.WriteHeader(400)
 				fmt.Fprint(w, `{"error":{"type":"invalid_request_error","message":"Managed Payments cannot be disabled on this account."}}`)
 			default:
-				fmt.Fprintf(w, `{"id":"cs_test_mp","url":"https://checkout.stripe.com/c/pay/cs_test_mp","client_reference_id":%q,"expires_at":%d}`, ref, fixedNow.Add(time.Hour).Unix())
+				fmt.Fprintf(w, `{"id":"cs_test_mp","url":"https://checkout.stripe.com/c/pay/cs_test_mp","payment_method_types":["card"],"client_reference_id":%q,"expires_at":%d}`, ref, fixedNow.Add(time.Hour).Unix())
 			}
 		})
 		co, err := adapter(srv).CreateCheckout(context.Background(), req())
-		if err != nil || co.ProviderSessionRef != "cs_test_mp" {
-			t.Fatalf("%s: %+v %v", accepts, co, err)
+		if calls != 2 {
+			t.Fatalf("%s: %d calls, want 2 (card-only, then card-only with Managed Payments off; never a third)", accepts, calls)
 		}
-		want := 2
-		if accepts == "dynamic" {
-			want = 3
-		}
-		if calls != want {
-			t.Fatalf("%s: %d calls, want %d", accepts, calls, want)
-		}
-		// Stripe records a refused request against its key: each variant has its own, derived from the
-		// reference; the first attempt keeps the reference itself.
 		if f.requests[0].Header.Get("Idempotency-Key") != ref || f.requests[1].Header.Get("Idempotency-Key") != ref+"-v1" {
 			t.Fatalf("keys: %q %q", f.requests[0].Header.Get("Idempotency-Key"), f.requests[1].Header.Get("Idempotency-Key"))
 		}
-		last := f.forms[len(f.forms)-1]
-		if accepts == "card_only" && (last.Get("payment_method_types[0]") != "card" || last.Get("managed_payments[enabled]") != "false") {
-			t.Fatalf("card-only retry: %v", last)
+		for _, fm := range f.forms {
+			if fm.Get("payment_method_types[0]") != "card" || fm.Get("payment_method_types[1]") != "" {
+				t.Fatalf("%s: every variant must ask for card only: %v", accepts, fm)
+			}
+		}
+		if accepts == "card_only" {
+			if err != nil || co.ProviderSessionRef != "cs_test_mp" {
+				t.Fatalf("card_only: %+v %v", co, err)
+			}
+			continue
+		}
+		// Refused both ways: not created, so the client is told Card payment is unavailable. No fallback.
+		if !errors.Is(err, payment.ErrCheckoutNotCreated) {
+			t.Fatalf("neither: want ErrCheckoutNotCreated, got %+v %v", co, err)
+		}
+	}
+}
+
+// A session that would offer anything but card is expired before any client sees it, and is not created.
+func TestCreateCheckoutRefusesASessionOfferingUnapprovedMethods(t *testing.T) {
+	for _, types := range []string{`["card","link"]`, `["klarna"]`, `[]`, ``} {
+		var expired bool
+		_, srv := newFake(t, func(w http.ResponseWriter, r *http.Request, form url.Values) {
+			if strings.HasSuffix(r.URL.Path, "/expire") {
+				expired = true
+				fmt.Fprint(w, `{"id":"cs_x","status":"expired"}`)
+				return
+			}
+			pm := ""
+			if types != "" {
+				pm = `,"payment_method_types":` + types
+			}
+			fmt.Fprintf(w, `{"id":"cs_x","url":"https://checkout.stripe.com/c/pay/cs_x","client_reference_id":%q%s}`, ref, pm)
+		})
+		co, err := adapter(srv).CreateCheckout(context.Background(), req())
+		if !errors.Is(err, payment.ErrCheckoutNotCreated) || co.RedirectURL != "" {
+			t.Fatalf("%q: want not created, got %+v %v", types, co, err)
+		}
+		if !expired {
+			t.Fatalf("%q: the unapproved session was not expired", types)
+		}
+	}
+}
+
+// A capture by a method that is not approved never reports CAPTURED; it stays unresolved for review.
+func TestCaptureByAnUnapprovedMethodIsNotCaptured(t *testing.T) {
+	for _, pm := range []string{`"payment_method_details":{"type":"link"},`, `"payment_method_details":{"type":"klarna"},`, ``} {
+		ch := strings.Replace(chargeJSON(0, false), `"payment_method_details":{"type":"card"},`, pm, 1)
+		_, srv := worldServer(t, &world{session: sess("complete", "paid", intent("succeeded", ch))})
+		res, err := adapter(srv).QueryStatus(context.Background(), query("cs_test_1"))
+		if err != nil || res.State != payment.CheckoutOpen || res.ReasonCode != "payment_method_not_approved" {
+			t.Fatalf("%q: %+v %v", pm, res, err)
 		}
 	}
 }

@@ -394,6 +394,27 @@ type sessionCreated struct {
 	URL               string `json:"url"`
 	ExpiresAt         int64  `json:"expires_at"`
 	ClientReferenceID string `json:"client_reference_id"`
+	// PaymentMethodTypes is what the hosted page will actually offer. It must be exactly the approved set.
+	PaymentMethodTypes []string `json:"payment_method_types"`
+}
+
+// approvedMethodTypes is the complete set of Stripe payment-method types OneGate's Card payment may offer
+// or accept. Apple Pay and Google Pay are card wallets: Stripe reports them as type "card" (with
+// card.wallet set), so they pass; Link, bank debits, vouchers and every asynchronous method do not.
+var approvedMethodTypes = map[string]bool{"card": true}
+
+// onlyApproved reports whether a session offers approved methods and nothing else. An empty or absent
+// list is NOT approved: what the page will offer must be known, not assumed.
+func onlyApproved(types []string) bool {
+	if len(types) == 0 {
+		return false
+	}
+	for _, t := range types {
+		if !approvedMethodTypes[strings.ToLower(strings.TrimSpace(t))] {
+			return false
+		}
+	}
+	return true
 }
 
 // CreateCheckout creates one Stripe Checkout Session in payment mode for a single line item. The
@@ -450,9 +471,10 @@ func (a *Adapter) CreateCheckout(ctx context.Context, r payment.CheckoutRequest)
 
 	// MANAGED PAYMENTS. On a Stripe account where Managed Payments is enabled (the default for new accounts,
 	// found live on PRE-LIVE 2026-10-11), Stripe refuses `payment_method_types` with a 400 before any object
-	// exists. The variants are tried in order -- card-only as before; card-only with Managed Payments off; then
-	// Stripe's own choice of methods (card is always among them) -- and the one an account accepts is
-	// remembered for that account. Stripe records a refused request against its idempotency key, so each
+	// exists. The variants are tried in order -- card-only as before, then card-only with Managed Payments
+	// off -- and the one an account accepts is remembered for that account. THERE IS NO VARIANT THAT LETS
+	// STRIPE CHOOSE THE METHODS: an account that refuses both is refused as "not created", and the client is
+	// told Card payment is unavailable. Only approved methods may ever be offered. Stripe records a refused request against its idempotency key, so each
 	// variant carries its own key derived from the reference; that is safe because a refused create created
 	// nothing, and the engine never creates again (it resolves an ambiguous create by client reference).
 	acct := keyFingerprint(key)
@@ -497,6 +519,15 @@ func (a *Adapter) CreateCheckout(ctx context.Context, r payment.CheckoutRequest)
 	if s.ClientReferenceID != "" && s.ClientReferenceID != r.ClientRef {
 		return payment.Checkout{}, errf("create checkout returned a session for a different reference")
 	}
+	// The page must offer approved methods only. A session that would offer anything else is expired before
+	// any client sees it; once expired nothing can be paid on it, so it is truthfully "not created".
+	if !onlyApproved(s.PaymentMethodTypes) {
+		er, eerr := a.call(ctx, http.MethodPost, "/v1/checkout/sessions/"+url.PathEscape(s.ID)+"/expire", url.Values{}, key, r.ClientRef+"-expire")
+		if eerr == nil && er.status >= 200 && er.status <= 299 {
+			return payment.Checkout{}, notCreated("provider offered unapproved payment methods; the session was expired unused")
+		}
+		return payment.Checkout{}, errf("provider offered unapproved payment methods and the session could not be expired")
+	}
 	out := payment.Checkout{ProviderSessionRef: s.ID, RedirectURL: s.URL, ExpiresAt: exp}
 	if s.ExpiresAt > 0 {
 		out.ExpiresAt = time.Unix(s.ExpiresAt, 0).UTC()
@@ -521,14 +552,18 @@ type balanceTxn struct {
 }
 
 type charge struct {
-	BalanceTxnRaw  json.RawMessage `json:"balance_transaction"`
-	ID             string          `json:"id"`
-	Status         string          `json:"status"`
-	Paid           bool            `json:"paid"`
-	Captured       bool            `json:"captured"`
-	AmountCaptured int64           `json:"amount_captured"`
-	AmountRefunded int64           `json:"amount_refunded"`
-	Disputed       bool            `json:"disputed"`
+	BalanceTxnRaw json.RawMessage `json:"balance_transaction"`
+	// PaymentMethodDetails.Type is the method the client actually paid with.
+	PaymentMethodDetails *struct {
+		Type string `json:"type"`
+	} `json:"payment_method_details"`
+	ID             string `json:"id"`
+	Status         string `json:"status"`
+	Paid           bool   `json:"paid"`
+	Captured       bool   `json:"captured"`
+	AmountCaptured int64  `json:"amount_captured"`
+	AmountRefunded int64  `json:"amount_refunded"`
+	Disputed       bool   `json:"disputed"`
 }
 
 type paymentIntent struct {
@@ -647,6 +682,11 @@ func (a *Adapter) mapSession(ctx context.Context, key string, s session, hasPI b
 		}
 		if !ch.Captured || ch.Status != "succeeded" {
 			return payment.StatusResult{State: payment.CheckoutOpen, ReasonCode: "charge_not_captured"}, nil
+		}
+		// Money taken by a method that is not approved never grants by itself: it stays unresolved, and after
+		// the grace it becomes UNKNOWN and goes to financial review for a person to decide.
+		if ch.PaymentMethodDetails == nil || !approvedMethodTypes[strings.ToLower(ch.PaymentMethodDetails.Type)] {
+			return payment.StatusResult{State: payment.CheckoutOpen, ReasonCode: "payment_method_not_approved"}, nil
 		}
 		res := payment.StatusResult{
 			State:          payment.CheckoutCaptured,
@@ -923,14 +963,14 @@ func managedPaymentsRefusal(body []byte) bool {
 	return strings.Contains(b, "managed payments") || strings.Contains(b, "managed_payments")
 }
 
-// checkoutVariants are the ways a checkout's payment methods are asked for, in order of preference.
+// checkoutVariants are the ways a checkout's payment methods are asked for, in order of preference. Every
+// variant asks for card and card only.
 var checkoutVariants = []func(url.Values){
 	func(f url.Values) { f.Set("payment_method_types[0]", "card"); f.Del("managed_payments[enabled]") },
 	func(f url.Values) {
 		f.Set("payment_method_types[0]", "card")
 		f.Set("managed_payments[enabled]", "false")
 	},
-	func(f url.Values) { f.Del("payment_method_types[0]"); f.Del("managed_payments[enabled]") },
 }
 
 // keyFingerprint names an account for the variant memory without holding its key.

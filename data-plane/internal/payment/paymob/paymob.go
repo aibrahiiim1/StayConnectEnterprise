@@ -522,6 +522,10 @@ type transaction struct {
 	Data                struct {
 		TxnResponseCode json.RawMessage `json:"txn_response_code"`
 	} `json:"data"`
+	// SourceData.Type is the method the client actually paid with ("card", "wallet", "aman", ...).
+	SourceData struct {
+		Type string `json:"type"`
+	} `json:"source_data"`
 	Order struct {
 		ID              int64  `json:"id"`
 		MerchantOrderID string `json:"merchant_order_id"`
@@ -631,6 +635,11 @@ func (a *Adapter) QueryStatus(ctx context.Context, q payment.StatusQuery) (payme
 		return payment.StatusResult{State: payment.CheckoutOpen, ReasonCode: "pending"}, nil
 	case t.Success && t.IsAuth:
 		return payment.StatusResult{}, errf("transaction %s is authorised but not captured; manual review required", txnRef)
+	case t.Success && !strings.EqualFold(strings.TrimSpace(t.SourceData.Type), "card"):
+		// The integration ids are configured by an operator as CARD integrations, but nothing at Paymob stops
+		// a wallet or kiosk integration being entered. Money taken by a method that is not approved never
+		// grants by itself: it stays unresolved and, after the grace, goes to financial review.
+		return payment.StatusResult{State: payment.CheckoutOpen, ReasonCode: "payment_method_not_approved"}, nil
 	case t.Success:
 		res := payment.StatusResult{
 			State:          payment.CheckoutCaptured,
