@@ -41,13 +41,19 @@ func TestVerificationAccessIsMeteredFirstAndAdmittedOnlyToTheInternet(t *testing
 			t.Errorf("%q must precede the established accept", meter)
 		}
 	}
-	admit := strings.Index(fwd, "iifname . ip saddr @verify_ipv4 accept")
+	admit := strings.Index(fwd, "iifname . ip saddr @verify_ipv4 ct mark set 0x56455249 accept")
 	if admit < 0 || !strings.Contains(fwd[admit-80:admit], `oifname "ens160"`) {
 		t.Fatal("verification access must be admitted to the WAN only")
 	}
 	for _, guard := range []string{`guest -> mgmt blocked`, `inter-guest isolation`} {
 		if g := strings.Index(fwd, guard); g < 0 || g > admit {
 			t.Errorf("%q must precede the verification admit", guard)
+		}
+	}
+	// A closed window's flows end with it: the marked-flow drops precede the established accept.
+	for _, d := range []string{"ct mark 0x56455249 iifname @guest_interfaces ip saddr != @verify_quota drop", "ct mark 0x56455249 oifname @guest_interfaces ip daddr != @verify_quota drop"} {
+		if i := strings.Index(fwd, d); i < 0 || i > est {
+			t.Errorf("%q must precede the established accept", d)
 		}
 	}
 	nat := n[strings.Index(n, "chain prerouting_nat"):]

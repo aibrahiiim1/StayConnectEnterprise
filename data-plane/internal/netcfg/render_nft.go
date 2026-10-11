@@ -247,6 +247,12 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	b.WriteString("\t\toifname @guest_interfaces ip daddr @verify_down limit name ip daddr map @verify_down drop comment \"verification rate (down)\"\n")
 	b.WriteString("\t\tiifname @guest_interfaces ip saddr @verify_quota quota name ip saddr map @verify_quota drop comment \"verification data cap (up)\"\n")
 	b.WriteString("\t\tiifname @guest_interfaces ip saddr @verify_up limit name ip saddr map @verify_up drop comment \"verification rate (up)\"\n")
+	// A CLOSED WINDOW'S FLOWS END WITH IT. A flow the window admitted carries a conntrack mark (set at the admit
+	// below); once the device no longer holds a live window -- cap reached, expired, cancelled, verified -- its
+	// meters are removed, and without this a download already in progress would carry on through the
+	// established accept, unmetered. Membership of verify_quota is the "window is live" test.
+	b.WriteString("\t\tct mark 0x56455249 iifname @guest_interfaces ip saddr != @verify_quota drop comment \"closed verification window: its flows end (up)\"\n")
+	b.WriteString("\t\tct mark 0x56455249 oifname @guest_interfaces ip daddr != @verify_quota drop comment \"closed verification window: its flows end (down)\"\n")
 	b.WriteString("\t\tct state established,related accept\n\t\tct state invalid drop\n")
 	// block guests reaching management subnets
 	for _, cidr := range topo.MgmtCIDRs {
@@ -271,7 +277,7 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" meta l4proto { tcp, udp } th dport 53 update @dns_preauth_rl { ip saddr limit rate over 20/second burst 40 packets } counter name \"dns_preauth_limited\" drop comment \"pre-auth DNS rate limit\"\n", topo.WANInterface)
 	// Temporary verification access: the internet, never the appliance's other networks (the management and
 	// client-to-client drops above have already run), for as long as the kernel keeps the timed element.
-	fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @verify_ipv4 accept comment \"temporary verification access\"\n", topo.WANInterface)
+	fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @verify_ipv4 ct mark set 0x56455249 accept comment \"temporary verification access\"\n", topo.WANInterface)
 	// walled-garden pre-auth -> WAN for any guest interface: every port to an address-only element, and exactly
 	// the named port to a port-restricted one.
 	fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" ip daddr @walled_garden_ip accept\n", topo.WANInterface)
