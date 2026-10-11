@@ -276,6 +276,7 @@ func (s *server) authorizeSocial(w http.ResponseWriter, r *http.Request) {
 	primary, secondary := iamv2.SocialFactors(req.Provider, info.Sub, info.Email, info.EmailVerified, info.Claims)
 	s.authorizeViaIAMv2(w, r, iamv2.MethodSocial, iamv2.Request{
 		Provider:         req.Provider,
+		Credential:       iamv2.CredentialForSocial(req.Provider),
 		FactorIssuer:     primary.Issuer,
 		FactorValue:      primary.Value,
 		FactorAttrs:      primary.Attrs,

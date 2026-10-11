@@ -245,14 +245,23 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
-		// credential_method records which authority admitted this device, so an operator reading the session
-		// can tell a voucher guest from an account guest without joining back through the entitlement.
+		// credential_method records HOW this device signed in, so an operator reading the session can tell an
+		// emailed code from a WhatsApp code or a Google sign-in without joining back through the entitlement.
+		// It is the credential recorded on the auth context (iamv2/credential.go): this device's own sign-in
+		// when it joined with one, otherwise the sign-in that acquired the entitlement. A context minted before
+		// credentials were recorded falls back to the authority's name, as before.
 		var method string
 		if err := tx.QueryRow(ctx, `
-		    SELECT CASE WHEN voucher_id IS NOT NULL THEN 'VOUCHER'
-		                WHEN guest_account_id IS NOT NULL THEN 'ACCOUNT'
-		                ELSE 'PRINCIPAL' END
-		      FROM iam_v2.entitlements WHERE id=$1`, req.EntitlementID).Scan(&method); err != nil {
+		    SELECT COALESCE(
+		             (SELECT NULLIF(ac.credential,'') FROM iam_v2.auth_contexts ac WHERE ac.id = NULLIF($2,'')::uuid),
+		             (SELECT NULLIF(ac.credential,'') FROM iam_v2.purchases p
+		                JOIN iam_v2.auth_contexts ac ON ac.id = p.auth_context_id
+		               WHERE p.id = e.purchase_id),
+		             CASE WHEN e.voucher_id IS NOT NULL THEN 'VOUCHER'
+		                  WHEN e.guest_account_id IS NOT NULL THEN 'ACCOUNT'
+		                  WHEN e.anonymous_subject_id IS NOT NULL THEN 'OPEN'
+		                  ELSE 'PRINCIPAL' END)
+		      FROM iam_v2.entitlements e WHERE e.id=$1`, req.EntitlementID, req.AuthContextID).Scan(&method); err != nil {
 			return err
 		}
 		return tx.QueryRow(ctx, `

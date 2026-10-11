@@ -70,6 +70,6 @@ func (s *server) authorizeGuestAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.authorizeViaIAMv2(w, r, iamv2.MethodAccount,
-		iamv2.Request{Username: username, Secret: req.Password,
+		iamv2.Request{Username: username, Secret: req.Password, Credential: iamv2.CredentialAccount,
 			Device: iamv2.DeviceContext{MAC: mac.String()}}, ip)
 }

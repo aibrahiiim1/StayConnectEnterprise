@@ -95,7 +95,7 @@ func (s *server) rememberDeviceDays(ctx context.Context) int {
 // issueResumeCredential is called after a verified OTP / SOCIAL allow. It returns the plaintext token for the
 // portal cookie, or "" when devices are not remembered here. A previous credential for the same
 // (principal, device) is revoked so one device holds one live credential.
-func (s *server) issueResumeCredential(ctx context.Context, principalID, deviceID string, method iamv2.Method) string {
+func (s *server) issueResumeCredential(ctx context.Context, principalID, deviceID string, method iamv2.Method, credential string) string {
 	if len(s.resumeKey) < 32 || s.db == nil || principalID == "" || deviceID == "" {
 		return ""
 	}
@@ -121,10 +121,16 @@ func (s *server) issueResumeCredential(ctx context.Context, principalID, deviceI
 		slog.Warn("remembered device: revoke previous failed", "err", err)
 		return ""
 	}
+	// The credential the device proved (EMAIL_OTP, SOCIAL_GOOGLE, ...) travels with the remembered device, so a
+	// resumed sign-in is reported to the operator as what it originally was.
+	var cred *string
+	if c := iamv2.NormalizeCredential(credential); c != "" {
+		cred = &c
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.principal_device_credentials
-	     (tenant_id, site_id, guest_principal_id, device_id, method, secret_hmac, key_id, expires_at)
-	     VALUES ($1,$2,$3::uuid,$4::uuid,$5,$6,$7, now() + ($8::int * interval '1 day'))`,
-		s.tenID, s.siteID, principalID, deviceID, string(method), s.resumeHMAC(token), clientResumeKeyID, days); err != nil {
+	     (tenant_id, site_id, guest_principal_id, device_id, method, secret_hmac, key_id, expires_at, credential)
+	     VALUES ($1,$2,$3::uuid,$4::uuid,$5,$6,$7, now() + ($8::int * interval '1 day'), $9)`,
+		s.tenID, s.siteID, principalID, deviceID, string(method), s.resumeHMAC(token), clientResumeKeyID, days, cred); err != nil {
 		slog.Warn("remembered device: issue failed", "err", err)
 		return ""
 	}
@@ -136,6 +142,9 @@ func (s *server) issueResumeCredential(ctx context.Context, principalID, deviceI
 
 type resumeRow struct {
 	id, principalID, deviceID, method, deviceMAC string
+	// credential is what the device proved when it was remembered (EMAIL_OTP, SOCIAL_GOOGLE, ...); "" for a
+	// credential issued before it was recorded.
+	credential string
 }
 
 var errResumeUnknown = errors.New("resume credential unknown")
@@ -143,11 +152,11 @@ var errResumeUnknown = errors.New("resume credential unknown")
 // lookupResume finds a live credential. The device's MAC comes with it so the caller can enforce the binding.
 func (s *server) lookupResume(ctx context.Context, token string) (resumeRow, error) {
 	var r resumeRow
-	err := s.db.QueryRow(ctx, `SELECT c.id::text, c.guest_principal_id::text, c.device_id::text, c.method, d.mac::text
+	err := s.db.QueryRow(ctx, `SELECT c.id::text, c.guest_principal_id::text, c.device_id::text, c.method, d.mac::text, COALESCE(c.credential,'')
 	      FROM iam_v2.principal_device_credentials c
 	      JOIN iam_v2.devices d ON d.tenant_id=c.tenant_id AND d.site_id=c.site_id AND d.id=c.device_id
 	     WHERE c.tenant_id=$1 AND c.site_id=$2 AND c.secret_hmac=$3 AND c.revoked_at IS NULL AND c.expires_at > now()`,
-		s.tenID, s.siteID, s.resumeHMAC(token)).Scan(&r.id, &r.principalID, &r.deviceID, &r.method, &r.deviceMAC)
+		s.tenID, s.siteID, s.resumeHMAC(token)).Scan(&r.id, &r.principalID, &r.deviceID, &r.method, &r.deviceMAC, &r.credential)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return resumeRow{}, errResumeUnknown
 	}
@@ -307,6 +316,7 @@ func (s *server) authorizeResume(w http.ResponseWriter, r *http.Request) {
 	_, _ = s.db.Exec(r.Context(), `UPDATE iam_v2.principal_device_credentials SET last_used_at = now() WHERE id=$1::uuid`, row.id)
 	s.authorizeViaIAMv2(w, r, method, iamv2.Request{
 		ResumedPrincipalID: row.principalID,
+		Credential:         row.credential,
 		Device:             iamv2.DeviceContext{MAC: row.deviceMAC},
 	}, ip)
 }

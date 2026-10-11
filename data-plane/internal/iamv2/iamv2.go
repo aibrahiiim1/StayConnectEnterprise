@@ -102,7 +102,12 @@ type Request struct {
 	// resume credential for this principal, so no factor is re-proven; the Client's stored factors decide the
 	// group and an ordinary auth context is minted for the method the credential was issued under.
 	ResumedPrincipalID string
-	Device             DeviceContext
+	// Credential names HOW the Client proved themselves this time, for the operator: EMAIL_OTP, SMS_OTP,
+	// WHATSAPP_OTP, SOCIAL_GOOGLE, VOUCHER, ACCOUNT ... (credential.go). The method says which authority
+	// decided; the credential says which channel or provider the client actually used, which is what the
+	// Admin Console's "Signed in with" needs. A remembered device carries the credential it was issued under.
+	Credential string
+	Device     DeviceContext
 }
 
 // DeviceContext is the device/network the request arrived on. MAC identifies a device, never a person.
@@ -181,6 +186,9 @@ type AuthContextSpec struct {
 	// Pinned here so eligibility reads a recorded decision rather than re-deriving one.
 	ClientGroupID       string
 	ClientGroupEvidence map[string]any
+	// Credential is the channel or provider the client proved themselves with (Request.Credential), recorded
+	// on the context so the session opened from it can say so to an operator.
+	Credential string
 }
 
 // subjectFor returns the single subject identifier a method requires, and whether the subject shape is

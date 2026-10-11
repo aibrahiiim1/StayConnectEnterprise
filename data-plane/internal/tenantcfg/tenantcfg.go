@@ -45,6 +45,12 @@ type PortalConfig struct {
 	// RememberDeviceDays is how long a device that verified a code or an identity provider may reconnect
 	// without proving again (0 = never remember). nil = the default of 30 days.
 	RememberDeviceDays *int `json:"remember_device_days,omitempty"`
+	// MailProviders are the email services a device may reach BEFORE sign-in so it can read its one-time code
+	// without leaving the Wi-Fi: preset ids from internal/mailreach (gmail, outlook, yahoo, icloud, ...).
+	// MailDomains are host names the site adds for a provider the presets do not know. Both open the walled
+	// garden only while the Email code method is switched on.
+	MailProviders []string `json:"mail_providers,omitempty"`
+	MailDomains   []string `json:"mail_domains,omitempty"`
 }
 
 // DefaultRememberDeviceDays is the contract default (§2.3).

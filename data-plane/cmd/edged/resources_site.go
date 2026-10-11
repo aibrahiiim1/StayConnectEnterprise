@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/mailreach"
 )
 
 // Site-wide settings + the read-mostly resources: auth-methods, walled
@@ -127,8 +129,20 @@ func (s *server) authMethodsRoutes() http.Handler {
 		}
 		sort.Strings(changed)
 		s.audit(req, "auth_methods.updated", "tenant", s.tenantID, map[string]any{"methods_changed": changed})
+		// The email services reachable before sign-in follow the Email switch and the portal's mail list, so
+		// the walled garden is re-read at once rather than on its next minute.
+		if _, ok := patch["portal"]; ok {
+			s.pokeSCD(req, "/v1/admin/walled-garden/reload")
+		} else if _, ok := patch["email"]; ok {
+			s.pokeSCD(req, "/v1/admin/walled-garden/reload")
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(out)
+	})
+	// The email-service presets the Admin Console offers (id, name and the host names each opens), so the
+	// screen never carries its own copy of the list.
+	r.Get("/mail-providers", func(w http.ResponseWriter, _ *http.Request) {
+		writeList(w, mailreach.Providers)
 	})
 	return r
 }
@@ -138,8 +152,10 @@ func (s *server) authMethodsRoutes() http.Handler {
 func validateAuthMethodsPatch(patch map[string]json.RawMessage) error {
 	if rawPortal, ok := patch["portal"]; ok {
 		var p struct {
-			PrimaryMethod      *string `json:"primary_method"`
-			RememberDeviceDays *int    `json:"remember_device_days"`
+			PrimaryMethod      *string  `json:"primary_method"`
+			RememberDeviceDays *int     `json:"remember_device_days"`
+			MailProviders      []string `json:"mail_providers"`
+			MailDomains        []string `json:"mail_domains"`
 		}
 		if err := json.Unmarshal(rawPortal, &p); err != nil {
 			return errors.New("portal must be an object")
@@ -149,6 +165,15 @@ func validateAuthMethodsPatch(patch map[string]json.RawMessage) error {
 		}
 		if p.RememberDeviceDays != nil && (*p.RememberDeviceDays < 0 || *p.RememberDeviceDays > 365) {
 			return errors.New("portal.remember_device_days must be between 0 (never) and 365")
+		}
+		// The email services reachable before sign-in: known presets, and host names only (no wildcards, no
+		// addresses, no bare suffixes), bounded -- every entry is reachable by a device that has signed in to
+		// nothing, so the list is kept to what a mail app actually contacts.
+		if bad, ok := mailreach.Validate(p.MailProviders, p.MailDomains); !ok {
+			if bad == "too many" {
+				return fmt.Errorf("portal.mail_domains may hold at most %d host names", mailreach.MaxCustomDomains)
+			}
+			return fmt.Errorf("portal.mail_providers / mail_domains: %q is not a known email service or a valid host name", bad)
 		}
 	}
 	rawPMS, ok := patch["pms"]

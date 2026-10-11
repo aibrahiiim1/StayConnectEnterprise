@@ -10,12 +10,14 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
+	"github.com/stayconnect/enterprise/data-plane/internal/mailreach"
 	"github.com/stayconnect/enterprise/data-plane/internal/nft"
 	"github.com/stayconnect/enterprise/data-plane/internal/social"
 	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
@@ -244,7 +246,12 @@ func (s *server) reconcileWalledGarden(ctx context.Context) (int, error) {
 	for _, d := range s.socialGardenDomains(ctx) {
 		domains = append(domains, domain{d})
 	}
-	resolver := &net.Resolver{}
+	// The email services a device may read its one-time code from (internal/mailreach): only while the Email
+	// code method is on, only the presets and host names the site chose.
+	for _, d := range s.mailGardenDomains(ctx) {
+		domains = append(domains, domain{d})
+	}
+	resolver := gardenResolver()
 	for _, d := range domains {
 		rctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		ips, err := resolver.LookupIP(rctx, "ip4", d.name)
@@ -305,6 +312,48 @@ func (s *server) socialGardenDomains(ctx context.Context) []string {
 		}
 	}
 	return out
+}
+
+// mailGardenDomains lists the email services' host names the site chose (Sign-in methods → "Reading the
+// code"), only while the Email code method is switched on. A device that cannot reach its mail service cannot
+// read the code it was sent; a device that can reach nothing else is still captive.
+func (s *server) mailGardenDomains(ctx context.Context) []string {
+	if s.db == nil {
+		return nil
+	}
+	var cfg *tenantcfg.AuthMethods
+	var err error
+	if s.methodSwitches != nil {
+		cfg, err = s.methodSwitches(ctx)
+	} else {
+		cfg, err = tenantcfg.Load(ctx, s.db, s.tenID)
+	}
+	if err != nil || cfg == nil || cfg.Email == nil || !cfg.Email.Enabled || cfg.Portal == nil {
+		return nil
+	}
+	return mailreach.Domains(cfg.Portal.MailProviders, cfg.Portal.MailDomains)
+}
+
+// gardenResolver resolves garden host names THROUGH THE GUEST RESOLVER (unbound on the appliance, which is the
+// nameserver every client device is handed by DHCP), so the addresses opened are the ones the clients were
+// told -- answers cached by unbound are served to scd and to the phone alike. The appliance's own
+// systemd-resolved can answer differently for a service behind a large CDN, which left a client holding an
+// address the garden had never opened. SCD_GARDEN_RESOLVER overrides the address; "system" uses the host's.
+func gardenResolver() *net.Resolver {
+	addr := strings.TrimSpace(os.Getenv("SCD_GARDEN_RESOLVER"))
+	if addr == "" {
+		addr = "127.0.0.1:53"
+	}
+	if addr == "system" {
+		return &net.Resolver{}
+	}
+	return &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			d := net.Dialer{Timeout: 2 * time.Second}
+			return d.DialContext(ctx, network, addr)
+		},
+	}
 }
 
 func (s *server) gardenReconcileLoop(ctx context.Context) {

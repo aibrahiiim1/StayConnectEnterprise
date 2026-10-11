@@ -102,6 +102,13 @@ type edgeSessionRow struct {
 	// How many devices this same Entitlement currently has online. "3 of 4 devices" is the fact behind a guest
 	// complaining that their fourth device is refused.
 	ActiveDevices int `json:"active_devices"`
+
+	// HOW MANY TIMES THIS CLIENT HAS HAD THIS PACKAGE, counting the one this session runs under: every
+	// activated entitlement for the same subject (stay, account, voucher, Client or anonymous subject) on any
+	// revision of the same package. 1 is the first time; a Free package taken again shows 2, 3 ... so an
+	// operator can see a repeat at a glance instead of reconstructing it from the activity list. 0 when the
+	// session has no resolvable entitlement.
+	PackageAcquisitions int `json:"package_acquisitions"`
 }
 
 // sessionCols keeps the historical alias pairs (started AS started_at, ended AS ended_at) so the wire contract
@@ -140,7 +147,21 @@ const sessionCols = `s.id, s.ip::text, s.mac::text, s.state,
        COALESCE(e.data_quota_bytes, spr.data_quota_bytes), e.consumed_data_bytes,
        spr.time_quota_seconds, e.consumed_online_seconds,
        (SELECT count(DISTINCT d.mac)::int FROM iam_v2.sessions d
-         WHERE d.entitlement_id = s.entitlement_id AND d.state = 'active')`
+         WHERE d.entitlement_id = s.entitlement_id AND d.state = 'active'),
+       -- Times this subject has had this package (any revision), up to and including this entitlement.
+       CASE WHEN e.id IS NULL OR ipr.package_id IS NULL OR e.activated_at IS NULL THEN 0 ELSE
+         (SELECT count(*)::int FROM iam_v2.entitlements e2
+            JOIN iam_v2.internet_package_revisions r2
+              ON r2.tenant_id = e2.tenant_id AND r2.site_id = e2.site_id AND r2.id = e2.package_revision_id
+           WHERE e2.tenant_id = e.tenant_id AND e2.site_id = e.site_id
+             AND r2.package_id = ipr.package_id
+             AND e2.activated_at IS NOT NULL AND e2.activated_at <= e.activated_at
+             AND e2.stay_id IS NOT DISTINCT FROM e.stay_id
+             AND e2.guest_account_id IS NOT DISTINCT FROM e.guest_account_id
+             AND e2.voucher_id IS NOT DISTINCT FROM e.voucher_id
+             AND e2.guest_principal_id IS NOT DISTINCT FROM e.guest_principal_id
+             AND e2.anonymous_subject_id IS NOT DISTINCT FROM e.anonymous_subject_id)
+       END`
 
 // sessionFrom is shared by the list and the single-row read so the two cannot drift into describing the same
 // session differently.
@@ -172,7 +193,7 @@ func scanEdgeSession(row interface{ Scan(...any) error }, e *edgeSessionRow) err
 		&e.PackageCode, &e.PackageName,
 		&e.PlanCode, &e.DownKbps, &e.UpKbps, &e.MaxDevices,
 		&e.DataQuotaBytes, &e.DataUsedBytes, &e.TimeQuotaSeconds, &e.TimeUsedSeconds,
-		&e.ActiveDevices)
+		&e.ActiveDevices, &e.PackageAcquisitions)
 }
 
 func (s *server) sessionsRoutes() http.Handler {

@@ -192,6 +192,25 @@ func (h *handler) packagesPage(w http.ResponseWriter, r *http.Request) {
 		h.landing(w, r, "Please sign in again.")
 		return
 	}
+	h.packagesFor(w, r, sess, "")
+}
+
+// backToPackages answers a refused acquisition. THE CLIENT STAYS SIGNED IN: while their commerce session is
+// valid they are shown the same choices again with the reason above them, not the sign-in page. Sending them
+// to the sign-in page -- which this did -- read as "you have been signed out", and on a phone it meant a new
+// code, a trip to the mail app, and the captive browser gone again (found by the Product Owner, 2026-10-11).
+// Only a client whose session has already expired is asked to sign in again.
+func (h *handler) backToPackages(w http.ResponseWriter, r *http.Request, msg string) {
+	sess, ok := h.resolveCommerceSession(r)
+	if !ok {
+		h.landing(w, r, msg)
+		return
+	}
+	h.packagesFor(w, r, sess, msg)
+}
+
+// packagesFor lists the session's eligible packages, with an optional refusal above them.
+func (h *handler) packagesFor(w http.ResponseWriter, r *http.Request, sess commerceSession, errMsg string) {
 	q := url.Values{}
 	q.Set("auth_context_id", sess.authContextID)
 	q.Set("device_id", sess.deviceID)
@@ -229,7 +248,7 @@ func (h *handler) packagesPage(w http.ResponseWriter, r *http.Request) {
 			h.commerceSessions.put(c.Value, sess)
 		}
 	}
-	h.renderPackages(w, r, out.Packages, code, sess.identityLabel, out.FreeAllowanceUsed)
+	h.renderPackages(w, r, out.Packages, code, sess.identityLabel, out.FreeAllowanceUsed, errMsg)
 }
 
 // acquirePackage runs quote -> confirm -> activate server-side.
@@ -249,7 +268,7 @@ func (h *handler) acquirePackage(w http.ResponseWriter, r *http.Request) {
 	}
 	pkgID := strings.TrimSpace(r.FormValue("package_id"))
 	if pkgID == "" {
-		h.landing(w, r, "Please choose a package.")
+		h.backToPackages(w, r, "Please choose a package.")
 		return
 	}
 	// The method the client chose. scd re-validates it against every gate; an unknown value is refused there.
@@ -276,10 +295,10 @@ func (h *handler) acquirePackage(w http.ResponseWriter, r *http.Request) {
 		"guest_network_id": sess.guestNetworkID, "package_id": pkgID, "method": method})
 	if !ok {
 		if method == "ONLINE_PAYMENT" {
-			h.landing(w, r, msgCardUnavailable)
+			h.backToPackages(w, r, msgCardUnavailable)
 			return
 		}
-		h.landing(w, r, "That package is not available. Please choose another.")
+		h.backToPackages(w, r, "That package is not available. Please choose another.")
 		return
 	}
 	confirm, ok := post("/v1/commerce/confirm", map[string]any{
@@ -300,10 +319,10 @@ func (h *handler) acquirePackage(w http.ResponseWriter, r *http.Request) {
 	}
 	if !ok {
 		if method == "ONLINE_PAYMENT" {
-			h.landing(w, r, msgCardUnavailable)
+			h.backToPackages(w, r, msgCardUnavailable)
 			return
 		}
-		h.landing(w, r, "We could not complete that. Please try again.")
+		h.backToPackages(w, r, "We could not complete that. Please try again.")
 		return
 	}
 	// The entitlement is durable; the guest is still offline until it is activated into a session.
@@ -312,23 +331,28 @@ func (h *handler) acquirePackage(w http.ResponseWriter, r *http.Request) {
 	switch failure {
 	case "":
 	case activateNoDevice:
-		h.landing(w, r, "Your device isn't connected to this Wi-Fi network.")
+		h.backToPackages(w, r, "Your device isn't connected to this Wi-Fi network.")
 		return
 	case activateDeviceLimit:
-		h.landing(w, r, "This account has reached its device limit. Disconnect another device and try again.")
+		h.backToPackages(w, r, "This account has reached its device limit. Disconnect another device and try again.")
 		return
 	case activateCapacity:
-		h.landing(w, r, guestCapacityMessage)
+		h.backToPackages(w, r, guestCapacityMessage)
 		return
 	case activateLicense:
-		h.landing(w, r, guestLicenseRefusedMessage)
+		h.backToPackages(w, r, guestLicenseRefusedMessage)
 		return
 	case activateNotEnforced:
-		h.landing(w, r, "We could not bring your device online. Please try again in a moment.")
+		h.backToPackages(w, r, "We could not bring your device online. Please try again in a moment.")
 		return
 	default:
-		h.landing(w, r, "We could not connect your device.")
+		h.backToPackages(w, r, "We could not connect your device.")
 		return
+	}
+	// The journey is finished: the landing page no longer continues it at package selection.
+	if c, err := r.Cookie(commerceCookie); err == nil {
+		sess.acquired = true
+		h.commerceSessions.put(c.Value, sess)
 	}
 	http.Redirect(w, r, "/success?s="+url.QueryEscape(sid), http.StatusSeeOther)
 }
@@ -339,14 +363,15 @@ func (h *handler) acquirePackage(w http.ResponseWriter, r *http.Request) {
 // Every value that reaches the page goes through html/template, which escapes it. Package display text is
 // operator-authored, but it arrives here through the database and an API, and treating it as trusted markup
 // would make the package name an injection point into a page shown to every guest.
-func (h *handler) renderPackages(w http.ResponseWriter, r *http.Request, pkgs []guestPackage, returnCode, identity string, freeUsed bool) {
+func (h *handler) renderPackages(w http.ResponseWriter, r *http.Request, pkgs []guestPackage, returnCode, identity string, freeUsed bool, errMsg string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	// The same policy as the sign-in page; the page's only scripts carry this nonce.
 	nonce := setPortalCSP(w)
 	p := h.newGuestPage(r, nonce)
+	// The refusal is one of the server's sentences, shown in the guest's language like the sign-in page does.
 	_ = packagesTmpl.Execute(w, packagesView{guestPage: p, Packages: packageRows(p.T, pkgs), ReturnCode: returnCode,
-		Identity: identity, FreeUsed: freeUsed})
+		Identity: identity, FreeUsed: freeUsed, Error: localise(p.T, errMsg).Text})
 }
 
 var packagesTmpl = template.Must(template.New("packages").Parse(compactMarkup(packagesHTML)))

@@ -194,7 +194,7 @@ func TestThePackagePageSaysWhoAndWhyFreeIsGone(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.renderPackages(w, httptest.NewRequest(http.MethodGet, "/packages", nil),
 		[]guestPackage{{PackageID: "p1", Display: map[string]any{"name": "Day pass"}, PriceMinor: 500, Currency: "USD", CurrencyExponent: 2, Methods: []string{"ONLINE_PAYMENT"}}},
-		"", "a•••@example.com", true)
+		"", "a•••@example.com", true, "")
 	body := w.Body.String()
 	for _, want := range []string{"Signed in as", "a•••@example.com", "used your free access"} {
 		if !strings.Contains(body, want) {

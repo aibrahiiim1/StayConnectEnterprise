@@ -194,7 +194,7 @@ func (s *server) authorizeViaIAMv2(w http.ResponseWriter, r *http.Request,
 		// A verified factor on this device earns the device a resume credential (contract §2.3). A resumed
 		// sign-in already holds one and gets no second.
 		if req.ResumedPrincipalID == "" && res.Subject.PrincipalID != "" {
-			out.ResumeToken = s.issueResumeCredential(r.Context(), res.Subject.PrincipalID, res.DeviceID, method)
+			out.ResumeToken = s.issueResumeCredential(r.Context(), res.Subject.PrincipalID, res.DeviceID, method, req.Credential)
 		}
 		if len(res.IdentityConflicts) > 0 {
 			slog.Info("iamv2 identity link conflict", "method", string(method), "factors", res.IdentityConflicts)

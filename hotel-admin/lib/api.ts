@@ -300,6 +300,8 @@ export type Session = {
   time_used_seconds?: number | null;
 
   active_devices?: number;
+  // How many times this client has had this package, counting the current one (0 = unknown).
+  package_acquisitions?: number;
 };
 
 // ---- Phase 3 (DARK) PMS stay resolution + checkout grace -------------------

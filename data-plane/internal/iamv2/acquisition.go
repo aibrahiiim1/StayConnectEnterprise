@@ -73,6 +73,22 @@ type SiteMethods struct {
 	PaidAccess bool
 	Card       bool
 	RoomCharge bool
+	// CardCurrencies are the settlement currencies of the site's ACTIVE payment accounts. A card payment is
+	// never converted (migration 0018/0096 refuse a mismatch at confirm), so a package priced in a currency no
+	// account settles must not be OFFERED by card: the client would choose it and be refused a step later --
+	// what the Product Owner hit on PRE-LIVE with a GBP test account and a USD package. Empty means "unknown",
+	// which offers nothing by card.
+	CardCurrencies []string
+}
+
+// cardSettles reports whether some active account settles in cur.
+func (s SiteMethods) cardSettles(cur string) bool {
+	for _, c := range s.CardCurrencies {
+		if strings.EqualFold(strings.TrimSpace(c), strings.TrimSpace(cur)) {
+			return true
+		}
+	}
+	return false
 }
 
 // MethodGate reports the site's effective acquisition modules. Nil means only the core (Free, Voucher).
@@ -117,7 +133,7 @@ func applicableMethods(pkg PackageRevisionRow, ac AuthContextRow, site SiteMetho
 	if !site.PaidAccess {
 		return nil
 	}
-	if site.Card && hasMethod(pkg.SettlementMethods, AcquireCard) {
+	if site.Card && hasMethod(pkg.SettlementMethods, AcquireCard) && site.cardSettles(pkg.Currency) {
 		out = append(out, AcquireCard)
 	}
 	return out

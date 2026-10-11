@@ -29,7 +29,9 @@ func TestIntegration_FreeToPaidThroughTheExistingPipeline(t *testing.T) {
 
 	engine, err := iamv2.NewCommerceEngine(iamv2.CommerceConfig{MasterEnabled: true, PortalEnabled: true},
 		iamv2.NewPgCommerceRepository(admin), iamv2.NopObserver{}, iamv2.WithQuoteTTL(5*time.Minute),
-		iamv2.WithMethodGate(func(context.Context) iamv2.SiteMethods { return iamv2.SiteMethods{PaidAccess: true, Card: true} }))
+		iamv2.WithMethodGate(func(context.Context) iamv2.SiteMethods {
+			return iamv2.SiteMethods{PaidAccess: true, Card: true, CardCurrencies: []string{"USD"}}
+		}))
 	if err != nil {
 		t.Fatal(err)
 	}

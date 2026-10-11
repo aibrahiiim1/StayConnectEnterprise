@@ -150,7 +150,13 @@ export function PackageForm({
   const hotel = moduleLicensedIn("hospitality", modules ?? null);
   const [code, setCode] = useState(initial?.code ?? "");
   const [name, setName] = useState(initial?.name ?? "");
-  const [rules, setRules] = useState<EligibilityRuleForm[]>(initial?.rules ?? []);
+  // A NEW PACKAGE STARTS WITH "ONCE PER CLIENT". It starts Free, and a free package with no limit is handed
+  // out again every time the same client's allowance runs out -- what the Product Owner watched happen on
+  // PRE-LIVE (2026-10-11). The operator can still choose "every N hours" or "no limit" below; an existing
+  // package keeps exactly the rules it has.
+  const [rules, setRules] = useState<EligibilityRuleForm[]>(
+    initial ? (initial.rules ?? []) : [{ type: "PRIOR_PURCHASE", mode: "forbids_prior", also_by_device: true }],
+  );
   // A package with no grant tier is offered to nobody, so a new one starts with the single open tier that
   // means "everyone who is eligible". The operator never has to know that.
   const [tiers, setTiers] = useState<GrantTierForm[]>(initial?.tiers?.length ? initial.tiers : [{ order: 10 }]);
@@ -571,10 +577,12 @@ export function PackageForm({
         {rules.map((r, i) => {
           // The audience and the free allowance have their own controls above; their rules are not rows.
           if (isDedicatedRule(r)) return null;
-          const n = `Condition ${rules.slice(0, i).filter((x) => !isDedicatedRule(x)).length + 1}`;
+          const vi = rules.slice(0, i).filter((x) => !isDedicatedRule(x)).length;
+          // Test hooks are numbered by VISIBLE row, like the accessible name: the dedicated rules above are not rows.
+          const n = `Condition ${vi + 1}`;
           return (
-          <div key={i} className="flex gap-2 items-center mb-2" data-testid={`rule-${i}`}>
-            <Select data-testid={`rule-type-${i}`} aria-label={`${n}: type`} className="h-9 w-auto shrink-0 ps-2.5"
+          <div key={i} className="flex gap-2 items-center mb-2" data-testid={`rule-${vi}`}>
+            <Select data-testid={`rule-type-${vi}`} aria-label={`${n}: type`} className="h-9 w-auto shrink-0 ps-2.5"
               value={r.type} onChange={(e) => setRules((rs) => rs.map((x, j) => (j === i ? emptyRule(e.target.value as RuleType) : x)))}>
               {/* Conditions about a PMS stay only mean something at a hotel, so they are grouped as such. The
                   audience (CLIENT_GROUP) is set by its own control and is not offered as a row. */}
@@ -588,41 +596,41 @@ export function PackageForm({
                 </optgroup>
               )}
             </Select>
-            {r.type === "AUTH_METHOD" && <Input data-testid={`rule-methods-${i}`} aria-label={`${n}: sign-in methods`} placeholder="account, voucher" value={r.methods} onChange={(e) => setRule(i, { methods: e.target.value })} />}
-            {r.type === "SUBJECT_KIND" && <Input data-testid={`rule-kinds-${i}`} aria-label={`${n}: client kinds`} placeholder="ACCOUNT, VOUCHER" value={r.kinds} onChange={(e) => setRule(i, { kinds: e.target.value })} />}
+            {r.type === "AUTH_METHOD" && <Input data-testid={`rule-methods-${vi}`} aria-label={`${n}: sign-in methods`} placeholder="account, voucher" value={r.methods} onChange={(e) => setRule(i, { methods: e.target.value })} />}
+            {r.type === "SUBJECT_KIND" && <Input data-testid={`rule-kinds-${vi}`} aria-label={`${n}: client kinds`} placeholder="ACCOUNT, VOUCHER" value={r.kinds} onChange={(e) => setRule(i, { kinds: e.target.value })} />}
             {r.type === "DATE_WINDOW" && <>
-              <Input data-testid={`rule-from-${i}`} aria-label={`${n}: from`} type="datetime-local" value={r.from} onChange={(e) => setRule(i, { from: e.target.value })} />
-              <Input data-testid={`rule-until-${i}`} aria-label={`${n}: until`} type="datetime-local" value={r.until} onChange={(e) => setRule(i, { until: e.target.value })} />
+              <Input data-testid={`rule-from-${vi}`} aria-label={`${n}: from`} type="datetime-local" value={r.from} onChange={(e) => setRule(i, { from: e.target.value })} />
+              <Input data-testid={`rule-until-${vi}`} aria-label={`${n}: until`} type="datetime-local" value={r.until} onChange={(e) => setRule(i, { until: e.target.value })} />
             </>}
             {r.type === "PRIOR_PURCHASE" && (
               // Only "requires prior" is a row: the other mode is the Free access control above, and a row set
               // to it would simply move there.
-              <Select data-testid={`rule-mode-${i}`} aria-label={`${n}: earlier purchase`} className="h-9 w-auto shrink-0 ps-2.5"
+              <Select data-testid={`rule-mode-${vi}`} aria-label={`${n}: earlier purchase`} className="h-9 w-auto shrink-0 ps-2.5"
                 value={r.mode} onChange={(e) => setRule(i, { mode: e.target.value as "requires_prior" | "forbids_prior" })}>
                 <option value="requires_prior">Only clients who already had a package here</option>
               </Select>
             )}
-            {r.type === "SITE_NETWORK" && <Input data-testid={`rule-networks-${i}`} aria-label={`${n}: client networks`} placeholder="uuid,uuid" value={r.guest_network_ids} onChange={(e) => setRule(i, { guest_network_ids: e.target.value })} />}
+            {r.type === "SITE_NETWORK" && <Input data-testid={`rule-networks-${vi}`} aria-label={`${n}: client networks`} placeholder="uuid,uuid" value={r.guest_network_ids} onChange={(e) => setRule(i, { guest_network_ids: e.target.value })} />}
             {/* STAY LENGTH. Either bound may be left empty — "8 nights or more" and "up to 7 nights" are both
                 real rules — so neither input is required and an empty one is omitted rather than sent as 0. */}
             {r.type === "STAY_LENGTH" && <>
-              <Input data-testid={`rule-min-nights-${i}`} aria-label={`${n}: from nights`} type="number" min={0} placeholder="from (nights)"
+              <Input data-testid={`rule-min-nights-${vi}`} aria-label={`${n}: from nights`} type="number" min={0} placeholder="from (nights)"
                 value={r.min_nights} onChange={(e) => setRule(i, { min_nights: e.target.value })} />
-              <Input data-testid={`rule-max-nights-${i}`} aria-label={`${n}: to nights`} type="number" min={0} placeholder="to (nights)"
+              <Input data-testid={`rule-max-nights-${vi}`} aria-label={`${n}: to nights`} type="number" min={0} placeholder="to (nights)"
                 value={r.max_nights} onChange={(e) => setRule(i, { max_nights: e.target.value })} />
             </>}
-            {r.type === "ROOM_TYPE" && <Input data-testid={`rule-room-types-${i}`} aria-label={`${n}: room types`} placeholder="DLX, SUITE" value={r.room_types} onChange={(e) => setRule(i, { room_types: e.target.value })} />}
-            {r.type === "RATE_PLAN" && <Input data-testid={`rule-rate-plans-${i}`} aria-label={`${n}: rate plans`} placeholder="BAR, CORP" value={r.rate_plans} onChange={(e) => setRule(i, { rate_plans: e.target.value })} />}
+            {r.type === "ROOM_TYPE" && <Input data-testid={`rule-room-types-${vi}`} aria-label={`${n}: room types`} placeholder="DLX, SUITE" value={r.room_types} onChange={(e) => setRule(i, { room_types: e.target.value })} />}
+            {r.type === "RATE_PLAN" && <Input data-testid={`rule-rate-plans-${vi}`} aria-label={`${n}: rate plans`} placeholder="BAR, CORP" value={r.rate_plans} onChange={(e) => setRule(i, { rate_plans: e.target.value })} />}
             {r.type === "VIP" && (
-              <Select data-testid={`rule-vip-${i}`} aria-label={`${n}: VIP status`} className="h-9 w-auto shrink-0 ps-2.5"
+              <Select data-testid={`rule-vip-${vi}`} aria-label={`${n}: VIP status`} className="h-9 w-auto shrink-0 ps-2.5"
                 value={r.is_vip} onChange={(e) => setRule(i, { is_vip: e.target.value as "true" | "false" })}>
                 <option value="true">VIP guests only</option>
                 <option value="false">Non-VIP guests only</option>
               </Select>
             )}
-            {r.type === "TRAVEL_AGENT" && <TravelAgentPicker testId={`rule-travel-agents-${i}`} label={`${n}: travel agents`} value={r.travel_agents} onChange={(v) => setRule(i, { travel_agents: v })} />}
-            {r.type === "PMS_INTERFACE" && <Input data-testid={`rule-pms-interfaces-${i}`} aria-label={`${n}: PMS interfaces`} placeholder="interface id" value={r.pms_interface_ids} onChange={(e) => setRule(i, { pms_interface_ids: e.target.value })} />}
-            <Button type="button" variant="ghost" data-testid={`remove-rule-${i}`} aria-label={`Remove condition ${i + 1}`} onClick={() => setRules((rs) => rs.filter((_, j) => j !== i))}><Trash2 size={14} /></Button>
+            {r.type === "TRAVEL_AGENT" && <TravelAgentPicker testId={`rule-travel-agents-${vi}`} label={`${n}: travel agents`} value={r.travel_agents} onChange={(v) => setRule(i, { travel_agents: v })} />}
+            {r.type === "PMS_INTERFACE" && <Input data-testid={`rule-pms-interfaces-${vi}`} aria-label={`${n}: PMS interfaces`} placeholder="interface id" value={r.pms_interface_ids} onChange={(e) => setRule(i, { pms_interface_ids: e.target.value })} />}
+            <Button type="button" variant="ghost" data-testid={`remove-rule-${vi}`} aria-label={`Remove condition ${vi + 1}`} onClick={() => setRules((rs) => rs.filter((_, j) => j !== i))}><Trash2 size={14} /></Button>
           </div>
           );
         })}

@@ -389,14 +389,18 @@ func (t *pgTx) CreateAuthContext(ctx context.Context, s AuthContextSpec) (string
 			}
 		}
 	}
+	var credential *string
+	if c := NormalizeCredential(s.Credential); c != "" {
+		credential = &c
+	}
 	var id string
 	err := t.tx.QueryRow(ctx,
 		`INSERT INTO iam_v2.auth_contexts
 		     (tenant_id, site_id, method, voucher_id, guest_account_id, guest_principal_id,
-		      device_id, guest_network_id, expires_at, client_group_id, client_group_evidence)
-		 VALUES ($1,$2,$3,$4::uuid,$5::uuid,$6::uuid,$7::uuid,$8::uuid,$9,$10::uuid,$11::jsonb)
+		      device_id, guest_network_id, expires_at, client_group_id, client_group_evidence, credential)
+		 VALUES ($1,$2,$3,$4::uuid,$5::uuid,$6::uuid,$7::uuid,$8::uuid,$9,$10::uuid,$11::jsonb,$12)
 		 RETURNING id::text`,
 		s.TenantID, s.SiteID, string(s.Method), voucherID, accountID, principalID,
-		dev, gn, s.Now.Add(s.TTL), groupID, evidence).Scan(&id)
+		dev, gn, s.Now.Add(s.TTL), groupID, evidence, credential).Scan(&id)
 	return id, err
 }

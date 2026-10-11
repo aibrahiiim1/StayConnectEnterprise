@@ -121,7 +121,7 @@ func TestVoucherIssuanceGate(t *testing.T) {
 func TestCardConfirmGrantsNothing(t *testing.T) {
 	db := p2DB(t)
 	s := seedFreeCommerce(t, db, func(o *seedOpts) { o.price = 2500; o.settlement = "{ONLINE_PAYMENT}" })
-	e := engineWithMethods(t, db, SiteMethods{PaidAccess: true, Card: true})
+	e := engineWithMethods(t, db, SiteMethods{PaidAccess: true, Card: true, CardCurrencies: []string{"USD"}})
 	ctx := context.Background()
 	q, err := e.CreateQuote(ctx, QuoteRequest{TenantID: p2Tenant, SiteID: p2Site, AuthContextID: s.authCtxID, PackageID: s.packageID,
 		DeviceID: s.deviceID, GuestNetworkID: p2GN, Method: AcquireCard})
@@ -149,7 +149,7 @@ func TestCardConfirmGrantsNothing(t *testing.T) {
 func TestMethodRecheckedAtConfirm(t *testing.T) {
 	db := p2DB(t)
 	s := seedFreeCommerce(t, db, func(o *seedOpts) { o.price = 2500; o.settlement = "{ONLINE_PAYMENT}" })
-	on := SiteMethods{PaidAccess: true, Card: true}
+	on := SiteMethods{PaidAccess: true, Card: true, CardCurrencies: []string{"USD"}}
 	gate := on
 	e, err := NewCommerceEngine(CommerceConfig{MasterEnabled: true, PortalEnabled: true}, NewPgCommerceRepository(db),
 		NopObserver{}, WithMethodGate(func(context.Context) SiteMethods { return gate }))
@@ -162,7 +162,7 @@ func TestMethodRecheckedAtConfirm(t *testing.T) {
 	if q.QuoteID == "" {
 		t.Fatalf("quote: %+v", q)
 	}
-	gate = SiteMethods{PaidAccess: true, Card: false} // e.g. the provider became unreachable
+	gate = SiteMethods{PaidAccess: true, Card: false, CardCurrencies: []string{"USD"}} // e.g. the provider became unreachable
 	pr, _ := e.ConfirmPurchase(ctx, ConfirmRequest{TenantID: p2Tenant, SiteID: p2Site, QuoteID: q.QuoteID, DeviceID: s.deviceID, GuestNetworkID: p2GN})
 	if pr.Reason != "method_not_available" {
 		t.Fatalf("confirm must re-check the method: %+v", pr)

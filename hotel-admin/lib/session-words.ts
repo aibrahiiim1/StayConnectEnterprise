@@ -88,17 +88,38 @@ export function methodLabel(method?: string | null): string {
     ROOM: "Room number and name",
     ROOM_NAME: "Room number and name",
     PMS_ROOM: "Room number and name",
+    PMS: "Room sign-in",
     VOUCHER: "Voucher code",
     ACCOUNT: "Username and password",
     USERNAME_PASSWORD: "Username and password",
+    // The credential labels scd records on the session (iamv2/credential.go): the channel or provider the
+    // client actually used, which is what "Signed in with" means to an operator.
     EMAIL_OTP: "Emailed code",
     SMS_OTP: "Texted code",
+    WHATSAPP_OTP: "WhatsApp code",
     SOCIAL: "Social login",
+    SOCIAL_GOOGLE: "Google",
+    SOCIAL_APPLE: "Apple",
+    SOCIAL_MICROSOFT: "Microsoft",
+    SOCIAL_FACEBOOK: "Facebook",
+    // A session opened before the channel was recorded: an email, phone or social sign-in, unspecified.
+    PRINCIPAL: "Email, phone or social login",
+    OPEN: "No sign-in (chose a package)",
     POST_STAY: "Post-stay access",
     GRACE: "Grace Period",
     ADMIN: "Granted by an operator",
   };
-  return map[method] ?? method.replace(/_/g, " ").toLowerCase();
+  if (map[method]) return map[method];
+  if (method.startsWith("SOCIAL_")) return method.slice(7).charAt(0) + method.slice(8).toLowerCase();
+  return method.replace(/_/g, " ").toLowerCase();
+}
+
+/** "2nd time", "3rd time" — how many times this client has had this package, counting the current one. */
+export function acquisitionOrdinal(n?: number | null): string | undefined {
+  if (typeof n !== "number" || n < 2) return undefined;
+  const mod100 = n % 100;
+  const suffix = mod100 >= 11 && mod100 <= 13 ? "th" : n % 10 === 1 ? "st" : n % 10 === 2 ? "nd" : n % 10 === 3 ? "rd" : "th";
+  return `${n}${suffix} time`;
 }
 
 /** Session state, in words, with the tone it should carry. */

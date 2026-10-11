@@ -1645,6 +1645,7 @@ const packagesHTML = guestHead + `
 <div class="sc-body">
   <h1 class="page-title">{{index .T "pkg.title"}}</h1>
   <p class="page-lead">{{index .T "pkg.subtitle"}}{{with .Identity}} <span class="signed-in">{{index $.T "pkg.signedin"}} <strong dir="ltr">{{.}}</strong></span>{{end}}</p>
+  {{with .Error}}<div class="notice show" role="alert">{{.}}</div>{{end}}
   {{if .FreeUsed}}<div class="notice show" role="status">{{index .T "pkg.freeused"}}</div>{{end}}
   {{with .ReturnCode}}<div class="notice show" role="status"><strong>{{index $.T "open.code.title"}}: <span dir="ltr" class="return-code">{{.}}</span></strong><br>{{index $.T "open.code.lead"}}</div>{{end}}
   <div class="choice-list">

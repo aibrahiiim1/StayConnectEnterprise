@@ -56,7 +56,7 @@ func TestIntegration_RememberedDeviceIsBoundToOneDevice(t *testing.T) {
 			return &tenantcfg.AuthMethods{Email: &tenantcfg.AuthMethod{Enabled: true}, Portal: &tenantcfg.PortalConfig{RememberDeviceDays: &days}}, nil
 		}}
 
-	tok := s.issueResumeCredential(ctx, pid, dev, iamv2.MethodOTP)
+	tok := s.issueResumeCredential(ctx, pid, dev, iamv2.MethodOTP, iamv2.CredentialEmailOTP)
 	if tok == "" {
 		t.Fatal("a verified sign-in must earn a credential")
 	}
@@ -95,7 +95,7 @@ func TestIntegration_RememberedDeviceIsBoundToOneDevice(t *testing.T) {
 		t.Fatalf("a credential seen on another device must be revoked: %v", out)
 	}
 	// A fresh credential replaces the old one (one live per device), and sign-out forgets it.
-	tok = s.issueResumeCredential(ctx, pid, dev, iamv2.MethodOTP)
+	tok = s.issueResumeCredential(ctx, pid, dev, iamv2.MethodOTP, iamv2.CredentialEmailOTP)
 	if out := peek("02:00:00:00:00:aa"); out["ok"] != true {
 		t.Fatalf("a fresh credential works: %v", out)
 	}
@@ -106,7 +106,7 @@ func TestIntegration_RememberedDeviceIsBoundToOneDevice(t *testing.T) {
 		t.Fatalf("sign-out must forget the device: %v", out)
 	}
 	// The method switched off: a remembered device is not let in either.
-	tok = s.issueResumeCredential(ctx, pid, dev, iamv2.MethodOTP)
+	tok = s.issueResumeCredential(ctx, pid, dev, iamv2.MethodOTP, iamv2.CredentialEmailOTP)
 	s.methodSwitches = func(context.Context) (*tenantcfg.AuthMethods, error) {
 		return &tenantcfg.AuthMethods{Portal: &tenantcfg.PortalConfig{RememberDeviceDays: &days}}, nil
 	}
@@ -118,11 +118,11 @@ func TestIntegration_RememberedDeviceIsBoundToOneDevice(t *testing.T) {
 	s.methodSwitches = func(context.Context) (*tenantcfg.AuthMethods, error) {
 		return &tenantcfg.AuthMethods{Email: &tenantcfg.AuthMethod{Enabled: true}, Portal: &tenantcfg.PortalConfig{RememberDeviceDays: &zero}}, nil
 	}
-	if tok := s.issueResumeCredential(ctx, pid, dev, iamv2.MethodOTP); tok != "" {
+	if tok := s.issueResumeCredential(ctx, pid, dev, iamv2.MethodOTP, iamv2.CredentialEmailOTP); tok != "" {
 		t.Fatal("a site that does not remember devices must issue nothing")
 	}
 	// A voucher or account sign-in never earns one.
-	if tok := s.issueResumeCredential(ctx, pid, dev, iamv2.MethodVoucher); tok != "" {
+	if tok := s.issueResumeCredential(ctx, pid, dev, iamv2.MethodVoucher, iamv2.CredentialVoucher); tok != "" {
 		t.Fatal("only a verified factor earns a credential")
 	}
 }

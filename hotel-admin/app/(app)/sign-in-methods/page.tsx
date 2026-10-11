@@ -50,7 +50,13 @@ type PMSMethod = { enabled?: boolean; mode?: string; provider?: string; template
 // THE CLIENT JOURNEY (ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md §2.3, §6.2): which method the portal leads
 // with, and how long a device that has verified a code or an identity provider is remembered.
 type PrimaryMethod = "" | "pms" | "email" | "sms" | "whatsapp" | "guest_account" | "voucher";
-type PortalJourney = { primary_method?: PrimaryMethod; remember_device_days?: number };
+type PortalJourney = {
+  primary_method?: PrimaryMethod; remember_device_days?: number;
+  // The email services a device may reach before sign-in to read its code (presets by id, plus the site's
+  // own host names). They open the walled garden only while the Email code method is on.
+  mail_providers?: string[]; mail_domains?: string[];
+};
+type MailProvider = { id: string; name: string; domains: string[] };
 type AuthMethods = {
   voucher?: Method;
   guest_account?: Method;
@@ -411,6 +417,17 @@ export default function SignInMethodsPage() {
         )}
       </div>
 
+      {/* READING THE CODE. A client who asked for an email code has to open their mail app before they have
+          internet; the services switched on here are reachable through the walled garden while Email code is on. */}
+      {emailMod && (
+        <MailReachCard
+          cfg={cfg}
+          writable={writable}
+          busy={busy === "Email services"}
+          onSave={(portal) => save({ portal }, "Email services")}
+        />
+      )}
+
       {/* THE JOURNEY. Which method leads, and whether a device is remembered, are decided once the methods
           themselves are chosen -- so the card follows the grid rather than leading it. */}
       <ClientJourneyCard
@@ -438,7 +455,7 @@ export default function SignInMethodsPage() {
 // stays disabled until something actually changed.
 function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
   cfg: AuthMethods; writable: boolean; busy: boolean; hospitality: boolean;
-  onSave: (portal: Required<PortalJourney>) => void;
+  onSave: (portal: PortalJourney) => void;
 }) {
   const stored = cfg.portal ?? {};
   const storedPrimary: PrimaryMethod = stored.primary_method ?? "";
@@ -483,7 +500,9 @@ function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
           onSubmit={(e) => {
             e.preventDefault();
             if (!daysValid || !writable) return;
-            onSave({ primary_method: primary, remember_device_days: n });
+            // The whole `portal` key is replaced by the server's per-key merge, so the email services chosen
+            // on the card above travel with this save rather than being dropped by it.
+            onSave({ ...stored, primary_method: primary, remember_device_days: n });
           }}
         >
           <Field
@@ -519,6 +538,127 @@ function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
             </div>
           )}
         </form>
+      </CardBody>
+    </Card>
+  );
+}
+
+// MailReachCard — which email services a device may reach BEFORE sign-in, so a client can open their mail app
+// and read the code without leaving the Wi-Fi for mobile data. Presets come from the appliance (one list, in
+// internal/mailreach); the site adds host names for a service the presets do not know.
+//
+// Saved as the one `portal` key together with the journey settings it already holds: the server replaces the
+// key whole, so the stored primary method and remember-days are spread back in rather than dropped.
+function MailReachCard({ cfg, writable, busy, onSave }: {
+  cfg: AuthMethods; writable: boolean; busy: boolean; onSave: (portal: PortalJourney) => void;
+}) {
+  const stored = cfg.portal ?? {};
+  const storedProviders = useMemo(() => stored.mail_providers ?? [], [stored.mail_providers]);
+  const storedDomains = useMemo(() => stored.mail_domains ?? [], [stored.mail_domains]);
+  const [presets, setPresets] = useState<MailProvider[] | null>(null);
+  const [chosen, setChosen] = useState<string[]>(storedProviders);
+  const [custom, setCustom] = useState(storedDomains.join("\n"));
+  const [showHosts, setShowHosts] = useState<string | null>(null);
+  useEffect(() => { setChosen(storedProviders); setCustom(storedDomains.join("\n")); }, [storedProviders, storedDomains]);
+  useEffect(() => {
+    api.get<ListResp<MailProvider>>("/auth-methods/mail-providers").then((r) => setPresets(r.data ?? [])).catch(() => setPresets([]));
+  }, []);
+
+  const customList = useMemo(
+    () => Array.from(new Set(custom.split(/[\n,;\s]+/).map((d) => d.trim().toLowerCase()).filter(Boolean))),
+    [custom],
+  );
+  const hostOK = (h: string) => /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/.test(h) && !/\d$/.test(h) && !h.includes("*");
+  const badHost = customList.find((h) => !hostOK(h));
+  const dirty = JSON.stringify([...chosen].sort()) !== JSON.stringify([...storedProviders].sort())
+    || JSON.stringify(customList) !== JSON.stringify(storedDomains);
+  const emailOn = !!cfg.email?.enabled;
+
+  return (
+    <Card>
+      <CardHeader className="items-start">
+        <div className="min-w-0 space-y-1">
+          <CardTitle className="flex items-center gap-2 [&_svg]:size-4"><Mail aria-hidden /> Reading the code: email services reachable before sign-in</CardTitle>
+          <CardDescription>
+            A client who asked for an email code opens their mail app before they are online. The services ticked here
+            can be reached without signing in, so the code can arrive on the Wi-Fi itself — a client without mobile
+            data is otherwise stuck.
+          </CardDescription>
+        </div>
+      </CardHeader>
+      <CardBody className="space-y-4">
+        {!emailOn && (
+          <p className="text-xs text-muted-foreground" role="status">
+            Applies only while <strong>Email code</strong> is switched on; nothing is opened while it is off.
+          </p>
+        )}
+        {presets === null ? (
+          <Skeleton className="h-24" />
+        ) : (
+          <ul className="grid gap-2 sm:grid-cols-2">
+            {presets.map((p) => {
+              const on = chosen.includes(p.id);
+              return (
+                <li key={p.id} className="flex items-center justify-between gap-3 rounded-md border border-border px-3.5 py-2.5">
+                  <label className={cn("flex items-center gap-2.5 text-sm", writable && "cursor-pointer")}>
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-primary"
+                      checked={on}
+                      disabled={!writable || busy}
+                      onChange={(e) => setChosen((c) => (e.target.checked ? [...c, p.id] : c.filter((x) => x !== p.id)))}
+                    />
+                    <span>{p.name}</span>
+                  </label>
+                  <button
+                    type="button"
+                    className="text-xs text-primary underline-offset-4 hover:underline"
+                    onClick={() => setShowHosts(showHosts === p.id ? null : p.id)}
+                    aria-expanded={showHosts === p.id}
+                  >
+                    {p.domains.length} hosts
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {showHosts && presets && (
+          <p className="rounded-md border border-border bg-surface/60 p-3 font-mono text-2xs text-muted-foreground break-words">
+            {presets.find((p) => p.id === showHosts)?.domains.join("  ")}
+          </p>
+        )}
+        <Field
+          label="Other email services (host names)"
+          hint="One host name per line, for a service not listed above — for example mail.example.com and login.example.com. Host names only: no wildcards, addresses or paths. Up to 50."
+        >
+          <textarea
+            className="min-h-24 w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-sm"
+            value={custom}
+            readOnly={!writable || busy}
+            onChange={(e) => setCustom(e.target.value)}
+            placeholder={"mail.example.com\nlogin.example.com"}
+            aria-label="Other email services (host names)"
+          />
+        </Field>
+        {badHost && <p className="text-xs text-destructive" role="alert">&ldquo;{badHost}&rdquo; is not a valid host name.</p>}
+        {writable && (
+          <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              disabled={!dirty || !!badHost || busy}
+              onClick={() => onSave({ ...stored, mail_providers: chosen, mail_domains: customList })}
+            >
+              {busy ? "Saving…" : "Save email services"}
+            </Button>
+            {dirty && !busy && <span className="text-xs text-muted-foreground">Not saved yet.</span>}
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground">
+          Each service is opened at the host names its apps and webmail are known to use. Services change their
+          hosts from time to time; add what changed under &ldquo;Other email services&rdquo;. Everything else stays
+          closed until the client signs in.
+        </p>
       </CardBody>
     </Card>
   );

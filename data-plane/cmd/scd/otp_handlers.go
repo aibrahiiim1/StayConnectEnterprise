@@ -387,6 +387,7 @@ func (s *server) authorizeOTP(w http.ResponseWriter, r *http.Request) {
 	s.authorizeViaIAMv2(w, r, iamv2.MethodOTP, iamv2.Request{
 		FactorType:  otpFactorType(v.Channel),
 		FactorValue: v.Destination,
+		Credential:  iamv2.CredentialForOTP(v.Channel),
 		Device:      iamv2.DeviceContext{MAC: mac.String()},
 	}, ip)
 }

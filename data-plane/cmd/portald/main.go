@@ -219,6 +219,16 @@ func (h *handler) landing(w http.ResponseWriter, r *http.Request, errMsg string)
 }
 
 func (h *handler) index(w http.ResponseWriter, r *http.Request) {
+	// A CLIENT WHO HAS SIGNED IN AND NOT YET CHOSEN IS STILL CHOOSING. While their commerce session is valid
+	// (10 minutes from sign-in) a reload of the landing page -- a refused card payment, a tab reopened, the
+	// captive browser popped again -- continues at package selection instead of asking for another code.
+	// Captive-portal probes carry no cookie and are unaffected.
+	if r.Method == http.MethodGet {
+		if sess, ok := h.resolveCommerceSession(r); ok && !sess.acquired {
+			http.Redirect(w, r, "/packages", http.StatusSeeOther)
+			return
+		}
+	}
 	h.landing(w, r, "")
 }
 

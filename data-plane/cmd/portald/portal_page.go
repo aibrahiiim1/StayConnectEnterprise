@@ -580,6 +580,9 @@ type packagesView struct {
 	Identity string
 	// FreeUsed: a free package was withheld only because this Client already had it (contract §6.1).
 	FreeUsed bool
+	// Error is why the client's last choice did not go through, in their language, shown ABOVE the same
+	// choices: a refused acquisition sends the client back to package selection, never to the sign-in page.
+	Error string
 }
 
 // guestPackage is one package as scd lists it: an opaque id, display text, the price and every acquisition

@@ -431,7 +431,7 @@ func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 	//
 	// authorizeViaIAMv2 always handles the request -- success or refusal -- so there is nothing after it.
 	s.authorizeViaIAMv2(w, r, iamv2.MethodVoucher,
-		iamv2.Request{Secret: req.Voucher, Device: iamv2.DeviceContext{MAC: mac.String()}}, ip)
+		iamv2.Request{Secret: req.Voucher, Credential: iamv2.CredentialVoucher, Device: iamv2.DeviceContext{MAC: mac.String()}}, ip)
 }
 
 type revokeReq struct {

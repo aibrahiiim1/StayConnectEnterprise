@@ -146,7 +146,10 @@ describe("PackageForm", () => {
       expect((screen.getByTestId("audience") as HTMLSelectElement).value).toBe("everyone");
       ready();
       fireEvent.click(screen.getByRole("button", { name: /add package/i }));
-      expect(onSave.mock.calls[0][0].payload.eligibility_rules).toEqual([]);
+      // No audience rule; the only rule is the new package's default free allowance (once per client).
+      expect(onSave.mock.calls[0][0].payload.eligibility_rules).toEqual([
+        { type: "PRIOR_PURCHASE", value: { forbids_prior: true, also_by_device: true } },
+      ]);
     });
 
     it("Only these groups publishes one CLIENT_GROUP rule with the ticked ids", () => {
@@ -158,6 +161,7 @@ describe("PackageForm", () => {
       fireEvent.click(screen.getByRole("button", { name: /add package/i }));
       expect(onSave.mock.calls[0][0].payload.eligibility_rules).toEqual([
         { type: "CLIENT_GROUP", value: { group_ids: ["g-emp"] } },
+        { type: "PRIOR_PURCHASE", value: { forbids_prior: true, also_by_device: true } },
       ]);
     });
 
@@ -177,13 +181,15 @@ describe("PackageForm", () => {
       fireEvent.change(screen.getByTestId("audience"), { target: { value: "public" } });
       ready();
       fireEvent.click(screen.getByRole("button", { name: /add package/i }));
-      expect(onSave.mock.calls[0][0].payload.eligibility_rules).toEqual([{ type: "CLIENT_GROUP", value: { public: true } }]);
+      const freeDefault = { type: "PRIOR_PURCHASE", value: { forbids_prior: true, also_by_device: true } };
+      expect(onSave.mock.calls[0][0].payload.eligibility_rules).toEqual([{ type: "CLIENT_GROUP", value: { public: true } }, freeDefault]);
 
       fireEvent.change(screen.getByTestId("audience"), { target: { value: "groups_public" } });
       fireEvent.click(screen.getByTestId("audience-group-g-par"));
       fireEvent.click(screen.getByRole("button", { name: /add package/i }));
       expect(onSave.mock.calls[1][0].payload.eligibility_rules).toEqual([
         { type: "CLIENT_GROUP", value: { group_ids: ["g-par"], public: true } },
+        freeDefault,
       ]);
     });
 
@@ -196,9 +202,10 @@ describe("PackageForm", () => {
       expect((screen.getByTestId("audience") as HTMLSelectElement).value).toBe("groups_public");
       expect((screen.getByTestId("audience-group-g-emp") as HTMLInputElement).checked).toBe(true);
       expect((screen.getByTestId("audience-group-g-par") as HTMLInputElement).checked).toBe(true);
-      // The audience is not also a generic condition row; the sign-in condition still is.
-      expect(screen.queryByTestId("rule-type-0")).toBeNull();
-      expect((screen.getByTestId("rule-type-1") as HTMLSelectElement).value).toBe("AUTH_METHOD");
+      // The audience is not also a generic condition row; the sign-in condition is the ONLY row (rows are
+      // numbered by what is visible, so it is row 0 whatever its place in the stored list).
+      expect((screen.getByTestId("rule-type-0") as HTMLSelectElement).value).toBe("AUTH_METHOD");
+      expect(screen.queryByTestId("rule-type-1")).toBeNull();
       fireEvent.change(screen.getByTestId("name"), { target: { value: "Renamed" } });
       fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
       expect(onSave.mock.calls[0][0].payload.eligibility_rules).toEqual([
@@ -223,7 +230,10 @@ describe("PackageForm", () => {
     it("Once per client, ever publishes forbids_prior and counts the device on a Free package", () => {
       const onSave = vi.fn();
       render(<PackageForm mode="add" plans={plans} onSave={onSave} />);
-      expect((screen.getByTestId("free-access") as HTMLSelectElement).value).toBe("unlimited");
+      // A NEW PACKAGE STARTS AT "ONCE PER CLIENT": a free package with no limit was handed out again every time
+      // the same client's allowance ran out. "No limit" remains a choice, never the default.
+      expect((screen.getByTestId("free-access") as HTMLSelectElement).value).toBe("once");
+      fireEvent.change(screen.getByTestId("free-access"), { target: { value: "unlimited" } });
       fireEvent.change(screen.getByTestId("free-access"), { target: { value: "once" } });
       expect(screen.getByRole("switch", { name: "Count the device too" })).toHaveAttribute("aria-checked", "true");
       ready();
@@ -275,8 +285,9 @@ describe("PackageForm", () => {
       expect((screen.getByTestId("free-access") as HTMLSelectElement).value).toBe("every");
       expect((screen.getByTestId("free-access-hours") as HTMLInputElement).value).toBe("24");
       expect(screen.getByRole("switch", { name: "Count the device too" })).toHaveAttribute("aria-checked", "false");
-      expect(screen.queryByTestId("rule-type-0")).toBeNull();
-      expect((screen.getByTestId("rule-mode-1") as HTMLSelectElement).value).toBe("requires_prior");
+      // The allowance is a dedicated control, not a row; the requires_prior rule is the only row (row 0).
+      expect((screen.getByTestId("rule-mode-0") as HTMLSelectElement).value).toBe("requires_prior");
+      expect(screen.queryByTestId("rule-type-1")).toBeNull();
       fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
       expect(onSave.mock.calls[0][0].payload.eligibility_rules).toEqual([
         { type: "PRIOR_PURCHASE", value: { forbids_prior: true, within_hours: 24, also_by_device: false } },

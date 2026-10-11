@@ -37,6 +37,9 @@ type commerceSession struct {
 	// identityLabel is the masked factor the Client proved (a•••@example.com), shown on the package page so a
 	// Client on a shared device can tell whose allowance they are about to use. Never the full value.
 	identityLabel string
+	// acquired is set once this session has put the device online. The landing page continues an UNFINISHED
+	// journey at package selection (main.go index); a finished one is left to the success page and its panel.
+	acquired bool
 }
 
 // commerceSessionStore maps an opaque cookie token to a trusted commerceSession. The browser only ever

@@ -139,11 +139,18 @@ export default function WalledGardenPage() {
             <HelpSection title="Writing a rule">
               <HelpList
                 items={[
-                  <>A <strong>domain</strong> covers its subdomains; an <strong>address range</strong> uses CIDR notation, for example 10.0.0.0/24.</>,
+                  <>A <strong>domain</strong> is one host name, opened at the addresses it resolves to (checkout.stripe.com, not *.stripe.com); an <strong>address range</strong> uses CIDR notation, for example 10.0.0.0/24.</>,
                   <>Leave <strong>Ports</strong> empty to allow every port.</>,
                   <>Say <strong>why it is needed</strong>, so the next operator does not have to guess before removing it.</>,
                 ]}
               />
+            </HelpSection>
+            <HelpSection title="Email services for the one-time code">
+              <p>
+                The email services a client may open to read their code — Gmail, Outlook, Yahoo and others — are not
+                written here one host at a time. Switch them on under <strong>Sign-in methods → Reading the code</strong>,
+                which opens each service&apos;s host names while the Email code method is on.
+              </p>
             </HelpSection>
           </>
         }

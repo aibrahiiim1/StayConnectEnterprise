@@ -295,6 +295,7 @@ func (a *Authenticator) finalizeWithPin(ctx context.Context, tx Tx, m Method, su
 		TenantID: req.TenantID, SiteID: req.SiteID, Method: m, Subject: subj,
 		DeviceID: deviceID, GuestNetworkID: req.Device.GuestNetworkID, TTL: a.ttl, Now: now,
 		ClientGroupID: pin.id, ClientGroupEvidence: pin.evidence,
+		Credential: NormalizeCredential(req.Credential),
 	}
 	if err := spec.validate(); err != nil {
 		return Result{}, err

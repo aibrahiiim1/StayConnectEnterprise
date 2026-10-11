@@ -117,11 +117,28 @@ func (s *server) modulesStatus(w http.ResponseWriter, r *http.Request) {
 // effective here right now (licensed, enabled, deployed and ready). Free and Voucher are core.
 func (s *server) siteAcquisitionMethods(ctx context.Context) iamv2.SiteMethods {
 	snap := s.moduleSnapshot(ctx)
-	return iamv2.SiteMethods{
+	m := iamv2.SiteMethods{
 		PaidAccess: snap.Effective(lic.ModulePaidAccess),
 		Card:       snap.Effective(lic.ModuleCardPayment),
 		RoomCharge: snap.Effective(lic.ModuleRoomCharge),
 	}
+	// Card payment is never converted, so a package is offered by card only in a currency an ACTIVE account
+	// settles (iamv2.SiteMethods.CardCurrencies). The confirm would otherwise refuse it one step later
+	// (PAYMENT_ACCOUNT_CURRENCY), after the client had already chosen.
+	if m.Card && s.db != nil {
+		rows, err := s.db.Query(ctx, `SELECT DISTINCT upper(trim(currency)) FROM iam_v2.payment_provider_accounts
+			WHERE tenant_id=$1 AND site_id=$2 AND status='ACTIVE' AND COALESCE(trim(currency),'') <> ''`, s.tenID, s.siteID)
+		if err == nil {
+			for rows.Next() {
+				var c string
+				if rows.Scan(&c) == nil {
+					m.CardCurrencies = append(m.CardCurrencies, c)
+				}
+			}
+			rows.Close()
+		}
+	}
+	return m
 }
 
 // registerModuleProbes gives the resolver the readiness and history answers only their owners can give.

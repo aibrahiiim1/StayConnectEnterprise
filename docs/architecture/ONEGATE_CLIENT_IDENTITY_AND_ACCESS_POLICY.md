@@ -222,6 +222,12 @@ The `PRIOR_PURCHASE` rule is the free-allowance policy, extended rather than rep
 The editor exposes this as **Free access: once per client / once every N hours**, with the device switch
 underneath. `max_purchases_per_stay` and `renewable` remain stored-only; the editor no longer implies they act.
 
+**A new package starts at "once per client"** (2026-10-11). A Free package with no limit is handed out again
+every time the same Client's allowance runs out — observed on PRE-LIVE: a 100 MB free package taken at 07:15,
+exhausted at 07:24, taken again at 07:43 by the same Client on the same phone. "No limit" stays a choice the
+operator makes on purpose; an existing package keeps exactly the rules it has, and the sessions screen says how
+many times a Client has had a package (§9).
+
 **No quota reset exists.** A Client's history is the entitlement ledger; nothing in this delivery deletes or
 rewrites it.
 
@@ -264,6 +270,34 @@ translation overrides and is not a product rule.
 
 The package page shows who the Client is signed in as (masked: `a•••@example.com`, `+20 •• ••• 1234`,
 "Google account"), so a Client on a shared device can tell whose allowance they are about to use.
+
+### 6.4 The journey survives a refusal (2026-10-11)
+
+A refused acquisition — a card payment the site cannot take, a package withdrawn between listing and
+choosing, a device limit — **returns the Client to package selection, signed in**, with the reason above the
+same choices. It used to return the sign-in page, which on a phone meant another code, the mail app, and the
+captive browser gone again. While the commerce session is valid (10 minutes from sign-in) the landing page
+itself continues an unfinished journey at package selection; a finished one (the device is online) is left to
+the success page. Captive-portal probes carry no cookie and are unaffected.
+
+**Card is offered only in a currency an active payment account settles.** A card payment is never converted
+(`PAYMENT_ACCOUNT_CURRENCY` refuses the mismatch at confirm), so a package priced in USD is not offered by
+card at a site whose only active account settles GBP: the method is withheld at listing rather than refused
+after the choice. `iamv2.SiteMethods.CardCurrencies` carries the active accounts' currencies.
+
+### 6.5 Reading the code without leaving the Wi-Fi (2026-10-11)
+
+A Client who asked for an email code has to open their mail app before they are online. **Sign-in methods →
+Reading the code** lists email services (`internal/mailreach`: Gmail / Google Workspace, Outlook / Hotmail /
+Live / Microsoft 365, Yahoo, iCloud, Proton, Zoho, AOL, GMX / WEB.DE, Yandex, Mail.ru) as switches, and takes
+host names for a service the presets do not know (bounded: 50 host names, FQDN only, no wildcard). The chosen
+host names are opened in the walled garden only while the Email code method is on, and they are resolved
+**through the guest resolver** (unbound on the appliance) so the addresses opened are the ones the clients
+were handed. It is stored as `tenants.auth_methods.portal.mail_providers` / `mail_domains`, audited with the
+other switches. Everything else stays closed until the Client signs in.
+
+The pending-code behaviour of §6.2 stands: the code box survives leaving the captive browser, and the email's
+*tap to connect* link completes the sign-in in the phone's real browser.
 
 ---
 
@@ -333,7 +367,7 @@ The **Client Portal** section becomes **Client access** and is ordered as the jo
 
 | Page | What it owns |
 |---|---|
-| Sign-in methods | which methods are on; **Primary method**; **Remember devices (days)** |
+| Sign-in methods | which methods are on; **Primary method**; **Remember devices (days)**; **Reading the code** — the email services reachable before sign-in (§6.5) |
 | **Client groups** (new) | groups, priority, membership rules, with the two assurance levels explained |
 | Identity providers (was *Social login*) | provider applications |
 | Delivery (was *Email & SMS*) | email (SendGrid / your own SMTP), SMS, WhatsApp; test; health |
@@ -342,6 +376,17 @@ The **Client Portal** section becomes **Client access** and is ordered as the jo
 
 **Internet packages** gains *Audience* and *Free access* in the package editor (§4, §5). Nothing moves
 between sections; the four acquisition methods stay on *Payment methods*.
+
+**Sessions say how the client signed in, and how often they had the package** (2026-10-11). The auth context
+records a *credential* label beside its method — `EMAIL_OTP`, `SMS_OTP`, `WHATSAPP_OTP`, `SOCIAL_GOOGLE` /
+`_APPLE` / `_MICROSOFT` / `_FACEBOOK`, `VOUCHER`, `ACCOUNT`, `OPEN` (migration 0109; `iamv2/credential.go`) —
+and scd copies it onto `sessions.credential_method` when it opens the session, so *Signed in with* reads
+"Emailed code", "WhatsApp code" or "Google" instead of a bare "PRINCIPAL". A remembered device carries the
+credential it was issued under, so a resumed sign-in is reported as what it originally was. The session row
+also carries `package_acquisitions` — how many times the same subject has had that package, any revision,
+counting this one — shown as a *2nd time / 3rd time* badge on the row and as a line in the session detail. The
+label is never a secret and never an identity; edged keeps its column-level grant on `auth_contexts` (0083)
+and reads both facts from the session.
 
 Settings follow the operational-settings rule: persisted, defaulted, bounded, audited. Group changes are
 recorded in `iam_v2.client_group_changes` (append-only) and in the audit log; `Primary method` and `Remember
