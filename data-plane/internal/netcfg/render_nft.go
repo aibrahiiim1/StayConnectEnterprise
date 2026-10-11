@@ -158,7 +158,13 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 
 	// --- input ---
 	b.WriteString("\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n")
-	b.WriteString("\t\tiif \"lo\" accept\n\t\tct state established,related accept\n\t\tct state invalid drop\n")
+	// PRE-AUTHENTICATION DNS IS RATE-LIMITED BEFORE THE ESTABLISHED ACCEPT. A UDP socket becomes "established"
+	// at the resolver's first reply, so a limiter placed after that accept saw only a client's first queries --
+	// a tunnel uses one socket and would pass unmetered (measured on PRE-LIVE 2026-10-11). Authenticated
+	// devices are exempt.
+	b.WriteString("\t\tiif \"lo\" accept\n")
+	b.WriteString("\t\tiifname @guest_interfaces meta l4proto { tcp, udp } th dport 53 iifname . ip saddr != @auth_ipv4 iifname . ip saddr != @phase3_auth_ipv4 update @dns_preauth_rl { ip saddr limit rate over 20/second burst 40 packets } counter name \"dns_preauth_limited\" drop comment \"pre-auth DNS rate limit\"\n")
+	b.WriteString("\t\tct state established,related accept\n\t\tct state invalid drop\n")
 	fmt.Fprintf(&b, "\t\tiifname \"%s\" tcp dport 22 accept\n", topo.MgmtInterface)
 	// Admin UI (Caddy TLS). When MgmtAddr is set, pin the accept to that address
 	// so the admin UI is refused on any other IP the mgmt NIC carries — this is
@@ -196,8 +202,6 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	// DHCP KEEPS THE BROADCAST DESTINATION, and it has to: a client with no address yet sends DISCOVER and
 	// REQUEST to 255.255.255.255, so a gateway-only rule would break address assignment entirely -- the one
 	// mistake here that would take guest networking down rather than merely harden it.
-	// Pre-authentication DNS to the gateway, rate-limited per device before the per-network accepts below.
-	b.WriteString("\t\tiifname @guest_interfaces meta l4proto { tcp, udp } th dport 53 iifname . ip saddr != @auth_ipv4 iifname . ip saddr != @phase3_auth_ipv4 update @dns_preauth_rl { ip saddr limit rate over 20/second burst 40 packets } counter name \"dns_preauth_limited\" drop comment \"pre-auth DNS rate limit\"\n")
 	for _, n := range enabled {
 		br := n.BridgeName
 		fmt.Fprintf(&b, "\t\tiifname \"%s\" meta nfproto ipv6 counter name \"guest_ipv6_dropped\" drop comment \"no IPv6 guest services\"\n", br)
@@ -253,6 +257,9 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	// established accept, unmetered. Membership of verify_quota is the "window is live" test.
 	b.WriteString("\t\tct mark 0x56455249 iifname @guest_interfaces ip saddr != @verify_quota drop comment \"closed verification window: its flows end (up)\"\n")
 	b.WriteString("\t\tct mark 0x56455249 oifname @guest_interfaces ip daddr != @verify_quota drop comment \"closed verification window: its flows end (down)\"\n")
+	// Pre-authentication DNS straight to a public resolver, rate-limited exactly like DNS to the gateway and for
+	// the same reason placed before the established accept; authenticated devices are exempt.
+	fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" meta l4proto { tcp, udp } th dport 53 iifname . ip saddr != @auth_ipv4 iifname . ip saddr != @phase3_auth_ipv4 update @dns_preauth_rl { ip saddr limit rate over 20/second burst 40 packets } counter name \"dns_preauth_limited\" drop comment \"pre-auth DNS rate limit\"\n", topo.WANInterface)
 	b.WriteString("\t\tct state established,related accept\n\t\tct state invalid drop\n")
 	// block guests reaching management subnets
 	for _, cidr := range topo.MgmtCIDRs {
@@ -272,9 +279,6 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @auth_ipv4 accept comment \"authenticated guests\"\n", topo.WANInterface)
 	// The Phase-3 gate. While the set is empty this rule can never match, so a dark appliance is unaffected.
 	fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @phase3_auth_ipv4 accept comment \"phase-3 authorized guests\"\n", topo.WANInterface)
-	// Pre-authentication DNS straight to a public resolver is rate-limited exactly like DNS to the gateway.
-	// Authenticated guests were accepted above and never reach this rule.
-	fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" meta l4proto { tcp, udp } th dport 53 update @dns_preauth_rl { ip saddr limit rate over 20/second burst 40 packets } counter name \"dns_preauth_limited\" drop comment \"pre-auth DNS rate limit\"\n", topo.WANInterface)
 	// Temporary verification access: the internet, never the appliance's other networks (the management and
 	// client-to-client drops above have already run), for as long as the kernel keeps the timed element.
 	fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @verify_ipv4 ct mark set 0x56455249 accept comment \"temporary verification access\"\n", topo.WANInterface)

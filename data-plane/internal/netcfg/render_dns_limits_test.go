@@ -25,6 +25,18 @@ func TestDNSIsRateLimitedAtTheResolverAndForDevicesThatHaveNotSignedIn(t *testin
 	if strings.Index(in, "dns_preauth_rl") > strings.Index(in, `udp dport 53 accept comment "DNS (own gateway)"`) {
 		t.Error("the limit must precede the DNS accept")
 	}
+	// ...AND THE ESTABLISHED ACCEPT: a UDP socket is "established" after the first reply, so a limiter behind
+	// that accept would meter only a client's first queries.
+	if strings.Index(in, "dns_preauth_rl") > strings.Index(in, "ct state established,related accept") {
+		t.Error("the input limiter must precede the established accept")
+	}
+	fwd := n[strings.Index(n, "chain forward"):strings.Index(n, "chain prerouting_nat")]
+	if i := strings.Index(fwd, "dns_preauth_rl"); i < 0 || i > strings.Index(fwd, "ct state established,related accept") {
+		t.Error("the forward limiter must precede the established accept")
+	}
+	if !strings.Contains(fwd, "iifname . ip saddr != @auth_ipv4 iifname . ip saddr != @phase3_auth_ipv4 update @dns_preauth_rl") {
+		t.Error("authenticated devices must be exempt in forward too")
+	}
 }
 
 // TEMPORARY VERIFICATION ACCESS: metered before the established accept, admitted to the WAN only after the
