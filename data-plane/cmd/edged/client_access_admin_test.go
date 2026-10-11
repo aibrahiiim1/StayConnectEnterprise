@@ -103,5 +103,24 @@ func TestThePortalJourneySettingsAreBounded(t *testing.T) {
 	}
 }
 
+func TestSwitchingASenderOffIsNeverRefusedByValidation(t *testing.T) {
+	off := false
+	on := true
+	if !(notifyWriteReq{Enabled: &off}).onlySwitchesOff() {
+		t.Fatal("enabled:false alone must be the switch-off patch")
+	}
+	for label, in := range map[string]notifyWriteReq{
+		"switching on":       {Enabled: &on},
+		"off plus a setting": {Enabled: &off, Extra: map[string]string{"host": "h"}},
+		"off plus a secret":  {Enabled: &off, APIKey: strp("x")},
+		"no enabled at all":  {DisplayName: strp("n")},
+		"off plus from":      {Enabled: &off, FromAddress: strp("a@b.c")},
+	} {
+		if in.onlySwitchesOff() {
+			t.Errorf("%s must still be validated", label)
+		}
+	}
+}
+
 func strp(s string) *string { return &s }
 func intp(n int) *int       { return &n }

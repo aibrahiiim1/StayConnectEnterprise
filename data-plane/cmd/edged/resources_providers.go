@@ -134,6 +134,13 @@ type notifyWriteReq struct {
 	Extra       map[string]string `json:"extra,omitempty"` // WhatsApp template settings; an empty value removes a key
 }
 
+// onlySwitchesOff reports a patch that turns the sender off and changes nothing else: the one change that is
+// never subject to configuration validation.
+func (in notifyWriteReq) onlySwitchesOff() bool {
+	return in.Enabled != nil && !*in.Enabled && in.DisplayName == nil && in.APIKey == nil &&
+		in.APIUser == nil && in.FromAddress == nil && in.FromName == nil && in.Region == nil && len(in.Extra) == 0
+}
+
 // notifyProviderShape is what validation sees: the provider as it would be stored.
 type notifyProviderShape struct {
 	Channel, Kind, APIUser, FromAddress string
@@ -269,6 +276,20 @@ func (s *server) storeNotifySecret(r *http.Request, id, secret string) (bool, st
 		return false, "the secret could not be stored (" + e.Error + ")"
 	}
 	return true, ""
+}
+
+// notifySecretStored asks scd whether a sealed secret generation exists for the row. scd holds the key and the
+// grant; edged holds neither. Unreachable scd reads as "none stored" and the operator sees the ordinary
+// "a password is required" refusal rather than a silent success that could not send.
+func (s *server) notifySecretStored(r *http.Request, id string) bool {
+	status, body, err := s.scd.call(r.Context(), http.MethodGet, "/v1/admin/notify/providers/"+id+"/secret-state", nil)
+	if err != nil || status != http.StatusOK {
+		return false
+	}
+	var out struct {
+		Sealed bool `json:"sealed"`
+	}
+	return json.Unmarshal(body, &out) == nil && out.Sealed
 }
 
 // testNotifyProvider proxies the test to scd and returns its verdict verbatim.
@@ -437,15 +458,18 @@ func (s *server) patchNotifyProvider(w http.ResponseWriter, r *http.Request) {
 		cur.FromAddress = *in.FromAddress
 	}
 	// HasAPIKey means "a secret exists somewhere": the plaintext column (rows written before 0107), a sealed
-	// generation (rows written since), or the one arriving in this request.
+	// generation (rows written since, which scd alone can read -- edged is deliberately not granted that
+	// table, and asking it directly failed silently and refused every PATCH on a sealed sender), or the one
+	// arriving in this request.
 	if strings.TrimSpace(strDeref(in.APIKey)) != "" {
 		cur.HasAPIKey = true
 	} else if !cur.HasAPIKey {
-		var sealed bool
-		_ = s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM iam_v2.notification_provider_secret_generations
-		     WHERE tenant_id=$1 AND provider_id=$2::uuid AND superseded_at IS NULL)`, s.tenantID, id).Scan(&sealed)
-		cur.HasAPIKey = sealed
+		cur.HasAPIKey = s.notifySecretStored(r, id)
 	}
+	// SWITCHING A SENDER OFF IS ALWAYS ALLOWED. Validation exists so a sender that could never send is not
+	// switched on; it must never hold a sender on because its settings no longer validate (found live: a
+	// working Gmail sender could not be switched off).
+	switchingOff := in.onlySwitchesOff()
 	var extraArg *string
 	if len(in.Extra) > 0 {
 		cur.Extra = mergeExtra(publicExtra(curExtra), in.Extra)
@@ -455,9 +479,11 @@ func (s *server) patchNotifyProvider(w http.ResponseWriter, r *http.Request) {
 	} else if cur.Channel == "whatsapp" || cur.Kind == "smtp" {
 		cur.Extra = publicExtra(curExtra)
 	} // stored extras on other rows are left exactly as they are
-	if msg := validateNotifyProvider(cur); msg != "" {
-		jsonErr(w, http.StatusBadRequest, "bad_request", msg)
-		return
+	if !switchingOff {
+		if msg := validateNotifyProvider(cur); msg != "" {
+			jsonErr(w, http.StatusBadRequest, "bad_request", msg)
+			return
+		}
 	}
 
 	var n edgeNotificationProvider

@@ -130,6 +130,19 @@ func (s *server) notifyAdminRoutes(r chi.Router) {
 	r.Post("/v1/admin/notify/reload", s.notifyReload)
 	r.Post("/v1/admin/notify/providers/{id}/secret", s.notifySecretStore)
 	r.Post("/v1/admin/notify/providers/{id}/test", s.notifyTest)
+	r.Get("/v1/admin/notify/providers/{id}/secret-state", s.notifySecretState)
+}
+
+// notifySecretState answers whether a current sealed generation exists for a provider row -- a yes/no only,
+// never the secret. edged asks this when validating a change to a sender whose plaintext column is NULL.
+func (s *server) notifySecretState(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var sealed bool
+	if s.db != nil {
+		_ = s.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM iam_v2.notification_provider_secret_generations
+		     WHERE tenant_id=$1 AND provider_id=$2::uuid AND superseded_at IS NULL)`, s.tenID, id).Scan(&sealed)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sealed": sealed})
 }
 
 func (s *server) notifyReload(w http.ResponseWriter, r *http.Request) {
