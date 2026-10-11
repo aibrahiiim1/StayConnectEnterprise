@@ -180,6 +180,7 @@ export const PORTAL_STRINGS: PortalString[] = [
   { group: "Messages", key: "err.otp.send", english: "We couldn't send a code right now. Please try again, or choose another way to sign in.", module: OTP },
   { group: "Messages", key: "err.otp.delivery", english: "We couldn't send your code. Please try again or contact the site team.", module: OTP },
   { group: "Sign-in", key: "otp.pending.hint", english: "You can open your mail app and come back: this box will still be here. Or tap the link in the email.", module: OTP },
+  { group: "Sign-in", key: "otp.temp.access", english: "Internet is open on this device for {m} minutes (up to {mb} MB) so you can read the code in any mail app.", module: OTP },
   { group: "Sign-in", key: "otp.again", english: "Send the code again", module: OTP },
   { group: "Sign-in", key: "link.title", english: "Connect to the Wi-Fi", module: OTP },
   { group: "Sign-in", key: "link.lead", english: "You're almost online. Tap Connect to use the code from your email on this device.", module: OTP },

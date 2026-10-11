@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -381,6 +382,7 @@ func (e *CheckoutEngine) queryAndApply(ctx context.Context, t txnRow) error {
 			return err
 		}
 		_, gerr := e.grant(ctx, t.tenant, t.site, t.settlement)
+		e.recordSettlementReport(ctx, t, res.Settlement)
 		e.recordReversals(ctx, t, res.Events)
 		return gerr
 	case CheckoutDeclined, CheckoutExpired:
@@ -447,6 +449,29 @@ func (e *CheckoutEngine) grant(ctx context.Context, tenantID, siteID, settlement
 		return "", classify(err)
 	}
 	return eid, nil
+}
+
+// recordSettlementReport records, once, what the provider says it settled the captured charge as (contract §9,
+// migration 0112): presentment as quoted, and the provider's settlement currency, gross, rate, fee, net and
+// balance reference exactly as reported. Never computed here: no rate, no FX.
+func (e *CheckoutEngine) recordSettlementReport(ctx context.Context, t txnRow, r *SettlementReport) {
+	// Nothing reported yet: record nothing (the table is append-only, so a NOT_REPORTED row would stand in the
+	// way of the real report). For a card charge Stripe books the balance transaction at capture.
+	if e.Outcome == nil || r == nil || r.Currency == "" {
+		return
+	}
+	var cur, rate, ref *string
+	var amount, fee, net *int64
+	if r != nil && r.Currency != "" {
+		c, rt, rf, a, f, n := strings.ToUpper(r.Currency), r.ExchangeRate, r.BalanceRef, r.AmountMinor, r.FeeMinor, r.NetMinor
+		cur, rate, ref, amount, fee, net = &c, &rt, &rf, &a, &f, &n
+	}
+	var status string
+	if err := e.Outcome.QueryRow(ctx, `SELECT iam_v2.p4_record_settlement_report($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		t.tenant, t.site, t.id, cur, amount, rate, fee, net, ref).Scan(&status); err != nil {
+		// A missing report never blocks the grant; the charge and its money are already recorded.
+		slog.Warn("card settlement report not recorded", "err", err)
+	}
 }
 
 // recordReversals records provider-originated refunds and chargebacks on a captured charge. OneGate never

@@ -33,6 +33,7 @@ import { useServerPage, type PagedFields } from "@/lib/use-server-page";
 import { Skeleton, SkeletonRows } from "@/components/ui/misc";
 import { Sheet, SheetBody, SheetContent, SheetFooter, SheetHeader, SheetSection } from "@/components/ui/sheet";
 import { humanize, money } from "./format";
+import { currencyExponent } from "@/lib/commerce-form";
 
 type Tone = "ok" | "warn" | "err" | "info" | "default";
 
@@ -350,7 +351,18 @@ export function SettlementsView() {
                             {detail.payments.map((p) => (
                               <TR key={p.payment_id}>
                                 <TD>{humanize(p.transaction_type)}</TD>
-                                <TD className="tabular">{money(p.amount_minor, p.currency, p.currency_exponent)}</TD>
+                                <TD className="tabular">
+                                  {money(p.amount_minor, p.currency, p.currency_exponent)}
+                                  {/* What the provider settled it as, exactly as it reported it (migration 0112). */}
+                                  {p.settlement_report && (
+                                    <div className="text-2xs text-muted-foreground" data-testid="settlement-report">
+                                      Settled as {money(p.settlement_report.settlement_amount_minor, p.settlement_report.settlement_currency, currencyExponent(p.settlement_report.settlement_currency) ?? 2)}
+                                      {p.settlement_report.exchange_rate ? ` at the provider's rate ${p.settlement_report.exchange_rate}` : ""}
+                                      {typeof p.settlement_report.fee_minor === "number" ? ` · fee ${money(p.settlement_report.fee_minor, p.settlement_report.settlement_currency, currencyExponent(p.settlement_report.settlement_currency) ?? 2)}` : ""}
+                                      {typeof p.settlement_report.net_minor === "number" ? ` · net ${money(p.settlement_report.net_minor, p.settlement_report.settlement_currency, currencyExponent(p.settlement_report.settlement_currency) ?? 2)}` : ""}
+                                    </div>
+                                  )}
+                                </TD>
                                 <TD>
                                   <Badge tone={p.status === "CAPTURED" ? "ok" : p.status === "UNKNOWN" ? "err" : "info"}>
                                     {humanize(p.status)}

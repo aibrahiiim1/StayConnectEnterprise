@@ -50,7 +50,7 @@ func emailFixture(t *testing.T) (*server, *capturedMail) {
 
 func TestTheEmailCodeCarriesATapToConnectLinkForTheOriginTheDeviceUsed(t *testing.T) {
 	s, cm := emailFixture(t)
-	body, _ := json.Marshal(otpIssueReq{Channel: "email", Destination: "ann@example.com", IP: "10.0.0.5", PortalBase: "http://192.168.77.1:8380"})
+	body, _ := json.Marshal(otpIssueReq{Channel: "email", Destination: "ann@example.com", IP: "10.0.0.5", MAC: "aa:bb:cc:dd:ee:05", PortalBase: "http://192.168.77.1:8380"})
 	rec := httptest.NewRecorder()
 	s.otpIssue(rec, httptest.NewRequest(http.MethodPost, "/v1/auth/otp/issue", bytes.NewReader(body)))
 	if rec.Code != http.StatusOK || len(cm.msgs) != 1 {
@@ -63,7 +63,7 @@ func TestTheEmailCodeCarriesATapToConnectLinkForTheOriginTheDeviceUsed(t *testin
 	// No origin, or one that is not a plain origin: the code alone, never a link built from something odd.
 	for _, base := range []string{"", "javascript:alert(1)", "http://evil.example/x?y", "ftp://h", "http://user:pw@h"} {
 		cm.msgs = nil
-		body, _ = json.Marshal(otpIssueReq{Channel: "email", Destination: "ann@example.com", IP: "10.0.0.5", PortalBase: base})
+		body, _ = json.Marshal(otpIssueReq{Channel: "email", Destination: "ann@example.com", IP: "10.0.0.5", MAC: "aa:bb:cc:dd:ee:05", PortalBase: base})
 		rec = httptest.NewRecorder()
 		s.otpIssue(rec, httptest.NewRequest(http.MethodPost, "/v1/auth/otp/issue", bytes.NewReader(body)))
 		if rec.Code != http.StatusOK || len(cm.msgs) != 1 {
@@ -83,5 +83,22 @@ func TestOTPLinkBaseAcceptsOnlyAPlainOrigin(t *testing.T) {
 		if got := otpLinkBase(in); got != want {
 			t.Errorf("%q -> %q, want %q", in, got, want)
 		}
+	}
+}
+
+// A CODE IS ISSUED TO A DEVICE OR NOT AT ALL (migration 0110): without the kernel-resolved hardware address the
+// challenge could not be bound, so the issue is refused -- nothing is generated and nothing is sent.
+func TestACodeIsNeverIssuedWithoutADevice(t *testing.T) {
+	s, cm := emailFixture(t)
+	for _, mac := range []string{"", "not-a-mac"} {
+		body, _ := json.Marshal(otpIssueReq{Channel: "email", Destination: "ann@example.com", IP: "10.0.0.5", MAC: mac})
+		rec := httptest.NewRecorder()
+		s.otpIssue(rec, httptest.NewRequest(http.MethodPost, "/v1/auth/otp/issue", bytes.NewReader(body)))
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "device identity required") {
+			t.Fatalf("mac %q: %d %s", mac, rec.Code, rec.Body.String())
+		}
+	}
+	if len(cm.msgs) != 0 {
+		t.Fatal("nothing may be sent for a code that was not issued")
 	}
 }

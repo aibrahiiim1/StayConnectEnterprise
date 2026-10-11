@@ -135,6 +135,9 @@ func otpLinkBase(raw string) string {
 type otpIssueResp struct {
 	ChallengeID string `json:"challenge_id"`
 	TTLSeconds  int    `json:"ttl_seconds"`
+	// TemporaryAccess is the internet window this issue opened for the device (email only; absent when none
+	// was opened -- the setting is off, a limit was reached, or the device could not be placed).
+	TemporaryAccess *verifyAccessView `json:"temporary_access,omitempty"`
 }
 
 func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
@@ -212,6 +215,15 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusForbidden, channelLabel+" auth disabled for this tenant")
 		return
 	}
+	// A CODE IS ISSUED TO A DEVICE OR NOT AT ALL (migration 0110). The hardware address is the kernel's answer
+	// for the requesting connection, resolved by portald; without it the code could not be bound, and an unbound
+	// code would verify from any device -- so the issue is refused rather than made unbound.
+	devHW, merr := net.ParseMAC(strings.TrimSpace(req.MAC))
+	if merr != nil || net.ParseIP(req.IP) == nil {
+		httpErr(w, http.StatusBadRequest, "device identity required")
+		return
+	}
+	devMAC := devHW.String()
 	// A code is issued only when an enabled sender exists for the channel: it is never "sent" to nowhere.
 	if s.providerReadiness != nil || s.db != nil {
 		if channels, _, ok := s.readProviderReadiness(r.Context()); !ok || !channels[req.Channel] {
@@ -242,7 +254,7 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 		Destination: dest,
 		IP:          req.IP,
 		UserAgent:   r.UserAgent(),
-		DeviceMAC:   strings.TrimSpace(req.MAC),
+		DeviceMAC:   devMAC,
 	})
 	if err != nil {
 		switch {
@@ -308,10 +320,19 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.met.OTPIssued.WithLabelValues(channelLabel).Inc()
-	writeJSON(w, http.StatusOK, otpIssueResp{
+	out := otpIssueResp{
 		ChallengeID: issued.ChallengeID,
 		TTLSeconds:  int(time.Until(issued.ExpiresAt).Seconds()),
-	})
+	}
+	// THE CODE IS ISSUED AND SENT: the device may now reach its mail (verify_access.go). Only for an email code,
+	// only after a successful send, and never a condition of the code itself -- a refused window leaves the
+	// code exactly as valid as it is.
+	if channelLabel == "email" {
+		if v, ok := s.grantVerifyAccess(r.Context(), devMAC, net.ParseIP(req.IP), issued.ChallengeID, dest); ok {
+			out.TemporaryAccess = &v
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // ---- /v1/sessions/authorize-otp --------------------------------------------

@@ -13,6 +13,75 @@ import (
 type AuthMethod struct {
 	Enabled    bool   `json:"enabled"`
 	TemplateID string `json:"template_id,omitempty"`
+	// TemporaryAccess is the email-code method's verification window (read on the email method only).
+	TemporaryAccess *TemporaryAccess `json:"temporary_access,omitempty"`
+}
+
+// TemporaryAccess: when an email code is issued, the requesting device may use the internet for a short,
+// metered window so the code can be read in any mail app (contract §6.6). Every field is an operational
+// setting: absent means the default, and Effective clamps a stored value into its bounds.
+type TemporaryAccess struct {
+	Enabled             *bool `json:"enabled,omitempty"`
+	Minutes             *int  `json:"minutes,omitempty"`
+	DownKbps            *int  `json:"down_kbps,omitempty"`
+	UpKbps              *int  `json:"up_kbps,omitempty"`
+	DataMB              *int  `json:"data_mb,omitempty"`
+	PerDeviceDaily      *int  `json:"per_device_daily,omitempty"`
+	PerDestinationDaily *int  `json:"per_destination_daily,omitempty"`
+	MaxConcurrent       *int  `json:"max_concurrent,omitempty"`
+}
+
+// TemporaryAccessBound is one setting's default and inclusive bounds.
+type TemporaryAccessBound struct{ Default, Min, Max int }
+
+// TemporaryAccessBounds are the defaults the Product Owner set (2026-10-11) and the safe limits a site
+// administrator may choose within. edged validates against the same table.
+var TemporaryAccessBounds = map[string]TemporaryAccessBound{
+	"minutes":               {10, 1, 30},
+	"down_kbps":             {2000, 128, 20000},
+	"up_kbps":               {1000, 64, 10000},
+	"data_mb":               {25, 1, 200},
+	"per_device_daily":      {3, 1, 10},
+	"per_destination_daily": {3, 1, 10},
+	"max_concurrent":        {50, 1, 500},
+}
+
+// TemporaryAccessEffective is the setting as enforced.
+type TemporaryAccessEffective struct {
+	Enabled                                            bool
+	Minutes, DownKbps, UpKbps, DataMB                  int
+	PerDeviceDaily, PerDestinationDaily, MaxConcurrent int
+}
+
+func clampSetting(name string, v *int) int {
+	b := TemporaryAccessBounds[name]
+	if v == nil {
+		return b.Default
+	}
+	if *v < b.Min {
+		return b.Min
+	}
+	if *v > b.Max {
+		return b.Max
+	}
+	return *v
+}
+
+// Effective answers the window the site has, defaults filled in (enabled by default).
+func (t *TemporaryAccess) Effective() TemporaryAccessEffective {
+	if t == nil {
+		t = &TemporaryAccess{}
+	}
+	on := true
+	if t.Enabled != nil {
+		on = *t.Enabled
+	}
+	return TemporaryAccessEffective{
+		Enabled: on, Minutes: clampSetting("minutes", t.Minutes), DownKbps: clampSetting("down_kbps", t.DownKbps),
+		UpKbps: clampSetting("up_kbps", t.UpKbps), DataMB: clampSetting("data_mb", t.DataMB),
+		PerDeviceDaily: clampSetting("per_device_daily", t.PerDeviceDaily), PerDestinationDaily: clampSetting("per_destination_daily", t.PerDestinationDaily),
+		MaxConcurrent: clampSetting("max_concurrent", t.MaxConcurrent),
+	}
 }
 
 type AuthMethods struct {

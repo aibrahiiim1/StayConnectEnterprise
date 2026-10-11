@@ -34,12 +34,16 @@ func TestACodeVerifiesOnlyFromTheDeviceItWasIssuedTo(t *testing.T) {
 	if _, err := VerifyFrom(ctx, db, ring, iss.ChallengeID, iss.Code, "aa:bb:cc:dd:ee:01"); !errors.Is(err, ErrAlreadyUsed) {
 		t.Fatalf("single-use: %v", err)
 	}
-	// A challenge issued with no device (before 0110, or a caller that has none) verifies from anywhere.
+	// FAIL CLOSED: a challenge with no binding (issued before 0110, or by a caller with no device) is refused
+	// from every device, right code or not, and counts no attempt; so is a verification that names no device.
 	old, err := Issue(ctx, db, ring, IssueParams{TenantID: otpTenant, Channel: "email", Destination: "unbound@example.com"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := VerifyFrom(ctx, db, ring, old.ChallengeID, old.Code, "aa:bb:cc:dd:ee:09"); err != nil {
-		t.Fatalf("an unbound challenge keeps its old behaviour: %v", err)
+	if _, err := VerifyFrom(ctx, db, ring, old.ChallengeID, old.Code, "aa:bb:cc:dd:ee:09"); !errors.Is(err, ErrOtherDevice) {
+		t.Fatalf("an unbound challenge must be refused: %v", err)
+	}
+	if _, err := VerifyFrom(ctx, db, ring, iss.ChallengeID, iss.Code, ""); !errors.Is(err, ErrOtherDevice) {
+		t.Fatalf("a verification without a device must be refused: %v", err)
 	}
 }

@@ -67,6 +67,10 @@ export type PaymentAccount = {
   is_default: boolean;
   updated_at?: string;
   has_credentials: boolean;
+  /** The provider presents a package's price in the package currency and settles in this account's (0112). */
+  provider_converts?: boolean;
+  /** Whether the provider converts at all (Stripe yes, Paymob no). */
+  conversion_supported?: boolean;
   credential_keys_set?: string[];
 };
 

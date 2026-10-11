@@ -205,24 +205,35 @@ type Verified struct {
 // while unexpired (the compatibility window — no new legacy rows are issued once the ring is on). When
 // ring is nil the legacy verify path runs unchanged (and does not reference otp_key_generation, so it
 // is safe against a pre-0008 database). Attempt-increment and consume are atomic in one FOR UPDATE tx.
+//
+// Verify does NOT check the device: it exists for the package's own tests of code, expiry and attempt
+// handling. Every guest path calls VerifyFrom.
 func Verify(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, challengeID, code string) (*Verified, error) {
-	return VerifyFrom(ctx, db, ring, challengeID, code, "")
+	return verify(ctx, db, ring, challengeID, code)
 }
 
-// VerifyFrom is Verify from a named device: when the challenge was bound at issue (DeviceMAC) and deviceMAC
-// differs, it is refused with ErrOtherDevice BEFORE the code is compared -- no attempt is counted, nothing
-// is learned about the code. A challenge with no binding (issued before migration 0110) is verified as before.
+// VerifyFrom is Verify from a named device, and it FAILS CLOSED: no device, or a challenge bound to another
+// device, or a challenge with no binding at all, is refused with ErrOtherDevice BEFORE the code is compared --
+// no attempt is counted and nothing is learned about the code. Every challenge issued since migration 0110 is
+// bound (scd refuses to issue one it cannot bind), so an unbound challenge can only be one issued before it,
+// which expired within its ten minutes -- refusing it costs nothing and closes the any-device path for good.
 func VerifyFrom(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, challengeID, code, deviceMAC string) (*Verified, error) {
-	if mac := strings.TrimSpace(deviceMAC); mac != "" {
-		var bound *string
-		if err := db.QueryRow(ctx, `SELECT device_mac::text FROM iam_v2.otp_device_bindings WHERE challenge_id = $1::uuid`,
-			challengeID).Scan(&bound); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return nil, fmt.Errorf("otp: device binding: %w", err)
-		}
-		if bound != nil && !strings.EqualFold(*bound, mac) {
-			return nil, ErrOtherDevice
-		}
+	mac := strings.TrimSpace(deviceMAC)
+	if mac == "" {
+		return nil, ErrOtherDevice
 	}
+	var bound *string
+	if err := db.QueryRow(ctx, `SELECT device_mac::text FROM iam_v2.otp_device_bindings WHERE challenge_id = $1::uuid`,
+		challengeID).Scan(&bound); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("otp: device binding: %w", err)
+	}
+	if bound == nil || !strings.EqualFold(*bound, mac) {
+		return nil, ErrOtherDevice
+	}
+	return verify(ctx, db, ring, challengeID, code)
+}
+
+func verify(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, challengeID, code string) (*Verified, error) {
 	tx, err := db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return nil, err

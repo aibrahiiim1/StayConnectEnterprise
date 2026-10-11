@@ -236,6 +236,19 @@ type finopsPaymentRow struct {
 	Currency    string  `json:"currency"`
 	Exponent    int16   `json:"currency_exponent"`
 	ParentID    *string `json:"parent_transaction_id"`
+	// Settlement is the provider's report of what it settled a captured card charge as (migration 0112):
+	// presentment above, settlement here, exactly as the provider stated it. Absent when not reported.
+	Settlement *finopsSettlementReport `json:"settlement_report,omitempty"`
+}
+
+type finopsSettlementReport struct {
+	Currency     string  `json:"settlement_currency"`
+	AmountMinor  int64   `json:"settlement_amount_minor"`
+	ExchangeRate *string `json:"exchange_rate,omitempty"`
+	FeeMinor     *int64  `json:"fee_minor,omitempty"`
+	NetMinor     *int64  `json:"net_minor,omitempty"`
+	BalanceRef   *string `json:"provider_balance_ref,omitempty"`
+	Converted    bool    `json:"converted"`
 }
 
 // getSettlement returns one settlement with its payment history: the charge, and every refund or chargeback
@@ -274,6 +287,23 @@ SELECT payment_id::text, transaction_type, status, provider, amount_minor, curre
 			return
 		}
 		pay = append(pay, p)
+	}
+	rows.Close()
+	for i := range pay {
+		if pay[i].Type != "CHARGE" {
+			continue
+		}
+		var rep finopsSettlementReport
+		var cur *string
+		var amt *int64
+		if err := s.db.QueryRow(ctx, `SELECT settlement_currency, settlement_amount_minor, exchange_rate, fee_minor, net_minor,
+		       provider_balance_ref, converted FROM iam_v2.payment_settlement_reports
+		 WHERE tenant_id=$1 AND site_id=$2 AND transaction_id=$3::uuid AND report_status='REPORTED'`,
+			s.tenantID, s.siteID, pay[i].PaymentID).Scan(&cur, &amt, &rep.ExchangeRate, &rep.FeeMinor, &rep.NetMinor,
+			&rep.BalanceRef, &rep.Converted); err == nil && cur != nil && amt != nil {
+			rep.Currency, rep.AmountMinor = *cur, *amt
+			pay[i].Settlement = &rep
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"settlement": se,

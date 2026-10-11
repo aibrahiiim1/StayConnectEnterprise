@@ -363,6 +363,7 @@ const landingHTML = `<!doctype html>
         <input id="email-code" name="code" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" required maxlength="6" placeholder="••••••" dir="ltr">
       </div>
       <button class="primary" type="submit"><span data-i18n="btn.verify" data-i18n-en="Verify">{{index .T "btn.verify"}}</span></button>
+      <p class="hint temp-access" role="status" hidden></p>
       <p class="hint" data-i18n="otp.pending.hint" data-i18n-en="You can open your mail app and come back: this box will still be here. Or tap the link in the email.">{{index .T "otp.pending.hint"}}</p>
       <button type="button" class="link" data-again data-i18n="otp.again" data-i18n-en="Send the code again">{{index .T "otp.again"}}</button>
       <button type="button" class="link" data-resend data-i18n="otp.retry.email" data-i18n-en="Try a different email">{{index .T "otp.retry.email"}}</button>
@@ -1220,6 +1221,17 @@ const landingHTML = `<!doctype html>
       return t('err.service');
     }
 
+    // THE TEMPORARY WINDOW an issued email code opened for this device (scd verify_access.go): said in words, so
+    // the client knows they can open any mail app now, for how long, and how much.
+    function showTempAccess(codeForm, ta) {
+      const el = codeForm.querySelector('.temp-access');
+      if (!el) return;
+      if (!ta || !ta.seconds) { el.hidden = true; return; }
+      const mins = Math.max(1, Math.round(ta.seconds / 60));
+      el.textContent = t('otp.temp.access').split('{m}').join(String(mins)).split('{mb}').join(String(ta.data_mb || 0));
+      el.hidden = false;
+    }
+
     function attach(channel) {
       const destForm = form(channel, 'dest');
       const codeForm = form(channel, 'code');
@@ -1237,6 +1249,7 @@ const landingHTML = `<!doctype html>
           const j = await r.json().catch(() => ({}));
           if (!r.ok) { errEl.textContent = otpMessage('dest', j); return; }
           challenges[channel] = j.challenge_id;
+          showTempAccess(codeForm, j.temporary_access);
           codeForm.querySelector('.dest').textContent = dest;
           destForm.style.display = 'none';
           codeForm.style.display = 'block';
@@ -1282,6 +1295,7 @@ const landingHTML = `<!doctype html>
           const j = await r.json().catch(() => ({}));
           if (!r.ok) { errEl.textContent = otpMessage('dest', j); return; }
           challenges[channel] = j.challenge_id;
+          showTempAccess(codeForm, j.temporary_access);
           codeForm.querySelector('input[name=code]').value = '';
           codeForm.querySelector('input[name=code]').focus();
         } catch (err) {

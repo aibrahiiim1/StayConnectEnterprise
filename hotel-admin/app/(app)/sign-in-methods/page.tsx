@@ -46,6 +46,22 @@ import { Ticket, Hotel, KeyRound, Mail, MessageSquare, Users, ArrowUpRight, LogI
 // The auth_methods document. Only the keys this screen owns are typed; everything else is preserved
 // untouched by the server's merge, so an unknown future method cannot be deleted by saving here.
 type Method = { enabled?: boolean };
+// THE EMAIL CODE'S TEMPORARY INTERNET WINDOW (contract §6.6): every field an operational setting with a default,
+// unit and bounds -- the same table edged validates against (tenantcfg.TemporaryAccessBounds).
+type TemporaryAccess = {
+  enabled?: boolean; minutes?: number; down_kbps?: number; up_kbps?: number; data_mb?: number;
+  per_device_daily?: number; per_destination_daily?: number; max_concurrent?: number;
+};
+type EmailMethod = Method & { temporary_access?: TemporaryAccess };
+const TEMP_ACCESS_FIELDS: { key: Exclude<keyof TemporaryAccess, "enabled">; label: string; unit: string; def: number; min: number; max: number; explanation: string }[] = [
+  { key: "minutes", label: "How long", unit: "minutes", def: 10, min: 1, max: 30, explanation: "How long the device may use the internet after the code is sent. Independent of how long the code stays valid." },
+  { key: "down_kbps", label: "Download speed", unit: "kbps", def: 2000, min: 128, max: 20000, explanation: "Enough to open a mailbox, not to stream." },
+  { key: "up_kbps", label: "Upload speed", unit: "kbps", def: 1000, min: 64, max: 10000, explanation: "Upload limit during the window." },
+  { key: "data_mb", label: "Data allowance", unit: "MB", def: 25, min: 1, max: 200, explanation: "Upload and download combined. The window ends when it is used." },
+  { key: "per_device_daily", label: "Windows per device", unit: "per 24 hours", def: 3, min: 1, max: 10, explanation: "Asking again while a window is open reuses it; this limits new windows for the same device." },
+  { key: "per_destination_daily", label: "Windows per email address", unit: "per 24 hours", def: 3, min: 1, max: 10, explanation: "Limits windows for the same address, whatever device asks — so changing devices does not reset it." },
+  { key: "max_concurrent", label: "Open windows at once", unit: "devices", def: 50, min: 1, max: 500, explanation: "The most devices on a window at the same time across the site." },
+];
 type PMSMethod = { enabled?: boolean; mode?: string; provider?: string; template_id?: string };
 // THE CLIENT JOURNEY (ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md §2.3, §6.2): which method the portal leads
 // with, and how long a device that has verified a code or an identity provider is remembered.
@@ -63,7 +79,7 @@ type AuthMethods = {
   // Open package selection: the client picks an Internet package without any credential (Free or Card
   // payment). The access is held by an anonymous access subject, never by the device's MAC address.
   open?: Method;
-  email?: Method;
+  email?: EmailMethod;
   sms?: Method;
   whatsapp?: Method;
   social?: Record<string, Method>;
@@ -417,6 +433,15 @@ export default function SignInMethodsPage() {
         )}
       </div>
 
+      {emailMod && (
+        <TemporaryAccessCard
+          cfg={cfg}
+          writable={writable}
+          busy={busy === "Temporary internet"}
+          onSave={(ta) => save({ email: { ...(cfg.email ?? {}), temporary_access: ta } }, "Temporary internet")}
+        />
+      )}
+
       {/* READING THE CODE. A client who asked for an email code has to open their mail app before they have
           internet; the services switched on here are reachable through the walled garden while Email code is on. */}
       {emailMod && (
@@ -534,6 +559,63 @@ function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
           {writable && (
             <div className="flex items-center gap-3 md:col-span-2">
               <Button type="submit" disabled={!dirty || !daysValid || busy}>{busy ? "Saving…" : "Save journey"}</Button>
+              {dirty && !busy && <span className="text-xs text-muted-foreground">Not saved yet.</span>}
+            </div>
+          )}
+        </form>
+      </CardBody>
+    </Card>
+  );
+}
+
+// TemporaryAccessCard — the internet window an issued email code opens for the requesting device, so the client
+// can read the code in ANY mail app. Saved with the email method (the server replaces the key whole, so the
+// email switch travels with it). Bounds are checked here and again by edged.
+function TemporaryAccessCard({ cfg, writable, busy, onSave }: {
+  cfg: AuthMethods; writable: boolean; busy: boolean; onSave: (ta: TemporaryAccess) => void;
+}) {
+  const stored = cfg.email?.temporary_access ?? {};
+  const storedOn = stored.enabled ?? true;
+  const initial = () => Object.fromEntries(TEMP_ACCESS_FIELDS.map((f) => [f.key, String(stored[f.key] ?? f.def)])) as Record<string, string>;
+  const [on, setOn] = useState(storedOn);
+  const [vals, setVals] = useState<Record<string, string>>(initial);
+  const storedKey = JSON.stringify(stored);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setOn(storedOn); setVals(initial()); }, [storedKey]);
+  const bad = TEMP_ACCESS_FIELDS.find((f) => {
+    const n = Number(vals[f.key]);
+    return vals[f.key].trim() === "" || !Number.isInteger(n) || n < f.min || n > f.max;
+  });
+  const dirty = on !== storedOn || TEMP_ACCESS_FIELDS.some((f) => Number(vals[f.key]) !== (stored[f.key] ?? f.def));
+  return (
+    <Card>
+      <CardHeader className="items-start">
+        <div className="min-w-0 space-y-1">
+          <CardTitle className="flex items-center gap-2 [&_svg]:size-4"><Mail aria-hidden /> Temporary internet while reading the code</CardTitle>
+          <CardDescription>
+            When an email code is sent, the device that asked may use the internet for a short, metered window, so the
+            client can read the code in any mail app without mobile data. It ends when the client signs in, when the
+            time or data runs out, or when they choose a different address. It is not a package and changes no
+            client&apos;s access.
+          </CardDescription>
+        </div>
+        {writable && <Switch checked={on} disabled={busy} onCheckedChange={setOn} label="Temporary internet while reading the code" />}
+      </CardHeader>
+      <CardBody>
+        <form className="grid gap-4 md:grid-cols-2" onSubmit={(e) => {
+          e.preventDefault();
+          if (bad || !writable) return;
+          const ta: TemporaryAccess = { enabled: on };
+          for (const f of TEMP_ACCESS_FIELDS) (ta as Record<string, number | boolean>)[f.key] = Number(vals[f.key]);
+          onSave(ta);
+        }}>
+          {TEMP_ACCESS_FIELDS.map((f) => (
+            <SettingField key={f.key} label={f.label} value={vals[f.key]} onChange={(v) => setVals((x) => ({ ...x, [f.key]: v }))}
+              unit={f.unit} min={f.min} max={f.max} defaultValue={f.def} readOnly={!writable || busy || !on} explanation={f.explanation} />
+          ))}
+          {writable && (
+            <div className="flex items-center gap-3 md:col-span-2">
+              <Button type="submit" disabled={!dirty || !!bad || busy}>{busy ? "Saving…" : "Save temporary internet"}</Button>
               {dirty && !busy && <span className="text-xs text-muted-foreground">Not saved yet.</span>}
             </div>
           )}

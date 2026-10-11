@@ -236,6 +236,8 @@ type server struct {
 	openAccess  *iamv2.OpenAccess
 	openLimiter *recoveryLimiter
 	// resumeKey / resumeLimiter: the remembered-device credential (client_resume.go); nil = not remembered.
+	// verifyK overrides the kernel surface of temporary verification access (tests); nil = s.nft.client.
+	verifyK       verifyKernel
 	resumeKey     []byte
 	resumeLimiter *recoveryLimiter
 	// notify: the live sender trio, swappable on reload (notify_admin.go); notifyKey seals sender secrets.
@@ -872,6 +874,7 @@ func main() {
 	r.Post("/v1/sessions/revoke", s.revoke)
 	r.Get("/v1/sessions/status", s.status)
 	r.Post("/v1/auth/otp/issue", s.otpIssue)
+	r.Post("/v1/auth/otp/temporary-access/cancel", s.cancelVerifyAccess)
 	r.Post("/v1/auth/social/start", s.socialStart)
 	r.Post("/v1/sessions/authorize-social", s.authorizeSocial)
 	// The remembered device (client_resume.go): peek for the Welcome-back line, Connect, and sign-out.
@@ -1056,6 +1059,8 @@ func main() {
 	// Edge-first refactor: walled-garden rules from the (site) DB are now
 	// actually enforced — reconciled into the nft walled_garden_ip set.
 	go s.gardenReconcileLoop(rootCtx)
+	// Temporary verification windows: restore after a restart, meter, end what is due (verify_access.go).
+	go s.verifyAccessLoop(rootCtx)
 	go s.cardReconcileLoop(rootCtx)
 	go s.postingLoop(rootCtx, s.initPostingWorker(rootCtx))
 	// Periodic safety-net reload: Hotel Admin changes reload immediately through /v1/admin/pms/reload, and a

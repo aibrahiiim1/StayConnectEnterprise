@@ -311,6 +311,45 @@ device *before* the code is compared — the refusal counts no attempt and the p
 link page still verifies nothing on GET. A challenge issued before 0110 keeps the old behaviour for the ten
 minutes it lives. MAC identifies the device only, never a person.
 
+### 6.6 Temporary internet while reading the code (Product-Owner decision, 2026-10-11)
+
+Mail-service allowlisting (§6.5) cannot be made safe (a mail service's addresses serve the provider's other
+services) and cannot cover every provider. So when an **email** code is issued **and sent**, the device that
+asked gets a short window of **general** internet access, enforced in the kernel and separate from every
+entitlement:
+
+| Setting (Sign-in methods → *Temporary internet while reading the code*) | Default | Bounds |
+|---|---|---|
+| Enabled | on | — |
+| How long | 10 minutes | 1–30 |
+| Download / upload | 2000 / 1000 kbps | 128–20000 / 64–10000 |
+| Data allowance (combined) | 25 MB | 1–200 |
+| Windows per device | 3 per 24 h | 1–10 |
+| Windows per email address | 3 per 24 h | 1–10 |
+| Open windows at once (site) | 50 | 1–500 |
+
+Stored in `tenants.auth_methods.email.temporary_access`, validated by edged against
+`tenantcfg.TemporaryAccessBounds`, audited with old and new values.
+
+**Enforcement** (`internal/nft/verify.go`, render in `netcfg/render_nft.go`): a timed `(bridge, address)`
+element in `verify_ipv4` (the kernel ends it at expiry, even with scd down); a per-device quota object (every
+byte, both directions) and two limit objects (up, down), metered **before** the established-flow accept so no
+packet escapes them. Admission is to the WAN only, after the management and client-to-client drops; an admitted
+device is not captive-redirected.
+
+**Lifecycle** (`cmd/scd/verify_access.go`, ledger `iam_v2.verification_access_grants`, migration 0111): starts
+only after a successful send; ends at verification or any other successful sign-in from the device, expiry,
+data exhaustion, or *use a different address*. One live window per device — a second request (another address,
+a reconnection) reuses it and never resets its clock or bytes. Per-device and per-address limits are counted
+from the ledger over a rolling 24 h, so they survive restarts; the address is kept only as an HMAC digest. A
+reconcile every 2 s restores a live window after an scd, netd or appliance restart with **what is left** of it
+(time and bytes), ends what is due, and removes strays. The code's own validity (10 minutes) is independent.
+
+**What it cannot do:** a device that changes its hardware address is a new device to the network; it still
+needs a fresh address within the per-address limit, a deliverable code, and a free site slot. Anonymous abuse
+is bounded, not eliminated. While a window is open the phone's captive check succeeds, so the system sheet may
+close; the client returns to the portal (the pending code box, §6.2) or taps the email link.
+
 ---
 
 ## 7. Email delivery, SMS and WhatsApp
@@ -405,15 +444,22 @@ every active package priced in a currency no active account settles ("Not offere
 your active account settles GBP"), and the package editor says the same beside the price when Card is ticked.
 Nothing converts; §6.4 withholds the method.
 
-**Presentment vs settlement currency — recommendation, not built (2026-10-11).** Stripe will present a
-charge in the package's currency and settle it in the account's currency at its own rate, recording the rate,
-the fee and the net on the balance transaction; Paymob settles in the merchant's currency, with presentment in
-other currencies subject to the merchant's enablement. The safe design keeps OneGate's purchase and quote in
-the package's currency (presentment), lets the provider convert, and records on the settlement what the
-provider actually did — settlement currency, settled amount, exchange rate, fee, net, and the provider's
-balance-transaction id — read back from the authoritative status query, never computed locally. That is a
-change to the accepted financial contract and schema (`PAYMENT_ACCOUNT_CURRENCY` today refuses the mismatch
-by design) and needs the Product Owner's decision; until then the method is withheld rather than refused late.
+**Provider-managed currency conversion (Product-Owner decision 2026-10-11; migration 0112).** The client sees
+and pays the package price in the package's currency (presentment). An account may be marked
+**provider-converts** (Payment methods → *Let the provider convert*; step-up; audited in
+`payment_account_conversion_changes`), and only for a provider that converts: **Stripe** presents a Checkout
+Session in a supported currency and settles into the account currency at its own rate; **Paymob** settles in
+the merchant's currency and is refused by the definer (`PAYMENT_CONVERSION_UNSUPPORTED`). The payment identity
+gate accepts a CHARGE in another currency only for such an account; a refund or chargeback is always recorded in
+its charge's currency. After a verified capture the engine records, once and append-only, the provider's own
+report from the charge's balance transaction (`payment_settlement_reports`): presentment currency and amount as
+charged, settlement currency and amount, the exchange rate **as the provider sent it (text, never recomputed)**,
+fee, net and the balance-transaction id. OneGate computes no rate and performs no FX. Card is offered for a
+package only in the account currency, or — on a provider-converts Stripe account — in a currency from a
+conservative supported list (Stripe remains the authority; a currency it refuses fails as *not created* and the
+client is offered another way). Settlement, reconciliation, idempotency, UNKNOWN handling, refunds and
+chargebacks are unchanged. **Room charge is unchanged:** the package currency must equal the pinned interface's,
+with no conversion.
 
 Settings follow the operational-settings rule: persisted, defaulted, bounded, audited. Group changes are
 recorded in `iam_v2.client_group_changes` (append-only) and in the audit log; `Primary method` and `Remember
@@ -433,8 +479,8 @@ and one operator rule (`example.com`, ports `[443]`):
 | Every port was open to every garden address: port 80, UDP 443 (QUIC), any TCP port to a Google address | all ports | three sets (`walled_garden_ip` = address-only rules, every port; `walled_garden_tcp` / `walled_garden_udp` = `address . port` pairs). An email service opens TCP 443, 993, 5228, 5223 only; an identity provider or payment page TCP 443 only. |
 | A rule's **Ports** were stored and ignored (a page came back on port 80 from a rule that named 443) | ignored | enforced: the named ports, TCP and UDP; "every port" only when none is named |
 | The baseline resolvers (1.1.1.1, 8.8.8.8, 8.8.4.4) were open on every port — DNS-over-HTTPS to them worked before sign-in, and whatever else those addresses serve | all ports | port 53 only (TCP and UDP) |
-| The guest resolver (unbound on the gateway) answers any name recursively | — | unchanged and necessary: captive-portal detection resolves names. DNS tunnelling through the resolver is a known property of every captive portal; rate-limiting or filtering it is a separate decision. |
-| IPv6: no address is handed to a client and nothing is reachable over v6, but `net.ipv6.conf.all.forwarding=1` with no `ip6` rule in the StayConnect table | latent | **not changed** (host networking configuration): recommended as a decision — forward off, or an `ip6` drop policy in the render. |
+| The guest resolver (unbound on the gateway) answers any name recursively — a DNS-tunnel channel, as at every captive portal | unlimited | **rate-limited**: a device that has not signed in is held to 20 queries/s (burst 40) per address by the firewall, to the gateway and to the public resolvers alike, counted in `dns_preauth_limited`; unbound bounds every client to 100 qps (`ip-ratelimit`) and every zone to 1000 qps upstream (`ratelimit`), and refuses ANY. Resolution still works; tunnelling is throttled, not made impossible. |
+| IPv6 (corrected 2026-10-11: an earlier count looked for `ip6 ` and missed the `meta nfproto ipv6` form) | already dropped on guest input and guest-ingress forward | the guard now also covers the **return path** (`oifname @guest_interfaces`), sits **before** the established-flow accept, and counts every refused packet in `guest_ipv6_dropped`. Host forwarding and the appliance's own WAN/management IPv6 are untouched. |
 | **A name behind a shared front end**: `mail.google.com` resolves to an address that also serves YouTube, Search, Drive, Docs, Translate — all reached pre-auth by sending that host name to that address | reachable | **still reachable on 443**. The kernel filters addresses; the service is chosen by the TLS server name. No address/port rule can isolate a CDN-hosted domain. |
 
 **Why port enforcement is within the accepted model:** the sets, the forward accepts and the captive-redirect
@@ -445,7 +491,7 @@ render) before scd (the sync).
 
 **What the shared-front-end finding means for "Reading the code".** Opening a mail service opens the other
 services its addresses serve, to a device that has not signed in, for as long as the Email code method is on.
-Two ways to bound it, neither built here, both for the Product Owner:
+Decided 2026-10-11: §6.6 (a bounded, per-device window of general access) replaces reliance on mail-service allowlisting for reading the code; the options considered were:
 
 1. **Bounded, per-device verification access** — open the mail-service pairs only for the device that has a
    code in flight, for the code's lifetime (a timed `saddr` set keyed by the device, written by scd at issue,

@@ -447,14 +447,24 @@ func isHTTPURL(s string) bool {
 
 // ---------------------------------------------------------------- status
 
+type balanceTxn struct {
+	ID           string          `json:"id"`
+	Amount       int64           `json:"amount"`
+	Currency     string          `json:"currency"`
+	ExchangeRate json.RawMessage `json:"exchange_rate"`
+	Fee          int64           `json:"fee"`
+	Net          int64           `json:"net"`
+}
+
 type charge struct {
-	ID             string `json:"id"`
-	Status         string `json:"status"`
-	Paid           bool   `json:"paid"`
-	Captured       bool   `json:"captured"`
-	AmountCaptured int64  `json:"amount_captured"`
-	AmountRefunded int64  `json:"amount_refunded"`
-	Disputed       bool   `json:"disputed"`
+	BalanceTxnRaw  json.RawMessage `json:"balance_transaction"`
+	ID             string          `json:"id"`
+	Status         string          `json:"status"`
+	Paid           bool            `json:"paid"`
+	Captured       bool            `json:"captured"`
+	AmountCaptured int64           `json:"amount_captured"`
+	AmountRefunded int64           `json:"amount_refunded"`
+	Disputed       bool            `json:"disputed"`
 }
 
 type paymentIntent struct {
@@ -522,6 +532,8 @@ func (a *Adapter) QueryStatus(ctx context.Context, q payment.StatusQuery) (payme
 	f := url.Values{}
 	f.Add("expand[]", "payment_intent")
 	f.Add("expand[]", "payment_intent.latest_charge")
+	// The settlement as Stripe booked it: currency, gross, its exchange rate, fee and net (contract §9).
+	f.Add("expand[]", "payment_intent.latest_charge.balance_transaction")
 	resp, err := a.call(ctx, http.MethodGet, "/v1/checkout/sessions/"+url.PathEscape(sid), f, key, "")
 	if err != nil {
 		return payment.StatusResult{}, errf("status query failed: %v", err)
@@ -577,6 +589,11 @@ func (a *Adapter) mapSession(ctx context.Context, key string, s session, hasPI b
 			ProviderTxnRef: pi.ID,
 			AmountMinor:    pi.AmountReceived,
 			Currency:       strings.ToUpper(pi.Currency),
+		}
+		var bt balanceTxn
+		if ok, err := expandable(ch.BalanceTxnRaw, &bt); err == nil && ok && bt.ID != "" && bt.Currency != "" {
+			res.Settlement = &payment.SettlementReport{Currency: strings.ToUpper(bt.Currency), AmountMinor: bt.Amount,
+				ExchangeRate: stripeRate(bt.ExchangeRate), FeeMinor: bt.Fee, NetMinor: bt.Net, BalanceRef: bt.ID}
 		}
 		evs, err := a.events(ctx, key, ch)
 		if err != nil {
@@ -802,4 +819,36 @@ func (a *Adapter) TestConnection(ctx context.Context, mode payment.Mode, merchan
 		return errf("Stripe reports a different mode than the configured account mode")
 	}
 	return nil
+}
+
+// stripeRate is Stripe's exchange_rate exactly as sent (null when no conversion took place). It is kept as
+// text so no float rounding ever touches a financial record.
+func stripeRate(raw json.RawMessage) string {
+	t := strings.TrimSpace(string(raw))
+	if t == "" || t == "null" || !rateRE.MatchString(t) {
+		return ""
+	}
+	return t
+}
+
+var rateRE = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$`)
+
+// stripePresentment is the conservative set of presentment currencies OneGate offers for Stripe conversion:
+// currencies Stripe documents as supported for card payments, limited to those the package editor can price.
+// Stripe remains the authority -- a currency it refuses at checkout creation is refused as "not created" and
+// the client is offered another way -- but a package in a currency outside this list is simply not offered by
+// card, rather than offered and refused.
+var stripePresentment = map[string]bool{
+	"USD": true, "EUR": true, "GBP": true, "AED": true, "SAR": true, "QAR": true, "EGP": true, "KWD": true,
+	"BHD": true, "OMR": true, "JOD": true, "CHF": true, "CAD": true, "AUD": true, "NZD": true, "JPY": true,
+	"CNY": true, "HKD": true, "SGD": true, "INR": true, "TRY": true, "MAD": true, "ZAR": true, "SEK": true,
+	"NOK": true, "DKK": true, "PLN": true, "CZK": true, "HUF": true, "RON": true,
+}
+
+// ConvertsPresentment: Stripe presents a charge in any supported currency and settles it into the account's
+// currency at its own rate, reporting the rate, fee and net on the balance transaction.
+func (a *Adapter) ConvertsPresentment(presentment, settlement string) bool {
+	p := strings.ToUpper(strings.TrimSpace(presentment))
+	s := strings.ToUpper(strings.TrimSpace(settlement))
+	return p == s || (stripePresentment[p] && stripePresentment[s])
 }

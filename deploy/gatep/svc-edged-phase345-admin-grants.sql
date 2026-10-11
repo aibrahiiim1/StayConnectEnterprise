@@ -461,3 +461,10 @@ GRANT SELECT ON iam_v2.guest_network_lineage TO svc_edged;
 -- the Admin Console's API is deliberately not granted guest_principals or guest_principal_identities.
 GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.client_groups, iam_v2.client_group_rules TO svc_edged;
 GRANT SELECT, INSERT ON iam_v2.client_group_changes TO svc_edged;
+
+-- ---- 0111/0112: reporting only ----------------------------------------------------------------------------
+-- The Admin Console reports temporary verification windows and card settlement reports, and shows which
+-- accounts the provider converts for. It writes none of them.
+GRANT SELECT ON iam_v2.verification_access_grants TO svc_edged;
+GRANT SELECT ON iam_v2.payment_account_conversion, iam_v2.payment_account_conversion_changes,
+                iam_v2.payment_settlement_reports TO svc_edged;

@@ -196,6 +196,13 @@ func (s *server) authorizeViaIAMv2(w http.ResponseWriter, r *http.Request,
 		if req.ResumedPrincipalID == "" && res.Subject.PrincipalID != "" {
 			out.ResumeToken = s.issueResumeCredential(r.Context(), res.Subject.PrincipalID, res.DeviceID, method, req.Credential)
 		}
+		// A SUCCESSFUL SIGN-IN ENDS THE DEVICE'S TEMPORARY VERIFICATION WINDOW (verify_access.go): from here the
+		// device's access is whatever its own entitlement says, never the metered window.
+		endReason := "SIGNED_IN"
+		if method == iamv2.MethodOTP {
+			endReason = "VERIFIED"
+		}
+		s.endVerifyAccess(r.Context(), req.Device.MAC, endReason)
 		if len(res.IdentityConflicts) > 0 {
 			slog.Info("iamv2 identity link conflict", "method", string(method), "factors", res.IdentityConflicts)
 		}

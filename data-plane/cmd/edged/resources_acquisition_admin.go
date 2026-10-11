@@ -34,6 +34,7 @@ func (s *server) paymentProvidersRoutes() http.Handler {
 	})
 	r.Post("/accounts", s.savePaymentAccount)
 	r.Post("/accounts/{id}/test", s.testPaymentAccount)
+	r.Post("/accounts/{id}/conversion", s.setPaymentAccountConversion)
 	r.Put("/domains", s.savePaymentDomains)
 	r.Get("/settings", s.getCardSettings)
 	r.Put("/settings", s.putCardSettings)
@@ -591,4 +592,38 @@ func (s *server) approveFinancialOnboarding(w http.ResponseWriter, r *http.Reque
 	})
 	s.invalidateModules()
 	writeJSON(w, http.StatusOK, map[string]any{"revision_id": rev})
+}
+
+// setPaymentAccountConversion marks an account PROVIDER-CONVERTS (contract §9, migration 0112): the provider
+// presents a package's price in its own currency and settles it in the account's. A financial setting, so it
+// takes the same step-up as saving the account, is recorded in its own append-only log by the definer, and is
+// audited here. The definer refuses a provider that does not convert.
+func (s *server) setPaymentAccountConversion(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		ProviderConverts bool   `json:"provider_converts"`
+		Reason           string `json:"reason"`
+		Password         string `json:"password"`
+	}
+	if err := decodeJSON(r, &in); err != nil || len(strings.TrimSpace(in.Reason)) > 500 {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
+		return
+	}
+	actor, ok := s.paymentStepUp(w, r, in.Password)
+	if !ok {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	st, raw, err := s.scd.call(r.Context(), http.MethodPost, "/v1/payment/accounts/"+id+"/conversion",
+		map[string]any{"provider_converts": in.ProviderConverts, "operator": actor, "reason": in.Reason})
+	if err != nil {
+		jsonErr(w, http.StatusBadGateway, "scd_unreachable", "the payment service could not be reached")
+		return
+	}
+	if st < 300 {
+		s.audit(r, "payment_account.conversion", "payment_provider_account", id, map[string]any{
+			"provider_converts": in.ProviderConverts, "reason": strings.TrimSpace(in.Reason)})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(st)
+	_, _ = w.Write(raw)
 }

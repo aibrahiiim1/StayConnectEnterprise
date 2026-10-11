@@ -100,6 +100,29 @@ type StatusResult struct {
 	Currency       string
 	ReasonCode     string
 	Events         []ProviderEvent
+	// Settlement is the provider's own report of what it settled for a CAPTURED charge (nil when it has not
+	// reported yet). OneGate records it as stated and never recomputes it (contract §9, migration 0112).
+	Settlement *SettlementReport
+}
+
+// SettlementReport is what the provider settled a captured charge as, in its own terms. ExchangeRate is the
+// provider's figure exactly as it sent it (a decimal string), never a rate OneGate derived.
+type SettlementReport struct {
+	Currency     string
+	AmountMinor  int64
+	ExchangeRate string
+	FeeMinor     int64
+	NetMinor     int64
+	BalanceRef   string
+}
+
+// CurrencyConverter is the optional capability of a provider that presents a charge in one currency and
+// settles it in the merchant account's: Stripe has it, Paymob does not. A provider without it is offered only
+// for packages priced in its account's own currency.
+type CurrencyConverter interface {
+	// ConvertsPresentment reports whether a charge presented in `presentment` can be settled by the provider
+	// into an account that settles in `settlement`.
+	ConvertsPresentment(presentment, settlement string) bool
 }
 
 // HostedCheckoutProvider is the capability a Card payment adapter must have.

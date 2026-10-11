@@ -167,7 +167,8 @@ func TestTheManagementAndForwardProtectionsAreUnchanged(t *testing.T) {
 		"iifname \"ens160\" ip daddr 172.21.60.25 tcp dport 443 accept",
 		"iifname @guest_interfaces ip daddr 172.21.60.0/24 drop comment \"guest -> mgmt blocked\"",
 		"iifname @guest_interfaces ip daddr @guest_subnets drop comment \"inter-guest isolation\"",
-		"iifname @guest_interfaces meta nfproto ipv6 drop comment \"IPv6 guest bypass guard\"",
+		"iifname @guest_interfaces meta nfproto ipv6 counter name \"guest_ipv6_dropped\" drop comment \"IPv6 guest bypass guard\"",
+		"oifname @guest_interfaces meta nfproto ipv6 counter name \"guest_ipv6_dropped\" drop comment \"IPv6 guest bypass guard (return path)\"",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("an accepted protection is missing after the input-chain change:\n  %s", want)

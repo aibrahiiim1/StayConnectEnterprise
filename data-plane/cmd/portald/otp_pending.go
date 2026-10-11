@@ -120,6 +120,19 @@ func (h *handler) authOTPForget(w http.ResponseWriter, r *http.Request) {
 	if h.pendingOTP != nil {
 		h.pendingOTP.clear(pendingKey(r))
 	}
+	// The temporary internet window the abandoned code opened ends with it (scd verify_access.go). The device is
+	// named by the kernel's answer for this connection, never by the client.
+	if ip := clientIP(r); ip != nil {
+		if mac, ok := h.deviceMAC(r.Context(), ip); ok {
+			body, _ := json.Marshal(map[string]string{"ip": ipString(ip), "mac": mac.String()})
+			if req, err := http.NewRequestWithContext(r.Context(), "POST", "http://unix/v1/auth/otp/temporary-access/cancel", bytes.NewReader(body)); err == nil {
+				req.Header.Set("Content-Type", "application/json")
+				if resp, err := h.scd.Do(req); err == nil {
+					resp.Body.Close()
+				}
+			}
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{"ok":true}`))
 }
@@ -163,6 +176,11 @@ func (h *handler) connectPage(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
+	// THE LINK CARRIES A CODE IN ITS QUERY. Nothing on this page may hand that URL on: no Referer to anything it
+	// loads, no indexing, no caching (above). The code is bound to the device that asked for it, so a leaked link
+	// is refused from any other device -- these headers keep it from leaking in the first place.
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
 	nonce := setPortalCSP(w)
 	pg := h.newGuestPage(r, nonce, "link.", "welcome.connect")
 	_ = connectTmpl.Execute(w, connectView{guestPage: pg, ChallengeID: c, Code: k})

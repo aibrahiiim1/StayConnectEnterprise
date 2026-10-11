@@ -128,6 +128,22 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	b.WriteString("\tset walled_garden_ip {\n\t\ttype ipv4_addr\n\t\tflags interval\n\t\tauto-merge\n\t}\n\n")
 	b.WriteString("\tset walled_garden_tcp {\n\t\ttype ipv4_addr . inet_service\n\t\tflags interval\n\t\tcomment \"pre-auth (address, TCP port) pairs; scd reconciles\"\n\t\telements = { 1.1.1.1 . 53, 8.8.8.8 . 53, 8.8.4.4 . 53 }\n\t}\n\n")
 	b.WriteString("\tset walled_garden_udp {\n\t\ttype ipv4_addr . inet_service\n\t\tflags interval\n\t\tcomment \"pre-auth (address, UDP port) pairs; scd reconciles\"\n\t\telements = { 1.1.1.1 . 53, 8.8.8.8 . 53, 8.8.4.4 . 53 }\n\t}\n\n")
+	// TEMPORARY VERIFICATION ACCESS (scd verify_access.go). While a device waits for an email code it may reach
+	// the internet for a short, metered window: admission is a timed (bridge, address) element -- the kernel
+	// ends it at expiry by itself -- and each admitted address has its own quota object (combined bytes, both
+	// directions) and two rate-limit objects (up, down). scd creates and removes the objects; the sets and maps
+	// are structure and start empty. Separate from every entitlement set: nothing here is access a client bought.
+	b.WriteString("\tset verify_ipv4 {\n\t\ttype ifname . ipv4_addr\n\t\tflags timeout\n\t\tcomment \"temporary verification access: (ingress bridge, IP); scd-owned\"\n\t}\n\n")
+	b.WriteString("\tmap verify_quota {\n\t\ttype ipv4_addr : quota\n\t\tcomment \"per-device verification data cap; scd-owned\"\n\t}\n\n")
+	b.WriteString("\tmap verify_up {\n\t\ttype ipv4_addr : limit\n\t\tcomment \"per-device verification upload rate; scd-owned\"\n\t}\n\n")
+	b.WriteString("\tmap verify_down {\n\t\ttype ipv4_addr : limit\n\t\tcomment \"per-device verification download rate; scd-owned\"\n\t}\n\n")
+	// PRE-AUTHENTICATION DNS IS RATE-LIMITED PER DEVICE. A device that has not signed in may resolve names (the
+	// captive-portal probe needs it) but not tunnel through the resolver: 20 queries a second, burst 40, per
+	// address, to the gateway resolver and to the public resolvers in the garden alike. Authenticated devices
+	// are not subject to it. The counters make the defence observable.
+	b.WriteString("\tset dns_preauth_rl {\n\t\ttype ipv4_addr\n\t\tsize 65535\n\t\tflags dynamic,timeout\n\t\ttimeout 1m\n\t}\n\n")
+	b.WriteString("\tcounter dns_preauth_limited {\n\t\tcomment \"pre-auth DNS packets refused by the per-device rate limit\"\n\t}\n\n")
+	b.WriteString("\tcounter guest_ipv6_dropped {\n\t\tcomment \"IPv6 to or from a client network, refused\"\n\t}\n\n")
 	// dynamic descriptor sets (useful for generic rules + diagnostics)
 	b.WriteString("\tset guest_interfaces {\n\t\ttype ifname\n")
 	if len(enabled) > 0 {
@@ -180,9 +196,11 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	// DHCP KEEPS THE BROADCAST DESTINATION, and it has to: a client with no address yet sends DISCOVER and
 	// REQUEST to 255.255.255.255, so a gateway-only rule would break address assignment entirely -- the one
 	// mistake here that would take guest networking down rather than merely harden it.
+	// Pre-authentication DNS to the gateway, rate-limited per device before the per-network accepts below.
+	b.WriteString("\t\tiifname @guest_interfaces meta l4proto { tcp, udp } th dport 53 iifname . ip saddr != @auth_ipv4 iifname . ip saddr != @phase3_auth_ipv4 update @dns_preauth_rl { ip saddr limit rate over 20/second burst 40 packets } counter name \"dns_preauth_limited\" drop comment \"pre-auth DNS rate limit\"\n")
 	for _, n := range enabled {
 		br := n.BridgeName
-		fmt.Fprintf(&b, "\t\tiifname \"%s\" meta nfproto ipv6 drop comment \"no IPv6 guest services\"\n", br)
+		fmt.Fprintf(&b, "\t\tiifname \"%s\" meta nfproto ipv6 counter name \"guest_ipv6_dropped\" drop comment \"no IPv6 guest services\"\n", br)
 		// FAIL SAFE ON A MISSING GATEWAY. An empty GatewayIP would render `ip daddr  udp dport ...`, which is
 		// a syntax error -- and because this ruleset is applied as one atomic `nft -f`, a single malformed
 		// line does not break one network, it breaks the WHOLE table and takes every guest network with it.
@@ -217,8 +235,19 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 
 	// --- forward ---
 	b.WriteString("\tchain forward {\n\t\ttype filter hook forward priority filter; policy drop;\n")
+	// IPv6 NEVER CROSSES A CLIENT NETWORK, in either direction, and the guard sits before the established
+	// accept so no flow -- however it came to exist -- is exempt. The appliance's own IPv6 (WAN, management)
+	// is untouched: only packets entering or leaving a client bridge are refused.
+	b.WriteString("\t\tiifname @guest_interfaces meta nfproto ipv6 counter name \"guest_ipv6_dropped\" drop comment \"IPv6 guest bypass guard\"\n")
+	b.WriteString("\t\toifname @guest_interfaces meta nfproto ipv6 counter name \"guest_ipv6_dropped\" drop comment \"IPv6 guest bypass guard (return path)\"\n")
+	// TEMPORARY VERIFICATION ACCESS IS METERED BEFORE THE ESTABLISHED ACCEPT, so every packet of the window --
+	// new or established, either direction -- is counted against the device's quota and policed against its
+	// rates. A rule here only ever DROPS (over quota, over rate); admission is the verify_ipv4 accept below.
+	b.WriteString("\t\toifname @guest_interfaces ip daddr @verify_quota quota name ip daddr map @verify_quota drop comment \"verification data cap (down)\"\n")
+	b.WriteString("\t\toifname @guest_interfaces ip daddr @verify_down limit name ip daddr map @verify_down drop comment \"verification rate (down)\"\n")
+	b.WriteString("\t\tiifname @guest_interfaces ip saddr @verify_quota quota name ip saddr map @verify_quota drop comment \"verification data cap (up)\"\n")
+	b.WriteString("\t\tiifname @guest_interfaces ip saddr @verify_up limit name ip saddr map @verify_up drop comment \"verification rate (up)\"\n")
 	b.WriteString("\t\tct state established,related accept\n\t\tct state invalid drop\n")
-	b.WriteString("\t\tiifname @guest_interfaces meta nfproto ipv6 drop comment \"IPv6 guest bypass guard\"\n")
 	// block guests reaching management subnets
 	for _, cidr := range topo.MgmtCIDRs {
 		fmt.Fprintf(&b, "\t\tiifname @guest_interfaces ip daddr %s drop comment \"guest -> mgmt blocked\"\n", cidr)
@@ -237,6 +266,12 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @auth_ipv4 accept comment \"authenticated guests\"\n", topo.WANInterface)
 	// The Phase-3 gate. While the set is empty this rule can never match, so a dark appliance is unaffected.
 	fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @phase3_auth_ipv4 accept comment \"phase-3 authorized guests\"\n", topo.WANInterface)
+	// Pre-authentication DNS straight to a public resolver is rate-limited exactly like DNS to the gateway.
+	// Authenticated guests were accepted above and never reach this rule.
+	fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" meta l4proto { tcp, udp } th dport 53 update @dns_preauth_rl { ip saddr limit rate over 20/second burst 40 packets } counter name \"dns_preauth_limited\" drop comment \"pre-auth DNS rate limit\"\n", topo.WANInterface)
+	// Temporary verification access: the internet, never the appliance's other networks (the management and
+	// client-to-client drops above have already run), for as long as the kernel keeps the timed element.
+	fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @verify_ipv4 accept comment \"temporary verification access\"\n", topo.WANInterface)
 	// walled-garden pre-auth -> WAN for any guest interface: every port to an address-only element, and exactly
 	// the named port to a port-restricted one.
 	fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" ip daddr @walled_garden_ip accept\n", topo.WANInterface)
@@ -271,7 +306,7 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 		// A guest authorized in EITHER set must not be captive-redirected. Omitting the Phase-3 exclusion
 		// would leave an authorized Phase-3 guest's web traffic DNAT'd to the portal — internet "granted"
 		// but every page still the login screen.
-		fmt.Fprintf(&b, "\t\tiifname \"%s\" iifname . ip saddr != @auth_ipv4 iifname . ip saddr != @phase3_auth_ipv4 ip daddr != @walled_garden_ip tcp dport 80  dnat ip to %s:%d\n",
+		fmt.Fprintf(&b, "\t\tiifname \"%s\" iifname . ip saddr != @auth_ipv4 iifname . ip saddr != @phase3_auth_ipv4 iifname . ip saddr != @verify_ipv4 ip daddr != @walled_garden_ip tcp dport 80  dnat ip to %s:%d\n",
 			br, gw, topo.PortalHTTPPort)
 		// PORT 443 IS REDIRECTED ONLY IF THERE IS SOMETHING TO REDIRECT IT TO.
 		//
@@ -280,7 +315,7 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 		// with a reset, which at least failed quickly -- but the firewall was describing a captive TLS portal
 		// that does not exist, and the next person to read the ruleset would reasonably believe it did.
 		if topo.PortalTLSPort > 0 {
-			fmt.Fprintf(&b, "\t\tiifname \"%s\" iifname . ip saddr != @auth_ipv4 iifname . ip saddr != @phase3_auth_ipv4 ip daddr != @walled_garden_ip tcp dport 443 dnat ip to %s:%d\n",
+			fmt.Fprintf(&b, "\t\tiifname \"%s\" iifname . ip saddr != @auth_ipv4 iifname . ip saddr != @phase3_auth_ipv4 iifname . ip saddr != @verify_ipv4 ip daddr != @walled_garden_ip tcp dport 443 dnat ip to %s:%d\n",
 				br, gw, topo.PortalTLSPort)
 		}
 	}

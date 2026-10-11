@@ -509,6 +509,10 @@ func (h *handler) routes() http.Handler {
 	//
 	// If a real reverse proxy is ever introduced, the fix is not to re-add this line: it is to trust exactly
 	// that proxy's address and strip client-supplied forwarding headers at the edge.
+	// QUERY STRINGS ARE NEVER LOGGED. The email's tap-to-connect link carries the one-time code in its query
+	// (/connect?c=&k=), and the request log is the journal: the logged line keeps the path and drops the query.
+	// Handlers read r.URL, which is untouched.
+	r.Use(redactLoggedQuery)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(15 * time.Second))
@@ -657,4 +661,15 @@ func humanDuration(d time.Duration) string {
 		return fmt.Sprintf("%dh %dm", h, m)
 	}
 	return fmt.Sprintf("%dm", m)
+}
+
+// redactLoggedQuery strips the query from r.RequestURI -- the field the request logger prints -- so a code in a
+// link never reaches the journal. Routing and handlers use r.URL and are unaffected.
+func redactLoggedQuery(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if i := strings.IndexByte(r.RequestURI, '?'); i >= 0 {
+			r.RequestURI = r.RequestURI[:i] + "?[redacted]"
+		}
+		next.ServeHTTP(w, r)
+	})
 }

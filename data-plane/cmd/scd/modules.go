@@ -6,11 +6,13 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/deployment"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/modules"
+	"github.com/stayconnect/enterprise/data-plane/internal/payment"
 	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
 	lic "github.com/stayconnect/enterprise/license"
 )
@@ -126,16 +128,28 @@ func (s *server) siteAcquisitionMethods(ctx context.Context) iamv2.SiteMethods {
 	// settles (iamv2.SiteMethods.CardCurrencies). The confirm would otherwise refuse it one step later
 	// (PAYMENT_ACCOUNT_CURRENCY), after the client had already chosen.
 	if m.Card && s.db != nil {
-		rows, err := s.db.Query(ctx, `SELECT DISTINCT upper(trim(currency)) FROM iam_v2.payment_provider_accounts
-			WHERE tenant_id=$1 AND site_id=$2 AND status='ACTIVE' AND COALESCE(trim(currency),'') <> ''`, s.tenID, s.siteID)
-		if err == nil {
-			for rows.Next() {
-				var c string
-				if rows.Scan(&c) == nil {
-					m.CardCurrencies = append(m.CardCurrencies, c)
+		// The DEFAULT active account is the one a checkout uses (p4_resolve_payment_account_v2): its currency,
+		// and -- when it is marked provider-converts and its provider can -- the presentment currencies the
+		// provider converts from (contract §9, migration 0112).
+		var provider, settles string
+		var converts bool
+		if err := s.db.QueryRow(ctx, `SELECT a.provider, upper(trim(COALESCE(a.currency,''))),
+		       COALESCE((SELECT c.provider_converts FROM iam_v2.payment_account_conversion c WHERE c.account_id=a.id), false)
+		  FROM iam_v2.payment_provider_accounts a
+		 WHERE a.tenant_id=$1 AND a.site_id=$2 AND a.status='ACTIVE' AND a.is_default LIMIT 1`, s.tenID, s.siteID).
+			Scan(&provider, &settles, &converts); err == nil && settles != "" {
+			m.CardCurrencies = []string{settles}
+			if converts && s.card != nil {
+				for k, ad := range s.card.adapters {
+					if k != provider && !strings.HasPrefix(k, provider+":") {
+						continue
+					}
+					if cv, ok := ad.(payment.CurrencyConverter); ok {
+						m.CardAccepts = func(cur string) bool { return cv.ConvertsPresentment(cur, settles) }
+						break
+					}
 				}
 			}
-			rows.Close()
 		}
 	}
 	return m

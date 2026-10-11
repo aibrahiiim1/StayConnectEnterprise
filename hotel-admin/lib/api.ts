@@ -1395,6 +1395,11 @@ export type FinancialPayment = {
   currency: string;
   currency_exponent: number;
   parent_transaction_id: string | null;
+  /** The provider's report of what it settled a captured charge as (migration 0112), when it has reported. */
+  settlement_report?: {
+    settlement_currency: string; settlement_amount_minor: number; exchange_rate?: string | null;
+    fee_minor?: number | null; net_minor?: number | null; provider_balance_ref?: string | null; converted: boolean;
+  };
 };
 
 export type RecoveryStatus = {

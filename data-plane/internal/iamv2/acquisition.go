@@ -79,10 +79,16 @@ type SiteMethods struct {
 	// what the Product Owner hit on PRE-LIVE with a GBP test account and a USD package. Empty means "unknown",
 	// which offers nothing by card.
 	CardCurrencies []string
+	// CardAccepts, when set, answers for a presentment currency the provider converts from (an account marked
+	// provider-converts, migration 0112). nil = no conversion: only CardCurrencies.
+	CardAccepts func(currency string) bool
 }
 
 // cardSettles reports whether some active account settles in cur.
 func (s SiteMethods) cardSettles(cur string) bool {
+	if s.CardAccepts != nil && s.CardAccepts(strings.ToUpper(strings.TrimSpace(cur))) {
+		return true
+	}
 	for _, c := range s.CardCurrencies {
 		if strings.EqualFold(strings.TrimSpace(c), strings.TrimSpace(cur)) {
 			return true

@@ -338,3 +338,14 @@ GRANT SELECT, INSERT, UPDATE ON iam_v2.notification_provider_secret_generations 
 -- scd records the requesting device's kernel-resolved MAC at issue, compares it at verify, and prunes rows a
 -- day after issue. Nothing else reads the table.
 GRANT SELECT, INSERT, DELETE ON iam_v2.otp_device_bindings TO svc_scd;
+
+-- ---- 0111: the temporary verification window an issued email code earns ---------------------------------
+-- scd opens, meters and ends the windows and restores the kernel from the live rows; the Admin Console reads
+-- them for reporting and never writes one.
+GRANT SELECT, INSERT, UPDATE ON iam_v2.verification_access_grants TO svc_scd;
+
+-- ---- 0112: provider-managed card currency conversion ----------------------------------------------------
+-- scd marks an account provider-converts through one definer setter (Stripe only; audited in its own log) and
+-- reads the mark to decide which package currencies a card can be offered in.
+GRANT EXECUTE ON FUNCTION iam_v2.payment_account_set_conversion(uuid,uuid,uuid,boolean,text,text) TO svc_scd;
+GRANT SELECT ON iam_v2.payment_account_conversion TO svc_scd;

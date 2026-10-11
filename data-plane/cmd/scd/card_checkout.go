@@ -386,6 +386,7 @@ func (s *server) paymentAdminRoutes(r chi.Router) {
 	r.Get("/v1/payment/accounts", s.paymentAccounts)
 	r.Post("/v1/payment/accounts", s.paymentAccountSave)
 	r.Post("/v1/payment/accounts/{id}/test", s.paymentAccountTest)
+	r.Post("/v1/payment/accounts/{id}/conversion", s.paymentAccountConversion)
 	r.Put("/v1/payment/domains", s.paymentDomainsSave)
 }
 
@@ -441,6 +442,10 @@ func (s *server) paymentAccounts(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt   time.Time `json:"updated_at"`
 		HasSecrets  bool      `json:"has_credentials"`
 		SetKeys     []string  `json:"credential_keys_set"`
+		// ProviderConverts: the provider presents in the package's currency and settles in this account's
+		// (migration 0112). ConversionSupported: the provider can do that at all (Stripe yes, Paymob no).
+		ProviderConverts    bool `json:"provider_converts"`
+		ConversionSupported bool `json:"conversion_supported"`
 	}
 	out := []acct{}
 	for rows.Next() {
@@ -454,6 +459,10 @@ func (s *server) paymentAccounts(w http.ResponseWriter, r *http.Request) {
 		out = append(out, a)
 	}
 	rows.Close()
+	for i := range out {
+		_ = s.db.QueryRow(r.Context(), `SELECT provider_converts FROM iam_v2.payment_account_conversion WHERE account_id=$1::uuid`, out[i].ID).Scan(&out[i].ProviderConverts)
+		out[i].ConversionSupported = out[i].Provider == "stripe"
+	}
 	// Which credential keys are set (never their values).
 	if s.card != nil && s.card.key.Present() {
 		for i := range out {
@@ -657,4 +666,35 @@ func (s *server) kickGarden() {
 			slog.Warn("walled-garden: reconcile after payment change failed", "err", err)
 		}
 	}()
+}
+
+// paymentAccountConversion marks an account provider-converts through the audited definer (Stripe only).
+func (s *server) paymentAccountConversion(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ProviderConverts bool   `json:"provider_converts"`
+		Operator         string `json:"operator"`
+		Reason           string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Operator) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid", "message": "operator is required"})
+		return
+	}
+	var out bool
+	err := s.db.QueryRow(r.Context(), `SELECT iam_v2.payment_account_set_conversion($1,$2,$3::uuid,$4,$5,$6)`,
+		s.tenID, s.siteID, chi.URLParam(r, "id"), req.ProviderConverts, strings.TrimSpace(req.Operator), strings.TrimSpace(req.Reason)).Scan(&out)
+	if err != nil {
+		msg := err.Error()
+		switch {
+		case strings.Contains(msg, "PAYMENT_CONVERSION_UNSUPPORTED"):
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "conversion_unsupported",
+				"message": "This provider settles card payments in the merchant account currency and does not convert."})
+		case strings.Contains(msg, "PAYMENT_ACCOUNT_UNKNOWN"):
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "not_found", "message": "account not found"})
+		default:
+			slog.Error("payment conversion set failed", "err", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal"})
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"provider_converts": out})
 }

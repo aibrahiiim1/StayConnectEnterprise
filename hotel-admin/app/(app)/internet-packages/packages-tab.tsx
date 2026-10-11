@@ -111,6 +111,9 @@ export function PackagesTab({
           api.get<AccountsResp>("/payment-providers/accounts")
             .then((a) => {
               if (!live) return;
+              // A default account the provider converts for takes other currencies: make no claim (the
+              // provider is the authority on which it supports).
+              if ((a?.accounts ?? []).some((x) => x.status === "ACTIVE" && x.is_default && x.provider_converts)) { setCardCurrencies(null); return; }
               setCardCurrencies(Array.from(new Set((a?.accounts ?? []).filter((x) => x.status === "ACTIVE").map((x) => (x.currency ?? "").trim().toUpperCase()).filter(Boolean))));
             })
             .catch(() => { /* unknown: the form makes no claim about card currencies */ });

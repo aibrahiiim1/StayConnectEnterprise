@@ -519,3 +519,63 @@ func TestTestConnection(t *testing.T) {
 	}
 	_ = f
 }
+
+// THE SETTLEMENT AS STRIPE BOOKED IT (contract §9): read from the charge's balance transaction, the exchange
+// rate kept exactly as Stripe sent it, nothing computed. Presentment stays what was charged (USD 10.50).
+func TestCapturedStatusCarriesTheProvidersSettlementReport(t *testing.T) {
+	bt := `{"id":"txn_1","object":"balance_transaction","amount":823,"currency":"gbp","exchange_rate":0.783912,"fee":44,"net":779}`
+	ch := strings.Replace(chargeJSON(0, false), `{"id":"ch_1"`, `{"id":"ch_1","balance_transaction":`+bt, 1)
+	f, srv := worldServer(t, &world{session: sess("complete", "paid", intent("succeeded", ch))})
+	res, err := adapter(srv).QueryStatus(context.Background(), query("cs_test_1"))
+	if err != nil || res.State != payment.CheckoutCaptured {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if res.Currency != "USD" || res.AmountMinor != 1050 {
+		t.Fatalf("presentment must stay as charged: %+v", res)
+	}
+	s := res.Settlement
+	if s == nil || s.Currency != "GBP" || s.AmountMinor != 823 || s.ExchangeRate != "0.783912" || s.FeeMinor != 44 || s.NetMinor != 779 || s.BalanceRef != "txn_1" {
+		t.Fatalf("settlement report: %+v", s)
+	}
+	expanded := false
+	for _, fm := range f.forms {
+		for _, v := range fm["expand[]"] {
+			if v == "payment_intent.latest_charge.balance_transaction" {
+				expanded = true
+			}
+		}
+	}
+	if !expanded {
+		t.Fatal("the status query must ask Stripe for the balance transaction")
+	}
+	// No conversion: the rate is null and is recorded as absent, never as 1.
+	ch2 := strings.Replace(chargeJSON(0, false), `{"id":"ch_1"`, `{"id":"ch_1","balance_transaction":{"id":"txn_2","amount":1050,"currency":"usd","exchange_rate":null,"fee":61,"net":989}`, 1)
+	_, srv = worldServer(t, &world{session: sess("complete", "paid", intent("succeeded", ch2))})
+	res, _ = adapter(srv).QueryStatus(context.Background(), query("cs_test_1"))
+	if res.Settlement == nil || res.Settlement.ExchangeRate != "" || res.Settlement.Currency != "USD" {
+		t.Fatalf("same-currency report: %+v", res.Settlement)
+	}
+	// Not expanded yet (an id string): no report, not an error.
+	ch3 := strings.Replace(chargeJSON(0, false), `{"id":"ch_1"`, `{"id":"ch_1","balance_transaction":"txn_3"`, 1)
+	_, srv = worldServer(t, &world{session: sess("complete", "paid", intent("succeeded", ch3))})
+	res, err = adapter(srv).QueryStatus(context.Background(), query("cs_test_1"))
+	if err != nil || res.State != payment.CheckoutCaptured || res.Settlement != nil {
+		t.Fatalf("unexpanded balance transaction: %+v %v", res, err)
+	}
+}
+
+func TestStripeConvertsOnlyBetweenSupportedCurrencies(t *testing.T) {
+	a := New()
+	var _ payment.CurrencyConverter = a
+	for _, c := range []struct {
+		p, s string
+		ok   bool
+	}{{"USD", "GBP", true}, {"egp", "usd", true}, {"KWD", "EUR", true}, {"XYZ", "GBP", false}, {"USD", "XYZ", false}, {"XYZ", "XYZ", true}} {
+		if got := a.ConvertsPresentment(c.p, c.s); got != c.ok {
+			t.Errorf("%s->%s: %v", c.p, c.s, got)
+		}
+	}
+	if stripeRate([]byte(`"1; DROP"`)) != "" || stripeRate([]byte(`1.2e-3`)) != "1.2e-3" {
+		t.Error("the rate is kept only as a plain number")
+	}
+}
