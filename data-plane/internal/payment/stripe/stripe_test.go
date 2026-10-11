@@ -594,3 +594,46 @@ func TestProviderCodeCarriesARedactedSentenceWhenStripeGivesNoCode(t *testing.T)
 		t.Fatalf("a coded refusal stays a code: %q", got)
 	}
 }
+
+// A MANAGED PAYMENTS ACCOUNT refuses payment_method_types; the adapter retries card-only with Managed Payments
+// off, and never creates twice. Found live on PRE-LIVE with the site's Stripe TEST account.
+func TestCreateCheckoutOnAManagedPaymentsAccount(t *testing.T) {
+	for _, accepts := range []string{"card_only", "dynamic"} {
+		var calls int
+		f, srv := newFake(t, func(w http.ResponseWriter, r *http.Request, form url.Values) {
+			calls++
+			pmt := form.Get("payment_method_types[0]")
+			mp := form.Get("managed_payments[enabled]")
+			switch {
+			case pmt != "" && mp == "":
+				w.WriteHeader(400)
+				fmt.Fprint(w, `{"error":{"type":"invalid_request_error","message":"Unsupported parameter: payment_method_types. Managed Payments, which is enabled by default on your account, handles this parameter for you."}}`)
+			case pmt != "" && mp == "false" && accepts != "card_only":
+				w.WriteHeader(400)
+				fmt.Fprint(w, `{"error":{"type":"invalid_request_error","message":"Managed Payments cannot be disabled on this account."}}`)
+			default:
+				fmt.Fprintf(w, `{"id":"cs_test_mp","url":"https://checkout.stripe.com/c/pay/cs_test_mp","client_reference_id":%q,"expires_at":%d}`, ref, fixedNow.Add(time.Hour).Unix())
+			}
+		})
+		co, err := adapter(srv).CreateCheckout(context.Background(), req())
+		if err != nil || co.ProviderSessionRef != "cs_test_mp" {
+			t.Fatalf("%s: %+v %v", accepts, co, err)
+		}
+		want := 2
+		if accepts == "dynamic" {
+			want = 3
+		}
+		if calls != want {
+			t.Fatalf("%s: %d calls, want %d", accepts, calls, want)
+		}
+		for _, r := range f.requests {
+			if r.Header.Get("Idempotency-Key") != ref {
+				t.Fatalf("every attempt carries the same idempotency key")
+			}
+		}
+		last := f.forms[len(f.forms)-1]
+		if accepts == "card_only" && (last.Get("payment_method_types[0]") != "card" || last.Get("managed_payments[enabled]") != "false") {
+			t.Fatalf("card-only retry: %v", last)
+		}
+	}
+}

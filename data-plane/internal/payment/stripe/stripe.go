@@ -444,6 +444,21 @@ func (a *Adapter) CreateCheckout(ctx context.Context, r payment.CheckoutRequest)
 	f.Set("expires_at", strconv.FormatInt(exp.Unix(), 10))
 
 	resp, err := a.call(ctx, http.MethodPost, "/v1/checkout/sessions", f, key, r.ClientRef)
+	// MANAGED PAYMENTS. On a Stripe account where Managed Payments is enabled (the default for new accounts,
+	// found live on PRE-LIVE 2026-10-11), Stripe refuses `payment_method_types` with a 400 -- a refusal before
+	// any object exists, which Stripe does not record against the idempotency key. Retry once asking Stripe to
+	// keep the session card-only (managed_payments[enabled]=false); only if that is refused too, let Stripe
+	// choose the methods (card is always among them). Each retry is the same reference and key; nothing is
+	// created twice, because a refused create created nothing.
+	if err == nil && resp.status == http.StatusBadRequest && managedPaymentsRefusal(resp.body) {
+		f.Set("managed_payments[enabled]", "false")
+		resp, err = a.call(ctx, http.MethodPost, "/v1/checkout/sessions", f, key, r.ClientRef)
+		if err == nil && resp.status == http.StatusBadRequest {
+			f.Del("managed_payments[enabled]")
+			f.Del("payment_method_types[0]")
+			resp, err = a.call(ctx, http.MethodPost, "/v1/checkout/sessions", f, key, r.ClientRef)
+		}
+	}
 	if err != nil {
 		var te *transportError
 		if errors.As(err, &te) && te.notSent {
@@ -882,4 +897,10 @@ func (a *Adapter) ConvertsPresentment(presentment, settlement string) bool {
 	p := strings.ToUpper(strings.TrimSpace(presentment))
 	s := strings.ToUpper(strings.TrimSpace(settlement))
 	return p == s || (stripePresentment[p] && stripePresentment[s])
+}
+
+// managedPaymentsRefusal recognises Stripe's refusal of payment_method_types on a Managed Payments account.
+func managedPaymentsRefusal(body []byte) bool {
+	b := strings.ToLower(string(body))
+	return strings.Contains(b, "managed payments") || strings.Contains(b, "managed_payments")
 }
