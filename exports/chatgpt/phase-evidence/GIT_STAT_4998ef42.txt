@@ -1,0 +1,4 @@
+commit 4998ef4278ac716f369167661d1030d05af6fd9e
+Date:   Sun Oct 11 23:11:27 2026 +0300
+
+    Governance: T0216 records temporary internet, guest IPv6/DNS hardening, device-bound codes and provider-managed conversion on PRE-LIVE, with the exact provenance

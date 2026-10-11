@@ -1,4 +1,0 @@
-commit 004b92bd6b98b08abacb6d40a9cae95bcbf4d97c
-Date:   Sun Oct 11 20:31:42 2026 +0300
-
-    Governance: T0215 records the client-access corrections deployed to PRE-LIVE, with the exact provenance
