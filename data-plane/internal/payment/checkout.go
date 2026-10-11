@@ -246,6 +246,9 @@ RETURNING id::text, amount_minor, currency, currency_exponent`,
 		return out, nil
 	case errors.Is(cerr, ErrCheckoutNotCreated):
 		// PROVABLY nothing exists at the provider: no money can move. The outcome authority records FAILED.
+		// The adapter's message names the provider's refusal by type and code only (never a credential or a
+		// card detail), and it is the one thing an operator needs to fix the configuration.
+		slog.Warn("card checkout not created by the provider", "provider", acct.Provider, "currency", strings.TrimSpace(currency), "reason", cerr.Error())
 		e.Health.Record(acct.ID, false)
 		_, _ = e.Runtime.Exec(ctx, `UPDATE iam_v2.payment_checkouts SET creation_outcome='NOT_CREATED' WHERE transaction_id=$1`, out.TransactionID)
 		_ = e.applyOutcome(ctx, ref, "create:"+ref, "CHECKOUT_NOT_CREATED", "FAILED", "", "checkout_not_created")
