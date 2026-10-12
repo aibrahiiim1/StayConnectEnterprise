@@ -1,0 +1,51 @@
+{
+  "transition_id": "T0223",
+  "seq": 223,
+  "timestamp": "2026-10-12T14:37:00+03:00",
+  "timestamp_derivation": "Written after netd was installed and read back on PRE-LIVE and the network regression re-run, before the commit that introduces it.",
+  "record_type": "CLIENT_ACCESS_FULL_CHECK_THIRD_RUN_FINDING_FIXED",
+  "authorisation": "The 'PR #211 Final Closure Mission' of 2026-10-12 (T0218): resolve FULL CHECK failures without weakening validation; the standing PRE-LIVE deployment decision.",
+  "delivery": {
+    "pull_request": 211,
+    "branch": "delivery/client-access-identity",
+    "content_head": "ec46177bb3a8f644c74122601f89e5096e1add66",
+    "pr_state": "OPEN. NOT MERGED. po-merge-approved NOT applied."
+  },
+  "full_check_third_run": {
+    "ref": "delivery/client-access-identity",
+    "head": "51c58b7f724c",
+    "result": "FAIL",
+    "gates": {
+      "governance": "success, run 38235299490",
+      "phase3-full-software-gate": "failure, run 38235302207 -- the real-kernel suite: TestKernel_CarryOverPreservesATimedAuthorization expected 1 carried element and got 7 (its PG16 integration step, incl. the acctd test that failed in run 2, passed)",
+      "phase4-financial-core-gate": "success, run 38235304996 (incl. the full browser suite and the production dependency gate)",
+      "phase5-post-stay-transfer-gate": "success, run 38235307620"
+    }
+  },
+  "what_was_found": [
+    "Since the port-restricted garden the render declares the baseline resolver pairs as static elements of walled_garden_tcp/udp, and a structural converge carried them as if they were runtime state: harmless to traffic, wrong in the converge's own report."
+  ],
+  "delivered": [
+    "The pairs are declared once (netcfg.BaselineResolvers; render output byte-identical, no fingerprint moves); the converge skips what the new render already declares. Real-kernel suite 28/28 in a privileged Linux container; unit test added. netd redeployed to PRE-LIVE; the network regression 39/39 after it."
+  ],
+  "deployment_provenance": "PRE-LIVE 172.21.60.25, read back from the installed bytes on 2026-10-12: netd ec46177b; scd d0600e2c; edged d0600e2c; pmsd 6a403326; portald e1cd6d17; acctd 99ba9f10; the helpers keybootstrap 4c4acf07, sitemigrate and svc-run 29a6b21f. DEPLOYED_BINARIES 6/6 OK. Only netd changed since T0221.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0222."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; nothing merged, no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Nothing is merged. Go-Live remains unauthorised.",
+  "head": "ec46177b",
+  "head_note": "The last CONTENT commit of PR #211 at the time of this receipt; governance commits follow it.",
+  "previous_delivery": "T0222",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
