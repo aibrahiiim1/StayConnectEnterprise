@@ -385,8 +385,8 @@ func TestStatusMapping(t *testing.T) {
 
 func TestStatusEvents(t *testing.T) {
 	w0 := &world{
-		session:  sess("complete", "paid", intent("succeeded", chargeJSON(700, true))),
-		refunds:  `{"data":[{"id":"re_1","amount":500,"status":"succeeded","charge":"ch_1"},{"id":"re_2","amount":200,"status":"succeeded","charge":"ch_1"},{"id":"re_3","amount":100,"status":"pending","charge":"ch_1"}],"has_more":false}`,
+		session: sess("complete", "paid", intent("succeeded", chargeJSON(700, true))),
+		refunds: `{"data":[{"id":"re_1","amount":500,"status":"succeeded","charge":"ch_1"},{"id":"re_2","amount":200,"status":"succeeded","charge":"ch_1"},{"id":"re_3","amount":100,"status":"pending","charge":"ch_1"}],"has_more":false}`,
 		// An open dispute is a case for review (no money); a lost one is a chargeback; a won one is a case (the
 		// merchant kept the money); an inquiry is nothing.
 		disputes: `{"data":[{"id":"dp_1","amount":1050,"status":"needs_response"},{"id":"dp_2","amount":1050,"status":"warning_needs_response"},{"id":"dp_3","amount":300,"status":"lost"},{"id":"dp_4","amount":1050,"status":"won"}],"has_more":false}`,
