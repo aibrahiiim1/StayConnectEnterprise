@@ -1277,7 +1277,7 @@
     "prelive_phase4_flag_posture": "PRE-LIVE 172.21.60.25 since 2026-09-30 (D47): scd runs STAYCONNECT_PHASE4_MASTER, _PAYMENT, _PAYMENT_PROVIDER, _POSTING, _FINANCIAL_REVIEW, _OUTBOX_WORKER and _PMS_TRANSMIT; pmsd runs _MASTER, _OUTBOX_WORKER and _PMS_TRANSMIT; edged runs _MASTER, _POSTING and _FINANCIAL_REVIEW. STAYCONNECT_PAYMENT_LIVE_ALLOWED is set nowhere. Real PMS postings ever: one (T0204, USD 1.00, PA OK). Payment-provider traffic ever: none.",
     "phase4_flags_off_scope": "phase4_flags_off records the DELIVERED REPOSITORY configuration (no file in the tree enables a Phase-4 flag; scripts/ci/phase4-dark-check.sh asserts it). It is not a statement about the PRE-LIVE environment, whose posture is recorded in prelive_phase4_flag_posture."
   },
-  "latest_transition_id": "T0218",
+  "latest_transition_id": "T0219",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1778,13 +1778,13 @@
     "manifest": "docs/manifests/ClientAccessIdentity-change-manifest.md",
     "base": "3fbbe7dc789e82f34911fd57c146e81436fc5500",
     "base_note": "Master at the start of the mission (merge of PR #210, T0213 completion). The branch is built on it.",
-    "head": "d0600e2c",
-    "head_note": "The last content commit of PR #211 when T0218 was written. The governance commits that record this state follow it on the same branch and change no runtime.",
-    "transition": "T0218",
-    "previous_delivery": "T0217",
+    "head": "ca344d03",
+    "head_note": "The last content commit of PR #211 when T0219 was written (a fixture and a test file; no runtime change since T0218). Governance commits follow it.",
+    "transition": "T0219",
+    "previous_delivery": "T0218",
     "pr": 211,
     "pr_state": "OPEN -- READY FOR PRODUCT OWNER ACCEPTANCE, NOT MERGED (2026-10-12); po-merge-approved not applied",
-    "note": "T0218. PRE-LIVE runs netd d0600e2c; scd d0600e2c; edged d0600e2c; pmsd 6a403326; portald d0600e2c; acctd 99ba9f10; Admin Console release 20261012-052406 (d0600e2c); migrations through 0115; live verification verify_staff.sh 31/31 (the retry wait and the reason told to the client; Code requests; let them try again; a shown code signs in a NEW client marked staff_assisted, labelled EMAIL_OTP_ASSISTED, with no remembered device; an existing client's code is never shown (409) and nothing is recorded; reveals and clears audited without the code; card-cases endpoint) and the verify_round5.sh network regression 39/39 after the netd deploy. Open Product-Owner decisions: the public portal hostname and certificate (closes the plain-HTTP code-link risk). pmsd and acctd remain master-base builds (not redeployed). FULL CHECK result is recorded on PR #211 for the exact head it ran on. Go-Live not authorised."
+    "note": "T0219 (FULL CHECK preparation after T0218; runtime unchanged). PRE-LIVE runs netd d0600e2c; scd d0600e2c; edged d0600e2c; pmsd 6a403326; portald d0600e2c; acctd 99ba9f10; Admin Console release 20261012-052406 (d0600e2c); migrations through 0115; live verification verify_staff.sh 31/31 (the retry wait and the reason told to the client; Code requests; let them try again; a shown code signs in a NEW client marked staff_assisted, labelled EMAIL_OTP_ASSISTED, with no remembered device; an existing client's code is never shown (409) and nothing is recorded; reveals and clears audited without the code; card-cases endpoint) and the verify_round5.sh network regression 39/39 after the netd deploy. Open Product-Owner decisions: the public portal hostname and certificate (closes the plain-HTTP code-link risk). pmsd and acctd remain master-base builds (not redeployed). FULL CHECK result is recorded on PR #211 for the exact head it ran on. Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
