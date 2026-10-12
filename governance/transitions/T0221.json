@@ -1,0 +1,49 @@
+{
+  "transition_id": "T0221",
+  "seq": 221,
+  "timestamp": "2026-10-12T11:44:00+03:00",
+  "timestamp_derivation": "Written after the Admin Console rebuilt with the upgraded dependencies was installed and read back on PRE-LIVE, before the commit that introduces it.",
+  "record_type": "CLIENT_ACCESS_FULL_CHECK_SECOND_RUN_FINDINGS_FIXED",
+  "authorisation": "The 'PR #211 Final Closure Mission' of 2026-10-12 (T0218): resolve FULL CHECK failures without weakening validation, including the dependency corrections the mission requires; the standing PRE-LIVE deployment decision.",
+  "delivery": {
+    "pull_request": 211,
+    "branch": "delivery/client-access-identity",
+    "content_head": "f8e7cecc7f7849d8b7bfbb1cd08ae07aceb855ff",
+    "pr_state": "OPEN. NOT MERGED. po-merge-approved NOT applied."
+  },
+  "full_check_second_run": {
+    "ref": "delivery/client-access-identity",
+    "head": "95ddd3462eddb1d88070104913d99ac97e3dd55b",
+    "result": "FAIL",
+    "gates": {
+      "governance": "success, run 38221166744",
+      "phase3-full-software-gate": "failure, run 38221169557 -- one acctd test (TestIntegration_Acct_UncertainCommitIsSafeToRetry) read usage 0/0; it passed 10/10 locally on the same full schema; nothing in this PR touches acctd's accounting path; left unmodified and re-run",
+      "phase4-financial-core-gate": "failure, run 38221172026 -- the production dependency gate: next (GHSA-4jqv-mc3x-m676, GHSA-mcj8-r9mp-w47p), sharp (GHSA-wq5f-xc86-pv6w), source-map-js (GHSA-68fv-2mgg-jv7q, published since the previous run)",
+      "phase5-post-stay-transfer-gate": "success, run 38221174527"
+    }
+  },
+  "delivered": [
+    "The three production advisories are fixed by patch upgrades rather than accepted: next 15.5.27, sharp 0.35.5, source-map-js 1.2.2; npm audit --omit=dev reports 0 vulnerabilities; tsc clean; vitest 737/737; next build OK.",
+    "The Admin Console rebuilt from f8e7cecc and installed on PRE-LIVE (release 20261012-084337); signed-in pages answer 200."
+  ],
+  "deployment_provenance": "Service binaries unchanged from T0220. Admin Console release 20261012-084337 from f8e7cecc (BUILD_ID lu1ZglzVETFDbtUb00j4K), previous 20261012-052406 kept for rollback.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0220."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; nothing merged, no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Nothing is merged. Go-Live remains unauthorised.",
+  "head": "f8e7cecc",
+  "head_note": "The last CONTENT commit of PR #211 at the time of this receipt; governance commits follow it.",
+  "previous_delivery": "T0220",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
