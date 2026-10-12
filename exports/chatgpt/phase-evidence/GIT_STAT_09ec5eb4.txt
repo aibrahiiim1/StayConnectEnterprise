@@ -1,0 +1,4 @@
+commit 09ec5eb45180926b83914955512005f91cf31f3e
+Date:   Mon Oct 12 08:46:16 2026 +0300
+
+    Governance: T0218 records the final closure round on PRE-LIVE with the exact provenance
