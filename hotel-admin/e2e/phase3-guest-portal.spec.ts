@@ -221,8 +221,11 @@ test("enabling PMS does not expose the Post-Stay tab", async ({ page }) => {
   // code". Post-stay lives inside the guest group and must still not be reachable when Phase 5 is off, so the
   // claim is unchanged -- it is asserted on the PANEL that would serve it rather than on a tab that no longer
   // exists per method.
-  await expect(page.locator('.tab[data-group="guest"]')).toHaveCount(1);
-  await expect(page.locator('.tab[data-group="account"]')).toHaveCount(1);
+  // Since the one-journey landing (contract §6.2) the ways in are chips under "Or sign in with": exactly one
+  // for the room, one for the code, and NONE for post-stay.
+  await expect(page.locator('#alt-methods button[data-tab="pms"]')).toHaveCount(1);
+  await expect(page.locator('#alt-methods button:is([data-tab="account"],[data-tab="voucher"])')).toHaveCount(1);
+  await expect(page.locator('#alt-methods button[data-tab="poststay"]')).toHaveCount(0);
   await expect(page.locator('#panel-pms.active')).toHaveCount(1);
   // Nothing offers post-stay: it is not the group's first member and no alternative links to it.
   await expect(page.locator('#alt-methods')).not.toContainText("Post-stay");

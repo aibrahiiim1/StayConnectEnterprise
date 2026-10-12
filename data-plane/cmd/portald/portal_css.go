@@ -873,15 +873,20 @@ main.card { display: block; }
 .panel:not(.active) { display: none; }
 #tabs { display: grid; }
 #tabs .tab, .pill { display: inline-flex; }
+/* The ways in under "Or sign in with" (the one-journey landing, contract §6.2). The page's script hides the row
+   with an inline style when there is only one way in; an inline style still wins over this sheet. */
+#alt-methods { display: block; }
+#alt-methods button.link { display: inline-flex; }
 .page, main.card, .sc-signin, .panels, .panel.active, .panels form, .panels .field, .panels label,
 .panels input:not([type=hidden]), .panels button, #tabs, #tabs .tab, .pill, .langbar, #lang,
+#alt-methods, #alt-methods button.link,
 #server-error, .notice.show, .panels .err {
   visibility: visible; pointer-events: auto; filter: none; clip-path: none; content-visibility: visible;
   transform: none; translate: none; scale: none; rotate: none;
 }
 .page, main.card, .sc-signin, .panels, .panel.active, .panels form, .panels .field, .panels label,
-.panels input:not([type=hidden]), #tabs, #tabs .tab, #server-error, .notice.show, .panels .err,
-.panels button:not(:disabled) { opacity: 1; }
+.panels input:not([type=hidden]), #tabs, #tabs .tab, #alt-methods, #alt-methods button.link, #server-error,
+.notice.show, .panels .err, .panels button:not(:disabled) { opacity: 1; }
 .sc-signin, .panels, .panels form, .panels .field, .panels input:not([type=hidden]), .panels button {
   height: auto; max-height: none; overflow: visible;
 }
