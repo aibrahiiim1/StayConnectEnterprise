@@ -33,9 +33,32 @@ func TestIntegration_RememberedDeviceIsBoundToOneDevice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered first, so it runs after the row cleanup below
 	const tenant, site, appl = "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222", "33333333-3333-3333-3333-333333333333"
-	_, _ = pool.Exec(ctx, `TRUNCATE iam_v2.principal_device_credentials, iam_v2.auth_contexts, iam_v2.devices, iam_v2.guest_principal_identities, iam_v2.guest_principals CASCADE`)
+	// ONLY THIS TEST'S ROWS. This package runs concurrently with the other packages of the integration step on one
+	// database; a TRUNCATE ... CASCADE here took exclusive locks on devices and principals and cascaded into rows
+	// other suites were using mid-test (FULL CHECK found it as acctd deadlocks and vanished usage). The cleanup
+	// is scoped to the device and the address this test creates, before and after.
+	cleanup := func() {
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			return
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		_, _ = tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('auth_context')`)
+		const mine = `SELECT guest_principal_id FROM iam_v2.guest_principal_identities
+		               WHERE tenant_id=$1 AND factor_type='EMAIL' AND factor_value_norm='alice@example.com'`
+		const myDevice = `SELECT id FROM iam_v2.devices WHERE tenant_id=$1 AND site_id=$2 AND mac='02:00:00:00:00:aa'::macaddr`
+		_, _ = tx.Exec(ctx, `DELETE FROM iam_v2.principal_device_credentials WHERE tenant_id=$1
+		     AND (guest_principal_id IN (`+mine+`) OR device_id IN (`+myDevice+`))`, tenant, site)
+		_, _ = tx.Exec(ctx, `DELETE FROM iam_v2.devices WHERE tenant_id=$1 AND site_id=$2 AND mac='02:00:00:00:00:aa'::macaddr`, tenant, site)
+		_, _ = tx.Exec(ctx, `CREATE TEMP TABLE mine_p ON COMMIT DROP AS `+mine, tenant)
+		_, _ = tx.Exec(ctx, `DELETE FROM iam_v2.guest_principal_identities WHERE guest_principal_id IN (SELECT guest_principal_id FROM mine_p)`)
+		_, _ = tx.Exec(ctx, `DELETE FROM iam_v2.guest_principals WHERE id IN (SELECT guest_principal_id FROM mine_p)`)
+		_ = tx.Commit(ctx)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
 
 	var pid, dev string
 	if err := pool.QueryRow(ctx, `INSERT INTO iam_v2.guest_principals (tenant_id) VALUES ($1) RETURNING id::text`, tenant).Scan(&pid); err != nil {
