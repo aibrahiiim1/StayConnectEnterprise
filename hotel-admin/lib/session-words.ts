@@ -97,6 +97,10 @@ export function methodLabel(method?: string | null): string {
     EMAIL_OTP: "Emailed code",
     SMS_OTP: "Texted code",
     WHATSAPP_OTP: "WhatsApp code",
+    // A code a staff member showed the client (contract §6.7): the desk vouched for the address.
+    EMAIL_OTP_ASSISTED: "Emailed code, shown by staff",
+    SMS_OTP_ASSISTED: "Texted code, shown by staff",
+    WHATSAPP_OTP_ASSISTED: "WhatsApp code, shown by staff",
     SOCIAL: "Social login",
     SOCIAL_GOOGLE: "Google",
     SOCIAL_APPLE: "Apple",

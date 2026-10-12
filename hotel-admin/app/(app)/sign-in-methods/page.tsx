@@ -660,6 +660,9 @@ function MailReachCard({ cfg, writable, busy, onSave }: {
   const dirty = JSON.stringify([...chosen].sort()) !== JSON.stringify([...storedProviders].sort())
     || JSON.stringify(customList) !== JSON.stringify(storedDomains);
   const emailOn = !!cfg.email?.enabled;
+  // Not applied while temporary internet is on (contract §6.6, §10.1): it would open the services behind the mail
+  // provider's addresses to every device that has not signed in, and the per-device window already does the job.
+  const tempOn = cfg.email?.temporary_access?.enabled ?? true;
 
   return (
     <Card>
@@ -671,6 +674,13 @@ function MailReachCard({ cfg, writable, busy, onSave }: {
             can be reached without signing in, so the code can arrive on the Wi-Fi itself — a client without mobile
             data is otherwise stuck.
           </CardDescription>
+          {tempOn && (
+            <p className="text-sm font-medium" role="note">
+              Not applied while <em>Temporary internet while reading the code</em> is on: the device that asked for a code
+              already has the internet for a short time, and opening mail services to every device would also open the
+              provider&apos;s other services (video, search, storage) before sign-in.
+            </p>
+          )}
         </div>
       </CardHeader>
       <CardBody className="space-y-4">

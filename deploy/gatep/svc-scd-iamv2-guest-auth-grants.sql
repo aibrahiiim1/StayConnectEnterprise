@@ -350,6 +350,11 @@ GRANT SELECT, INSERT, UPDATE ON iam_v2.verification_access_grants TO svc_scd;
 -- of verification_access_grants, already granted above.)
 GRANT SELECT, INSERT, DELETE ON iam_v2.otp_code_escrow TO svc_scd;
 
+-- ---- 0114: a code shown by staff is recorded ---------------------------------------------------------------
+-- scd records each reveal before returning the code, reads it when the code is verified (a staff-assisted
+-- sign-in never reaches an existing Client), and prunes rows a day later.
+GRANT SELECT, INSERT, DELETE ON iam_v2.otp_code_reveals TO svc_scd;
+
 -- ---- 0112: provider-managed card currency conversion ----------------------------------------------------
 -- scd marks an account provider-converts through one definer setter (Stripe only; audited in its own log) and
 -- reads the mark to decide which package currencies a card can be offered in.

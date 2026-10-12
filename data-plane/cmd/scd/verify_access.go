@@ -55,6 +55,14 @@ type verifyAccessView struct {
 	UpKbps   int `json:"up_kbps"`
 }
 
+// verifyAccessWithheld tells the client why no window was opened, so the portal can say when to try again.
+// Reason is one of device_retry_wait (RetryAfterSeconds set), device_daily_limit, destination_daily_limit,
+// site_concurrent_limit. Never says anything about another device or address.
+type verifyAccessWithheld struct {
+	Reason            string `json:"reason"`
+	RetryAfterSeconds int    `json:"retry_after_seconds,omitempty"`
+}
+
 // verifyKernel is the kernel surface the grant logic needs (nft.Client in production; a fake in tests).
 type verifyKernel interface {
 	VerifyApply(ctx context.Context, g nft.VerifyGrant) error
@@ -109,22 +117,29 @@ func grantKey(id string) string {
 // grantVerifyAccess opens (or reports the already-open) window for the device that was just sent a code.
 // false = no window; the code is unaffected either way.
 func (s *server) grantVerifyAccess(ctx context.Context, mac string, ip net.IP, challengeID, dest string) (verifyAccessView, bool) {
+	v, ok, _ := s.grantVerifyAccessDetail(ctx, mac, ip, challengeID, dest)
+	return v, ok
+}
+
+// grantVerifyAccessDetail is grantVerifyAccess with the reason a window was withheld by a LIMIT (nil when a
+// window was opened, or when none could be for a reason the client cannot act on -- off, no network, no key).
+func (s *server) grantVerifyAccessDetail(ctx context.Context, mac string, ip net.IP, challengeID, dest string) (verifyAccessView, bool, *verifyAccessWithheld) {
 	k := s.verifyKernel()
 	if s.db == nil || k == nil || ip == nil || ip.To4() == nil || mac == "" {
-		return verifyAccessView{}, false
+		return verifyAccessView{}, false, nil
 	}
 	set := s.temporaryAccessSettings(ctx)
 	if !set.Enabled {
-		return verifyAccessView{}, false
+		return verifyAccessView{}, false, nil
 	}
 	digest := s.verifyDestDigest(dest)
 	if digest == "" {
 		slog.Warn("temporary access unavailable: anonymous-access key missing (run keybootstrap)")
-		return verifyAccessView{}, false
+		return verifyAccessView{}, false, nil
 	}
 	nc := s.resolveNetwork(ctx, ip)
 	if nc.NetworkID == "" || nc.Bridge == "" {
-		return verifyAccessView{}, false
+		return verifyAccessView{}, false, nil
 	}
 	type grantRow struct {
 		id, bridge string
@@ -136,6 +151,7 @@ func (s *server) grantVerifyAccess(ctx context.Context, mac string, ip net.IP, c
 	}
 	var g grantRow
 	refused := ""
+	var waitLeft float64
 	err := pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('verify_access'), hashtext($1))`, mac); err != nil {
 			return err
@@ -164,7 +180,6 @@ func (s *server) grantVerifyAccess(ctx context.Context, mac string, ip net.IP, c
 		// start again. The wait before another window counts from the device's last uncleared window that ended
 		// other than by choosing a different address -- a client correcting a mistyped address is not held back.
 		var perDevice, perDest, live int
-		var waitLeft float64
 		if err := tx.QueryRow(ctx, `SELECT
 		      count(*) FILTER (WHERE device_mac=$3::macaddr AND cleared_at IS NULL AND started_at > now() - interval '24 hours'),
 		      count(*) FILTER (WHERE destination_digest=$4 AND cleared_at IS NULL AND started_at > now() - interval '24 hours'),
@@ -207,11 +222,15 @@ func (s *server) grantVerifyAccess(ctx context.Context, mac string, ip net.IP, c
 	})
 	if err != nil {
 		slog.Warn("temporary access: grant failed", "err", err)
-		return verifyAccessView{}, false
+		return verifyAccessView{}, false, nil
 	}
 	if refused != "" {
 		slog.Info("temporary access refused", "reason", refused)
-		return verifyAccessView{}, false
+		w := &verifyAccessWithheld{Reason: refused}
+		if refused == "device_retry_wait" {
+			w.RetryAfterSeconds = int(waitLeft) + 1
+		}
+		return verifyAccessView{}, false, w
 	}
 	if g.fresh {
 		kg := nft.VerifyGrant{Key: grantKey(g.id), Bridge: g.bridge, IP: ip, Remaining: time.Until(g.expires),
@@ -220,7 +239,7 @@ func (s *server) grantVerifyAccess(ctx context.Context, mac string, ip net.IP, c
 			slog.Warn("temporary access: kernel install failed", "err", err)
 			_, _ = s.db.Exec(ctx, `UPDATE iam_v2.verification_access_grants SET ended_at=now(), end_reason='RESTORE_FAILED' WHERE id=$1::uuid AND ended_at IS NULL`, g.id)
 			k.VerifyRemove(ctx, kg.Key, kg.Bridge, ip)
-			return verifyAccessView{}, false
+			return verifyAccessView{}, false, nil
 		}
 		slog.Info("temporary access opened", "minutes", set.Minutes, "data_mb", set.DataMB)
 	}
@@ -228,7 +247,7 @@ func (s *server) grantVerifyAccess(ctx context.Context, mac string, ip net.IP, c
 	if left < 0 {
 		left = 0
 	}
-	return verifyAccessView{Seconds: left, DataMB: int((g.capBytes - g.used) / (1024 * 1024)), DownKbps: g.down, UpKbps: g.up}, true
+	return verifyAccessView{Seconds: left, DataMB: int((g.capBytes - g.used) / (1024 * 1024)), DownKbps: g.down, UpKbps: g.up}, true, nil
 }
 
 // endVerifyAccess ends the device's live window, if it has one, recording the bytes the kernel counted.

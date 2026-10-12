@@ -230,11 +230,18 @@ func (h *handler) authOTPLink(w http.ResponseWriter, r *http.Request) {
 	// A spent, expired or wrong code: say so in words, and offer the sign-in page (which may still hold the
 	// pending box for a fresh code).
 	var e struct {
-		Error string `json:"error"`
+		Error  string `json:"error"`
+		Reason string `json:"reason"`
 	}
 	_ = json.Unmarshal(payload, &e)
 	key := "err.otp.expired"
+	if e.Reason == "assisted_existing_client" {
+		e.Error = "assisted_existing_client"
+	}
 	switch strings.ToLower(e.Error) {
+	case "assisted_existing_client":
+		// A code staff showed cannot sign in an address that already belongs to a Client (contract §6.7).
+		key = "err.otp.assisted"
 	case "incorrect code":
 		key = "err.otp.code"
 	case "too_many_attempts":

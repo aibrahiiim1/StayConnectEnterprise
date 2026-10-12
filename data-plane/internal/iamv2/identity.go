@@ -49,6 +49,17 @@ func IssuerVerifiesEmail(provider string) bool {
 	return trustedEmailIssuers[strings.ToLower(strings.TrimSpace(provider))]
 }
 
+// ASSURANCE of an email or phone factor, kept in the identity row's attrs (contract §6.7). A factor the client
+// proved themselves -- by reading their own mail or phone, or through a trusted issuer's verified email -- is
+// "verified". A factor created from a code a staff member read to the client is "staff_assisted": the desk
+// vouched for it, the client did not prove it, so it satisfies no email-domain group and earns no remembered
+// device. The client's own later proof of the same factor overwrites the marker (attrs merge by key).
+const (
+	AssuranceKey           = "assurance"
+	AssuranceVerified      = "verified"
+	AssuranceStaffAssisted = "staff_assisted"
+)
+
 // NormalizeFactorValue applies the one normalisation the unique index relies on.
 func NormalizeFactorValue(v string) string { return strings.ToLower(strings.TrimSpace(v)) }
 
@@ -74,7 +85,7 @@ func SocialFactors(provider, sub, email string, emailVerified bool, claims map[s
 		// Honour rows written before 0107 (subject keyed by the email) -- find only, never insert.
 		secondary = append(secondary, FactorClaim{Type: "SOCIAL_SUBJECT", Issuer: provider, Value: email, LookupOnly: true})
 		if IssuerVerifiesEmail(provider) {
-			secondary = append(secondary, FactorClaim{Type: "EMAIL", Value: email, Attrs: map[string]string{"source": provider}})
+			secondary = append(secondary, FactorClaim{Type: "EMAIL", Value: email, Attrs: map[string]string{"source": provider, AssuranceKey: AssuranceVerified}})
 		}
 	}
 	return primary, secondary
@@ -83,7 +94,7 @@ func SocialFactors(provider, sub, email string, emailVerified bool, claims map[s
 // OTPFactor builds the factor of a code-verified email or phone.
 func OTPFactor(factorType, value string) FactorClaim {
 	return FactorClaim{Type: strings.ToUpper(strings.TrimSpace(factorType)), Value: NormalizeFactorValue(value),
-		Attrs: map[string]string{"source": "otp"}}
+		Attrs: map[string]string{"source": "otp", AssuranceKey: AssuranceVerified}}
 }
 
 // Key is the factor's identity tuple without the value, for evidence and logs ("EMAIL", "SOCIAL_SUBJECT:google").

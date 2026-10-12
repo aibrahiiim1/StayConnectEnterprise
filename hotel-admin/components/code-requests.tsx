@@ -32,6 +32,7 @@ export type CodeRequest = {
   challenge_id: string; channel: string; destination: string; issued_at: string; expires_at: string;
   consumed_at?: string; attempts: number; max_attempts: number; state: "PENDING" | "USED" | "EXPIRED" | "LOCKED";
   device_mac?: string; code_available: boolean; window?: CodeRequestWindow;
+  existing_client?: boolean; staff_revealed?: boolean; masked?: boolean;
   device_windows_24h: number; retry_wait_seconds: number;
 };
 export type CodeRequestsResp = {
@@ -111,7 +112,14 @@ export function CodeRequestsCard({ roles }: { roles: string[] }) {
                   <TR key={r.challenge_id}>
                     <TD className="whitespace-nowrap">{formatDate(r.issued_at)}</TD>
                     <TD><div className="break-all">{r.destination}</div><div className="text-xs text-muted-foreground">{r.channel}{r.device_mac ? ` · ${r.device_mac}` : ""}</div></TD>
-                    <TD><Badge tone={STATE[r.state].tone}>{STATE[r.state].label}</Badge>{r.state === "PENDING" && r.attempts > 0 && <div className="text-xs text-muted-foreground">{r.attempts} wrong {r.attempts === 1 ? "try" : "tries"}</div>}</TD>
+                    <TD>
+                      <Badge tone={STATE[r.state].tone}>{STATE[r.state].label}</Badge>
+                      {r.state === "PENDING" && r.attempts > 0 && <div className="text-xs text-muted-foreground">{r.attempts} wrong {r.attempts === 1 ? "try" : "tries"}</div>}
+                      {r.staff_revealed && <div className="text-xs text-muted-foreground">Shown by staff</div>}
+                      {r.existing_client && r.state === "PENDING" && (
+                        <div className="text-xs text-muted-foreground">Existing client — the code cannot be shown; they must use their own mail. You can let the device try again.</div>
+                      )}
+                    </TD>
                     <TD className="text-sm">{windowSummary(r, data.limits)}</TD>
                     <TD className="whitespace-nowrap text-right">
                       {mayReveal && r.code_available && (
@@ -187,7 +195,7 @@ function RevealDialog({ request, onClose }: { request: CodeRequest | null; onClo
       title={code ? "The client's code" : "Show this client's code?"}
       description={code
         ? "Tell it to the client. It works only on the device that asked for it, once, until it expires."
-        : "Only for a client in front of you or on the phone who asked for this code to " + (request?.destination ?? "") + ". Reading it to them signs them in on an address they have not proved themselves. The reveal is recorded with your name and reason."}
+        : "Only for a client in front of you or on the phone who asked for this code to " + (request?.destination ?? "") + ". The code works only on the device that asked for it. The client is signed in as a new client whose address is marked as vouched for by staff: it earns no email-domain group and no remembered device until they prove it themselves. The reveal is recorded with your name and reason."}
       confirmLabel={code ? "Done" : "Show code"}
       busy={busy}
       error={error}
@@ -197,6 +205,7 @@ function RevealDialog({ request, onClose }: { request: CodeRequest | null; onClo
         setBusy(true); setError(null);
         try {
           const r = await api.post<{ code: string }>(`/code-reveal/${request.challenge_id}`, { reason: reason.trim(), password });
+          if (!r?.code) throw new Error("The code is no longer available.");
           setCode(r.code);
           setPassword("");
         } catch (e) { setError(e); } finally { setBusy(false); }

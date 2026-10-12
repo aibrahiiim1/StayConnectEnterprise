@@ -16,6 +16,7 @@ package main
 // edged never holds the key. Scope is the appliance's own tenant and site, bound inside scd.
 
 import (
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/url"
@@ -23,6 +24,8 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
 var codeChallengeRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
@@ -57,7 +60,50 @@ func (s *server) listCodeRequests(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadGateway, "scd_unreachable", "the sign-in service could not be reached")
 		return
 	}
+	// WHO SEES WHAT (contract §6.7). The full address and the device's hardware address are shown only to a
+	// role that may also show a code -- the desk that has the client in front of it. Every other role that may
+	// read the list (guest relations, viewer) sees them masked; the state, window and limits are the same.
+	if st == http.StatusOK {
+		var roles []string
+		if sess := sessFrom(r.Context()); sess != nil {
+			roles = sess.Roles
+		}
+		if !permFor(roles, "code-reveal", permWrite) {
+			raw = maskCodeRequests(raw)
+		}
+	}
 	s.relayScd(w, st, raw)
+}
+
+// maskCodeRequests masks every request's destination and device address. Fails closed: a body it cannot
+// parse is replaced by an empty list rather than relayed unmasked.
+func maskCodeRequests(raw []byte) []byte {
+	var body map[string]any
+	if json.Unmarshal(raw, &body) != nil {
+		return []byte(`{"requests":[]}`)
+	}
+	reqs, _ := body["requests"].([]any)
+	for _, x := range reqs {
+		m, ok := x.(map[string]any)
+		if !ok {
+			continue
+		}
+		dest, _ := m["destination"].(string)
+		ft := "PHONE"
+		if ch, _ := m["channel"].(string); ch == "email" {
+			ft = "EMAIL"
+		}
+		m["destination"] = iamv2.MaskIdentity(iamv2.FactorClaim{Type: ft, Value: dest})
+		if mac, _ := m["device_mac"].(string); len(mac) == 17 {
+			m["device_mac"] = "••:••:••:••:" + mac[12:]
+		}
+		m["masked"] = true
+	}
+	out, err := json.Marshal(body)
+	if err != nil {
+		return []byte(`{"requests":[]}`)
+	}
+	return out
 }
 
 func (s *server) clearCodeRequestDevice(w http.ResponseWriter, r *http.Request) {

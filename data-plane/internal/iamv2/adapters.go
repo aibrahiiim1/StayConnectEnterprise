@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -130,6 +131,10 @@ func (a *Authenticator) authOTPIdentity(ctx context.Context, req Request) (Resul
 	for k, v := range req.FactorAttrs {
 		primary.Attrs[k] = v
 	}
+	if req.StaffAssisted {
+		primary.Attrs[AssuranceKey] = AssuranceStaffAssisted
+		req.Credential = AssistedCredential(req.Credential)
+	}
 	return a.resolvePrincipalAndFinalize(ctx, MethodOTP, primary, req.SecondaryFactors, req)
 }
 
@@ -186,6 +191,13 @@ func (a *Authenticator) resolvePrincipalAndFinalize(ctx context.Context, m Metho
 			res = deny(m, "subject_resolve")
 			return nil
 		}
+		// A STAFF-SHOWN CODE NEVER SIGNS IN TO AN EXISTING CLIENT (contract §6.7): the desk vouched for the
+		// address, the client did not prove it, so it must not reach someone else's access, group or devices.
+		// Rolled back, so nothing the resolution touched (an attrs merge) survives.
+		if req.StaffAssisted && !rs.Created {
+			res = deny(m, "assisted_existing_client")
+			return errAssistedRollback
+		}
 		factors, err := tx.LoadPrincipalFactors(ctx, req.TenantID, rs.PrincipalID)
 		if err != nil {
 			return err
@@ -212,11 +224,17 @@ func (a *Authenticator) resolvePrincipalAndFinalize(ctx context.Context, m Metho
 		}
 		return nil
 	})
+	if errors.Is(err, errAssistedRollback) {
+		return res, nil
+	}
 	if err != nil {
 		return Result{}, &Error{Code: ErrRepo, Msg: string(m)}
 	}
 	return res, nil
 }
+
+// errAssistedRollback rolls back a staff-assisted resolution that reached an existing Client.
+var errAssistedRollback = errors.New("iamv2: staff-assisted sign-in reached an existing client")
 
 // finalizeWithGroup decides the Client Group from the Client's verified factors, then creates the auth context
 // with that decision pinned on it. A group lookup failure is a repository error (fail closed), never "Public".

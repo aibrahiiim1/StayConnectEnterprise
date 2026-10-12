@@ -107,7 +107,10 @@ type Request struct {
 	// decided; the credential says which channel or provider the client actually used, which is what the
 	// Admin Console's "Signed in with" needs. A remembered device carries the credential it was issued under.
 	Credential string
-	Device     DeviceContext
+	// StaffAssisted is set by scd when the OTP code was read to the client by a staff member (contract §6.7).
+	// Such a sign-in may create a NEW Client, marked staff_assisted, but never signs in to an existing one.
+	StaffAssisted bool
+	Device        DeviceContext
 }
 
 // DeviceContext is the device/network the request arrived on. MAC identifies a device, never a person.

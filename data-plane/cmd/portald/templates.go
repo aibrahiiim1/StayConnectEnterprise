@@ -1215,6 +1215,7 @@ const landingHTML = `<!doctype html>
       }
       if (e === 'incorrect code') return t('err.otp.code');
       if (e === 'other_device') return t('err.otp.device');
+      if (j && j.reason === 'assisted_existing_client') return t('err.otp.assisted');
       if (e === 'code expired' || e === 'challenge not found' || e === 'code already used' || e === 'too many wrong attempts') {
         return t('err.otp.expired');
       }
@@ -1223,9 +1224,20 @@ const landingHTML = `<!doctype html>
 
     // THE TEMPORARY WINDOW an issued email code opened for this device (scd verify_access.go): said in words, so
     // the client knows they can open any mail app now, for how long, and how much.
-    function showTempAccess(codeForm, ta) {
+    // When a limit kept the window closed (temporary_access_withheld), the client is told when this device may
+    // have one again -- or that it may not today -- and that the desk can help.
+    function showTempAccess(codeForm, ta, withheld) {
       const el = codeForm.querySelector('.temp-access');
       if (!el) return;
+      if ((!ta || !ta.seconds) && withheld && withheld.reason) {
+        if (withheld.reason === 'device_retry_wait' && withheld.retry_after_seconds) {
+          el.textContent = t('otp.temp.wait').split('{m}').join(String(Math.max(1, Math.ceil(withheld.retry_after_seconds / 60))));
+        } else {
+          el.textContent = t('otp.temp.limit');
+        }
+        el.hidden = false;
+        return;
+      }
       if (!ta || !ta.seconds) { el.hidden = true; return; }
       const mins = Math.max(1, Math.round(ta.seconds / 60));
       el.textContent = t('otp.temp.access').split('{m}').join(String(mins)).split('{mb}').join(String(ta.data_mb || 0));
@@ -1249,7 +1261,7 @@ const landingHTML = `<!doctype html>
           const j = await r.json().catch(() => ({}));
           if (!r.ok) { errEl.textContent = otpMessage('dest', j); return; }
           challenges[channel] = j.challenge_id;
-          showTempAccess(codeForm, j.temporary_access);
+          showTempAccess(codeForm, j.temporary_access, j.temporary_access_withheld);
           codeForm.querySelector('.dest').textContent = dest;
           destForm.style.display = 'none';
           codeForm.style.display = 'block';
@@ -1295,7 +1307,7 @@ const landingHTML = `<!doctype html>
           const j = await r.json().catch(() => ({}));
           if (!r.ok) { errEl.textContent = otpMessage('dest', j); return; }
           challenges[channel] = j.challenge_id;
-          showTempAccess(codeForm, j.temporary_access);
+          showTempAccess(codeForm, j.temporary_access, j.temporary_access_withheld);
           codeForm.querySelector('input[name=code]').value = '';
           codeForm.querySelector('input[name=code]').focus();
         } catch (err) {

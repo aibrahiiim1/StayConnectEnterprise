@@ -41,8 +41,8 @@ func TestIntegration_ADeviceWaitsBeforeAnotherWindowExceptAfterChangingAddress(t
 		t.Fatal("first window")
 	}
 	_, _ = pool.Exec(ctx, `UPDATE iam_v2.verification_access_grants SET ended_at=now(), end_reason='EXPIRED' WHERE tenant_id=$1 AND ended_at IS NULL`, s.tenID)
-	if _, ok := s.grantVerifyAccess(ctx, mac, ip, "", "w1@example.com"); ok {
-		t.Fatal("a window that just expired must be followed by the wait")
+	if _, ok, why := s.grantVerifyAccessDetail(ctx, mac, ip, "", "w1@example.com"); ok || why == nil || why.Reason != "device_retry_wait" || why.RetryAfterSeconds < 1790 || why.RetryAfterSeconds > 1801 {
+		t.Fatalf("a window that just expired must be followed by the wait, said to the client: ok=%v %+v", ok, why)
 	}
 	// 31 minutes later the device may have another.
 	_, _ = pool.Exec(ctx, `UPDATE iam_v2.verification_access_grants SET started_at=started_at - interval '41 minutes', ended_at=now() - interval '31 minutes' WHERE tenant_id=$1`, s.tenID)
@@ -106,6 +106,7 @@ func TestIntegration_ACodeCopyIsReadableOnlyWhileTheCodeIsLive(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM iam_v2.otp_code_reveals WHERE challenge_id=$1::uuid`, id)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM iam_v2.otp_code_escrow WHERE challenge_id=$1::uuid`, id)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM public.auth_otps WHERE id=$1::uuid`, id)
 	})
@@ -119,6 +120,10 @@ func TestIntegration_ACodeCopyIsReadableOnlyWhileTheCodeIsLive(t *testing.T) {
 	}
 	if code, out := adminCall(t, s, http.MethodPost, "/v1/admin/otp/"+id+"/reveal", `{"operator":"desk"}`); code != 200 || out["code"] != "482913" {
 		t.Fatalf("reveal a live code: %d %v", code, out)
+	}
+	var by string
+	if err := pool.QueryRow(ctx, `SELECT revealed_by FROM iam_v2.otp_code_reveals WHERE challenge_id=$1::uuid`, id).Scan(&by); err != nil || by != "desk" {
+		t.Fatalf("the reveal must be recorded before the code leaves (0114): %q %v", by, err)
 	}
 	if code, _ := adminCall(t, s, http.MethodPost, "/v1/admin/otp/"+id+"/reveal", `{}`); code != 400 {
 		t.Fatal("a reveal needs an operator")
@@ -165,4 +170,51 @@ func mustTime(t *testing.T, pool *pgxpool.Pool, id string) time.Time {
 		t.Fatal(err)
 	}
 	return at
+}
+
+// AN EXISTING CLIENT'S CODE IS NEVER SHOWN (contract §6.7): a staff-shown code could not sign them in, and the list
+// says so, so the desk lets the device try again instead.
+func TestIntegration_AnExistingClientsCodeIsNeverShown(t *testing.T) {
+	s, _, pool := verifyFixture(t, nil)
+	ctx := context.Background()
+	raw := make([]byte, 32)
+	_, _ = rand.Read(raw)
+	s.otpEscrowKey, _ = sealbox.NewKey(otpEscrowDomain, raw)
+	const addr = "existing-client-reveal@example.com"
+	var pid, id string
+	if err := pool.QueryRow(ctx, `INSERT INTO iam_v2.guest_principals (tenant_id) VALUES ($1) RETURNING id::text`, s.tenID).Scan(&pid); err != nil {
+		t.Skipf("cannot seed a principal here: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO iam_v2.guest_principal_identities (tenant_id, guest_principal_id, factor_type, factor_value_norm)
+	     VALUES ($1,$2::uuid,'EMAIL',$3)`, s.tenID, pid, addr); err != nil {
+		t.Skipf("cannot seed an identity here: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO public.auth_otps (tenant_id, channel, destination, code_hash, expires_at)
+	     VALUES ($1,'email',$2,'x', now() + interval '10 minutes') RETURNING id::text`, s.tenID, "Existing-Client-Reveal@Example.com").Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM iam_v2.otp_code_reveals WHERE challenge_id=$1::uuid`, id)
+		_, _ = pool.Exec(bg, `DELETE FROM iam_v2.otp_code_escrow WHERE challenge_id=$1::uuid`, id)
+		_, _ = pool.Exec(bg, `DELETE FROM public.auth_otps WHERE id=$1::uuid`, id)
+		_, _ = pool.Exec(bg, `DELETE FROM iam_v2.guest_principal_identities WHERE guest_principal_id=$1::uuid`, pid)
+		_, _ = pool.Exec(bg, `DELETE FROM iam_v2.guest_principals WHERE id=$1::uuid`, pid)
+	})
+	s.escrowOTPCode(ctx, id, "771204", mustTime(t, pool, id))
+	if code, out := adminCall(t, s, http.MethodPost, "/v1/admin/otp/"+id+"/reveal", `{"operator":"desk"}`); code != 409 || out["error"] != "EXISTING_CLIENT" || out["code"] != nil {
+		t.Fatalf("an existing client's code must not be shown: %d %v", code, out)
+	}
+	var n int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM iam_v2.otp_code_reveals WHERE challenge_id=$1::uuid`, id).Scan(&n)
+	if n != 0 {
+		t.Fatal("a refused reveal records nothing")
+	}
+	_, out := adminCall(t, s, http.MethodGet, "/v1/admin/temporary-access", "")
+	for _, r := range out["requests"].([]any) {
+		m := r.(map[string]any)
+		if m["challenge_id"] == id && (m["existing_client"] != true || m["code_available"] != false) {
+			t.Fatalf("the list must flag the existing client and offer no code: %v", m)
+		}
+	}
 }

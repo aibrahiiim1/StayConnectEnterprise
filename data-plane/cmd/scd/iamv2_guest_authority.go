@@ -193,7 +193,9 @@ func (s *server) authorizeViaIAMv2(w http.ResponseWriter, r *http.Request,
 		}
 		// A verified factor on this device earns the device a resume credential (contract §2.3). A resumed
 		// sign-in already holds one and gets no second.
-		if req.ResumedPrincipalID == "" && res.Subject.PrincipalID != "" {
+		// A sign-in completed with a code staff showed the client earns NO remembered device (contract §6.7): the
+		// next visit proves the address again.
+		if req.ResumedPrincipalID == "" && res.Subject.PrincipalID != "" && !iamv2.IsAssistedCredential(req.Credential) {
 			out.ResumeToken = s.issueResumeCredential(r.Context(), res.Subject.PrincipalID, res.DeviceID, method, req.Credential)
 		}
 		// A SUCCESSFUL SIGN-IN ENDS THE DEVICE'S TEMPORARY VERIFICATION WINDOW (verify_access.go): from here the
@@ -220,9 +222,11 @@ func (s *server) authorizeViaIAMv2(w http.ResponseWriter, r *http.Request,
 		return true
 
 	default: // DecisionDeny
-		writeJSON(w, http.StatusForbidden, map[string]any{
-			"error": "AUTH_DENIED", "reason": res.Reason, "authority": "iam_v2",
-		})
+		out := map[string]any{"error": "AUTH_DENIED", "reason": res.Reason, "authority": "iam_v2"}
+		if res.Reason == "assisted_existing_client" {
+			out["key"] = "err.otp.assisted" // the portal says it in the client's language
+		}
+		writeJSON(w, http.StatusForbidden, out)
 		return true
 	}
 }

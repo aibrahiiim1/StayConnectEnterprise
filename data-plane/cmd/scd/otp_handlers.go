@@ -138,6 +138,8 @@ type otpIssueResp struct {
 	// TemporaryAccess is the internet window this issue opened for the device (email only; absent when none
 	// was opened -- the setting is off, a limit was reached, or the device could not be placed).
 	TemporaryAccess *verifyAccessView `json:"temporary_access,omitempty"`
+	// TemporaryAccessWithheld says a limit kept the window closed, and when the device may ask again.
+	TemporaryAccessWithheld *verifyAccessWithheld `json:"temporary_access_withheld,omitempty"`
 }
 
 func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
@@ -331,8 +333,10 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 	// only after a successful send, and never a condition of the code itself -- a refused window leaves the
 	// code exactly as valid as it is.
 	if channelLabel == "email" {
-		if v, ok := s.grantVerifyAccess(r.Context(), devMAC, net.ParseIP(req.IP), issued.ChallengeID, dest); ok {
+		if v, ok, why := s.grantVerifyAccessDetail(r.Context(), devMAC, net.ParseIP(req.IP), issued.ChallengeID, dest); ok {
 			out.TemporaryAccess = &v
+		} else if why != nil {
+			out.TemporaryAccessWithheld = why
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -407,6 +411,21 @@ func (s *server) authorizeOTP(w http.ResponseWriter, r *http.Request) {
 	}
 	s.met.OTPVerify.WithLabelValues(v.Channel, "ok").Inc()
 	s.dropOTPEscrow(r.Context(), req.ChallengeID)
+	// STAFF-ASSISTED (0114, contract §6.7): the code was shown to the client by a staff member. The sign-in may
+	// create a new Client, marked staff_assisted, and never reaches an existing one. Fails closed: if the record
+	// cannot be read, the verification is treated as staff-assisted.
+	assisted := true
+	if s.db != nil {
+		var revealed bool
+		if err := s.db.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM iam_v2.otp_code_reveals WHERE challenge_id=$1::uuid)`,
+			req.ChallengeID).Scan(&revealed); err == nil {
+			assisted = revealed
+		}
+	}
+	credential := iamv2.CredentialForOTP(v.Channel)
+	if assisted {
+		credential = iamv2.AssistedCredential(credential)
+	}
 
 	// THE CHALLENGE IS VERIFIED; THE IDENTITY IS IAM-v2's.
 	//
@@ -420,10 +439,11 @@ func (s *server) authorizeOTP(w http.ResponseWriter, r *http.Request) {
 	// shaping are not properties of the credential in the current model -- they come from the package the
 	// guest selects in the commerce flow after authentication.
 	s.authorizeViaIAMv2(w, r, iamv2.MethodOTP, iamv2.Request{
-		FactorType:  otpFactorType(v.Channel),
-		FactorValue: v.Destination,
-		Credential:  iamv2.CredentialForOTP(v.Channel),
-		Device:      iamv2.DeviceContext{MAC: mac.String()},
+		FactorType:    otpFactorType(v.Channel),
+		FactorValue:   v.Destination,
+		Credential:    credential,
+		StaffAssisted: assisted,
+		Device:        iamv2.DeviceContext{MAC: mac.String()},
 	}, ip)
 }
 

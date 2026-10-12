@@ -58,6 +58,15 @@ describe("Code requests", () => {
     expect(await screen.findByText("482913")).toBeTruthy();
   });
 
+  it("never offers to show an existing client's code, and says why", async () => {
+    g.mockResolvedValue({ ...resp, requests: [{ ...pending, code_available: false, existing_client: true }] });
+    render(<CodeRequestsCard roles={["front_office_operator"]} />);
+    await screen.findByText("guest@example.com");
+    expect(screen.queryByRole("button", { name: /show code/i })).toBeNull();
+    expect(screen.getByText(/existing client/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /let them try again/i })).toBeTruthy();
+  });
+
   it("never offers the reveal to a role without code-reveal, nor any action to a viewer", async () => {
     const { unmount } = render(<CodeRequestsCard roles={["guest_relations_operator"]} />);
     await screen.findByText("guest@example.com");

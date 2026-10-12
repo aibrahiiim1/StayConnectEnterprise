@@ -178,6 +178,10 @@ func EvaluateClientGroup(groups []ClientGroup, factors []FactorClaim) (GroupDeci
 }
 
 func ruleMatches(r ClientGroupRule, f FactorClaim) bool {
+	// A factor the desk vouched for (a staff-shown code) proves nothing about the client's organisation.
+	if f.Attrs[AssuranceKey] == AssuranceStaffAssisted {
+		return false
+	}
 	switch r.Type {
 	case GroupRuleEmailDomain:
 		if f.Type != "EMAIL" {

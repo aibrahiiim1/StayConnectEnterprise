@@ -402,6 +402,13 @@ func (s *server) mailGardenDomains(ctx context.Context) []string {
 	if err != nil || cfg == nil || cfg.Email == nil || !cfg.Email.Enabled || cfg.Portal == nil {
 		return nil
 	}
+	// NOT WHILE TEMPORARY INTERNET IS ON (contract §6.6, §10.1). A mail service's addresses also serve the
+	// provider's other services (measured: mail.google.com's address answers for YouTube, Search, Drive), and the
+	// garden opens them to EVERY device that has not signed in. The temporary window gives the one device that
+	// asked for a code what it needs, so while it is on the site-wide mail allowlist is not applied at all.
+	if cfg.Email.TemporaryAccess.Effective().Enabled {
+		return nil
+	}
 	return mailreach.Domains(cfg.Portal.MailProviders, cfg.Portal.MailDomains)
 }
 

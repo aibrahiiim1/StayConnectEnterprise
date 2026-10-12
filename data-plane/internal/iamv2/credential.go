@@ -33,6 +33,21 @@ func CredentialForOTP(channel string) string {
 	return ""
 }
 
+// CredentialAssistedSuffix marks a sign-in completed with a code a staff member read to the client (contract
+// §6.7): EMAIL_OTP_ASSISTED, SMS_OTP_ASSISTED, WHATSAPP_OTP_ASSISTED. The Admin Console says "Code shown by staff".
+const CredentialAssistedSuffix = "_ASSISTED"
+
+// AssistedCredential returns the staff-assisted form of an OTP credential.
+func AssistedCredential(c string) string {
+	if c == "" || strings.HasSuffix(c, CredentialAssistedSuffix) {
+		return c
+	}
+	return NormalizeCredential(c + CredentialAssistedSuffix)
+}
+
+// IsAssistedCredential reports a credential minted from a staff-shown code.
+func IsAssistedCredential(c string) bool { return strings.HasSuffix(c, CredentialAssistedSuffix) }
+
 // CredentialForSocial names an identity provider: SOCIAL_GOOGLE, SOCIAL_APPLE, SOCIAL_MICROSOFT, SOCIAL_FACEBOOK.
 func CredentialForSocial(provider string) string {
 	p := NormalizeCredential(provider)

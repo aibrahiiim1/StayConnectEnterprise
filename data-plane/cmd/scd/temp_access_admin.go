@@ -76,6 +76,7 @@ func (s *server) pruneOTPEscrow(ctx context.Context) {
 	if s.db == nil {
 		return
 	}
+	_, _ = s.db.Exec(ctx, `DELETE FROM iam_v2.otp_code_reveals WHERE revealed_at < now() - interval '1 day'`)
 	if _, err := s.db.Exec(ctx, `DELETE FROM iam_v2.otp_code_escrow e
 	     WHERE e.expires_at <= now()
 	        OR NOT EXISTS (SELECT 1 FROM public.auth_otps o WHERE o.id = e.challenge_id
@@ -99,17 +100,22 @@ type codeRequestWindow struct {
 }
 
 type codeRequest struct {
-	ChallengeID   string             `json:"challenge_id"`
-	Channel       string             `json:"channel"`
-	Destination   string             `json:"destination"`
-	IssuedAt      time.Time          `json:"issued_at"`
-	ExpiresAt     time.Time          `json:"expires_at"`
-	ConsumedAt    *time.Time         `json:"consumed_at,omitempty"`
-	Attempts      int                `json:"attempts"`
-	MaxAttempts   int                `json:"max_attempts"`
-	State         string             `json:"state"` // PENDING | USED | EXPIRED | LOCKED
-	DeviceMAC     string             `json:"device_mac,omitempty"`
-	CodeAvailable bool               `json:"code_available"`
+	ChallengeID   string     `json:"challenge_id"`
+	Channel       string     `json:"channel"`
+	Destination   string     `json:"destination"`
+	IssuedAt      time.Time  `json:"issued_at"`
+	ExpiresAt     time.Time  `json:"expires_at"`
+	ConsumedAt    *time.Time `json:"consumed_at,omitempty"`
+	Attempts      int        `json:"attempts"`
+	MaxAttempts   int        `json:"max_attempts"`
+	State         string     `json:"state"` // PENDING | USED | EXPIRED | LOCKED
+	DeviceMAC     string     `json:"device_mac,omitempty"`
+	CodeAvailable bool       `json:"code_available"`
+	// ExistingClient: the address already belongs to a Client here. A staff-shown code cannot sign it in
+	// (contract §6.7), so the code is not offered for showing; the desk can let the device try again instead.
+	ExistingClient bool `json:"existing_client"`
+	// StaffRevealed: a staff member has already shown this code.
+	StaffRevealed bool               `json:"staff_revealed"`
 	Window        *codeRequestWindow `json:"window,omitempty"`
 	// What the device would meet if it asked for a window now.
 	DeviceWindows24h int `json:"device_windows_24h"`
@@ -131,6 +137,10 @@ func (s *server) listCodeRequests(w http.ResponseWriter, r *http.Request) {
 	  SELECT o.id::text, o.channel, o.destination, o.issued_at, o.expires_at, o.consumed_at, o.attempts, o.max_attempts,
 	         COALESCE(b.device_mac::text, ''),
 	         EXISTS (SELECT 1 FROM iam_v2.otp_code_escrow e WHERE e.challenge_id = o.id),
+	         EXISTS (SELECT 1 FROM iam_v2.guest_principal_identities i WHERE i.tenant_id = o.tenant_id
+	                   AND i.factor_type = CASE WHEN o.channel = 'email' THEN 'EMAIL' ELSE 'PHONE' END
+	                   AND coalesce(i.factor_issuer, '') = '' AND i.factor_value_norm = lower(btrim(o.destination))),
+	         EXISTS (SELECT 1 FROM iam_v2.otp_code_reveals v WHERE v.challenge_id = o.id),
 	         g.started_at, g.expires_at, g.ended_at, COALESCE(g.end_reason, ''), COALESCE(g.used_bytes, 0),
 	         COALESCE(g.data_cap_bytes, 0), g.cleared_at, COALESCE(g.cleared_by, ''), COALESCE(g.down_kbps, 0), COALESCE(g.up_kbps, 0),
 	         CASE WHEN b.device_mac IS NULL THEN 0 ELSE (SELECT count(*) FROM iam_v2.verification_access_grants x
@@ -162,7 +172,7 @@ func (s *server) listCodeRequests(w http.ResponseWriter, r *http.Request) {
 		var gdown, gup int
 		var wait float64
 		if err := rows.Scan(&c.ChallengeID, &c.Channel, &c.Destination, &c.IssuedAt, &c.ExpiresAt, &c.ConsumedAt,
-			&c.Attempts, &c.MaxAttempts, &c.DeviceMAC, &c.CodeAvailable, &gs, &ge, &gend, &greason, &gused, &gcap,
+			&c.Attempts, &c.MaxAttempts, &c.DeviceMAC, &c.CodeAvailable, &c.ExistingClient, &c.StaffRevealed, &gs, &ge, &gend, &greason, &gused, &gcap,
 			&gclr, &gby, &gdown, &gup, &c.DeviceWindows24h, &wait); err != nil {
 			slog.Error("code requests: scan", "err", err)
 			httpErr(w, http.StatusInternalServerError, "list failed")
@@ -178,7 +188,7 @@ func (s *server) listCodeRequests(w http.ResponseWriter, r *http.Request) {
 		default:
 			c.State = "PENDING"
 		}
-		c.CodeAvailable = c.CodeAvailable && c.State == "PENDING"
+		c.CodeAvailable = c.CodeAvailable && c.State == "PENDING" && !c.ExistingClient
 		c.RetryWaitSeconds = int(wait)
 		if gs != nil && ge != nil {
 			c.Window = &codeRequestWindow{StartedAt: *gs, ExpiresAt: *ge, EndedAt: gend, EndReason: greason,
@@ -252,12 +262,16 @@ func (s *server) revealOTPCode(w http.ResponseWriter, r *http.Request) {
 	var nonce, ct []byte
 	var expires time.Time
 	var mac string
+	var existing bool
 	err := s.db.QueryRow(r.Context(), `SELECT e.key_id, e.cipher_version, e.nonce, e.ciphertext, o.expires_at,
-	         COALESCE((SELECT b.device_mac::text FROM iam_v2.otp_device_bindings b WHERE b.challenge_id=o.id), '')
+	         COALESCE((SELECT b.device_mac::text FROM iam_v2.otp_device_bindings b WHERE b.challenge_id=o.id), ''),
+	         EXISTS (SELECT 1 FROM iam_v2.guest_principal_identities i WHERE i.tenant_id = o.tenant_id
+	                   AND i.factor_type = CASE WHEN o.channel = 'email' THEN 'EMAIL' ELSE 'PHONE' END
+	                   AND coalesce(i.factor_issuer, '') = '' AND i.factor_value_norm = lower(btrim(o.destination)))
 	    FROM iam_v2.otp_code_escrow e JOIN public.auth_otps o ON o.id = e.challenge_id
 	   WHERE e.challenge_id=$1::uuid AND e.tenant_id=$2 AND e.site_id=$3
 	     AND o.consumed_at IS NULL AND o.expires_at > now() AND o.attempts < o.max_attempts`,
-		id, s.tenID, s.siteID).Scan(&keyID, &ver, &nonce, &ct, &expires, &mac)
+		id, s.tenID, s.siteID).Scan(&keyID, &ver, &nonce, &ct, &expires, &mac, &existing)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Used, expired, locked, never sent, or not this site's: one answer for all of them.
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "CODE_NOT_AVAILABLE"})
@@ -268,11 +282,25 @@ func (s *server) revealOTPCode(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusInternalServerError, "reveal failed")
 		return
 	}
+	// AN EXISTING CLIENT'S ADDRESS: a shown code could not sign them in (the verification refuses it), and
+	// showing it would only put another person's code in the desk's hands. Refused before anything is opened.
+	if existing {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "EXISTING_CLIENT"})
+		return
+	}
 	plain, err := s.otpEscrowKey.Open(sealbox.Sealed{Ciphertext: ct, Nonce: nonce, KeyID: keyID, CipherVersion: ver},
 		s.tenID, s.siteID, id)
 	if err != nil {
 		slog.Warn("code reveal: cannot open the sealed copy")
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "CODE_COPY_UNAVAILABLE"})
+		return
+	}
+	// RECORDED BEFORE THE CODE LEAVES (0114): the verification this code completes is staff-assisted. If the
+	// record cannot be written the code is not shown.
+	if _, err := s.db.Exec(r.Context(), `INSERT INTO iam_v2.otp_code_reveals (challenge_id, tenant_id, site_id, revealed_by)
+	     VALUES ($1::uuid,$2,$3,$4) ON CONFLICT (challenge_id) DO NOTHING`, id, s.tenID, s.siteID, strings.TrimSpace(req.Operator)); err != nil {
+		slog.Error("code reveal: record failed", "err", err)
+		httpErr(w, http.StatusInternalServerError, "reveal failed")
 		return
 	}
 	slog.Info("code revealed to an operator") // never the code, never the address
