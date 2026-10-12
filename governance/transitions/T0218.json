@@ -1,0 +1,63 @@
+{
+  "transition_id": "T0218",
+  "seq": 218,
+  "timestamp": "2026-10-12T08:46:00+03:00",
+  "timestamp_derivation": "Written after the PRE-LIVE verification pass of 2026-10-12 (migrations 0114 and 0115 applied, scd, edged, portald and netd at d0600e2c and the Admin Console installed and read back, Gate-P reconciled, the staff check, the network regression and the Stripe TEST-mode dispute run complete, harness residue ended) and before the commit that introduces it.",
+  "record_type": "CLIENT_ACCESS_FINAL_CLOSURE_ROUND_DEPLOYED_TO_PRE_LIVE",
+  "authorisation": "Product-Owner 'PR #211 Final Closure Mission' of 2026-10-12: Show Code approved for front desk and IT with permission, step-up, reason and audit, without establishing independent ownership or compromising an existing Client; the temporary-access experience; the refund policy (a full provider refund ends only the entitlement that purchase funded, partial refunds and UNKNOWN never act, chargebacks reviewed), sandbox only; HTTPS for the portal where feasible within the authorised architecture; directly related security and residue fixes; FULL CHECK; documentation and evidence. It authorises NO merge, no LIVE payment, no PMS financial operation, no Root-CA or trust change, no new topology or external infrastructure, no change to protected-master rules and no Go-Live.",
+  "delivery": {
+    "pull_request": 211,
+    "branch": "delivery/client-access-identity",
+    "base": "3fbbe7dc789e82f34911fd57c146e81436fc5500",
+    "content_head": "d0600e2cac752fbb8045f7345e956a253c3b5a20",
+    "pr_state": "OPEN. NOT MERGED. po-merge-approved NOT applied.",
+    "contract": "docs/architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md (sections 6.7, 9, 10.1, 10.2)",
+    "acceptance_checklist": "docs/acceptance/ClientAccessIdentity-Real-Phone-Acceptance-Checklist.md"
+  },
+  "what_was_found": [
+    "A sign-in with a staff-shown code silently resolved to an EXISTING Client with that address and inherited its live entitlement, client group and a 30-day remembered device.",
+    "A chargeback counted towards a 'full refund' (refunds and chargebacks were summed), and Stripe booked every non-inquiry dispute as a chargeback, including open and won ones; card settlements had no review case.",
+    "Nothing reacted to a full provider refund: the access it paid for stayed on.",
+    "The Phase-4 harness ran none of the card reversal, LIVE-refusal, sealing, conversion or free-to-paid tests (no -run filter matched them).",
+    "The site-wide mail allowlist opened the services behind mail providers' addresses to every pre-auth device while the per-device temporary window already served the device that asked.",
+    "Code requests showed full addresses and hardware addresses to every role that could read the list.",
+    "An SMTP unit test expected a plain-ASCII Subject to be MIME-encoded; Go leaves it unencoded.",
+    "Automated harness runs had left 91 live test entitlements (e2e-/md- accounts, the e2e voucher batch)."
+  ],
+  "delivered": [
+    "Staff-assisted verification (migration 0114): each reveal recorded before the code leaves; an existing Client is never reached (refused at reveal, refused and rolled back at verification); a new Client's factor is marked staff_assisted, matches no client-group rule, earns no remembered device, is labelled *_OTP_ASSISTED; the client's own later proof clears the marker; fails closed.",
+    "Code requests: full address and device only for roles that may show a code (masked for others, fail closed); existing clients flagged; the portal tells a client when a withheld window returns (six languages).",
+    "Refund policy (migration 0115): a full refund ends only the funded entitlement (REVOKED, devices and sessions closed, append-only evidence, idempotent); partial refunds and UNKNOWN never act; disputes and chargebacks open a case decided once by a payments operator (Keep / End access, password, reason, audit; cases refuse deletion and change after a decision); Stripe books a chargeback only for a lost dispute.",
+    "The mail allowlist is not applied while temporary internet is on.",
+    "HTTPS for the portal investigated and designed; not deliverable inside this authorisation (public hostname, certificate issuance path and the recorded no-portal-PKI decision are Product-Owner decisions)."
+  ],
+  "database_schema": "Appliance migrations 0114 (iam_v2.otp_code_reveals) and 0115 (card_reversal_reviews with its guard, refund_access_terminations append-only, p4_end_access_funded_by, p4_apply_refund_policy, p4_open_dispute_review, p4_resolve_reversal_review). Additive with a .down; each proven up, down and up on PostgreSQL 16 and built into the full-schema Phase-4 harness. Applied on PRE-LIVE through scripts/edge-migrate.sh as iam_v2_owner, --target-kind live-site, SHA pinned; Gate-P reconciled (GATEP_RECONCILE = OK); grants mirrored in deploy/gatep.",
+  "deployment_provenance": "PRE-LIVE 172.21.60.25, read back from the installed bytes on 2026-10-12: netd d0600e2c; scd d0600e2c; edged d0600e2c; pmsd 6a403326; portald d0600e2c; acctd 99ba9f10; DEPLOYED_BINARIES 6/6 OK. pmsd (6a403326) and acctd (99ba9f10) remain master-base builds, as throughout PR #211; their dependency set includes internal/iamv2, which this PR changes, and they were not redeployed (a pmsd restart restarts the live FIAS link, which was not requested). Admin Console release 20261012-052406 from d0600e2c (BUILD_ID O_L-pZTvr-w2U8HQ3jeVV). Site migrations through 0115. PRE-LIVE is AHEAD of master, as the standing decision intends.",
+  "live_verification": "From client network namespaces on the deployed build: verify_staff.sh 31/31 (the retry wait and the reason told to the client; Code requests; let them try again; a shown code signs in a NEW client marked staff_assisted, labelled EMAIL_OTP_ASSISTED, with no remembered device; an existing client's code is never shown (409) and nothing is recorded; reveals and clears audited without the code; card-cases endpoint) and the verify_round5.sh network regression 39/39 after the netd deploy. Stripe TEST mode: a USD 1.00 package was paid with Stripe's dispute test card; Stripe disputed the charge; OneGate opened one DISPUTE case, recorded no money row and left the access on; the case was resolved through the operator API with END_ACCESS (401 without the password, 409 for a second decision, audit row written), ending that test access (REVOKED). The earlier fully refunded sandbox charge, whose access had already been ended by hand (ADMIN), was re-swept and correctly produced no refund evidence. A full or partial refund was NOT exercised live: OneGate never initiates a refund and the sandbox key is sealed; those paths are proven in the Phase-4 harness and listed for the Product Owner's dashboard test.",
+  "automated_verification": "Phase-4 full-schema harness PHASE4_PG_INTEGRATION rc=0 (verbose run: both refund-policy tests and the five previously unrun tests passed); Go unit suites of every data-plane package green; DB-backed iamv2 staff-assisted test and eight scd window/staff tests green; Admin vitest 737/737 and tsc clean.",
+  "test_access_ended": "91 harness entitlements (e2e-*/md-* accounts, the 'guest-access e2e test' voucher batch) ended through terminate_entitlement_at_boundary (ADMIN) with one audit row each; payment, purchase and settlement counts unchanged (9 / 226 / 172). The dispute-test access ended through its review case. 31 live entitlements remain that cannot be shown to be test data (26 unbatched vouchers, 2 open-selection, 3 Room sign-ins on PMS stays) and were left. Test identities with commerce history are kept as evidence with no live access and no unrevoked device credential.",
+  "financial": "TEST mode only. payment_transactions on PRE-LIVE: two CAPTURED sandbox charges (one fully refunded at the provider earlier, one disputed by the test card), one REFUND, seven FAILED (no money). No LIVE key, no PMS posting, no FX by OneGate, nothing initiated towards the provider.",
+  "security_findings_open": "The email code link is still plain HTTP (contract 10.2): closed only by an HTTPS portal on a public hostname with a publicly trusted certificate -- a Product-Owner decision on the hostname, the issuance path and the recorded no-portal-PKI decision. Identity-provider and payment-page garden entries keep the shared-front-end property while their method is on (accepted; required for the method to work).",
+  "not_validated": "A real phone (the checklist), a full/partial refund on PRE-LIVE (needs the Stripe dashboard), Apple Pay / Google Pay on a real device, the Paymob sandbox. FULL CHECK had not run at the time of this receipt; its result for the exact head is recorded on PR #211.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0217."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. A PRE-LIVE deployment for Product Owner acceptance; nothing merged, no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Nothing is merged. Go-Live remains unauthorised.",
+  "base": "3fbbe7dc789e82f34911fd57c146e81436fc5500",
+  "base_note": "Master at the start of the mission (the merge of PR #210, T0213 completion).",
+  "head": "d0600e2c",
+  "head_note": "The last CONTENT commit of PR #211 at the time of this receipt; governance commits follow it.",
+  "previous_delivery": "T0217",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
