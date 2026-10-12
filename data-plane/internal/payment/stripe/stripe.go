@@ -752,7 +752,9 @@ type listResp struct {
 
 // events reports provider-originated refunds and chargebacks on a captured charge. Only succeeded
 // refunds are reported (a pending refund can still fail and will be reported when it succeeds).
-// Disputes in a warning_* status are inquiries that withdraw no funds and are not reported.
+// Disputes in a warning_* status are inquiries that withdraw no funds and are not reported. A dispute is
+// reported as a CHARGEBACK (money returned) only once Stripe has decided it LOST; while it is open, or after
+// it was won, it is a DISPUTE -- a case for review that records no money (Product-Owner policy 2026-10-12).
 func (a *Adapter) events(ctx context.Context, key string, ch charge) ([]payment.ProviderEvent, error) {
 	var out []payment.ProviderEvent
 	if ch.AmountRefunded > 0 {
@@ -785,8 +787,13 @@ func (a *Adapter) events(ctx context.Context, key string, ch charge) ([]payment.
 			if err := json.Unmarshal(raw, &d); err != nil || d.ID == "" {
 				return errf("dispute list is malformed")
 			}
-			if !strings.HasPrefix(d.Status, "warning_") {
+			switch {
+			case strings.HasPrefix(d.Status, "warning_"):
+				// an inquiry: no funds withdrawn, nothing to record
+			case d.Status == "lost":
 				out = append(out, payment.ProviderEvent{EventID: d.ID, Kind: "CHARGEBACK", AmountMinor: d.Amount, ProviderRef: ch.ID})
+			default:
+				out = append(out, payment.ProviderEvent{EventID: "dispute:" + d.ID, Kind: "DISPUTE", AmountMinor: d.Amount, ProviderRef: d.ID})
 			}
 			return nil
 		})

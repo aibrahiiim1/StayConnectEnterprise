@@ -47,7 +47,7 @@ line says so — ideally one iPhone and one Android — and an email address you
 | 3.4 | Wait past 10 minutes without entering the code | internet stops; the portal comes back |
 | 3.5 | Enter the code (or sign in any other way) | the window ends at once; normal package access takes over |
 | 3.6 | *Use a different address* on the pending page | the window ends |
-| 3.7 | Let a window run out (or use up its data) without entering the code, then ask for a new code at once | the code is sent, but **no new window** until 30 minutes after the last one ended |
+| 3.7 | Let a window run out (or use up its data) without entering the code, then ask for a new code at once | the code is sent, **no new window**, and the page says how many minutes until the device may have one again (about 30) |
 | 3.8 | After 30 minutes, ask for a code again | a new window opens |
 | 3.9 | End a window by *Use a different address*, then ask with the right address | a new window opens at once (changing address does not start the wait) |
 | 3.10 | Request more than 3 windows from the same phone in 24 h | the code is still sent; no further window is opened |
@@ -58,10 +58,12 @@ line says so — ideally one iPhone and one Android — and an email address you
 |---|---|---|
 | 3A.1 | After 3.7, open Code requests in the Admin Console | the request is listed with the address, the device, "Waiting for the code" and "next window in … min" |
 | 3A.2 | *Let them try again* (reason + your password) | the phone's next code request opens a window at once; the audit log shows who and why |
-| 3A.3 | While a code is waiting, *Show code* (reason + your password) as an IT manager or front-desk user | the code is shown; typing it on the phone that asked signs in |
+| 3A.3 | Use a **new** address (never signed in here). While its code is waiting, *Show code* (reason + your password) as an IT manager or front-desk user | the code is shown; typing it on the phone that asked signs in; Sessions says *Emailed code, shown by staff* |
+| 3A.3b | Request a code for an address that **already signed in here before** | Code requests flags *Existing client*; *Show code* is not offered; *Let them try again* is |
+| 3A.3c | Sign out and come back on the phone from 3A.3 | no *Welcome back*: a staff-assisted sign-in earns no remembered device |
 | 3A.4 | Type that same code on a **different** phone | refused: requested from another device |
 | 3A.5 | After the client has signed in, look for *Show code* on that row | not offered (the code is used) |
-| 3A.6 | Sign in as a guest-relations or viewer user | guest relations: *Let them try again* only; viewer: the list only |
+| 3A.6 | Sign in as a guest-relations or viewer user | guest relations: *Let them try again* only; viewer: the list only; both see addresses and devices masked (`g•••@example.com`) |
 
 ## 4. Packages and acquisition
 
@@ -83,6 +85,10 @@ line says so — ideally one iPhone and one Android — and an email address you
 | 5.5 | Start another card purchase and press *Back* on the Stripe page | back on the portal; nothing granted; no charge |
 | 5.6 | Pay with the decline test card `4000 0000 0000 0002` | Stripe shows the decline; you can try again on the same page; nothing granted |
 | 5.7 | *(Optional)* Apple Pay / Google Pay on the Stripe page | in TEST mode the wallet uses a real card but Stripe charges nothing; the payment completes and access is granted like a card |
+| 5.8 | Buy a package with the dispute test card `4000 0000 0000 0259` | paid and connected; within the reconciliation sweep (up to 6 h) Financial review → *Card disputes and chargebacks* shows a **Dispute** case; access stays on |
+| 5.9 | Decide that case: *Keep access* (reason + password) | the case shows *Access kept* with your name; access unchanged |
+| 5.10 | In the Stripe dashboard (TEST mode), **partially** refund a paid test payment | settlement *Partially reversed*; the client stays online |
+| 5.11 | Refund the **rest** of the same payment | settlement *Reversed*; that client's access ends on every device within the sweep; it is listed under *Access ended by a full provider refund*; the client's other purchases are untouched |
 
 ## 6. Provider-managed conversion (only if you are testing it)
 
@@ -98,14 +104,15 @@ line says so — ideally one iPhone and one Android — and an email address you
 | # | Check | Expected |
 |---|---|---|
 | 7.1 | Admin Console → Sessions: end the test sessions | ended |
-| 7.2 | Any access paid in TEST mode that you refunded in Stripe | the refund is recorded and the settlement shows REVERSED; **access is not ended automatically** (open decision, contract §9) — end it by hand |
+| 7.2 | Any test case still open under *Card disputes and chargebacks* | decide it (*Keep* or *End access*) so no open case is left from testing |
 
 ## Known limits — not failures
 
 * **The code link is plain HTTP.** It carries the code in clear text on the client network and in the email.
   Device binding, single use, the ten-minute lifetime, *GET never verifies* and log redaction limit what that
   exposes; serving the portal over HTTPS needs a public certificate decision. Contract §10.2.
-* **A refunded charge does not end access.** Contract §9; a Product-Owner decision.
+* **Refunds act on the reconciliation sweep**, which runs every 6 hours, not instantly.
+* **A dispute or chargeback never ends access by itself**; a payments operator decides each case. Contract §9.
 * **Showing a code is the desk vouching for the client.** The client has not proved the address by reading their
   own mail. Contract §6.7.
 * **A phone that changes its hardware address** (private / random Wi-Fi address) is a new device to the network:

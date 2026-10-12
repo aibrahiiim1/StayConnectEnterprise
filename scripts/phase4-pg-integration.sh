@@ -122,6 +122,9 @@ run_step "review + finops API"     "${GO[@]}" -run "IntegrationReviewAPI|Integra
 run_step "payment runtime"         "${GO[@]}" -run IntegrationPayment ./internal/payment/ "$@"
 # Card checkout (D44): hosted checkout, reconciliation, and the account save committing with its credentials.
 run_step "card checkout"           "${GO[@]}" -run "TestCheckout|TestSaveAccount" ./internal/payment/ "$@"
+# Provider reversals, the refund policy (0115), LIVE refusal, sealed credentials, conversion and free-to-paid:
+# these tests existed (or are new) but matched no earlier -run filter, so the harness never ran them.
+run_step "card reversals + policy" "${GO[@]}" -run "TestProviderRefunds|TestCardRefundPolicy|TestLiveModeRefused|TestSealedCredentials|TestIntegration_ProviderManagedConversion|TestIntegration_FreeToPaid" ./internal/payment/ "$@"
 # Narrowed to the free GRANT path deliberately: TestC2RollbackAtEveryBoundary seeds a fixed device MAC and
 # collides with itself when it shares a database with another suite. That is a pre-existing fixture defect
 # in a test unrelated to the grant writer, and widening this step would be testing the fixture.

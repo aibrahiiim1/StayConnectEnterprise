@@ -74,7 +74,7 @@ const (
 // never initiates: a refund the merchant made in the provider dashboard, or a chargeback.
 type ProviderEvent struct {
 	EventID     string // the provider's own id: the deduplication key
-	Kind        string // REFUND | CHARGEBACK
+	Kind        string // REFUND | CHARGEBACK (money returned) | DISPUTE (opened or decided for the merchant: no money moved; review only)
 	AmountMinor int64
 	ProviderRef string
 	// Cumulative is true when AmountMinor is the provider's running TOTAL of this kind on the charge rather

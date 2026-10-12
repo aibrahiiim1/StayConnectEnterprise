@@ -107,10 +107,21 @@ func TestSMTPSendsOneMessageInTheClearWhenToldTo(t *testing.T) {
 	}
 	select {
 	case body := <-got:
-		for _, want := range []string{"From: =?utf-8?q?Caf=C3=A9_Wi-Fi?= <wifi@example.com>", "To: alice@example.com", "Subject: =?utf-8?q?Your_code?=", "123456"} {
+		for _, want := range []string{"From: =?utf-8?q?Caf=C3=A9_Wi-Fi?= <wifi@example.com>", "To: alice@example.com", "123456"} {
 			if !strings.Contains(body, want) {
 				t.Errorf("message lacks %q:\n%s", want, body)
 			}
+		}
+		// A plain-ASCII subject is sent as it is (mime.QEncoding leaves it unencoded); a non-ASCII header is
+		// encoded, as the From name above shows. The Subject line must be exactly the subject.
+		subject := ""
+		for _, line := range strings.Split(body, "\n") {
+			if strings.HasPrefix(line, "Subject: ") {
+				subject = strings.TrimRight(line, "\r")
+			}
+		}
+		if subject != "Subject: Your code" {
+			t.Errorf("subject line %q, want %q", subject, "Subject: Your code")
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("no message received")

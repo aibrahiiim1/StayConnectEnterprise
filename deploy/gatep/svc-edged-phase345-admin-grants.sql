@@ -466,5 +466,11 @@ GRANT SELECT, INSERT ON iam_v2.client_group_changes TO svc_edged;
 -- The Admin Console reports temporary verification windows and card settlement reports, and shows which
 -- accounts the provider converts for. It writes none of them.
 GRANT SELECT ON iam_v2.verification_access_grants TO svc_edged;
+
+-- ---- 0115: card disputes and chargebacks are reviewed; a full refund's access termination is evidenced ----
+-- The financial review screen reads the cases and the evidence, and resolves a case through one definer
+-- (KEEP_ACCESS / END_ACCESS, operator and reason required, a resolution written once).
+GRANT SELECT ON iam_v2.card_reversal_reviews, iam_v2.refund_access_terminations TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.p4_resolve_reversal_review(uuid, uuid, uuid, text, text, text) TO svc_edged;
 GRANT SELECT ON iam_v2.payment_account_conversion, iam_v2.payment_account_conversion_changes,
                 iam_v2.payment_settlement_reports TO svc_edged;

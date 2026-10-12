@@ -477,13 +477,28 @@ func (e *CheckoutEngine) recordSettlementReport(ctx context.Context, t txnRow, r
 	}
 }
 
-// recordReversals records provider-originated refunds and chargebacks on a captured charge. OneGate never
-// initiates one; it records what the provider reports so the ledger is true.
+// recordReversals records provider-originated refunds and chargebacks on a captured charge, opens a review case
+// for a dispute, and then applies the refund policy to the charge (migration 0115): a confirmed FULL refund ends
+// only the access that charge paid for; a partial refund changes nothing; a chargeback or dispute never ends
+// access by itself -- it is a case an operator resolves. OneGate never initiates a reversal and never retries
+// money; it records what the provider reports so the ledger is true.
 func (e *CheckoutEngine) recordReversals(ctx context.Context, t txnRow, events []ProviderEvent) {
+	touched := false
 	for _, ev := range events {
+		if ev.Kind == "DISPUTE" && ev.ProviderRef != "" {
+			var r string
+			if err := e.Outcome.QueryRow(ctx, `SELECT iam_v2.p4_open_dispute_review($1,$2,$3,$4)`,
+				t.tenant, t.site, t.id, ev.ProviderRef).Scan(&r); err != nil {
+				slog.Warn("card dispute review not opened", "err", err)
+			} else if r == "OPENED" {
+				slog.Info("card dispute opened for review")
+			}
+			continue
+		}
 		if ev.Kind != "REFUND" && ev.Kind != "CHARGEBACK" || ev.EventID == "" || ev.AmountMinor <= 0 {
 			continue
 		}
+		touched = true
 		amount := ev.AmountMinor
 		if ev.Cumulative {
 			var recorded int64
@@ -497,6 +512,20 @@ func (e *CheckoutEngine) recordReversals(ctx context.Context, t txnRow, events [
 		var r string
 		_ = e.Outcome.QueryRow(ctx, `SELECT iam_v2.p4_record_provider_reversal($1,$2,$3,$4,$5,$6,$7)`,
 			t.tenant, t.site, t.id, ev.Kind, amount, ev.EventID, nullIfEmpty(ev.ProviderRef)).Scan(&r)
+	}
+	if !touched {
+		return
+	}
+	var outcome string
+	if err := e.Outcome.QueryRow(ctx, `SELECT iam_v2.p4_apply_refund_policy($1,$2,$3)`, t.tenant, t.site, t.id).Scan(&outcome); err != nil {
+		slog.Warn("card refund policy not applied", "err", err)
+		return
+	}
+	switch outcome {
+	case "ACCESS_ENDED":
+		slog.Info("card fully refunded: the access it paid for was ended")
+	case "CHARGEBACK_REVIEW":
+		slog.Info("card chargeback: opened for review, access unchanged")
 	}
 }
 

@@ -378,10 +378,30 @@ own domain `otp-code-escrow:v1`, bound to tenant, site and challenge). Only scd 
 edged has authorised; the copy is deleted when the code is used and pruned once it has expired, been used or been
 locked. The code never appears in the audit record, the logs or the list.
 
-**What showing a code means.** The code still works only on the device that asked (§6.5), once, within its ten
-minutes. But a client signed in this way has not proved the address by reading their own mail: **the operator
-is vouching for it.** That is the Product Owner's decision; the desk should show a code only to a client who is
-present or on the phone, and the audit record names who did it and why.
+**What showing a code means — and does not (Product Owner approval, 2026-10-12; migration 0114).** The code
+still works only on the device that asked (§6.5), once, within its ten minutes. But a client signed in this way
+has not proved the address by reading their own mail: **the operator is vouching for it**, and the system records
+it as such:
+
+| Rule | Where |
+|---|---|
+| Every reveal is recorded (`iam_v2.otp_code_reveals`, the operator) **before** the code leaves; if it cannot be recorded, the code is not shown | scd `revealOTPCode` |
+| **An existing Client is never reached.** A code for an address that already belongs to a Client is not shown (`EXISTING_CLIENT`); Code requests flags the row and offers *Let them try again* instead. If a Client appears between the reveal and the verification, the verification is refused (`assisted_existing_client`) and the transaction is rolled back, so nothing on that Client changes | scd, `iamv2.resolvePrincipalAndFinalize` |
+| A staff-assisted verification may create a **new** Client. Its factor carries `assurance = staff_assisted` | `iamv2.OTPFactor`, identity attrs |
+| A `staff_assisted` factor satisfies **no** client-group rule (an address in a company domain earns no company group on the desk's word) | `iamv2.ruleMatches` |
+| The sign-in earns **no remembered device**; the next visit proves the address again | scd `authorizeViaIAMv2` |
+| The sign-in is labelled `EMAIL_OTP_ASSISTED` / `SMS_OTP_ASSISTED` / `WHATSAPP_OTP_ASSISTED` — *"…, shown by staff"* on the Sessions screen | `iamv2.AssistedCredential` |
+| When the client later proves the address themselves, the same Client continues and the marker becomes `verified` (attrs merge by key) | `iamv2.OTPFactor` |
+| The verification fails closed: if the reveal record cannot be read, the verification is treated as staff-assisted | scd `authorizeOTP` |
+
+**Who sees what on Code requests.** The full address and the device's hardware address are shown only to roles
+that may show a code (site admin, IT manager, front desk). Guest relations and viewers see `g•••@example.com` and
+`••:••:••:••:f7:3a`; the code state, the window and the limits are the same for everyone. Masking happens in edged
+and fails closed.
+
+**The client is told when the window returns.** When a limit keeps the window closed, scd says why
+(`temporary_access_withheld`) and the portal tells the client, in six languages, either how many minutes until the
+device may have one again, or that it may not today — and that the desk can help.
 
 ---
 
@@ -517,11 +537,23 @@ offered; there is no cash method. **Card means card**, at the provider too:
 Measured on PRE-LIVE (Stripe TEST mode, 2026-10-12): the site's account accepts the card-only request, and the
 hosted page offers the Card form only, with the express frame for card wallets and no Link.
 
-**A provider refund is recorded; it does not end access.** A refund or chargeback raised at the provider is
-recorded against its charge and moves the settlement to `PARTIALLY_REVERSED` / `REVERSED`. It does not
-terminate the entitlement the charge paid for — observed on PRE-LIVE, where a fully refunded sandbox charge
-left its entitlement ACTIVE until it was ended by an operator. Whether a full reversal should end or suspend
-access is an **open Product-Owner decision**; until it is made, an operator ends such access by hand.
+**Refunds, disputes and chargebacks (Product-Owner policy 2026-10-12; migration 0115).** OneGate never starts a
+refund or any other reversal; it records what the provider reports and applies one policy:
+
+| Provider reports | Ledger | Access |
+|---|---|---|
+| A **full** refund (refunds recorded against the charge ≥ the charge) | REFUND rows; settlement `REVERSED` | **Ends only the entitlement that charge's purchase funded** (purchase → settlement → entitlement is 1:1:1), reason `REVOKED`; its devices are disconnected and its sessions ended, as the Phase-6 expiry writer does; one append-only row in `refund_access_terminations` records the amounts and the transition. Idempotent. |
+| A **partial** refund | REFUND row; settlement `PARTIALLY_REVERSED` | Unchanged |
+| An open dispute, or a dispute the merchant **won** (Stripe) | Nothing — no money moved | Unchanged; a **DISPUTE case** is opened once |
+| A dispute the merchant **lost** (Stripe), or any chargeback | CHARGEBACK row; settlement reversed | **Unchanged**; a **CHARGEBACK case** is opened. If a charge has both a chargeback and refunds, the case decides |
+| UNKNOWN or anything not CAPTURED | Unchanged (settlement to review, as before) | Unchanged; never a blind retry |
+
+A case is decided once by a payments operator on **Financial review → Card disputes and chargebacks**: *Keep
+access* or *End access*, with the password and a reason, recorded on the case (`card_reversal_reviews`, which
+refuses deletion and any change after a decision) and in the audit log. The outcome role can open a case and
+never decide one. Previously every Stripe dispute that was not an inquiry was booked as a chargeback, including
+open and won ones; a chargeback also counted towards a "full refund". Both are corrected. Verified in the Phase-4
+harness; on PRE-LIVE only the sandbox paths a test card can drive are exercised (§ acceptance checklist).
 
 Settings follow the operational-settings rule: persisted, defaulted, bounded, audited. Group changes are
 recorded in `iam_v2.client_group_changes` (append-only) and in the audit log; `Primary method` and `Remember
@@ -543,7 +575,7 @@ and one operator rule (`example.com`, ports `[443]`):
 | The baseline resolvers (1.1.1.1, 8.8.8.8, 8.8.4.4) were open on every port — DNS-over-HTTPS to them worked before sign-in, and whatever else those addresses serve | all ports | port 53 only (TCP and UDP) |
 | The guest resolver (unbound on the gateway) answers any name recursively — a DNS-tunnel channel, as at every captive portal | unlimited | **rate-limited**: a device that has not signed in is held to 20 queries/s (burst 40) per address by the firewall, to the gateway and to the public resolvers alike, counted in `dns_preauth_limited`; unbound bounds every client to 100 qps (`ip-ratelimit`) and every zone to 1000 qps upstream (`ratelimit`), and refuses ANY. Resolution still works; tunnelling is throttled, not made impossible. |
 | IPv6 (corrected 2026-10-11: an earlier count looked for `ip6 ` and missed the `meta nfproto ipv6` form) | already dropped on guest input and guest-ingress forward | the guard now also covers the **return path** (`oifname @guest_interfaces`), sits **before** the established-flow accept, and counts every refused packet in `guest_ipv6_dropped`. Host forwarding and the appliance's own WAN/management IPv6 are untouched. |
-| **A name behind a shared front end**: `mail.google.com` resolves to an address that also serves YouTube, Search, Drive, Docs, Translate — all reached pre-auth by sending that host name to that address | reachable | **still reachable on 443**. The kernel filters addresses; the service is chosen by the TLS server name. No address/port rule can isolate a CDN-hosted domain. |
+| **A name behind a shared front end**: `mail.google.com` resolves to an address that also serves YouTube, Search, Drive, Docs, Translate — all reached pre-auth by sending that host name to that address | reachable | **Mail services: closed by default (2026-10-12)** — the mail allowlist is not applied while temporary internet is on. **Identity providers and the payment page** (opened only while their method is on) keep the same property: the kernel filters addresses and the service is chosen by the TLS server name, so no address/port rule can isolate a CDN-hosted domain. Accepted for those, because the sign-in or the payment cannot work without them. |
 
 **Why port enforcement is within the accepted model:** the sets, the forward accepts and the captive-redirect
 exclusion are the same mechanism, narrowed. `nftconverge` carries all three sets across a structural
@@ -572,7 +604,10 @@ mail services* the recommended design. That was superseded the same day: the Pro
 window of **general** internet access for the device that asked (§6.6), because restricting it to mail
 services inherits exactly the shared-front-end limitation measured above. §6.6 is the implemented and binding
 design; option 1 above is kept as the record of what was considered. The mail-service allowlist of §6.5
-remains available and site-configured; it is no longer what reading the code depends on.
+remains site-configured but, **since 2026-10-12, is not applied at all while temporary internet is on** (the
+default): applied site-wide it opened the services behind the providers' addresses (video, search, storage) to
+every device before sign-in, and the per-device window already gives the device that asked what it needs. It
+applies only on a site that switches temporary internet off, with this exposure stated on the screen.
 
 ### 10.2 Residual risk: the code link travels over plain HTTP (stated 2026-10-12)
 
@@ -592,8 +627,33 @@ the email itself, and on the client network when the phone opens the link.
 **What it does not protect against:** an observer who can read traffic on the same client network *and*
 present the binding device's hardware address — that is, someone already able to impersonate the device on
 the LAN — could use a code captured from the link within its ten minutes. Anyone who can read the client's
-mailbox can read the code in any case. The risk is accepted for PRE-LIVE testing and is closed only by serving
-the portal over HTTPS with a publicly trusted certificate, a separate Product-Owner decision.
+mailbox can read the code in any case. **The risk remains open**: it is closed only by serving the portal over
+HTTPS with a publicly trusted certificate.
+
+**Investigated 2026-10-12 — why HTTPS cannot be delivered inside the current authorisation.** Nothing on the
+appliance can obtain or serve a publicly trusted certificate for the portal today:
+
+* A public CA issues only for a **public DNS name the operator controls**. The portal is reached as the
+  gateway's private address or `portal.stayconnect.local`; no public hostname exists (deferred 2026-09-29).
+* Proving control needs **HTTP-01** (public inbound :80 to the appliance — a topology change) or **DNS-01**
+  (credentials for the domain's DNS provider and a Caddy build with that provider's plugin — external
+  infrastructure). The appliance has neither; ACME exists only on Central.
+* Serving it needs a **guest-side accept on the gateway's :443** (or 8343): today a pre-auth guest may reach only
+  DHCP, DNS and :8380 on its gateway, and unauthenticated 443 is reset. The repository also records the Product
+  Owner's earlier "no portal PKI / no interception" decision
+  (`TestNothingHereTerminatesTLSOrCarriesACertificate`).
+* Caddy can terminate TLS with an imported certificate, and portald has a dormant TLS listener, but neither has a
+  path to a public certificate, and the admin certificate manager accepts only its local CA.
+
+**The design, ready to build once decided.** A site setting *Portal hostname* (e.g. `wifi.<hotel-domain>`), the
+guest resolver answering it with each network's own gateway, a publicly trusted certificate for it — either
+imported by the operator (any public CA; renewed by the operator) or issued by ACME DNS-01 with the domain's
+DNS-provider token — served by Caddy on the gateway's :443 to guests (one new per-gateway accept, no
+interception, no DNAT of other HTTPS), the email link and the portal's own links built on `https://<hostname>`,
+and DHCP option 114 kept HTTP (captive detection still starts over plain HTTP everywhere). Local-first and
+outage-safe: the certificate and key live on the appliance; renewal needs the CA only every few weeks. **Decision
+needed from the Product Owner:** the hostname and domain, and which issuance path (operator import, or DNS-01
+with whose DNS provider) — together with lifting the recorded "no portal PKI" decision for this purpose.
 
 ### 10.3 Other properties
 
@@ -635,7 +695,8 @@ real social-provider validation (needs the public portal hostname decision).
 
 ## 13. Recommended next decisions (not implemented)
 
-1. **Public Client Portal hostname and certificate** — blocks every real IdP.
+1. **Public Client Portal hostname and certificate** — blocks every real IdP and is the only way to close the
+   plain-HTTP code-link risk (§10.2 has the investigation and the ready design).
 2. **OneGate-managed email relay** — a Central service with per-site sending identity; the appliance side is
    ready (an `smtp` row pointing at it).
 3. **Seal social provider secrets** the same way as notification secrets (same mechanism; not done here to

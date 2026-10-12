@@ -387,7 +387,9 @@ func TestStatusEvents(t *testing.T) {
 	w0 := &world{
 		session:  sess("complete", "paid", intent("succeeded", chargeJSON(700, true))),
 		refunds:  `{"data":[{"id":"re_1","amount":500,"status":"succeeded","charge":"ch_1"},{"id":"re_2","amount":200,"status":"succeeded","charge":"ch_1"},{"id":"re_3","amount":100,"status":"pending","charge":"ch_1"}],"has_more":false}`,
-		disputes: `{"data":[{"id":"dp_1","amount":1050,"status":"needs_response"},{"id":"dp_2","amount":1050,"status":"warning_needs_response"}],"has_more":false}`,
+		// An open dispute is a case for review (no money); a lost one is a chargeback; a won one is a case (the
+		// merchant kept the money); an inquiry is nothing.
+		disputes: `{"data":[{"id":"dp_1","amount":1050,"status":"needs_response"},{"id":"dp_2","amount":1050,"status":"warning_needs_response"},{"id":"dp_3","amount":300,"status":"lost"},{"id":"dp_4","amount":1050,"status":"won"}],"has_more":false}`,
 	}
 	f, srv := worldServer(t, w0)
 	a := adapter(srv)
@@ -404,8 +406,10 @@ func TestStatusEvents(t *testing.T) {
 		for _, e := range res.Events {
 			got[e.EventID] = e
 		}
-		if len(got) != 3 || got["re_1"].Kind != "REFUND" || got["re_1"].AmountMinor != 500 || got["re_2"].AmountMinor != 200 ||
-			got["dp_1"].Kind != "CHARGEBACK" || got["dp_1"].ProviderRef != "ch_1" {
+		if len(got) != 5 || got["re_1"].Kind != "REFUND" || got["re_1"].AmountMinor != 500 || got["re_2"].AmountMinor != 200 ||
+			got["dispute:dp_1"].Kind != "DISPUTE" || got["dispute:dp_1"].ProviderRef != "dp_1" ||
+			got["dp_3"].Kind != "CHARGEBACK" || got["dp_3"].AmountMinor != 300 || got["dp_3"].ProviderRef != "ch_1" ||
+			got["dispute:dp_4"].Kind != "DISPUTE" || got["dp_2"].Kind != "" || got["dp_1"].Kind != "" {
 			t.Fatalf("events %+v", res.Events)
 		}
 		if i == 0 {
