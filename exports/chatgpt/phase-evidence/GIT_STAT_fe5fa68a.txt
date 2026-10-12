@@ -1,4 +1,0 @@
-commit fe5fa68a4f82b9debaf9bac331ac86d40d8792bf
-Date:   Mon Oct 12 10:41:04 2026 +0300
-
-    The provenance note no longer reads as if every binary ran one head
