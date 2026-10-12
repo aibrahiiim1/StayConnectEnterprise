@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `3fbbe7dc789e82f34911fd57c146e81436fc5500`
-- **HEAD commit:** `f8e7cecc`
-- **Provenance (generation HEAD = inventory_head):** `e63cc93fb247db708b93ae605bbed49ee072abfa`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `f2785601`
+- **Provenance (generation HEAD = inventory_head):** `f27856014d9a1710cac76eb938998777b229baa8`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/client-access-identity`
 - **Remote branch:** `origin/delivery/client-access-identity`
 - **Changed files:** 234
@@ -162,26 +162,26 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0221 records the second FULL CHECK's findings, the dependency fix and the Admin Console on PRE-LIVE |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0221 records the second FULL CHECK's findings, the dependency fix and the Admin Console on PRE-LIVE |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0221 records the second FULL CHECK's findings, the dependency fix and the Admin Console on PRE-LIVE |
-| `docs/manifests/ClientAccessIdentity-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | The export packs and the change manifest carry the corrected note |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the corrected note |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the corrected note |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the corrected note |
+| `docs/manifests/ClientAccessIdentity-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | The export packs and the change manifest carry the T0221 state |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0221 state |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0221 state |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0221 state |
 | `exports/chatgpt/phase-evidence/GIT_STAT_24f4c734.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | The export packs and the change manifest carry the T0214 state |
-| `exports/chatgpt/phase-evidence/GIT_STAT_e63cc93f.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the corrected note |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the corrected note |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the corrected note |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the corrected note |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the corrected note |
-| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0220 state |
+| `exports/chatgpt/phase-evidence/GIT_STAT_e63cc93f.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | The export packs and the change manifest carry the T0221 state |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0221 state |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0221 state |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0221 state |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0221 state |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0221 state |
+| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0221 state |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0221 records the second FULL CHECK's findings, the dependency fix and the Admin Console on PRE-LIVE |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the corrected note |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0221 state |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0221 records the second FULL CHECK's findings, the dependency fix and the Admin Console on PRE-LIVE |
 | `exports/chatgpt/stayconnectenterprise/SYSTEM_OVERVIEW.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0214 state |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0220 state |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0220 state |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0220 state |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0220 state |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0221 state |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0221 state |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0221 state |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0221 state |
 | `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0221 records the second FULL CHECK's findings, the dependency fix and the Admin Console on PRE-LIVE |
 | `governance/transitions/T0214.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0214 records the client-access deployment to PRE-LIVE, with the exact provenance |
 | `governance/transitions/T0215.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0215 records the client-access corrections deployed to PRE-LIVE, with the exact provenance |
@@ -225,7 +225,7 @@
 | `hotel-admin/lib/payment-admin.ts` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | An issued email code opens a metered internet window, guest IPv6 and DNS are bounded, codes fail closed without a device, and a card provider may convert with recorded provenance |
 | `hotel-admin/lib/roles.ts` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | A device may have temporary internet again after a configurable wait; staff can let it try again or read a live code |
 | `hotel-admin/lib/session-words.ts` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | A staff-shown code never reaches an existing client; clients are told when temporary internet returns |
-| `hotel-admin/package-lock.json` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Admin Console production dependencies carry no known advisory: next 15.5.27, sharp 0.35.5, source-map-js 1.2.2 |
+| `hotel-admin/package-lock.json` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | The Admin Console lockfile resolves on Linux (sharp's optional platform packages) |
 | `hotel-admin/package.json` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Admin Console production dependencies carry no known advisory: next 15.5.27, sharp 0.35.5, source-map-js 1.2.2 |
 | `hotel-admin/test/allowance-notice.test.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | A refused acquisition keeps the client signed in, a session says how they signed in, and the code can be read on the Wi-Fi |
 | `hotel-admin/test/card-cases.test.tsx` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | A full provider refund ends only the access it paid for; disputes and chargebacks are reviewed, never automatic |
@@ -399,7 +399,7 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |    4 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |    4 +-
  docs/context/StayConnect-IAM-Handoff.md            |    4 +-
- .../ClientAccessIdentity-change-manifest.md        |  550 +++++++
+ .../ClientAccessIdentity-change-manifest.md        |  564 +++++++
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 350325 -> 350520 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 155549 -> 155589 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 44042 -> 44043 bytes
@@ -462,7 +462,7 @@
  hotel-admin/lib/payment-admin.ts                   |    4 +
  hotel-admin/lib/roles.ts                           |   16 +-
  hotel-admin/lib/session-words.ts                   |   27 +-
- hotel-admin/package-lock.json                      |  417 +++---
+ hotel-admin/package-lock.json                      |  377 ++---
  hotel-admin/package.json                           |    4 +-
  hotel-admin/test/allowance-notice.test.tsx         |    5 +
  hotel-admin/test/card-cases.test.tsx               |   48 +
@@ -483,31 +483,18 @@
  scripts/phase4-pg-integration.sh                   |    3 +
  scripts/prod-privilege-integration.sh              |    2 +-
  scripts/sitedb-dev.sh                              |    2 +-
- 234 files changed, 18363 insertions(+), 882 deletions(-)
+ 234 files changed, 18365 insertions(+), 854 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_e63cc93f.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_fe5fa68a.txt
-M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/MANIFEST.md
-M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md
-M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md
+(clean)
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: f2785601 The Admin Console lockfile resolves on Linux (sharp's optional platform packages)
+HISTORICAL: 86025d00 The export packs and the change manifest carry the T0221 state
 HISTORICAL: e63cc93f Governance: T0221 records the second FULL CHECK's findings, the dependency fix and the Admin Console on PRE-LIVE
 HISTORICAL: f8e7cecc Admin Console production dependencies carry no known advisory: next 15.5.27, sharp 0.35.5, source-map-js 1.2.2
 HISTORICAL: 95ddd346 The export packs and the change manifest carry the corrected note
