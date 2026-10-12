@@ -1,4 +1,0 @@
-commit bb9e053a63d194b4fb54c74449a00d7ff765d89a
-Date:   Mon Oct 12 12:40:08 2026 +0300
-
-    Governance: T0222 records the Linux-resolved lockfile
