@@ -1,0 +1,50 @@
+{
+  "transition_id": "T0224",
+  "seq": 224,
+  "timestamp": "2026-10-12T15:57:00+03:00",
+  "timestamp_derivation": "Written after the Phase-3 PG16 integration step passed locally with every package concurrent, before the commit that introduces it.",
+  "record_type": "CLIENT_ACCESS_FULL_CHECK_FOURTH_RUN_FINDING_FIXED",
+  "authorisation": "The 'PR #211 Final Closure Mission' of 2026-10-12 (T0218): resolve FULL CHECK failures without weakening validation.",
+  "delivery": {
+    "pull_request": 211,
+    "branch": "delivery/client-access-identity",
+    "content_head": "25e093020664d7e54bdf35f7e84ccf328b21aac5",
+    "pr_state": "OPEN. NOT MERGED. po-merge-approved NOT applied."
+  },
+  "full_check_fourth_run": {
+    "head": "747a217072cd",
+    "result": "FAIL",
+    "gates": {
+      "governance": "success, run 38247998963",
+      "phase3-full-software-gate": "failure, run 38248001584 -- PG16 step: acctd TestIntegration_Acct_ClassOriginIsSourceBound, deadlock detected (40P01); the real-kernel suite passed",
+      "phase4-financial-core-gate": "success, run 38248004421",
+      "phase5-post-stay-transfer-gate": "success, run 38248007120"
+    }
+  },
+  "what_was_found": [
+    "The acctd failures of runs 2 (usage 0/0) and 4 (deadlock) had one cause in this PR: the remembered-device scd integration test ran TRUNCATE ... devices, guest_principals ... CASCADE while the step's other packages ran concurrently on the same database, taking exclusive locks and cascading into their rows mid-test. The run-2 reading 'a runner-timing flake' was wrong and is corrected here."
+  ],
+  "delivered": [
+    "The test's cleanup is scoped to the device and address it creates, before and after (the pool is closed after the cleanup). The whole Phase-3 PG16 integration step passes locally with every package concurrent, and on repetition."
+  ],
+  "deployment_provenance": "Unchanged from T0223 (a test file only).",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0223."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; nothing merged, no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Nothing is merged. Go-Live remains unauthorised.",
+  "head": "25e09302",
+  "head_note": "The last CONTENT commit of PR #211 at the time of this receipt; governance commits follow it.",
+  "previous_delivery": "T0223",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
