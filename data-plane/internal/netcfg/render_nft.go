@@ -126,8 +126,8 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	// page's 443. The baseline resolvers live in the port sets at 53 only: they used to be open on every port,
 	// which made DNS-over-HTTPS to them (and whatever else those addresses serve) reachable before sign-in.
 	b.WriteString("\tset walled_garden_ip {\n\t\ttype ipv4_addr\n\t\tflags interval\n\t\tauto-merge\n\t}\n\n")
-	b.WriteString("\tset walled_garden_tcp {\n\t\ttype ipv4_addr . inet_service\n\t\tflags interval\n\t\tcomment \"pre-auth (address, TCP port) pairs; scd reconciles\"\n\t\telements = { 1.1.1.1 . 53, 8.8.8.8 . 53, 8.8.4.4 . 53 }\n\t}\n\n")
-	b.WriteString("\tset walled_garden_udp {\n\t\ttype ipv4_addr . inet_service\n\t\tflags interval\n\t\tcomment \"pre-auth (address, UDP port) pairs; scd reconciles\"\n\t\telements = { 1.1.1.1 . 53, 8.8.8.8 . 53, 8.8.4.4 . 53 }\n\t}\n\n")
+	fmt.Fprintf(&b, "\tset walled_garden_tcp {\n\t\ttype ipv4_addr . inet_service\n\t\tflags interval\n\t\tcomment \"pre-auth (address, TCP port) pairs; scd reconciles\"\n\t\telements = { %s }\n\t}\n\n", baselinePairs())
+	fmt.Fprintf(&b, "\tset walled_garden_udp {\n\t\ttype ipv4_addr . inet_service\n\t\tflags interval\n\t\tcomment \"pre-auth (address, UDP port) pairs; scd reconciles\"\n\t\telements = { %s }\n\t}\n\n", baselinePairs())
 	// TEMPORARY VERIFICATION ACCESS (scd verify_access.go). While a device waits for an email code it may reach
 	// the internet for a short, metered window: admission is a timed (bridge, address) element -- the kernel
 	// ends it at expiry by itself -- and each admitted address has its own quota object (combined bytes, both
@@ -357,6 +357,22 @@ func joinSubnets(nets []GuestNetwork) string {
 	var parts []string
 	for _, n := range nets {
 		parts = append(parts, n.SubnetCIDR)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// BaselineResolvers are the public resolvers every pre-auth device may reach on port 53, TCP and UDP. The render
+// declares them as the static elements of walled_garden_tcp / walled_garden_udp; the converge does not carry
+// them across a structural replace, because the new ruleset already declares them (nftconverge).
+var BaselineResolvers = []string{"1.1.1.1", "8.8.8.8", "8.8.4.4"}
+
+// BaselineResolverPort is the only port the baseline resolvers are open on before sign-in.
+const BaselineResolverPort = 53
+
+func baselinePairs() string {
+	parts := make([]string, 0, len(BaselineResolvers))
+	for _, ip := range BaselineResolvers {
+		parts = append(parts, fmt.Sprintf("%s . %d", ip, BaselineResolverPort))
 	}
 	return strings.Join(parts, ", ")
 }

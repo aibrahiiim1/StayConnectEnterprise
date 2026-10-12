@@ -123,7 +123,7 @@ func (e *Engine) Ensure(ctx context.Context, intent []netcfg.GuestNetwork, trigg
 				// would silently deauthorize whoever is in it. Refuse before touching anything.
 				return out, fmt.Errorf("%w: read live set %s: %v", ErrLiveStateUntrusted, set, err)
 			}
-			carried = append(carried, CarryOverCommands(set, els)...)
+			carried = append(carried, CarryOverCommands(set, withoutRendered(set, els))...)
 		}
 	}
 	out.Carried = len(carried)
@@ -309,6 +309,31 @@ func CarryOverCommands(set string, els []nft.Element) []string {
 		default:
 			out = append(out, fmt.Sprintf("add element inet stayconnect %s { %s }", set, key))
 		}
+	}
+	return out
+}
+
+// withoutRendered drops the elements the new render declares itself -- the baseline resolver pairs of the
+// port-restricted garden sets -- so the converge carries only RUNTIME state (authorizations, scd's garden
+// entries) and reports exactly that many.
+func withoutRendered(set string, els []nft.Element) []nft.Element {
+	if set != nft.GardenTCP && set != nft.GardenUDP {
+		return els
+	}
+	static := map[string]bool{}
+	for _, ip := range netcfg.BaselineResolvers {
+		static[ip] = true
+	}
+	out := make([]nft.Element, 0, len(els))
+	for _, e := range els {
+		ip := e.IP
+		if v4 := ip.To4(); v4 != nil {
+			ip = v4
+		}
+		if e.Port == netcfg.BaselineResolverPort && static[ip.String()] {
+			continue
+		}
+		out = append(out, e)
 	}
 	return out
 }
