@@ -1,0 +1,39 @@
+{
+  "transition_id": "T0229",
+  "seq": 229,
+  "timestamp": "2026-10-14T00:22:10+03:00",
+  "timestamp_derivation": "Written before the commit that introduces it (Cairo time from UTC by hand).",
+  "record_type": "RECEIPT_TIME_CORRECTED_FORWARD",
+  "authorisation": "The governance rule that a late receipt is corrected forward, exactly, by a later receipt (tools/validate-transition-times.sh).",
+  "timestamp_corrections": [
+    {
+      "transition_id": "T0228",
+      "recorded_timestamp": "2026-10-14T00:21:30+03:00",
+      "introducing_commit": "59ee81e618dd5a092f012a2823d04eaebbe3c787",
+      "introducing_commit_time": "2026-10-14T00:21:15+03:00",
+      "late_by_seconds": 15,
+      "what_is_true": "The merge T0228 records happened at 2026-10-14T00:20:05+03:00, and the receipt was committed at 2026-10-14T00:21:15+03:00; the receipt's hand-typed time is 15s too late. The receipt is left exactly as written."
+    }
+  ],
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0228."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "f9310bb8be45497c4f549f50b9ba4649fddfa2bf",
+  "base_note": "Master after the merge of PR #212; the closure lineage is built on it.",
+  "head": "f9310bb8",
+  "head_note": "No content commit: governance only.",
+  "previous_delivery": "T0228",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
