@@ -1,4 +1,0 @@
-commit 726b7776bf5397c51bf59377ee01bdca1a835056
-Date:   Mon Oct 12 15:57:11 2026 +0300
-
-    Governance: T0224 records the fourth FULL CHECK's finding fixed (a test-isolation defect) and corrects the run-2 flake reading

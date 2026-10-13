@@ -717,6 +717,7 @@ the appliance itself.
 | `POST /v1/appliance/offline-reconcile` | tell Central an offline activation package was consumed | the package id | after an offline import, retried every 10 minutes until Central confirms |
 | `GET /v1/appliance/hello` | **licence enforcement** — detects that Central deleted this appliance (§26) | signed appliance id only | at boot, then every 5 minutes |
 | `GET /v1/appliance/assignment`, `/assignment-registry`, `POST /assignment/ack` | the signed customer/site binding the licence is scoped to; carries retirement | signed document: customer, site, state, version; the ack returns the version adopted | every 30 seconds (mutual TLS only); a terminal acknowledgement is retried until Central confirms |
+| `POST /v1/appliance/portal-tls/sync`, `POST /portal-tls/orders`, `GET /portal-tls/orders/{id}` | the Client Portal's HTTPS hostname and certificates (contract) | the portal address and hotel domain up; the hostname, DNS state, domain records and certificate status down; a CSR up and the issued chain down (the key never leaves the appliance) | every 5 minutes, and on an Admin Console change (mutual TLS only) |
 
 **No client identity, stay, session, usage or log content appears in any of them.**
 
