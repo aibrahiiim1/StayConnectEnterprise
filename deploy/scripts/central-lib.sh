@@ -79,6 +79,8 @@ CENTRAL_TRUST_ITEMS=(
   "opt|opt/stayconnect/central/tls/san.cnf|0644|names the :443 certificate was issued for"
   "opt|etc/stayconnect/backup-retention.conf|0644|backup retention policy"
   "opt|etc/stayconnect/backup-retention.pins|0644|operator-pinned backup artefacts"
+  "opt|etc/stayconnect/portal-tls/acme-account.key|0600|portal certificates: the ACME account key (CAA pins its account URL)"
+  "opt|etc/stayconnect/portal-tls/dns-api.token|0600|portal certificates: the zone-scoped DNS API token"
 )
 # Retired vendor identities are kept on purpose (vendor-signing-key.sh rotate): appliances still pinned to one
 # can only be re-signed with it. Carried by glob.
