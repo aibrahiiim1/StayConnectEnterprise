@@ -32,6 +32,10 @@ var tenantOwnedTables = []string{
 	"accounting_records",
 	"social_oauth_states",
 	"stripe_events",
+	// sealed provider secrets (0107, 0116): keyed by tenant, unreadable under another tenant's AAD, and purged
+	// with the providers they belong to rather than left as ciphertext nobody can use.
+	"iam_v2.notification_provider_secret_generations",
+	"iam_v2.social_provider_secret_generations",
 	// parents
 	"walled_garden_rules",
 	"notification_providers",

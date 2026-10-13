@@ -183,6 +183,8 @@ BEGIN
     GRANT SELECT, INSERT, UPDATE ON public.portal_tls_state, public.portal_certificates TO svc_scd;
     GRANT DELETE ON public.portal_certificates TO svc_scd;
     GRANT SELECT, INSERT, UPDATE ON iam_v2.social_provider_secret_generations TO svc_scd;
+    -- a cross-tenant transition purges the previous tenant's sealed secrets (cmd/scd/tenant_transition.go)
+    GRANT DELETE ON iam_v2.social_provider_secret_generations, iam_v2.notification_provider_secret_generations TO svc_scd;
     GRANT UPDATE (client_secret) ON public.social_oauth_providers TO svc_scd;
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_edged') THEN
