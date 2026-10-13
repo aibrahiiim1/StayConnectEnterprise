@@ -165,6 +165,18 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	b.WriteString("\t\tiif \"lo\" accept\n")
 	b.WriteString("\t\tiifname @guest_interfaces meta l4proto { tcp, udp } th dport 53 iifname . ip saddr != @auth_ipv4 iifname . ip saddr != @phase3_auth_ipv4 update @dns_preauth_rl { ip saddr limit rate over 20/second burst 40 packets } counter name \"dns_preauth_limited\" drop comment \"pre-auth DNS rate limit\"\n")
 	b.WriteString("\t\tct state established,related accept\n\t\tct state invalid drop\n")
+	// THE PORTAL ADDRESS IS REFUSED EVERYWHERE BUT A GUEST NETWORK, and the refusal is a rule, not the policy.
+	//
+	// The policy drop alone does NOT cover it. The management accepts just below (SSH on 22, and the admin UI on
+	// 443 when no MgmtAddr pins it) are keyed on the interface, not the destination -- so anything on the WAN or
+	// management side that routed a packet to the portal address at this appliance would be accepted by them and
+	// land on SSH or the admin console under the portal's name. The portal address is answered on guest
+	// networks only (contract §2.1, §9), so every other ingress is dropped here, BEFORE those accepts and after
+	// the established accept (a reply to the appliance's own connection is never addressed to it). Loopback was
+	// accepted above: the appliance's own health checks may still reach it.
+	if vip := renderPortalVIP(topo); vip != "" {
+		fmt.Fprintf(&b, "\t\tiifname != @guest_interfaces ip daddr %s drop comment \"portal address: guest networks only\"\n", vip)
+	}
 	fmt.Fprintf(&b, "\t\tiifname \"%s\" tcp dport 22 accept\n", topo.MgmtInterface)
 	// Admin UI (Caddy TLS). When MgmtAddr is set, pin the accept to that address
 	// so the admin UI is refused on any other IP the mgmt NIC carries — this is
@@ -227,6 +239,15 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 		}
 		fmt.Fprintf(&b, "\t\tiifname \"%s\" ip daddr %s icmp type echo-request accept comment \"ping own gateway\"\n", br, gw)
 	}
+	// THE PORTAL ADDRESS, FROM ANY GUEST NETWORK, ON THE TWO PORTAL LISTENERS ONLY. prerouting_nat has already
+	// turned the guest's 443 into 8343 and 80 into 8380 on this same address, so these are the ports the input
+	// hook sees. Nothing else on the portal address is open: no DNS, no ping, and none of portald's other ports
+	// by their own numbers -- a guest who connects to <portal address>:8343 directly is admitted only because that
+	// is where its 443 lands anyway, which is the same listener.
+	if vip := renderPortalVIP(topo); vip != "" {
+		fmt.Fprintf(&b, "\t\tiifname @guest_interfaces ip daddr %s tcp dport { %d, %d } accept comment \"portal address (TLS and HTTP portal)\"\n",
+			vip, PortalAddressTLSPort, portalHTTPPort(topo))
+	}
 	// AND THE BOUNDARY, STATED RATHER THAN IMPLIED BY THE POLICY.
 	//
 	// The chain's policy is already drop, so this changes no packet's fate today. It is here because the
@@ -244,6 +265,16 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	// is untouched: only packets entering or leaving a client bridge are refused.
 	b.WriteString("\t\tiifname @guest_interfaces meta nfproto ipv6 counter name \"guest_ipv6_dropped\" drop comment \"IPv6 guest bypass guard\"\n")
 	b.WriteString("\t\toifname @guest_interfaces meta nfproto ipv6 counter name \"guest_ipv6_dropped\" drop comment \"IPv6 guest bypass guard (return path)\"\n")
+	// THE PORTAL ADDRESS IS NEVER ROUTED, in either direction, from or to anything. A guest's packet to it is
+	// DNAT'd to a LOCAL address and goes to the input hook, never here; the only way one reaches this chain is
+	// the portal interface being absent (a failed apply, a hand-deleted link) while the ruleset still names the
+	// address -- and then an authorized guest's packet would be forwarded out of the WAN, and masqueraded, to
+	// whatever holds that private address upstream. Dropped here, before the established accept and before
+	// every accept below, so the address cannot leave the appliance whatever state the interface is in.
+	if vip := renderPortalVIP(topo); vip != "" {
+		fmt.Fprintf(&b, "\t\tip daddr %s drop comment \"portal address is never routed\"\n", vip)
+		fmt.Fprintf(&b, "\t\tip saddr %s drop comment \"portal address is never routed (source)\"\n", vip)
+	}
 	// TEMPORARY VERIFICATION ACCESS IS METERED BEFORE THE ESTABLISHED ACCEPT, so every packet of the window --
 	// new or established, either direction -- is counted against the device's quota and policed against its
 	// rates. A rule here only ever DROPS (over quota, over rate); admission is the verify_ipv4 accept below.
@@ -304,6 +335,22 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 
 	// --- prerouting nat (captive redirect per network to its own gateway) ---
 	b.WriteString("\tchain prerouting_nat {\n\t\ttype nat hook prerouting priority dstnat; policy accept;\n")
+	// THE PORTAL ADDRESS, FIRST. A guest -- signed in or not -- that connects to the portal address reaches the
+	// portal: 443 to portald's TLS listener, 80 to its HTTP listener, both on the portal address itself, so the
+	// packet stays local and is decided by the input chain above.
+	//
+	// THIS IS THE ONLY 443 REDIRECT IN THE RULESET, AND IT IS BOUND TO ONE DESTINATION. `ip daddr <portal
+	// address>` is the whole of its scope: a guest's HTTPS to any other host is never redirected (PortalTLSPort
+	// stays zero), because the appliance holds a certificate for its own portal names and nobody else's.
+	//
+	// It sits before the walled-garden accept and before the per-network captive DNAT, so neither can claim a
+	// packet addressed to the portal; a nat rule's dnat ends the chain for that packet.
+	if vip := renderPortalVIP(topo); vip != "" {
+		fmt.Fprintf(&b, "\t\tiifname @guest_interfaces ip daddr %s tcp dport 443 dnat ip to %s:%d comment \"portal address: TLS portal\"\n",
+			vip, vip, PortalAddressTLSPort)
+		fmt.Fprintf(&b, "\t\tiifname @guest_interfaces ip daddr %s tcp dport 80 dnat ip to %s:%d comment \"portal address: HTTP portal\"\n",
+			vip, vip, portalHTTPPort(topo))
+	}
 	// A port-restricted garden pair on 80 or 443 is reachable as itself: accepting here ends NAT processing for
 	// the packet, so the captive redirect below (which excludes only the address-only set) never claims it.
 	b.WriteString("\t\tiifname @guest_interfaces ip daddr . tcp dport @walled_garden_tcp accept comment \"port-restricted garden: no captive redirect\"\n")
@@ -343,6 +390,19 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 
 	b.WriteString("}\n")
 	return b.String()
+}
+
+// renderPortalVIP is the portal address as it may appear in the ruleset, or "" for none.
+//
+// A malformed value renders NOTHING rather than a broken line. The ruleset is one atomic `nft -f`: a single
+// syntax error does not lose the portal, it loses every guest network at once (the same fail-safe as a missing
+// gateway above). Validation refuses such a value long before this, so reaching here with one means something
+// wrote the setting behind the validator's back, and the safe reading is "no portal address".
+func renderPortalVIP(topo Topology) string {
+	if ip := ParsePortalIP(topo.PortalVIP); ip != nil {
+		return ip.String()
+	}
+	return ""
 }
 
 func joinBridges(nets []GuestNetwork) string {

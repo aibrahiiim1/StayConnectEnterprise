@@ -14,6 +14,13 @@ package netcfg
 // The property that matters most is the one a mistake here would break silently. Removing a DNAT must not
 // turn a blocked connection into an allowed one: an unauthenticated guest must still not reach the internet
 // on 443. That is asserted first and from the rendered ruleset, not from intent.
+//
+// WHAT IS TRUE NOW (contract ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN §2.1). The portal does have a TLS listener
+// today, with a publicly trusted certificate for the appliance's OWN portal names -- and it is reachable ONLY
+// behind the portal address, one private /32 on the appliance, by a rule bound to that single destination
+// (render_nft_portal_vip_test.go). Nothing here changed: PortalTLSPort is still zero, no gateway redirects 443,
+// and a guest's HTTPS to any other host is still never intercepted, whether or not a portal address exists.
+// TestArbitrary443IsStillNeverInterceptedWithAPortalAddress holds that with the portal address in the render.
 
 import (
 	"strings"
@@ -121,6 +128,44 @@ func TestAnApplianceThatDOESServeATLSPortalIsUnchanged(t *testing.T) {
 	}
 	if strings.Contains(out, "tcp dport 443 reject with tcp reset") {
 		t.Error("an appliance with a working TLS portal should redirect, not refuse")
+	}
+}
+
+func TestArbitrary443IsStillNeverInterceptedWithAPortalAddress(t *testing.T) {
+	// The same guarantees as above, with the portal address in the render. The only 443 redirect is the one bound
+	// to `ip daddr <portal address>`; no gateway redirect exists; the prompt refusal of everything else stays.
+	topo := DefaultTopology()
+	topo.PortalVIP = "10.255.255.1"
+	nets := []GuestNetwork{{
+		ID: "n1", Name: "Pilot Guest", BridgeName: "br-g-test", GatewayIP: "192.168.77.1",
+		SubnetCIDR: "192.168.77.0/24", PrefixLen: 24, NetworkType: "untagged",
+		Enabled: true, CaptiveEnabled: true, InternetEnabled: true, NATEnabled: true,
+	}}
+	out := string(RenderNftables(nets, topo))
+
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "tcp dport 443") && strings.Contains(line, "dnat") &&
+			!strings.Contains(line, "ip daddr 10.255.255.1 tcp dport 443 dnat ip to 10.255.255.1:8343") {
+			t.Errorf("a 443 redirect that is not bound to the portal address: %s", strings.TrimSpace(line))
+		}
+	}
+	if strings.Contains(out, "dnat ip to 192.168.77.1:8343") || strings.Contains(out, "192.168.77.1 tcp dport { 8380, 8343 }") {
+		t.Error("the gateway serves the TLS port; it must exist only behind the portal address")
+	}
+	if !strings.Contains(out, `tcp dport 443 reject with tcp reset`) {
+		t.Error("the prompt refusal of unauthenticated HTTPS was lost when a portal address was added")
+	}
+	fwd := forwardChain(t, out)
+	for _, forbidden := range []string{"tcp dport 443 accept", "tcp dport 443 counter accept"} {
+		if strings.Contains(fwd, forbidden) {
+			t.Errorf("unauthenticated guest HTTPS is ACCEPTED (%q)", forbidden)
+		}
+	}
+	// The ruleset still carries no TLS material: the certificate lives with portald, not in the firewall.
+	for _, forbidden := range []string{"certificate", "cert ", ".crt", ".pem", "acme", "self-signed"} {
+		if strings.Contains(strings.ToLower(out), forbidden) {
+			t.Errorf("the rendered ruleset mentions %q", forbidden)
+		}
 	}
 }
 

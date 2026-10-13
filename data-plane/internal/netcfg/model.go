@@ -87,8 +87,53 @@ type Topology struct {
 	// terminated TLS would have to present a certificate for somebody else's domain, which is precisely what
 	// is NOT being built. Zero means the appliance does not pretend to serve that port, and the renderer
 	// stops emitting rules that depend on it.
+	//
+	// It STAYS zero now that the portal has an HTTPS listener (contract ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN
+	// §2.1). That listener is reachable ONLY behind the portal address below -- traffic a guest addresses to
+	// PortalVIP -- and never behind a gateway: a guest's connection to any other host on 443 is still never
+	// redirected, because the appliance holds a certificate only for its own portal names.
 	PortalTLSPort int
+
+	// PortalVIP is the portal address: one RFC 1918 IPv4 /32 that exists only on the dummy interface
+	// PortalIface, answered only from guest interfaces on TCP 443 (-> portald :8343) and TCP 80 (-> portald
+	// :8380), never routed, never NATed, never reachable from the WAN or management side. "" means this
+	// appliance has none, and the renderer emits nothing for it. It is the address the portal's public
+	// hostname resolves to, which is why it is one fixed address rather than each network's gateway: public
+	// DNS gives one answer to every guest on every network.
+	//
+	// netd fills it from public.portal_https_settings at apply time and records it in the revision bundle
+	// (file PortalVIPBundleFile), so a rollback restores the address that revision was applied with.
+	PortalVIP string
+
+	// PortalTLS is the portal's HTTPS state as scd last established it (public.portal_tls_state). It changes
+	// at runtime without a network revision; only DHCP option 114 (RenderKeaDhcp4) reads it. The nftables
+	// render deliberately ignores it: whether HTTPS is active must never change what the firewall admits.
+	PortalTLS PortalTLS
 }
+
+// PortalTLS is the subset of public.portal_tls_state that decides what guests are told about the portal.
+type PortalTLS struct {
+	// HTTPSActive is scd's verdict: a canonical hostname exists, its certificate is installed and valid, and
+	// the portal address is up. False means the approved HTTP fallback is in force.
+	HTTPSActive bool `json:"https_active"`
+	// CanonicalHostname is the name the portal is served under while HTTPS is active.
+	CanonicalHostname string `json:"canonical_hostname,omitempty"`
+	// OneGateHostname is <label>.gw.onegate.work, allocated by Central.
+	OneGateHostname string `json:"onegate_hostname,omitempty"`
+	// CustomDomain is the hotel's portal domain, filled ONLY while its status is VERIFIED.
+	CustomDomain string `json:"custom_domain,omitempty"`
+}
+
+const (
+	// PortalIface is the dummy interface that carries PortalVIP/32. It is created, re-addressed and deleted by
+	// netd alone; nothing else on the appliance may own an interface by this name.
+	PortalIface = "ogportal0"
+	// PortalAddressTLSPort is portald's TLS listener. It is reached only through the portal address's 443.
+	PortalAddressTLSPort = 8343
+	// PortalVIPBundleFile is the file in a revision bundle that records the portal address the revision was
+	// applied with ("" when none), so rollback and boot reconcile can restore exactly that address.
+	PortalVIPBundleFile = "portal-ip"
+)
 
 func DefaultTopology() Topology {
 	return Topology{
