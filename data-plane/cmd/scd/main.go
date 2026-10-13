@@ -53,7 +53,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/signinattempt"
 	"github.com/stayconnect/enterprise/data-plane/internal/sms"
 	"github.com/stayconnect/enterprise/data-plane/internal/social"
-	"github.com/stayconnect/enterprise/data-plane/internal/socialloader"
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
 	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
 	"github.com/stayconnect/enterprise/data-plane/internal/throttle"
@@ -195,7 +194,17 @@ type server struct {
 	whatsapp whatsapp.Sender
 	// otpIssuer issues a challenge; nil means otp.Issue against s.db. A test with no database supplies its own.
 	otpIssuer func(ctx context.Context, p otp.IssueParams) (*otp.Issued, error)
-	socialReg *social.Registry
+	// Social sign-in (social_secrets.go): the live provider registry generation, swapped whole on reload;
+	// socialBase is what every generation starts from (the development stub, and nothing in production);
+	// socialKey seals provider secrets; socialMu serialises reloads.
+	socialSet  atomic.Pointer[socialSet]
+	socialBase []social.Provider
+	socialKey  sealbox.Key
+	socialMu   sync.Mutex
+	// socialPortal reports whether the portal is served over HTTPS and its canonical hostname, for social
+	// sign-in; nil or noPortalHTTPS{} means the HTTP fallback (no real social provider is offered). It is the
+	// portal certificate agent (portalTLS) once that starts.
+	socialPortal portalHosts
 	loginRL   *loginLimiter // layered throttling for guest username/password logins (optional fast in-memory layer)
 
 	// Phase 1B dark-auth machinery. All are inert unless explicitly enabled at deploy time:
@@ -635,14 +644,15 @@ func main() {
 		slog.Warn("awaiting registration: this appliance has no registered identity yet")
 	}
 
-	// Social provider registry. Default: in-process Stub for "google" so
-	// dev environments work without OAuth credentials. The loader then
-	// overrides any provider that has an enabled social_oauth_providers
-	// row for this tenant — that's how the real Google client takes over
-	// in production.
-	stubAuthBase := envOr("SCD_OAUTH_STUB_BASE", "http://portal.stayconnect.local:8380/api/oauth/stub/authorize")
-	socialReg := social.NewRegistry()
-	socialReg.Register(&social.Stub{ProviderName: "google", AuthorizeBase: stubAuthBase})
+	// Social provider base. A DEVELOPMENT build keeps the in-process Stub for "google" so dev environments work
+	// without OAuth credentials (SCD_OAUTH_STUB_BASE, unchanged). A production build registers no stub: the stub
+	// mints whatever identity its code names, so a stub left standing in for an unconfigured provider would be
+	// a sign-in as anyone. The real providers are built from sealed secrets after the key loads (below).
+	var socialBase []social.Provider
+	if !buildprofile.Production {
+		stubAuthBase := envOr("SCD_OAUTH_STUB_BASE", "http://portal.stayconnect.local:8380/api/oauth/stub/authorize")
+		socialBase = append(socialBase, &social.Stub{ProviderName: "google", AuthorizeBase: stubAuthBase})
+	}
 
 	// awaiting = enrolled-but-unassigned OR un-enrolled: there is no tenant/site,
 	// so the tenant-scoped guest-plane subsystems (social/PMS providers, which
@@ -650,13 +660,6 @@ func main() {
 	// wizard + run the assignment agent; the guest data plane is pre-license until
 	// a signed assignment arrives, after which scd re-execs into the full path.
 	awaiting := c.TenantID == "" || c.SiteID == ""
-	if !awaiting {
-		sctx, scancel := context.WithTimeout(rootCtx, 10*time.Second)
-		if _, err := socialloader.Load(sctx, pool, c.TenantID, socialReg); err != nil {
-			slog.Warn("socialloader: load failed; using fallback stubs", "err", err)
-		}
-		scancel()
-	}
 
 	// PMS provider registry — config-driven from pms_providers (Phase 4.5.5a).
 	var pmsReg *pms.Registry
@@ -680,7 +683,7 @@ func main() {
 		mail:         mail.NewStub(c.MailLogPath),
 		sms:          sms.NewStub(c.SMSLogPath),
 		whatsapp:     whatsapp.NewStub(c.WhatsAppLogPath),
-		socialReg:    socialReg,
+		socialBase:   socialBase,
 		loginRL:      newLoginLimiter(),
 		pmsReg:       pmsReg,
 		pmsBuilt:     pmsBuilt,
@@ -701,6 +704,9 @@ func main() {
 	}
 	// Hand the metric registry to the nft wrapper, which was constructed before s existed.
 	s.nft.SetMetrics(s.met)
+	// The portal's HTTPS state for social sign-in (social_secrets.go portalHosts): the HTTP fallback until the
+	// portal certificate agent starts below and takes over (contract §4).
+	s.socialPortal = noPortalHTTPS{}
 
 	// Phase 1B dark-auth machinery (durable throttle, keyed-HMAC OTP ring, dark IAM-v2). Constructed
 	// here so handlers can reference the fields. All features are OFF unless explicitly enabled; an
@@ -817,6 +823,17 @@ func main() {
 	s.initClientResume(c.SecretsDir)
 	s.initNotifyKey(c.SecretsDir)
 	s.portalTLS = s.initPortalTLS(c, ident != nil && talksToCentral)
+	s.socialPortal = s.portalTLS
+	// Social sign-in: load the sealing key, seal any plaintext secret still in the provider table, build the
+	// providers from sealed secrets, and keep them current (social_secrets.go). An appliance awaiting its
+	// assignment has no tenant, and reloadSocial then serves only the base providers.
+	s.initSocialKey(c.SecretsDir)
+	if err := s.reloadSocial(rootCtx, true); err != nil {
+		slog.Warn("social sign-in: initial provider load failed", "err", err)
+	}
+	if !awaiting {
+		go s.socialReloadLoop(rootCtx)
+	}
 	s.registerModuleProbes()
 	// CRASH RECOVERY FOR OFFLINE FIRST ACTIVATION. Runs after the licence state is loaded, because deciding
 	// whether an interrupted activation completed means asking whether the licence actually landed. Either
@@ -931,6 +948,12 @@ func main() {
 	r.Post("/v1/admin/pms/reload", s.pmsAdminReload)
 	r.Post("/v1/admin/walled-garden/reload", s.gardenReload)
 	s.notifyAdminRoutes(r)
+	// Social sign-in administration for edged (social_secrets.go): the write-only secret, its yes/no state,
+	// the reload edged pokes after a provider write, and the offered/why-not status line.
+	r.Put("/v1/social/providers/{id}/secret", s.socialSecretStore)
+	r.Get("/v1/social/providers/{id}/secret-state", s.socialSecretState)
+	r.Post("/v1/social/reload", s.socialReload)
+	r.Get("/v1/social/status", s.socialStatus)
 	s.tempAccessAdminRoutes(r)
 	// Hotel Admin TLS cert lifecycle: scd runs as root and drives the privileged
 	// manager here (edged is sandboxed with NoNewPrivileges and cannot). edged

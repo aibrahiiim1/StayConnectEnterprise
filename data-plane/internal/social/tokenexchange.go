@@ -1,8 +1,8 @@
 package social
 
-// Shared authorization-code → token exchange for the providers that speak
-// plain RFC 6749 (Microsoft, Apple, Facebook). Google keeps its own copy in
-// google.go, which predates this helper and is already covered as it is.
+// Shared authorization-code → token exchange for every real provider (Google,
+// Microsoft, Apple, Facebook): plain RFC 6749, plus the PKCE code_verifier
+// for the providers that bind an attempt with one.
 //
 // The form carries the client secret, so neither the form nor the request is
 // ever put into an error or a log line; only the IdP's own error code and

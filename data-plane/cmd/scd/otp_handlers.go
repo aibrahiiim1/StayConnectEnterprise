@@ -38,6 +38,9 @@ func (s *server) tenantAuthMethods(w http.ResponseWriter, r *http.Request) {
 	// can deliver (provider readiness).
 	s.applyLicenseToMethods(cfg)
 	s.applyProviderReadiness(r.Context(), cfg)
+	// And a social provider is listed only while it can actually be started: HTTPS active and the canonical
+	// hostname registered in the hotel's app (social_secrets.go). Under the HTTP fallback the buttons go.
+	s.applySocialOffering(cfg)
 
 	// CAN THIS SITE GIVE A GUEST ANYTHING AT ALL?
 	//

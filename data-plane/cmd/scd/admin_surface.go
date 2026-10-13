@@ -121,6 +121,10 @@ var adminPrefixes = []string{
 	// "Renew now" orders new keys and certificates, which spends Central's issuance budget; the portal must
 	// never be able to trigger it.
 	"/v1/portal/tls/",
+	// Social sign-in administration: the write-only provider secret (sealed here, where the key is), its
+	// yes/no state, reload and the offered/why-not status. edged only; the portal's social routes are the
+	// separate /v1/auth/social/ guest prefix.
+	"/v1/social/",
 }
 
 func classifyRoute(path string) routeClass {

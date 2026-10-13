@@ -4,15 +4,18 @@ package social
 //
 // Flow:
 //   1. AuthorizeURL builds https://appleid.apple.com/auth/authorize with our
-//      Services ID as client_id, redirect_uri, scope "name email", state and
-//      response_mode=form_post.
+//      Services ID as client_id, redirect_uri, scope "name email", state, the
+//      attempt's OIDC nonce and response_mode=form_post. No PKCE: Apple does
+//      not document it for Sign in with Apple on the web, and the nonce plus
+//      the signed client-secret JWT already bind the exchange to this client
+//      and this attempt.
 //   2. Apple POSTs code + state (and, on the very first authorization only, a
 //      `user` JSON blob with the name) back to our callback as a form.
 //   3. Exchange POSTs the code to https://appleid.apple.com/auth/token and
 //      receives an id_token.
 //   4. The id_token is verified: RS256 signature against Apple's key set
 //      (https://appleid.apple.com/auth/keys), iss == https://appleid.apple.com,
-//      aud == our Services ID, exp/iat.
+//      aud == our Services ID, exp/iat, nonce == the attempt's.
 //
 // WHY form_post, and why the portal callback accepts POST:
 //   Apple refuses response_mode=query whenever any scope is requested, and
@@ -21,7 +24,9 @@ package social
 //   form_post follows from it, and portald's /auth/social/callback accepts a
 //   POST form alongside the GET query every other provider uses. The state
 //   row in scd still binds the callback to the device that started it, so a
-//   cross-site POST is no weaker than the GET leg.
+//   cross-site POST is no weaker than the GET leg. Nothing in the flow uses a
+//   cookie: a cross-site form POST would not carry a SameSite=Lax one, and
+//   captive browsers drop them anyway.
 //
 // THE CLIENT SECRET IS A JWT WE SIGN.
 //   Apple issues no static client secret. The developer downloads a private
@@ -30,7 +35,7 @@ package social
 //   https://appleid.apple.com, kid = Key ID, exp ≤ 6 months after iat. Config
 //   mapping on social_oauth_providers:
 //     client_id          the Services ID
-//     client_secret      the PEM text of the .p8 key (write-only, as for
+//     client_secret      the PEM text of the .p8 key (write-only and sealed by scd, as for
 //                        every provider)
 //     extra->>'team_id'  the 10-character Team ID
 //     extra->>'key_id'   the 10-character Key ID
@@ -149,18 +154,24 @@ func (a *Apple) keySet() *jwksCache {
 	return a.jwks
 }
 
-func (a *Apple) AuthorizeURL(state, redirectURI string) string {
+// Binding: the OIDC nonce only (see the file comment for why no PKCE).
+func (a *Apple) Binding() Binding { return Binding{Nonce: true} }
+
+func (a *Apple) AuthorizeURL(r AuthRequest) string {
 	u, err := url.Parse(orDefault(a.authBase, defaultAppleAuthBase))
 	if err != nil {
 		return ""
 	}
 	q := u.Query()
 	q.Set("client_id", a.ClientID)
-	q.Set("redirect_uri", redirectURI)
+	q.Set("redirect_uri", r.RedirectURI)
 	q.Set("response_type", "code")
 	q.Set("response_mode", "form_post") // required by Apple once any scope is requested
 	q.Set("scope", orDefault(a.Scopes, defaultAppleScope))
-	q.Set("state", state)
+	q.Set("state", r.State)
+	if r.Nonce != "" {
+		q.Set("nonce", r.Nonce)
+	}
 	u.RawQuery = q.Encode()
 	return u.String()
 }
@@ -179,9 +190,12 @@ func (a *Apple) clientSecret() (string, error) {
 		})
 }
 
-func (a *Apple) Exchange(ctx context.Context, code, redirectURI string) (*UserInfo, error) {
-	if code == "" {
+func (a *Apple) Exchange(ctx context.Context, x ExchangeRequest) (*UserInfo, error) {
+	if x.Code == "" {
 		return nil, ErrBadCode
+	}
+	if err := requireBinding(a.Binding(), x); err != nil {
+		return nil, fmt.Errorf("apple: %w", err)
 	}
 	secret, err := a.clientSecret()
 	if err != nil {
@@ -190,9 +204,9 @@ func (a *Apple) Exchange(ctx context.Context, code, redirectURI string) (*UserIn
 	form := url.Values{}
 	form.Set("client_id", a.ClientID)
 	form.Set("client_secret", secret)
-	form.Set("code", code)
+	form.Set("code", x.Code)
 	form.Set("grant_type", "authorization_code")
-	form.Set("redirect_uri", redirectURI)
+	form.Set("redirect_uri", x.RedirectURI)
 	tk, err := postTokenForm(ctx, a.HTTPClient, "apple", orDefault(a.tokenURL, defaultAppleTokenURL), form)
 	if err != nil {
 		return nil, err
@@ -206,6 +220,9 @@ func (a *Apple) Exchange(ctx context.Context, code, redirectURI string) (*UserIn
 	}
 	if c.Iss != orDefault(a.issuer, appleIssuer) {
 		return nil, fmt.Errorf("apple: %w: unexpected issuer", errIDToken)
+	}
+	if err := checkNonce(c, x.Nonce); err != nil {
+		return nil, fmt.Errorf("apple: %w", err)
 	}
 	email := strings.TrimSpace(c.str("email"))
 	verified, _ := c.boolish("email_verified")

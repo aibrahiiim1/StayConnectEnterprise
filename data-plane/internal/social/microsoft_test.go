@@ -32,15 +32,16 @@ func newMicrosoftAt(t *testing.T, tenant string) (*Microsoft, *fakeIdP) {
 
 func msClaims(base, tid string, extra map[string]any) map[string]any {
 	c := map[string]any{
-		"iss":  base + "/" + tid + "/v2.0",
-		"aud":  "ms-client",
-		"sub":  "pairwise-sub",
-		"oid":  "object-id-1",
-		"tid":  tid,
-		"iat":  fixedNow.Add(-time.Minute).Unix(),
-		"nbf":  fixedNow.Add(-time.Minute).Unix(),
-		"exp":  fixedNow.Add(time.Hour).Unix(),
-		"name": "Alice",
+		"iss":   base + "/" + tid + "/v2.0",
+		"aud":   "ms-client",
+		"sub":   "pairwise-sub",
+		"oid":   "object-id-1",
+		"tid":   tid,
+		"iat":   fixedNow.Add(-time.Minute).Unix(),
+		"nbf":   fixedNow.Add(-time.Minute).Unix(),
+		"exp":   fixedNow.Add(time.Hour).Unix(),
+		"name":  "Alice",
+		"nonce": testNonce,
 	}
 	for k, v := range extra {
 		if v == nil {
@@ -54,7 +55,8 @@ func msClaims(base, tid string, extra map[string]any) map[string]any {
 
 func TestMicrosoftAuthorizeURL(t *testing.T) {
 	m, _ := NewMicrosoft("cid", "sec", "", "")
-	u, err := url.Parse(m.AuthorizeURL("state-abc", "https://portal/auth/social/callback"))
+	u, err := url.Parse(m.AuthorizeURL(AuthRequest{State: "state-abc", RedirectURI: "https://portal/auth/social/callback",
+		Nonce: testNonce, CodeChallenge: PKCEChallengeS256(testVerifier)}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,13 +68,15 @@ func TestMicrosoftAuthorizeURL(t *testing.T) {
 		"client_id": "cid", "redirect_uri": "https://portal/auth/social/callback",
 		"response_type": "code", "response_mode": "query", "state": "state-abc",
 		"scope": "openid email profile", "prompt": "select_account",
+		"nonce": testNonce, "code_challenge": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+		"code_challenge_method": "S256",
 	} {
 		if q.Get(k) != want {
 			t.Errorf("query[%s] = %q, want %q", k, q.Get(k), want)
 		}
 	}
 	m2, _ := NewMicrosoft("cid", "sec", "", workTenant)
-	if !strings.Contains(m2.AuthorizeURL("s", "https://p/cb"), "/"+workTenant+"/oauth2/v2.0/authorize") {
+	if !strings.Contains(m2.AuthorizeURL(AuthRequest{State: "s", RedirectURI: "https://p/cb"}), "/"+workTenant+"/oauth2/v2.0/authorize") {
 		t.Error("configured tenant not used in the authorize path")
 	}
 }
@@ -82,7 +86,7 @@ func TestMicrosoftConsumerAccountSuccess(t *testing.T) {
 	key, _ := rsaKeys(t)
 	f.respondIDToken(signRS256(t, key, testKid, msClaims(f.srv.URL, msaConsumerTenant, map[string]any{"email": "alice@outlook.com"})))
 
-	info, err := m.Exchange(context.Background(), "code-1", "https://portal/cb")
+	info, err := m.Exchange(context.Background(), xreq("code-1", "https://portal/cb"))
 	if err != nil {
 		t.Fatalf("Exchange: %v", err)
 	}
@@ -96,6 +100,7 @@ func TestMicrosoftConsumerAccountSuccess(t *testing.T) {
 	for k, want := range map[string]string{
 		"client_id": "ms-client", "client_secret": "ms-secret", "code": "code-1",
 		"grant_type": "authorization_code", "redirect_uri": "https://portal/cb",
+		"code_verifier": testVerifier,
 	} {
 		if form.Get(k) != want {
 			t.Errorf("token form[%s] = %q, want %q", k, form.Get(k), want)
@@ -108,7 +113,7 @@ func TestMicrosoftConsumerPreferredUsernameFallback(t *testing.T) {
 	key, _ := rsaKeys(t)
 	f.respondIDToken(signRS256(t, key, testKid, msClaims(f.srv.URL, msaConsumerTenant,
 		map[string]any{"preferred_username": "bob@hotmail.com", "oid": nil})))
-	info, err := m.Exchange(context.Background(), "c", "https://portal/cb")
+	info, err := m.Exchange(context.Background(), xreq("c", "https://portal/cb"))
 	if err != nil {
 		t.Fatalf("Exchange: %v", err)
 	}
@@ -137,7 +142,7 @@ func TestMicrosoftWorkAccountEmailVerification(t *testing.T) {
 			m, f := newMicrosoftAt(t, "")
 			key, _ := rsaKeys(t)
 			f.respondIDToken(signRS256(t, key, testKid, msClaims(f.srv.URL, workTenant, tc.extra)))
-			info, err := m.Exchange(context.Background(), "c", "https://portal/cb")
+			info, err := m.Exchange(context.Background(), xreq("c", "https://portal/cb"))
 			if !errors.Is(err, tc.wantErr) && !(tc.wantErr == nil && err == nil) {
 				t.Fatalf("err = %v, want %v", err, tc.wantErr)
 			}
@@ -179,6 +184,12 @@ func TestMicrosoftRejectsBadTokens(t *testing.T) {
 		{"work account on consumers", "consumers", func(b string) string {
 			return signRS256(t, key, testKid, msClaims(b, workTenant, map[string]any{"email": "a@contoso.com", "xms_edov": true}))
 		}},
+		{"nonce of another attempt", "", func(b string) string {
+			return signRS256(t, key, testKid, msClaims(b, msaConsumerTenant, map[string]any{"email": "a@outlook.com", "nonce": "someone-elses"}))
+		}},
+		{"no nonce", "", func(b string) string {
+			return signRS256(t, key, testKid, msClaims(b, msaConsumerTenant, map[string]any{"email": "a@outlook.com", "nonce": nil}))
+		}},
 		{"alg none", "", func(b string) string {
 			good := signRS256(t, key, testKid, msClaims(b, msaConsumerTenant, map[string]any{"email": "a@outlook.com"}))
 			parts := strings.Split(good, ".")
@@ -189,7 +200,7 @@ func TestMicrosoftRejectsBadTokens(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m, f := newMicrosoftAt(t, tc.tenant)
 			f.respondIDToken(tc.token(f.srv.URL))
-			info, err := m.Exchange(context.Background(), "c", "https://portal/cb")
+			info, err := m.Exchange(context.Background(), xreq("c", "https://portal/cb"))
 			if err == nil || info != nil {
 				t.Fatalf("expected rejection, got info=%+v err=%v", info, err)
 			}
@@ -200,10 +211,33 @@ func TestMicrosoftRejectsBadTokens(t *testing.T) {
 	}
 }
 
+// An attempt row without the verifier or nonce (one written before PKCE existed, or a tampered call) never
+// reaches the token endpoint: the code is not spent on an exchange whose answer could not be bound.
+func TestMicrosoftRefusesAnExchangeWithoutTheAttemptBinding(t *testing.T) {
+	for name, edit := range map[string]func(*ExchangeRequest){
+		"no verifier": func(x *ExchangeRequest) { x.CodeVerifier = "" },
+		"no nonce":    func(x *ExchangeRequest) { x.Nonce = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			m, f := newMicrosoftAt(t, "")
+			key, _ := rsaKeys(t)
+			f.respondIDToken(signRS256(t, key, testKid, msClaims(f.srv.URL, msaConsumerTenant, map[string]any{"email": "a@outlook.com"})))
+			x := xreq("c", "https://portal/cb")
+			edit(&x)
+			if _, err := m.Exchange(context.Background(), x); !errors.Is(err, ErrAttemptBinding) {
+				t.Fatalf("want ErrAttemptBinding, got %v", err)
+			}
+			if f.form() != nil {
+				t.Fatal("the code reached the token endpoint")
+			}
+		})
+	}
+}
+
 func TestMicrosoftTokenError(t *testing.T) {
 	m, f := newMicrosoftAt(t, "")
 	f.respondError(http.StatusBadRequest, `{"error":"invalid_grant","error_description":"AADSTS70008: The provided authorization code has expired."}`)
-	_, err := m.Exchange(context.Background(), "c", "https://portal/cb")
+	_, err := m.Exchange(context.Background(), xreq("c", "https://portal/cb"))
 	if err == nil || !strings.Contains(err.Error(), "invalid_grant") || !strings.Contains(err.Error(), "AADSTS70008") {
 		t.Fatalf("err didn't include upstream details: %v", err)
 	}

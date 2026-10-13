@@ -32,6 +32,13 @@ func (h *handler) socialStart(w http.ResponseWriter, r *http.Request) {
 		fail(400, "errpage.social", "provider required")
 		return
 	}
+	// Google and Facebook refuse sign-in inside an Android WebView (the captive login window). Starting an
+	// attempt there only lands the guest on the provider's refusal; send them to their own browser instead,
+	// before any attempt exists (social_browser.go).
+	if refusesEmbeddedBrowser(provider) && isAndroidWebView(r.UserAgent()) {
+		h.renderOpenInBrowser(w, r, provider)
+		return
+	}
 	ip := clientIP(r)
 	if ip == nil {
 		fail(400, "err.device.detect", "bad ip")
@@ -46,9 +53,9 @@ func (h *handler) socialStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build the redirect_uri the provider should send the browser back to.
-	// Always over the portal's external host so the browser can reach it
-	// without DNS surgery on the guest network.
+	// The portal's own view of its callback URL. scd does NOT send this to a real provider: the redirect URI
+	// of an attempt is always https://<canonical>/auth/social/callback, decided by scd from the portal's HTTPS
+	// state (a Host header is the client's word). It is read only for the development stub over plain HTTP.
 	scheme := "http"
 	if r.TLS != nil || forwardedHTTPS(r) {
 		scheme = "https"
