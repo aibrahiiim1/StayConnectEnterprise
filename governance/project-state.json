@@ -1216,25 +1216,25 @@
     "session_start_check": "None owed by the delivery model. Nothing runs unattended under D42, so there is no nightly verdict to read at session start (tools/nightly-status.py was removed by T0196). A session starts from the state of its own delivery branch and pull request.",
     "central_console_runtime_identity": {
       "_note": "What Central (172.21.96.196) serves as its operator console, read back from /opt/stayconnect/central/DEPLOYED.json and the installed release.",
-      "source_commit": "e9b72aabd03ba26968f08f06e9f0f4079ab1f3fd",
+      "source_commit": "700a35647d16563870fae10f4a02ad73ef1eaba1",
       "source_state": "clean",
-      "build_id": "FjmQRQBbGXPKTaPDRvx-v",
-      "release": "/opt/stayconnect/releases/cloud-admin/20261013T175246Z",
-      "artifact_sha256": "release onegate-central-e9b72aabd03b.tar.gz sha256 78d8e0f4028b7c8e9bb4dc4aca4cc5add03a5ae98619b67f2e11b49b88de49f5 (central-build.sh, clean clone), deployed with central-deploy.sh",
-      "previous_release": "/opt/stayconnect/releases/cloud-admin/20260928T235345Z (8e4bed4e; the rollback target)",
-      "deployed_at": "2026-10-13T17:53Z UTC by central-deploy.sh (System -> Portal certificates).",
-      "verified": "central-deploy.sh smoke PASS 8/8; /opt/stayconnect/central/DEPLOYED.json names e9b72aab for ctrlapi and console."
+      "build_id": "yTrLW4AUv1lAjIrUsSy70",
+      "artifact_sha256": "release onegate-central-700a35647d16.tar.gz sha256 0b02d30e4205d652f1183289e23f0848b704c8ebb07d17252203ad1246d128ea (central-build.sh, clean clone), deployed with central-deploy.sh",
+      "previous_release": "/opt/stayconnect/releases/cloud-admin/20261013T175246Z (e9b72aab; the rollback target)",
+      "deployed_at": "2026-10-13T20:35Z UTC by central-deploy.sh (the review fixes of T0227).",
+      "verified": "central-deploy.sh smoke PASS 8/8; /opt/stayconnect/central/DEPLOYED.json names 700a3564 for ctrlapi and console.",
+      "release": "/opt/stayconnect/releases/cloud-admin/20261013T203444Z"
     },
     "prelive_guest_access_testing": "ENABLED on PRE-LIVE 172.21.60.25 for Product Owner testing (D43, T0197, 2026-09-26). STAYCONNECT_PHASE2_MASTER=1 and STAYCONNECT_PHASE2_PORTAL=1 in /etc/stayconnect/scd.env and portald.env; rollback copies *.bak-pre-guest-activation-20260926T193029Z (the portald.env copy removed by the retention sweep was reconstructed exactly as *-reconstructed). Live proof 2026-09-26: scripts/guest-access-e2e-test.sh 53/53 -- captive before sign-in, enforced (nft phase3_auth_ipv4) and online (generate_204 = 204, ICMP 1.1.1.1) after activation for all three methods, device limits, joining, reconnect, termination and backend-enforced method switches, with pms_postings, posting_outbox and payment_transactions unchanged. Test state reset afterwards.",
     "central_ctrlapi_runtime_identity": {
       "_note": "The Central API binary on 172.21.96.196, read back from the host.",
-      "sha256": "7a49ff033d78eef9f60ec1c6bd139ab4f9d1c3757eae4001f9289bb63c5cae13",
-      "source_commit": "e9b72aabd03ba26968f08f06e9f0f4079ab1f3fd",
+      "sha256": "6782c1ede90e7ead6faedc5f2a578ee24bc11db8e2f5d06c2b53cb1509e50cc5",
+      "source_commit": "700a35647d16563870fae10f4a02ad73ef1eaba1",
       "vcs_modified": false,
       "schema": "Central migrations 0001-0050 (0050: portal hostnames and certificates).",
-      "verified": "Deployed with a verified pre-deploy dump; /readyz ready; appliance mTLS :9443 verifies; PRE-LIVE syncs its portal hostname over mTLS.",
-      "rollback": "central-deploy.sh rollback. Pre-deploy dump /opt/stayconnect/backups/db/central-20261013T175246Z-pre-e9b72aabd03b.dump. The former host 150.0.0.252 is not a rollback target.",
-      "deployed_at": "2026-10-13T17:53Z UTC by central-deploy.sh."
+      "verified": "Deployed with a verified pre-deploy dump; smoke 8/8; /readyz ready; appliance mTLS :9443 verifies; PRE-LIVE syncs its portal hostname over mTLS.",
+      "rollback": "central-deploy.sh rollback (previous release e9b72aab). Pre-deploy dump /opt/stayconnect/backups/db/central-20261013T203444Z-pre-700a35647d16.dump. The former host 150.0.0.252 is not a rollback target.",
+      "deployed_at": "2026-10-13T20:35Z UTC by central-deploy.sh."
     },
     "central_host": {
       "_note": "Where OneGate Central runs. Appliances reach it by name; the address is a property of the host, the name is a property of the fleet.",
@@ -1277,7 +1277,7 @@
     "prelive_phase4_flag_posture": "PRE-LIVE 172.21.60.25 since 2026-09-30 (D47): scd runs STAYCONNECT_PHASE4_MASTER, _PAYMENT, _PAYMENT_PROVIDER, _POSTING, _FINANCIAL_REVIEW, _OUTBOX_WORKER and _PMS_TRANSMIT; pmsd runs _MASTER, _OUTBOX_WORKER and _PMS_TRANSMIT; edged runs _MASTER, _POSTING and _FINANCIAL_REVIEW. STAYCONNECT_PAYMENT_LIVE_ALLOWED is set nowhere. Real PMS postings ever: one (T0204, USD 1.00, PA OK). Payment-provider traffic ever: none.",
     "phase4_flags_off_scope": "phase4_flags_off records the DELIVERED REPOSITORY configuration (no file in the tree enables a Phase-4 flag; scripts/ci/phase4-dark-check.sh asserts it). It is not a statement about the PRE-LIVE environment, whose posture is recorded in prelive_phase4_flag_posture."
   },
-  "latest_transition_id": "T0226",
+  "latest_transition_id": "T0227",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1778,13 +1778,13 @@
     "manifest": "docs/manifests/HttpsPortalSocialLogin-change-manifest.md",
     "base": "3fbbe7dc789e82f34911fd57c146e81436fc5500",
     "base_note": "Master (merge of PR #210, T0213 completion). The branch is built on PR #211 (head 602b37ef), whose commits it carries, so the delivery diff against master includes PR #211.",
-    "head": "ca20a4d8",
-    "head_note": "The last content commit of PR #212 when T0226 was written (formatting and a test fixture; no runtime change since T0225). Governance commits follow it.",
-    "transition": "T0226",
-    "previous_delivery": "T0225",
+    "head": "700a3564",
+    "head_note": "The last content commit of PR #212 when T0227 was written (Central review fixes, deployed). Governance commits follow it.",
+    "transition": "T0227",
+    "previous_delivery": "T0226",
     "pr": 212,
     "pr_state": "OPEN -- merge authorized by the delivery mission of 2026-10-13 through the protected path",
-    "note": "T0226 (the first FULL CHECK's findings fixed, after T0225). PRE-LIVE runs netd dedd94a9; scd e9b72aab; edged e9b72aab; pmsd 6a403326; portald e9b72aab; acctd 99ba9f10; the helpers keybootstrap e9b72aab, sitemigrate and svc-run 29a6b21f; Admin Console release 20261013-181126 (dedd94a9); migrations through 0116; Central ctrlapi and console e9b72aab, migrations through 0050. PRE-LIVE is on the HTTP fallback (NOT_CONFIGURED) until the Product Owner hosts onegate.work at Cloudflare and enters the zone token in the Central console."
+    "note": "T0227 (the review findings fixed and Central redeployed, after T0225-T0226). PRE-LIVE runs netd dedd94a9; scd e9b72aab; edged e9b72aab; pmsd 6a403326; portald e9b72aab; acctd 99ba9f10; the helpers keybootstrap e9b72aab, sitemigrate and svc-run 29a6b21f; Admin Console release 20261013-181126 (dedd94a9); migrations through 0116; Central ctrlapi and console 700a3564, migrations through 0050. PRE-LIVE is on the HTTP fallback (NOT_CONFIGURED) until the Product Owner hosts onegate.work at Cloudflare and enters the zone token in the Central console."
   },
   "onboarding_reconciliation": {
     "decision": "D37",

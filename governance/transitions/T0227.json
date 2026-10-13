@@ -1,0 +1,56 @@
+{
+  "transition_id": "T0227",
+  "seq": 227,
+  "timestamp": "2026-10-13T23:35:50+03:00",
+  "timestamp_derivation": "Written after the fixes were committed, tested and deployed to Central, before the commit that introduces it (Cairo time from UTC by hand).",
+  "record_type": "HTTPS_PORTAL_REVIEW_FINDINGS_FIXED_AND_CENTRAL_REDEPLOYED",
+  "authorisation": "D49 and the 'Full HTTPS & Social Login Delivery Mission' of 2026-10-13 (directly related fixes, Central deployment).",
+  "delivery": {
+    "pull_request": 212,
+    "branch": "delivery/https-portal-social",
+    "content_head": "700a35647d16563870fae10f4a02ad73ef1eaba1",
+    "pr_state": "OPEN at the time of this receipt."
+  },
+  "full_check_second_run": {
+    "head": "3cfeb44d3efa",
+    "result": "PASS",
+    "gates": {
+      "governance": "success, run 38455688702",
+      "phase3-full-software-gate": "success, run 38455692752",
+      "phase4-financial-core-gate": "success, run 38455696963",
+      "phase5-post-stay-transfer-gate": "success, run 38455700780"
+    }
+  },
+  "what_was_found": [
+    "The merge was refused by the repository rule that every review conversation be resolved: the automated reviewer had raised three findings on Central's portal-certificate service, each confirmed in the code.",
+    "P1: switching the ACME directory (the documented staging -> production step) left staging certificates ISSUED, so appliances would serve browser-untrusted certificates until their ordinary renewal.",
+    "P1: an appliance could be deleted while Central's portal-certificate configuration was incomplete, cascading away the rows its published A record and certificates are cleaned up from.",
+    "P2: changing the DNS zone while hostnames exist would strand them where the zone-scoped token can no longer reach."
+  ],
+  "delivered": [
+    "Leaving a directory marks every certificate it issued due at once; ARI is consulted only for the current directory; 'new' for the weekly cap is per directory.",
+    "CanRelease refuses a deletion before anything is revoked when cleanup is pending and Central cannot perform it.",
+    "A zone change with live hostnames is refused (409 zone_in_use).",
+    "Regression steps in the Pebble integration test (PASS); control-plane suite PASS."
+  ],
+  "deployment_provenance": "Central 172.21.96.196 redeployed: ctrlapi 700a3564 (sha256 6782c1ede90e7ead6faedc5f2a578ee24bc11db8e2f5d06c2b53cb1509e50cc5, vcs.modified=false), console 700a3564 BUILD_ID yTrLW4AUv1lAjIrUsSy70; smoke 8/8; pre-deploy dump central-20261013T203444Z-pre-700a35647d16.dump. PRE-LIVE unchanged from T0225 and syncs against it (NOT_CONFIGURED).",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0226."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "head": "700a3564",
+  "head_note": "The last CONTENT commit of PR #212 at the time of this receipt; governance commits follow it.",
+  "previous_delivery": "T0226",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
