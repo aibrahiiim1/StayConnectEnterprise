@@ -9,6 +9,7 @@ require (
 	github.com/redis/go-redis/v9 v9.7.0
 	github.com/stayconnect/enterprise/license v0.0.0
 	golang.org/x/crypto v0.52.0
+	golang.org/x/net v0.54.0
 )
 
 replace github.com/stayconnect/enterprise/license => ../license

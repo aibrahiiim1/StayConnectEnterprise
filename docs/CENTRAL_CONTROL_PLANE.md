@@ -315,3 +315,33 @@ session — including a room guest's second device joining the stay — takes a 
 `max_concurrent_online_guests` reservation. Room sign-in records these refusals as the attempt results
 `LICENSE_REFUSED` and `LICENSE_CAPACITY_REACHED` (appliance migration 0092) in **Client Sign-in Attempts**. A device
 that signs in again while it still has an open session on the stay keeps that session and takes no new slot.
+
+## 9. Portal hostnames and certificates
+
+By Product-Owner decision (contract [architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md](architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md)),
+Central also manages each appliance's **portal hostname** (`<label>.gw.onegate.work`, permanent, never reused) and the
+**HTTPS certificate lifecycle** for it and for a hotel's own verified portal domain. Central never sees a private key:
+the appliance sends a CSR, Central answers DNS-01 in its own zone and finalises the Let's Encrypt order with that CSR.
+Nothing in this path carries client data. Implementation: `control-plane/internal/portaltls` (migration 0050).
+
+**Appliance API** (mutual TLS + appliance JWT, activated appliances only): `POST /v1/appliance/portal-tls/sync`
+`{portal_ip, custom_domain|null}` → hostname, DNS state, hotel-domain records and status, per-hostname certificate
+status · `POST /v1/appliance/portal-tls/orders {hostname, csr_pem}` → `202 {order_id,status}` (409 open order, 422
+refused CSR/name, 429 over 10/day, 503 Central not configured) · `GET /v1/appliance/portal-tls/orders/{id}`.
+
+**Console API** (reads `fleet.view`; writes `security.manage` + **SU**):
+`GET|PUT /cloud/v1/portal-tls/settings {acme_directory, contact_email, zone_name, weekly_new_limit}` ·
+`PUT /cloud/v1/portal-tls/dns-token {token}` → `{set:true}` (write-only; never displayed, logged or returned) ·
+`POST /cloud/v1/portal-tls/test` (proves zone access, registers the ACME account) · `POST /cloud/v1/portal-tls/caa` ·
+`GET /cloud/v1/portal-tls/fleet` · `GET /cloud/v1/portal-tls/events?appliance_id=` ·
+`POST /cloud/v1/portal-tls/appliances/{id}/revoke {reason, hostname?}`. Console page: **System → Portal certificates**.
+
+**Worker** (in ctrlapi, every 30 s; idle until configured): publishes and deletes A records, revokes what was asked to
+be revoked, issues queued orders within the weekly cap on *new* `gw.onegate.work` certificates (renewals are exempt),
+refreshes ACME Renewal Information daily (the appliance renews after `renew_after`, earlier when the CA's window moves),
+and re-checks verified hotel domains daily. Every action is in the append-only `portal_tls_events`.
+
+**Lifecycle**: retire, emergency retire, replace and delete all pass through `revokeApplianceBoundLicenses`, which in
+the same transaction releases the hostname, queues every valid portal certificate for revocation, cancels open orders
+and removes the hotel-domain claim. Delete additionally deletes the A record and revokes at once (the record's portal
+rows are cascaded away with it) and refuses to delete when that fails.

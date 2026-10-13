@@ -725,6 +725,13 @@ func (b *Base) deleteAppliance(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "The appliance's licence could not be revoked, so it was not deleted. Try again.")
 		return
 	}
+	// Deleting the record cascades its portal rows away, and with them the worker's memory of the A record
+	// to delete and the certificates to revoke. So that work happens now, before the record goes.
+	if err := b.PortalTLS.FinalizeRelease(ctx, id); err != nil {
+		Fail(w, r, http.StatusBadGateway, "portal_tls_release_failed",
+			"The appliance's portal hostname or certificate could not be released ("+err.Error()+"), so it was not deleted. Try again.")
+		return
+	}
 	tx, err := b.DB.Begin(ctx)
 	if err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "begin failed")

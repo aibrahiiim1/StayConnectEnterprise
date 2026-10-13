@@ -18,6 +18,7 @@ import (
 
 	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
 	"github.com/stayconnect/enterprise/control-plane/internal/pki"
+	"github.com/stayconnect/enterprise/control-plane/internal/portaltls"
 )
 
 type Base struct {
@@ -34,6 +35,10 @@ type Base struct {
 	CA          *pki.CA
 	ClientValid time.Duration      // issued client-cert lifetime
 	Lic         *licensing.Service // hardware-bound licence issuance; nil when no vendor key
+
+	// PortalTLS owns portal hostnames and certificates. nil only in tools and tests that never retire an
+	// appliance through the API; the lifecycle path's database half works without it.
+	PortalTLS *portaltls.Service
 }
 
 // issueAssignment signs + persists a new current assignment for the appliance (bumping its version).

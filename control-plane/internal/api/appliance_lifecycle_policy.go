@@ -1,6 +1,10 @@
 package api
 
-import "context"
+import (
+	"context"
+
+	"github.com/stayconnect/enterprise/control-plane/internal/portaltls"
+)
 
 // Appliance authority termination — what each path does with the licence (per-appliance, always):
 //
@@ -17,18 +21,27 @@ import "context"
 //
 // Credentials (certificate) are revoked ONLY by a verified terminal ack (AckHandler) or an emergency retire.
 // Licence operations (suspend / resume / revoke / set) NEVER touch the appliance lifecycle.
+//
+// THE PORTAL HOSTNAME ENDS WITH THE LICENCE, on every one of those paths, because they all come through here:
+// the hostname is released (its public A record is deleted and the label is never handed out again), every
+// valid portal certificate is queued for revocation, open certificate orders are cancelled and the hotel
+// domain claim is removed (portaltls.ReleaseAppliance). Same transaction as the licence: both or neither.
 
-// revokeApplianceBoundLicenses revokes every current (active/suspended) licence bound to this appliance.
-// Idempotent. Returns the revoked licence ids.
+// revokeApplianceBoundLicenses revokes every current (active/suspended) licence bound to this appliance and
+// releases its portal hostname and certificates. Idempotent. Returns the revoked licence ids.
 func (b *Base) revokeApplianceBoundLicenses(ctx context.Context, applianceID string) ([]string, error) {
-	rows, err := b.DB.Query(ctx, `
+	tx, err := b.DB.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	rows, err := tx.Query(ctx, `
         UPDATE licenses SET status='revoked', revoked_at=now()
          WHERE $1::uuid = ANY(appliance_ids) AND status IN ('active','suspended')
         RETURNING id::text`, applianceID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	revoked := []string{}
 	for rows.Next() {
 		var id string
@@ -36,5 +49,16 @@ func (b *Base) revokeApplianceBoundLicenses(ctx context.Context, applianceID str
 			revoked = append(revoked, id)
 		}
 	}
-	return revoked, rows.Err()
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := portaltls.ReleaseAppliance(ctx, tx, applianceID, portaltls.ActorSystem); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	b.PortalTLS.Nudge() // the worker deletes the A record and revokes now, not at its next pass
+	return revoked, nil
 }

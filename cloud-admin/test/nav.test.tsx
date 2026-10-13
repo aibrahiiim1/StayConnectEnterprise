@@ -24,7 +24,7 @@ describe("Central navigation", () => {
   });
 
   it("keeps the rarely used pages under System", () => {
-    expect(SYSTEM_PAGES.map((p) => p.label)).toEqual(["Security alerts", "Trust & keys", "Audit log", "Team", "Backup health"]);
+    expect(SYSTEM_PAGES.map((p) => p.label)).toEqual(["Security alerts", "Trust & keys", "Portal certificates", "Audit log", "Team", "Backup health"]);
     expect(SYSTEM_PAGES.every((p) => p.href.startsWith("/system/"))).toBe(true);
   });
 

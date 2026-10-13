@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
 	"github.com/stayconnect/enterprise/control-plane/internal/metrics"
 	"github.com/stayconnect/enterprise/control-plane/internal/pki"
+	"github.com/stayconnect/enterprise/control-plane/internal/portaltls"
 	"github.com/stayconnect/enterprise/license"
 )
 
@@ -185,6 +187,24 @@ func serve() {
 		}
 	}()
 
+	// Portal hostnames and certificates (docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md). The
+	// worker always runs and does nothing until an operator has configured the ACME contact and the DNS token
+	// from the console, so a fresh Central needs no extra step to start. The TEST-ONLY overrides let the whole
+	// chain run against Pebble + challtestsrv; when any is on, every start says so.
+	ptlsOpts, ptlsOverrides := portaltls.OptionsFromEnv()
+	var ptls *portaltls.Service
+	if err := ptlsOpts.Check(); err != nil {
+		slog.Error("portal TLS disabled: invalid configuration", "err", err)
+	} else {
+		ptls = portaltls.New(pool, ptlsOpts)
+		ptls.Overrides = ptlsOverrides
+		if len(ptlsOverrides) > 0 {
+			slog.Warn("portal TLS TEST-ONLY overrides are active; this Central is not issuing production portal certificates",
+				"overrides", strings.Join(ptlsOverrides, " "))
+		}
+		go ptls.Run(rootCtx)
+	}
+
 	// Appliance certificate authority. Two-tier: an offline Root signs an online Intermediate; runtime
 	// issuance uses ONLY the intermediate key. Absent key → PKI routes and the mTLS listener stay disabled.
 	var appCA *pki.CA
@@ -205,7 +225,7 @@ func serve() {
 			ca.Version, string(ca.IntermediatePEM()), ca.Subject(), ca.KeyFingerprint())
 		slog.Info("appliance CA chain loaded (root offline → online intermediate)", "intermediate_version", ca.Version, "subject", ca.Subject())
 		mtlsAddr := envOrDefault("CTRLAPI_MTLS_ADDR", ":9443")
-		applianceMTLSAPI := api.ApplianceMTLSRouter(pool, rdb, sharedReplay, licSvc, ca, assignKey, regRoot)
+		applianceMTLSAPI := api.ApplianceMTLSRouter(pool, rdb, sharedReplay, licSvc, ca, assignKey, regRoot, ptls)
 		go func() {
 			if err := apihttp.StartMTLS(rootCtx, pool, ca, mtlsAddr, applianceMTLSAPI); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				slog.Error("mTLS listener error", "err", err)
@@ -229,6 +249,7 @@ func serve() {
 		Version:       version,
 		AllowOrigins:  cfg.AllowOrigins,
 		CookieSecure:  cfg.CookieSecure,
+		PortalTLS:     ptls,
 	})
 
 	srv := &http.Server{

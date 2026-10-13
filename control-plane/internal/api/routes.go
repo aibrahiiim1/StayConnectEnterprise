@@ -94,5 +94,8 @@ func (b *Base) CloudRoutes(off *OfflineBase) http.Handler {
 	tm.Post("/team/{id}/password", b.teamPassword)
 	r.With(perm(auth.PermFleetView)).Get("/backup-health", b.BackupHealthHandler)
 
+	// Portal hostnames and certificates (portal_tls.go).
+	b.portalTLSRoutes(r)
+
 	return r
 }
