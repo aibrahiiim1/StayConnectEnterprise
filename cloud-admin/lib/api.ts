@@ -39,6 +39,7 @@ export const api = {
   get:   <T>(path: string)             => request<T>("GET", path),
   post:  <T>(path: string, body?: any) => request<T>("POST", path, body),
   patch: <T>(path: string, body?: any) => request<T>("PATCH", path, body),
+  put:   <T>(path: string, body?: any) => request<T>("PUT", path, body),
   del:   <T>(path: string, body?: any) => request<T>("DELETE", path, body),
 };
 
@@ -282,6 +283,80 @@ export type AuditEntry = {
 };
 
 export type AuditPage = { items?: AuditEntry[]; data?: AuditEntry[]; next_cursor?: string | null };
+
+// ------- Portal hostnames and certificates (docs/CENTRAL_CONTROL_PLANE.md §9) -------
+
+export type PortalTLSSettings = {
+  acme_directory: "staging" | "production";
+  contact_email: string;
+  zone_name: string;
+  zone_id: string;
+  account_url: string;
+  account_directory: string;
+  weekly_new_limit: number;
+  caa_applied_at?: string | null;
+  updated_at?: string;
+  updated_by?: string;
+  /** The ACME directory URL in use (a test override shows here). */
+  directory_url: string;
+  /** Whether a DNS API token is stored. The token itself is never returned. */
+  token_set: boolean;
+  dns_provider: string;
+  available: boolean;
+  unavailable_reason?: string;
+  /** TEST-ONLY environment overrides in force on this Central; empty in production. */
+  test_overrides: string[];
+};
+
+export type PortalTLSTestResult = {
+  zone_id: string;
+  zone_name: string;
+  nameservers: string[];
+  account_url: string;
+  directory: string;
+};
+
+export type PortalCert = {
+  hostname: string;
+  kind: "ONEGATE" | "CUSTOM";
+  order_id: string;
+  status: "QUEUED" | "PROCESSING" | "ISSUED" | "FAILED" | "REVOKED" | "SUPERSEDED";
+  serial?: string | null;
+  not_after?: string | null;
+  renew_after?: string | null;
+  revoked: boolean;
+  acme_directory_url?: string | null;
+  /** staging | production | other (a test CA) */
+  acme_directory?: string;
+  error?: string | null;
+};
+
+export type PortalFleetRow = {
+  appliance_id: string;
+  serial: string;
+  customer_name?: string | null;
+  site_name?: string | null;
+  hostname: string;
+  portal_ip?: string | null;
+  dns_state: "PENDING" | "SYNCED" | "ERROR" | "RELEASED";
+  dns_error?: string | null;
+  released: boolean;
+  custom_domain?: string | null;
+  custom_domain_status?: "PENDING" | "VERIFIED" | "FAILED" | null;
+  custom_domain_error?: string | null;
+  certificates: PortalCert[];
+  last_error?: string | null;
+};
+
+export type PortalTLSEvent = {
+  id: number;
+  at: string;
+  appliance_id?: string | null;
+  hostname?: string | null;
+  kind: string;
+  actor?: string | null;
+  detail?: Record<string, unknown> | null;
+};
 
 /** A Central sign-in: a platform operator (Team) or a customer's user. */
 export type CentralUser = {

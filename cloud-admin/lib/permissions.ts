@@ -101,6 +101,7 @@ export const CAPABILITIES = {
   "system.read": platformRead,           // the System section
   "securityAlerts.triage": platformAdmin,
   "team.manage": platformAdmin,
+  "portalTls.manage": platformAdmin,     // ACME/DNS settings, the DNS token, CAA, revoking portal certificates
 } as const satisfies Record<string, Rule>;
 
 export type Capability = keyof typeof CAPABILITIES;
