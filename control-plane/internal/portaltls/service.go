@@ -146,6 +146,7 @@ const (
 	EvAccessTested      = "DNS_ACCESS_TESTED"
 	EvAccountRegistered = "ACME_ACCOUNT_REGISTERED"
 	EvCAAApplied        = "CAA_APPLIED"
+	EvRenewalForced     = "RENEWAL_FORCED"
 )
 
 // Actor for things the worker does by itself.

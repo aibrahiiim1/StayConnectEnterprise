@@ -45,9 +45,38 @@ func (s *Service) UpdateSettings(ctx context.Context, u SettingsUpdate, actor st
 	if err != nil {
 		return Settings{}, err
 	}
+	// THE ZONE IS FIXED ONCE IT CARRIES HOSTNAMES. Every allocated name and every DNS-01 challenge lives in it, and
+	// the DNS token is scoped to one zone: switching would strand the old names where Central can no longer
+	// update or delete them, and give new appliances names in a different zone. Moving a live fleet is an explicit
+	// migration, not a settings edit.
+	if u.ZoneName != nil && NormalizeFQDN(*u.ZoneName) != before.ZoneName {
+		var inUse int
+		if err := s.DB.QueryRow(ctx, `SELECT count(*) FROM portal_hostnames
+		        WHERE released_at IS NULL OR dns_record_id IS NOT NULL`).Scan(&inUse); err != nil {
+			return Settings{}, err
+		}
+		if inUse > 0 {
+			return Settings{}, refuse(http.StatusConflict, "zone_in_use",
+				"%d appliance hostname(s) live in %s; the zone cannot change while they exist", inUse, before.ZoneName)
+		}
+	}
 	after, err := SaveSettings(ctx, s.DB, u, actor)
 	if err != nil {
 		return Settings{}, err
+	}
+	// A NEW DIRECTORY MEANS NEW CERTIFICATES. After the staging-first switch to production, every certificate in
+	// service was issued by the directory Central has left (staging: not trusted by any browser). Marking them due
+	// now makes every appliance order a replacement on its next sync instead of serving them to term.
+	if before.ACMEDirectory != after.ACMEDirectory {
+		ct, err := s.DB.Exec(ctx, `UPDATE portal_certificate_orders SET renew_after=now()
+		        WHERE status='ISSUED' AND revoked_at IS NULL AND revoke_requested_at IS NULL
+		          AND COALESCE(acme_directory_url,'') <> $1`, s.Opts.directoryURL(after.ACMEDirectory))
+		if err != nil {
+			return Settings{}, err
+		}
+		AppendEvent(ctx, s.DB, "", "", EvRenewalForced, actor, map[string]any{
+			"reason": "acme_directory changed", "from": before.ACMEDirectory, "to": after.ACMEDirectory,
+			"certificates": ct.RowsAffected()})
 	}
 	changes := map[string]any{}
 	if before.ACMEDirectory != after.ACMEDirectory {

@@ -164,10 +164,12 @@ func (s *Service) processNextOrder(ctx context.Context, st *Settings, prov DNSPr
 
 	countsNew := false
 	if kind == KindOneGate {
-		// NEW = this hostname never had a certificate. Let's Encrypt exempts renewals from its 50-per-week
-		// limit on a registered domain, and so does this cap.
-		if err := tx.QueryRow(ctx, `SELECT NOT EXISTS (SELECT 1 FROM portal_certificate_orders WHERE hostname=$1 AND issued_at IS NOT NULL)`,
-			hostname).Scan(&countsNew); err != nil {
+		// NEW = this hostname never had a certificate FROM THIS DIRECTORY. Let's Encrypt exempts renewals from its
+		// 50-per-week limit on a registered domain, and so does this cap -- but a staging certificate is not a
+		// production one: the first production certificate after the staging-first switch is new to the CA.
+		if err := tx.QueryRow(ctx, `SELECT NOT EXISTS (SELECT 1 FROM portal_certificate_orders
+		        WHERE hostname=$1 AND issued_at IS NOT NULL AND acme_directory_url=$2)`,
+			hostname, dirURL).Scan(&countsNew); err != nil {
 			return false, err
 		}
 	}
@@ -403,12 +405,20 @@ func (s *Service) processRevocations(ctx context.Context, st *Settings, applianc
 // A renew_after already inside the window is kept (re-drawing it daily would make it wander); one outside is
 // re-drawn -- which is how a CA-announced revocation reaches the appliance as an early renewal.
 func (s *Service) refreshARI(ctx context.Context) {
+	// Only certificates from the CURRENT directory: one issued by a directory Central has since left (staging,
+	// after the switch to production) is due for replacement now, and its old CA's renewal window must not
+	// push that back out.
+	st, err := LoadSettings(ctx, s.DB)
+	if err != nil {
+		return
+	}
 	rows, err := s.DB.Query(ctx, `
         SELECT id::text, appliance_id::text, hostname, chain_pem, COALESCE(acme_directory_url,''), renew_after
           FROM portal_certificate_orders
          WHERE status='ISSUED' AND revoke_requested_at IS NULL AND not_after > now()
+           AND acme_directory_url = $1
            AND (ari_checked_at IS NULL OR ari_checked_at < now() - interval '24 hours')
-         LIMIT 50`)
+         LIMIT 50`, s.Opts.directoryURL(st.ACMEDirectory))
 	if err != nil {
 		return
 	}
@@ -476,6 +486,32 @@ func (s *Service) recheckDomains(ctx context.Context, st Settings) {
 	}
 }
 
+// CanRelease refuses a deletion that Central could not clean up after. NOTHING TO CLEAN is the only case that
+// may pass while Central is unconfigured: deleting the appliance cascades its portal rows away, and those rows
+// are what the worker would retry from, so deleting while a published A record or an unrevoked certificate
+// exists would leave both unmanaged for good. Called BEFORE a deletion revokes anything, and again by
+// FinalizeRelease.
+func (s *Service) CanRelease(ctx context.Context, applianceID string) error {
+	if s == nil {
+		return nil
+	}
+	if _, ok := s.available(ctx); ok {
+		return nil
+	}
+	var pending bool
+	if err := s.DB.QueryRow(ctx, `SELECT
+	        EXISTS (SELECT 1 FROM portal_hostnames WHERE appliance_id=$1 AND dns_record_id IS NOT NULL)
+	     OR EXISTS (SELECT 1 FROM portal_certificate_orders WHERE appliance_id=$1 AND status='ISSUED'
+	                   AND revoked_at IS NULL AND not_after > now())`, applianceID).Scan(&pending); err != nil {
+		return err
+	}
+	if pending {
+		return errors.New("portal cleanup is pending (a published DNS record or an unrevoked certificate) and " +
+			"Central's portal-certificate configuration is incomplete; restore it, then delete")
+	}
+	return nil
+}
+
 // FinalizeRelease performs, now, what the worker would do for a released appliance -- delete its A record
 // and revoke its certificates -- so that deleting the appliance record (which cascades its portal rows away)
 // never leaves a live DNS name or a valid certificate behind. Nothing to do when Central is not configured.
@@ -485,7 +521,7 @@ func (s *Service) FinalizeRelease(ctx context.Context, applianceID string) error
 	}
 	st, ok := s.available(ctx)
 	if !ok {
-		return nil
+		return s.CanRelease(ctx, applianceID)
 	}
 	prov, err := s.NewProvider(st)
 	if err != nil {

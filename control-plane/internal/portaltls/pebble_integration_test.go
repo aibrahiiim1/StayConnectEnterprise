@@ -338,6 +338,51 @@ func TestPebbleEndToEnd(t *testing.T) {
 			t.Errorf("no %s event for appliance A", k)
 		}
 	}
+
+	// ---- 8. Review findings (PR #212). The zone cannot move under live hostnames.
+	if _, err := svc.UpdateSettings(ctx, SettingsUpdate{ZoneName: str("other-zone.test")}, "test"); !isRefusal(err, 409) {
+		t.Fatalf("a zone change with live hostnames must be refused (409): %v", err)
+	}
+	// Leaving a directory (staging -> production) makes every certificate it issued due NOW, and only those.
+	var oldOrder, curOrder string
+	_ = pool.QueryRow(ctx, `SELECT id::text FROM portal_certificate_orders WHERE status='ISSUED' AND revoke_requested_at IS NULL AND revoked_at IS NULL ORDER BY issued_at DESC LIMIT 1`).Scan(&oldOrder)
+	if oldOrder == "" {
+		t.Fatal("the scenario needs an issued, unrevoked certificate")
+	}
+	if _, err := pool.Exec(ctx, `UPDATE portal_certificate_orders SET acme_directory_url='https://old-directory.test/dir', renew_after=now()+interval '30 days' WHERE id::text=$1`, oldOrder); err != nil {
+		t.Fatal(err)
+	}
+	_ = pool.QueryRow(ctx, `SELECT id::text FROM portal_certificate_orders WHERE status='ISSUED' AND id::text<>$1 AND acme_directory_url=$2 LIMIT 1`, oldOrder, env.acmeDir).Scan(&curOrder)
+	if curOrder != "" {
+		_, _ = pool.Exec(ctx, `UPDATE portal_certificate_orders SET renew_after=now()+interval '30 days' WHERE id::text=$1`, curOrder)
+	}
+	cur, _ := LoadSettings(ctx, pool)
+	next := "production"
+	if cur.ACMEDirectory == "production" {
+		next = "staging"
+	}
+	if _, err := svc.UpdateSettings(ctx, SettingsUpdate{ACMEDirectory: &next}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	var due bool
+	_ = pool.QueryRow(ctx, `SELECT renew_after <= now() FROM portal_certificate_orders WHERE id::text=$1`, oldOrder).Scan(&due)
+	if !due {
+		t.Fatal("a certificate from the directory Central left must be due for renewal at once")
+	}
+	if curOrder != "" {
+		_ = pool.QueryRow(ctx, `SELECT renew_after <= now() FROM portal_certificate_orders WHERE id::text=$1`, curOrder).Scan(&due)
+		if due {
+			t.Fatal("a certificate from the current directory keeps its renewal date")
+		}
+	}
+	// Deletion is refused before anything is revoked when Central cannot clean up afterwards.
+	unconfigured := New(pool, Options{SecretsDir: t.TempDir(), DNSProvider: ProviderCloudflare})
+	if err := unconfigured.CanRelease(ctx, appA); err == nil {
+		t.Fatal("an appliance with a live certificate and A record cannot be released by an unconfigured Central")
+	}
+	if err := unconfigured.CanRelease(ctx, newAppliance("PTLS-D")); err != nil {
+		t.Fatalf("an appliance with nothing to clean may be released: %v", err)
+	}
 }
 
 func isRefusal(err error, status int) bool {
