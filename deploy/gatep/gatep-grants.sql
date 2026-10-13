@@ -302,6 +302,8 @@ GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_acctd;
 -- revoke loop above and from this list, so its privileges were whatever the last incremental apply happened to
 -- leave, and the reconcile's own D32 assertion then judged a role it had never converged.
 \ir svc-pmsd-iamv2-connector-grants.sql
+-- The HTTPS portal and sealed social secrets (0116).
+\ir svc-portal-https-grants.sql
 
 -- EXECUTE on the CANONICAL audited, versioned publication boundary. This is the only function the product
 -- calls to change checkout grace policy: it requires an active operator as actor, a bounded machine reason
