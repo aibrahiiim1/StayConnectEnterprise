@@ -508,7 +508,9 @@ func captiveOptions(dhcp4 map[string]any) map[string]string {
 	for _, s := range d.Subnet4 {
 		v := ""
 		for _, o := range s.Options {
-			if o.Name == "v4-captive-portal" || o.Code == 114 {
+			// Code 114 only: a stale "v4-captive-portal" entry from before the fix is code 160 on Kea 2.0 and
+			// must read as "no option 114", so the refresh replaces it.
+			if o.Code == 114 {
 				v = o.Data
 			}
 		}

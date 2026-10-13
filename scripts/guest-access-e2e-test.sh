@@ -45,7 +45,10 @@ trap cleanup EXIT
 
 GB=$($PSQL "SELECT bridge_name FROM guest_networks WHERE enabled ORDER BY created_at LIMIT 1")
 GW=$($PSQL "SELECT host(gateway_ip) FROM guest_networks WHERE enabled ORDER BY created_at LIMIT 1")
-PORTAL="http://$GW:8380"
+# The portal the clients use. Over HTTP by default; while the portal is on HTTPS (contract
+# docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md) every HTTP page redirects there, so pass
+# PORTAL=https://<canonical hostname> (and CURL_CA_BUNDLE for a test CA).
+PORTAL="${PORTAL:-http://$GW:8380}"
 counts(){ $PSQL "SELECT (SELECT count(*) FROM iam_v2.pms_postings)||'/'||(SELECT count(*) FROM iam_v2.posting_outbox)||'/'||(SELECT count(*) FROM iam_v2.payment_transactions)"; }
 FIN0=$(counts)
 

@@ -162,7 +162,7 @@ func option114(t *testing.T, dhcp4 map[string]any) string {
 	t.Helper()
 	subs := dhcp4["subnet4"].([]map[string]any)
 	for _, o := range subs[0]["option-data"].([]map[string]any) {
-		if o["name"] == "v4-captive-portal" {
+		if o["code"] == 114 {
 			return o["data"].(string)
 		}
 	}
@@ -187,7 +187,7 @@ func TestRenderKea_Option114FollowsTheHTTPSState(t *testing.T) {
 	n := vlan20()
 	n.CaptiveEnabled = false
 	for _, o := range RenderKeaDhcp4([]GuestNetwork{n}, topo, "/x", "/y")["subnet4"].([]map[string]any)[0]["option-data"].([]map[string]any) {
-		if o["name"] == "v4-captive-portal" {
+		if o["code"] == 114 || o["name"] == "v4-captive-portal" {
 			t.Fatal("a network with the captive portal disabled was given option 114")
 		}
 	}
