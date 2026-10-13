@@ -106,6 +106,24 @@ func (k *keaClient) ConfigSet(dhcp4 map[string]any) error {
 	return nil
 }
 
+// RunningDhcp4 returns the Dhcp4 configuration Kea is RUNNING (config-get), which is the only honest answer to
+// "what is Kea telling devices right now" -- the file on disk and the last thing netd pushed can both differ from it.
+func (k *keaClient) RunningDhcp4() (map[string]any, error) {
+	resp, err := k.cmd("config-get", nil)
+	if err != nil {
+		return nil, err
+	}
+	if code, text := resultOK(resp); code != 0 {
+		return nil, fmt.Errorf("kea config-get failed: %s", text)
+	}
+	args, _ := resp["arguments"].(map[string]any)
+	dhcp4, ok := args["Dhcp4"].(map[string]any)
+	if !ok {
+		return nil, errors.New("kea config-get returned no Dhcp4 object")
+	}
+	return dhcp4, nil
+}
+
 // Status returns true when the dhcp4 service answers status-get.
 func (k *keaClient) Healthy() bool {
 	resp, err := k.cmd("status-get", nil)

@@ -47,11 +47,14 @@ func RenderKeaDhcp4(nets []GuestNetwork, topo Topology, leaseCSVPath, ctrlSocket
 			{"name": "domain-name-servers", "data": dns},
 			{"name": "domain-name", "data": n.DomainName},
 		}
-		// RFC 8910 option 114 — plain-HTTP portal on this network's gateway.
+		// RFC 8910 option 114. While the portal's HTTPS is active it names the RFC 8908 captive API on the
+		// canonical hostname; otherwise it is the plain-HTTP portal on this network's own gateway, exactly as
+		// before (contract §4). The choice is CaptivePortalURL's alone, and netd's runtime refresh renders through
+		// this same function, so an apply and a refresh cannot disagree about what a device is told.
 		if n.CaptiveEnabled {
 			optionData = append(optionData, map[string]any{
 				"name": "v4-captive-portal",
-				"data": PortalURLFor(n.GatewayIP, topo.PortalHTTPPort),
+				"data": CaptivePortalURL(n.GatewayIP, topo),
 			})
 		}
 

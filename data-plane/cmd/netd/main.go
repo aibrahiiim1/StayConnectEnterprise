@@ -84,18 +84,20 @@ func main() {
 		}
 	}
 	ap := &applier{
-		st:            st,
-		kea:           newKeaClient(envOr("NETD_KEA_SOCKET", "/run/kea/kea4-ctrl-socket")),
-		topo:          topo,
-		generatedDir:  envOr("NETD_GENERATED_DIR", "/etc/stayconnect/generated/network"),
-		netplanFile:   envOr("NETD_NETPLAN_FILE", "/etc/netplan/50-stayconnect-guest.yaml"),
-		unboundFrag:   envOr("NETD_UNBOUND_FRAG", "/etc/unbound/unbound.conf.d/stayconnect-guest.conf"),
-		keaLeaseCSV:   envOr("NETD_KEA_LEASE_CSV", "/var/lib/kea/kea-leases4.csv"),
-		keaSocket:     envOr("NETD_KEA_SOCKET", "/run/kea/kea4-ctrl-socket"),
-		keaConfFile:   envOr("NETD_KEA_CONF", "/etc/kea/kea-dhcp4.conf"),
-		confirmWindow: confirmWindow,
-		legacyBridge:  envOr("NETD_LEGACY_BRIDGE", "br-lan"),
-		dryRun:        dryRun,
+		st:           st,
+		kea:          newKeaClient(envOr("NETD_KEA_SOCKET", "/run/kea/kea4-ctrl-socket")),
+		topo:         topo,
+		generatedDir: envOr("NETD_GENERATED_DIR", "/etc/stayconnect/generated/network"),
+		netplanFile:  envOr("NETD_NETPLAN_FILE", "/etc/netplan/50-stayconnect-guest.yaml"),
+		unboundFrag:  envOr("NETD_UNBOUND_FRAG", "/etc/unbound/unbound.conf.d/stayconnect-guest.conf"),
+		// The portal's public names -> the portal address. A separate file: it changes at runtime (portal.go).
+		unboundPortalFrag: envOr("NETD_UNBOUND_PORTAL_FRAG", "/etc/unbound/unbound.conf.d/stayconnect-portal.conf"),
+		keaLeaseCSV:       envOr("NETD_KEA_LEASE_CSV", "/var/lib/kea/kea-leases4.csv"),
+		keaSocket:         envOr("NETD_KEA_SOCKET", "/run/kea/kea4-ctrl-socket"),
+		keaConfFile:       envOr("NETD_KEA_CONF", "/etc/kea/kea-dhcp4.conf"),
+		confirmWindow:     confirmWindow,
+		legacyBridge:      envOr("NETD_LEGACY_BRIDGE", "br-lan"),
+		dryRun:            dryRun,
 	}
 
 	// Refresh interface inventory at boot.
@@ -121,6 +123,11 @@ func main() {
 	// managed guest bridge netplan did not recreate — would silently drift from
 	// the DB source of truth until the next apply.
 	ap.ReconcileActiveOnBoot(rootCtx)
+
+	// The portal's runtime state: the portal interface (kernel state anything can remove), DHCP option 114 and
+	// the portal-names resolver fragment (both follow scd's HTTPS verdict, which changes with no revision).
+	// Never touches nftables or netplan. See portal.go.
+	go ap.portalRuntimeLoop(rootCtx)
 
 	sn := &sysNetMgr{
 		st:            st,
@@ -233,6 +240,8 @@ func main() {
 	r.Post("/v1/rollback", srv.rollback)
 	r.Get("/v1/leases", srv.leases)
 	r.Get("/v1/pending", srv.pending)
+	// May this address become the portal address? Read-only; edged asks before saving the setting.
+	r.Post("/v1/portal-ip/validate", srv.portalIPValidate)
 	// System (WAN/LAN) network management — the appliance's own base networking.
 	// Phase 3: the ONLY Phase-3 tc mutation entry point on this appliance (ADR-0002).
 	r.Post("/v1/phase3/shaping", srv.phase3ShapingHandler)

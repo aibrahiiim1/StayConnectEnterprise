@@ -124,10 +124,21 @@ func ValidateOne(n GuestNetwork, topo Topology, availIfaces, knownIfaces map[str
 	}
 
 	// Portal URL (option 114) — only relevant for local+captive networks.
+	//
+	// HTTPS IS ALLOWED IN EXACTLY ONE FORM. The approved HTTP fallback is http://<gateway>:<port>/ and stays
+	// the default; while the portal's HTTPS is active the option names the RFC 8908 captive API on the
+	// canonical hostname -- https://<canonical>/captive-portal/api -- and nothing else. Any other https URL
+	// (a gateway address, a different path, a hostname that is not the canonical one) would hand a device a
+	// TLS endpoint the appliance holds no certificate for, so it is refused rather than rendered.
 	if n.DHCPMode == DHCPLocal && n.CaptiveEnabled && gw != nil {
-		url := PortalURLFor(n.GatewayIP, topo.PortalHTTPPort)
+		url := CaptivePortalURL(n.GatewayIP, topo)
 		if strings.HasPrefix(url, "https://") {
-			r.add(f("portal_url"), "portal_https", "captive-portal option 114 must use plain HTTP, not HTTPS")
+			want, ok := captiveAPIURL(topo)
+			if !ok || url != want {
+				r.add(f("portal_url"), "portal_https",
+					"captive-portal option 114 may use HTTPS only as https://<canonical portal hostname>/captive-portal/api "+
+						"while the portal's HTTPS is active; otherwise it must be the plain-HTTP gateway URL")
+			}
 		}
 	}
 
@@ -319,8 +330,9 @@ func ValidateSet(nets []GuestNetwork, topo Topology, availIfaces, knownIfaces ma
 	return res
 }
 
-// PortalURLFor builds the plain-HTTP captive-portal URL (option 114) for a
-// network's gateway. Always HTTP straight to portald — never HTTPS/Caddy.
+// PortalURLFor builds the plain-HTTP captive-portal URL for a network's gateway: the approved HTTP fallback
+// (and what option 114 carries whenever the portal's HTTPS is not active). Straight to portald, never Caddy.
+// See CaptivePortalURL for the state-aware choice option 114 actually makes.
 func PortalURLFor(gatewayIP string, httpPort int) string {
 	return fmt.Sprintf("http://%s:%d/", gatewayIP, httpPort)
 }
