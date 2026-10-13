@@ -113,6 +113,10 @@ var adminPrefixes = []string{
 	// connection test and the site's extra payment domains. Read and written by edged for the Payment methods
 	// screen; the portal never reaches it.
 	"/v1/payment/",
+	// Social sign-in administration: the write-only provider secret (sealed here, where the key is), its
+	// yes/no state, reload and the offered/why-not status. edged only; the portal's social routes are the
+	// separate /v1/auth/social/ guest prefix.
+	"/v1/social/",
 }
 
 func classifyRoute(path string) routeClass {

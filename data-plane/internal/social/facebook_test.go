@@ -58,7 +58,7 @@ const fbToken = `{"access_token":"fb-at-1","token_type":"bearer","expires_in":51
 
 func TestFacebookAuthorizeURL(t *testing.T) {
 	f, _ := NewFacebook("app", "sec", "")
-	u, err := url.Parse(f.AuthorizeURL("state-abc", "https://portal/auth/social/callback"))
+	u, err := url.Parse(f.AuthorizeURL(AuthRequest{State: "state-abc", RedirectURI: "https://portal/auth/social/callback"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestFacebookExchangeSuccess(t *testing.T) {
 		`{"id":"10222","name":"Alice","email":"alice@example.com","picture":{"data":{"url":"https://x/p.jpg"}}}`,
 		&form, &meQ)
 	f := newFacebookAt(t, srv.URL)
-	info, err := f.Exchange(context.Background(), "code-1", "https://portal/cb")
+	info, err := f.Exchange(context.Background(), xreq("code-1", "https://portal/cb"))
 	if err != nil {
 		t.Fatalf("Exchange: %v", err)
 	}
@@ -108,6 +108,13 @@ func TestFacebookExchangeSuccess(t *testing.T) {
 	if meQ.Get("access_token") != "" {
 		t.Error("the access token must travel in the Authorization header, not the URL")
 	}
+	// Facebook binds nothing beyond state: no verifier leaves the appliance, and an attempt without one exchanges.
+	if form.Has("code_verifier") || f.Binding() != (Binding{}) {
+		t.Errorf("facebook must not use PKCE or a nonce: form=%v binding=%+v", form, f.Binding())
+	}
+	if _, err := f.Exchange(context.Background(), ExchangeRequest{Code: "code-2", RedirectURI: "https://portal/cb"}); err != nil {
+		t.Errorf("an attempt with no verifier or nonce is normal for facebook: %v", err)
+	}
 }
 
 func TestFacebookAppSecretProofKnownVector(t *testing.T) {
@@ -122,7 +129,7 @@ func TestFacebookMissingEmailIsUnverified(t *testing.T) {
 	var form, meQ url.Values
 	srv := fakeFacebook(t, http.StatusOK, fbToken, http.StatusOK, `{"id":"10333","name":"Phone Only"}`, &form, &meQ)
 	f := newFacebookAt(t, srv.URL)
-	info, err := f.Exchange(context.Background(), "c", "https://portal/cb")
+	info, err := f.Exchange(context.Background(), xreq("c", "https://portal/cb"))
 	if !errors.Is(err, ErrEmailUnverified) {
 		t.Fatalf("expected ErrEmailUnverified, got %v", err)
 	}
@@ -137,7 +144,7 @@ func TestFacebookTokenError(t *testing.T) {
 		`{"error":{"message":"This authorization code has expired.","type":"OAuthException","code":100}}`,
 		http.StatusOK, "", &form, &meQ)
 	f := newFacebookAt(t, srv.URL)
-	_, err := f.Exchange(context.Background(), "c", "https://portal/cb")
+	_, err := f.Exchange(context.Background(), xreq("c", "https://portal/cb"))
 	if err == nil || !strings.Contains(err.Error(), "OAuthException") || !strings.Contains(err.Error(), "expired") {
 		t.Fatalf("err didn't include upstream details: %v", err)
 	}
@@ -152,7 +159,7 @@ func TestFacebookGraphError(t *testing.T) {
 		`{"error":{"message":"Invalid appsecret_proof provided in the API argument","type":"GraphMethodException","code":100}}`,
 		&form, &meQ)
 	f := newFacebookAt(t, srv.URL)
-	info, err := f.Exchange(context.Background(), "c", "https://portal/cb")
+	info, err := f.Exchange(context.Background(), xreq("c", "https://portal/cb"))
 	if err == nil || info != nil || !strings.Contains(err.Error(), "appsecret_proof") {
 		t.Fatalf("expected Graph refusal, got info=%+v err=%v", info, err)
 	}

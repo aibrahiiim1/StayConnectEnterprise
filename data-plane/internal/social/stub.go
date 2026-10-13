@@ -14,6 +14,11 @@ import (
 //
 // Wire it as Stub{Name: "google", AuthorizeBase: "http://portal.stayconnect.local:8380/api/oauth/stub/authorize"}
 // to simulate Google without a real OAuth client.
+//
+// THE STUB MINTS WHATEVER IDENTITY ITS CODE NAMES, so it is a development tool
+// only: scd registers it in a development build (buildprofile) and never in a
+// production one, where a stub left standing in for an unconfigured provider
+// would let anyone sign in as anyone.
 type Stub struct {
 	ProviderName  string
 	AuthorizeBase string // typically http://portal.stayconnect.local:8380/api/oauth/stub/authorize
@@ -21,22 +26,26 @@ type Stub struct {
 
 func (s *Stub) Name() string { return s.ProviderName }
 
-func (s *Stub) AuthorizeURL(state, redirectURI string) string {
+// Binding: none. The stub has no token endpoint to bind a verifier or a nonce to.
+func (s *Stub) Binding() Binding { return Binding{} }
+
+func (s *Stub) AuthorizeURL(a AuthRequest) string {
 	u, err := url.Parse(s.AuthorizeBase)
 	if err != nil {
 		return ""
 	}
 	q := u.Query()
 	q.Set("provider", s.ProviderName)
-	q.Set("state", state)
-	q.Set("redirect_uri", redirectURI)
+	q.Set("state", a.State)
+	q.Set("redirect_uri", a.RedirectURI)
 	u.RawQuery = q.Encode()
 	return u.String()
 }
 
 // Exchange decodes the stub code (base64url JSON of UserInfo). Real providers
 // would POST to the token endpoint here.
-func (s *Stub) Exchange(_ context.Context, code, _ string) (*UserInfo, error) {
+func (s *Stub) Exchange(_ context.Context, x ExchangeRequest) (*UserInfo, error) {
+	code := x.Code
 	if code == "" {
 		return nil, ErrBadCode
 	}
