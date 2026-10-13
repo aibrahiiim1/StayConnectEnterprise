@@ -84,6 +84,10 @@ var guestPrefixes = []string{
 	"/v1/phase3/auth/",
 	"/v1/phase5/",
 	"/v1/phase6/",
+	// The portal's HTTPS state (portal_tls.go): portald polls it to decide whether to redirect to HTTPS and which
+	// certificate to serve. It answers hostnames and a reason -- nothing secret, nothing that changes anything.
+	// Its siblings under /v1/portal/tls/ (kick, renew) are administrative and listed below.
+	"/v1/portal/tls-state",
 }
 
 // adminPrefixes exists for the TEST, not for the runtime: classification already defaults to admin, so this
@@ -113,6 +117,10 @@ var adminPrefixes = []string{
 	// connection test and the site's extra payment domains. Read and written by edged for the Payment methods
 	// screen; the portal never reaches it.
 	"/v1/payment/",
+	// The portal certificate agent's kick and renew: edged's, after the Portal HTTPS permission and step-up.
+	// "Renew now" orders new keys and certificates, which spends Central's issuance budget; the portal must
+	// never be able to trigger it.
+	"/v1/portal/tls/",
 }
 
 func classifyRoute(path string) routeClass {

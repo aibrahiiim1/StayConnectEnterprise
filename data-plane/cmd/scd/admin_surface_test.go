@@ -104,6 +104,7 @@ func TestTheGuestSurfaceIsExactlyWhatPortaldNeeds(t *testing.T) {
 		"/v1/phase5/poststay/convert",
 		"/v1/phase6/devices/list",
 		"/v1/phase6/devices/release",
+		"/v1/portal/tls-state",
 	} {
 		if classifyRoute(path) != guestRoute {
 			t.Errorf("%s classified as ADMIN. portald or acctd calls it, so this refuses a caller that "+
@@ -137,6 +138,8 @@ func TestTheDangerousRoutesAreAdmin(t *testing.T) {
 		"/v1/vouchers/0f8b9a0e-0000-0000-0000-000000000000/revoke",
 		"/v1/voucher-key-generations",
 		"/v1/phase3/signin-attempts/credentials",
+		"/v1/portal/tls/kick",
+		"/v1/portal/tls/renew",
 	} {
 		if classifyRoute(path) != adminRoute {
 			t.Errorf("%s classified as GUEST: the network-facing captive portal would be able to call it", path)

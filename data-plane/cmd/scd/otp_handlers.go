@@ -114,22 +114,22 @@ type otpIssueReq struct {
 	// MAC is the requesting device's hardware address as portald resolved it from the kernel. The challenge is
 	// bound to it (migration 0110): the code, and the email's link that carries it, verify from this device only.
 	MAC string `json:"mac"`
-	// PortalBase is the origin the device reached the portal by (portald, from the connection). When present
-	// and well-formed the email also carries a tap-to-connect link into the device's real browser.
+	// PortalBase is the origin the device reached the portal by, as portald saw it. STILL ACCEPTED, NEVER USED
+	// FOR THE LINK: it is the Host header of a guest's request, and a link in an email must not be built from
+	// something a guest typed. The link's origin is the canonical HTTPS hostname scd itself established
+	// (otpLinkBase). Kept so an older portald's request still decodes.
 	PortalBase string `json:"portal_base,omitempty"`
 }
 
-// otpLinkBase accepts only a plain http(s) origin: scheme and host (with an optional port), nothing else.
-func otpLinkBase(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || len(raw) > 255 {
+// otpLinkBase is the origin of the tap-to-connect link: https://<canonical hostname> while the portal is on
+// HTTPS, and "" -- no link, the code alone -- on the HTTP fallback (contract section 4). A link to the plain-HTTP
+// portal is deliberately not sent: it would teach clients to follow http:// links from a message, and social
+// sign-in and the browser's own trust indicators exist only on the HTTPS portal.
+func otpLinkBase(st PortalTLSState) string {
+	if !st.HTTPSActive || st.Canonical == "" {
 		return ""
 	}
-	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
-		return ""
-	}
-	return u.Scheme + "://" + u.Host
+	return "https://" + st.Canonical
 }
 
 type otpIssueResp struct {
@@ -277,10 +277,14 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 		issued.Code, int(otp.DefaultTTL.Minutes()))
 	// THE LINK THE CLIENT CAN TAP FROM THE MAIL APP. It opens the portal in the phone's real browser -- reachable
 	// before sign-in -- on a page with one Connect button; nothing is verified by merely opening it. The code in
-	// it is the same secret this email already carries, single-use and ten minutes long.
-	if base := otpLinkBase(req.PortalBase); base != "" && channelLabel == "email" {
-		sentBody += fmt.Sprintf("\n\nOr tap to connect this device:\n%s/connect?c=%s&k=%s", base,
-			url.QueryEscape(issued.ChallengeID), url.QueryEscape(issued.Code))
+	// it is the same secret this email already carries, single-use and ten minutes long. Only while the portal is
+	// on HTTPS (contract section 4); on the approved HTTP fallback the message carries the code alone.
+	link := ""
+	if base := otpLinkBase(s.portalTLS.State()); base != "" {
+		link = fmt.Sprintf("%s/connect?c=%s&k=%s", base, url.QueryEscape(issued.ChallengeID), url.QueryEscape(issued.Code))
+	}
+	if link != "" && channelLabel == "email" {
+		sentBody += "\n\nOr tap to connect this device:\n" + link
 	}
 
 	// A FAILED SEND IS A FAILURE. The code used to be reported as sent while the delivery error went to the
@@ -298,6 +302,9 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 		})
 	case "sms":
 		shortText := fmt.Sprintf("Wi-Fi code: %s (expires in %dm)", issued.Code, int(otp.DefaultTTL.Minutes()))
+		if link != "" {
+			shortText += " " + link
+		}
 		sendErr = smsSender.Send(r.Context(), sms.Message{
 			To:   dest,
 			Text: shortText,

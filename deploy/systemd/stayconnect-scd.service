@@ -78,6 +78,12 @@ ReadWritePaths=/etc/stayconnect/identity /etc/stayconnect/license /etc/stayconne
 # also written in place rather than renamed over, because a temp-and-rename needs the whole directory.
 ReadWritePaths=/etc/stayconnect/backup-retention.conf
 ReadWritePaths=/etc/systemd/system/stayconnect-backup-cleanup.timer.d
+# The Client Portal's HTTPS keys and certificates (cmd/scd/portal_tls.go, internal/portaltls): scd generates a key
+# per portal hostname, installs the certificate Central's ACME order returns, and portald reads both by SNI. ONE
+# directory, 0750 root:stayconnect-portald, created by deploy/tmpfiles/stayconnect-operator-surfaces.conf before
+# scd starts (an allowlisted path must exist at unit start). The "-" keeps scd starting if it does not exist yet:
+# the portal then simply stays on the approved HTTP fallback, which is the correct degraded state.
+ReadWritePaths=-/etc/stayconnect/portal-tls
 NoNewPrivileges=yes
 
 [Install]
