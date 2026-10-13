@@ -672,8 +672,17 @@ export type SocialOAuthProvider = {
   enabled: boolean;
   display_name?: string;
   client_id: string;
-  redirect_uri: string;
   scopes?: string;
+  /** Portal host names whose callback URL the hotel registered in its own provider app (contract §5). */
+  callback_hosts: string[];
+  /** The callback URL for every portal host name this appliance has now, registered or not. */
+  callback_urls: { hostname: string; kind: string; url: string; canonical: boolean }[];
+  /** Write-only secret: true for every stored provider (a provider is created only together with its secret). */
+  secret_set: boolean;
+  /** Whether clients are offered it right now, and why not: disabled | http_fallback | needs_hotel_domain |
+   *  callback_not_registered. */
+  offered: boolean;
+  offered_reason?: string;
   tenant?: string;   // Microsoft: directory (tenant) ID, or common / organizations / consumers
   team_id?: string;  // Apple: Team ID
   key_id?: string;   // Apple: Key ID of the .p8 key

@@ -81,6 +81,8 @@ const MATRIX: Matrix = {
     // financial onboarding are READ here: switching a module and approving room charge are site_admin only.
     "payment-providers": "write", modules: "read", "pms-financial-onboarding": "read",
     network: "write",
+    // Portal HTTPS (portal_https.read / portal_https.manage): follows network; changes also need the password.
+    "portal-https": "write",
     "financial-review": "read", "financial-ops": "read",
     // Vouchers: prints and cancels cards, and CHOOSES THE FORMAT -- which is a property configuration
     // decision, the same reasoning that puts auth-methods here. Not "voucher-codes": this role owns
@@ -170,7 +172,7 @@ const MATRIX: Matrix = {
     "guest-accounts": "read", sessions: "read", usage: "read", "auth-methods": "read",
     "walled-garden": "read", "client-groups": "read", "portal-branding": "read", "notification-providers": "read", "social-providers": "read",
     "payment-providers": "read", modules: "read", audit: "read", reports: "read",
-    backups: "read", license: "read", network: "read", diagnostics: "read",
+    backups: "read", license: "read", network: "read", diagnostics: "read", "portal-https": "read",
     // Sees which cards exist and in what state; reads no code, for the same reason
     // guest-signin-credentials is absent from this role.
     vouchers: "read", "voucher-code-settings": "read", "account-password-settings": "read",

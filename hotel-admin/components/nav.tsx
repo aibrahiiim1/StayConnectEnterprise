@@ -164,6 +164,8 @@ const SECTIONS: Section[] = [
       { href: "/network/dhcp",        label: "DHCP & leases",      icon: Wifi,      resource: "network", keywords: "ip address pool lease kea reservation" },
       { href: "/network/system",      label: "WAN / LAN settings", icon: Router,    resource: "network", keywords: "uplink gateway dns static management" },
       { href: "/network/revisions",   label: "Config history",     icon: History,   resource: "network", keywords: "rollback revision applied" },
+      // The Client Portal's own address, host names and publicly trusted certificates (HTTPS portal contract §8).
+      { href: "/portal-https",        label: "Portal HTTPS",       icon: ShieldCheck, resource: "portal-https", keywords: "https ssl certificate captive portal address domain hostname letsencrypt client portal guest portal fallback" },
       // "Cloud connection" is gone, and its keywords live on Activation so the search that found it still
       // does. The link to Central exists ONLY to serve activation and licensing. Everything the page actually
       // showed -- licence state, certificate health, reachability, appliance identity -- is licensing or

@@ -67,9 +67,18 @@ the keys are unchanged, [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md)). Legen
 | stripe-accounts | W | W | R | R | – | R | R |
 | notification-providers | W | W | R | R | – | R | R |
 | social-providers | W | W | R | R | – | R | R |
+| portal-https | W | W | – | – | – | – | R |
 | audit | W(R) | R | R | R | – | R | R |
 | reports | R | R | R | R | – | R | R |
 | backups (view/trigger) | W | W | R | R | – | R | R |
+
+**portal-https** (`portal_https.read` = R, `portal_https.manage` = W) is the Portal HTTPS screen under
+Networking ([ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md](architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md)
+§8): the portal address, the hotel portal domain, the hostnames and certificates scd installed, Check now and
+Renew now. It follows `network`: the portal address is a network change and the domain points at it. Changing
+the address or the domain and Renew now additionally require the operator's password (step-up); Check now
+changes nothing and needs only **W**. Applying a new address still goes through the Client networks
+validate/apply/confirm flow, which needs `network` **W**.
 
 **The four guest sign-in keys (Room sign-in, in the Hotel module) are four keys on purpose, and none implies another.**
 

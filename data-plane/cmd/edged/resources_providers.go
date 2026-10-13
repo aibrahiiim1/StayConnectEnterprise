@@ -9,9 +9,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -546,10 +548,34 @@ func (s *server) deleteNotifyProvider(w http.ResponseWriter, r *http.Request) {
 }
 
 // ----- social OAuth providers -----------------------------------------------------
+//
+// CUSTOMER-OWNED APPLICATIONS (docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md §5). Each hotel
+// registers its own Google, Apple, Microsoft and Facebook application; this surface stores what scd needs to
+// use it.
+//
+//   - THE CALLBACK IS DERIVED, NOT TYPED. It is https://<portal hostname>/auth/social/callback for each portal
+//     hostname scd established (the OneGate hostname and, once registered, the hotel portal domain). The hotel
+//     ticks the hostnames it registered in its app (callback_hosts); a free-text redirect URI is no longer
+//     stored. One sent by an older client is still accepted and turned into its host, as migration 0116 did.
+//   - THE SECRET IS WRITE-ONLY AND SEALED BY scd. edged forwards it over scd's socket
+//     (PUT /v1/social/providers/{id}/secret) and never writes social_oauth_providers.client_secret: scd seals
+//     it under social_dek.key into iam_v2.social_provider_secret_generations, which edged holds no grant on.
+//   - SECRET_SET: edged cannot read the sealed generations, and asks scd for nothing it has no endpoint for. It
+//     reports secret_set=true for every row it returns, and that is honest by construction: a row is created
+//     only together with its secret (the insert is undone when scd refuses the secret), and a secret can be
+//     replaced but never removed through this surface.
+//   - OFFERED: a provider is offered to clients only while HTTPS is active and the canonical hostname is one of
+//     its callback_hosts (§5); the response says which, and why not.
+//   - Every change asks scd to reload its providers (POST /v1/social/reload); scd also reloads every 60 s.
 
 var socialAllowedProviders = map[string]bool{
 	"google": true, "apple": true, "facebook": true, "microsoft": true,
 }
+
+// scd's social endpoints, named once.
+const scdSocialReload = "/v1/social/reload"
+
+func scdSocialSecretPath(id string) string { return "/v1/social/providers/" + id + "/secret" }
 
 type edgeSocialProvider struct {
 	ID          string `json:"id"`
@@ -557,15 +583,24 @@ type edgeSocialProvider struct {
 	Enabled     bool   `json:"enabled"`
 	DisplayName string `json:"display_name,omitempty"`
 	ClientID    string `json:"client_id"` // public per OAuth2 spec
-	RedirectURI string `json:"redirect_uri"`
 	Scopes      string `json:"scopes,omitempty"`
 	// Non-secret provider settings kept in the row's extra jsonb (the same
 	// socialloader.Extra scd builds the provider from): Microsoft's tenant,
 	// Apple's Team ID and Key ID. Apple's .p8 private key is the
 	// client_secret and, like every secret, is never returned.
-	Tenant        string     `json:"tenant,omitempty"`
-	TeamID        string     `json:"team_id,omitempty"`
-	KeyID         string     `json:"key_id,omitempty"`
+	Tenant string `json:"tenant,omitempty"`
+	TeamID string `json:"team_id,omitempty"`
+	KeyID  string `json:"key_id,omitempty"`
+	// The portal hostnames whose callback URL the hotel registered in its provider app, and the callback URL
+	// for every portal hostname that exists now (registered or not), so the page can show and copy them.
+	CallbackHosts []string            `json:"callback_hosts"`
+	CallbackURLs  []portalCallbackURL `json:"callback_urls"`
+	// See SECRET_SET above: true for every stored row.
+	SecretSet bool `json:"secret_set"`
+	// Offered is whether the portal shows this provider to clients right now; OfferedReason says why not:
+	// disabled | http_fallback | needs_hotel_domain | callback_not_registered.
+	Offered       bool       `json:"offered"`
+	OfferedReason string     `json:"offered_reason,omitempty"`
 	LastSuccessAt *time.Time `json:"last_success_at,omitempty"`
 	LastError     string     `json:"last_error,omitempty"`
 	LastErrorAt   *time.Time `json:"last_error_at,omitempty"`
@@ -574,35 +609,96 @@ type edgeSocialProvider struct {
 }
 
 const socialCols = `id, provider, enabled, COALESCE(display_name,''),
-       client_id, redirect_uri, COALESCE(scopes,''),
+       client_id, COALESCE(scopes,''), callback_hosts,
        last_success_at, COALESCE(last_error,''), last_error_at,
        created_at, updated_at, COALESCE(extra,'{}'::jsonb)::text`
 
 func scanSocial(row interface{ Scan(...any) error }, p *edgeSocialProvider) error {
 	var extraJSON string
 	if err := row.Scan(&p.ID, &p.Provider, &p.Enabled, &p.DisplayName,
-		&p.ClientID, &p.RedirectURI, &p.Scopes,
+		&p.ClientID, &p.Scopes, &p.CallbackHosts,
 		&p.LastSuccessAt, &p.LastError, &p.LastErrorAt,
 		&p.CreatedAt, &p.UpdatedAt, &extraJSON); err != nil {
 		return err
 	}
+	if p.CallbackHosts == nil {
+		p.CallbackHosts = []string{}
+	}
 	var x socialloader.Extra
 	_ = json.Unmarshal([]byte(extraJSON), &x) // unreadable extra shows as unset; scd refuses to build from it
 	p.Tenant, p.TeamID, p.KeyID = x.Tenant, x.TeamID, x.KeyID
+	p.SecretSet = true
 	return nil
 }
 
+// decorateSocial adds what depends on the portal's current HTTPS state: the callback URLs and the offered line.
+func decorateSocial(p *edgeSocialProvider, st portalTLSState) {
+	p.CallbackURLs = portalHostnames(st)
+	p.Offered, p.OfferedReason = socialOffered(p.Provider, p.Enabled, p.CallbackHosts, st)
+}
+
+// socialOffered is the contract's rule (§5), with the reason an administrator can act on when it is false.
+func socialOffered(provider string, enabled bool, callbackHosts []string, st portalTLSState) (bool, string) {
+	if !enabled {
+		return false, "disabled"
+	}
+	canonical := strings.ToLower(st.CanonicalHostname)
+	if !st.HTTPSActive || canonical == "" {
+		return false, "http_fallback"
+	}
+	// Google accepts only callback domains the app owner verified in Search Console, which a OneGate hostname
+	// can never be: Google needs the hotel portal domain to be the canonical hostname.
+	if provider == "google" && canonical == strings.ToLower(st.OneGateHostname) {
+		return false, "needs_hotel_domain"
+	}
+	for _, h := range callbackHosts {
+		if strings.ToLower(h) == canonical {
+			return true, ""
+		}
+	}
+	return false, "callback_not_registered"
+}
+
+// validateCallbackHosts normalises the ticked hostnames and refuses any that is not a portal hostname this
+// appliance has now. The result is deduplicated and in a stable order.
+func validateCallbackHosts(hosts []string, st portalTLSState) ([]string, string) {
+	known := map[string]bool{}
+	for _, c := range portalHostnames(st) {
+		known[c.Hostname] = true
+	}
+	seen := map[string]bool{}
+	out := []string{}
+	for _, raw := range hosts {
+		h := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(raw)), ".")
+		if h == "" || seen[h] {
+			continue
+		}
+		if !known[h] {
+			if len(known) == 0 {
+				return nil, "this appliance has no portal hostname yet, so no callback URL can be registered; see Portal HTTPS"
+			}
+			return nil, h + " is not a portal hostname of this appliance; tick only the callback URLs shown"
+		}
+		seen[h] = true
+		out = append(out, h)
+	}
+	sort.Strings(out)
+	return out, ""
+}
+
 type socialWriteReq struct {
-	Provider     string  `json:"provider,omitempty"` // create-only
-	Enabled      *bool   `json:"enabled,omitempty"`
-	DisplayName  *string `json:"display_name,omitempty"`
-	ClientID     *string `json:"client_id,omitempty"`
-	ClientSecret *string `json:"client_secret,omitempty"` // write-only
-	RedirectURI  *string `json:"redirect_uri,omitempty"`
-	Scopes       *string `json:"scopes,omitempty"`
-	Tenant       *string `json:"tenant,omitempty"`  // microsoft only
-	TeamID       *string `json:"team_id,omitempty"` // apple only
-	KeyID        *string `json:"key_id,omitempty"`  // apple only
+	Provider      string    `json:"provider,omitempty"` // create-only
+	Enabled       *bool     `json:"enabled,omitempty"`
+	DisplayName   *string   `json:"display_name,omitempty"`
+	ClientID      *string   `json:"client_id,omitempty"`
+	ClientSecret  *string   `json:"client_secret,omitempty"` // write-only, forwarded to scd
+	CallbackHosts *[]string `json:"callback_hosts,omitempty"`
+	// RedirectURI is accepted from older clients only. It is never stored: its host becomes a callback host.
+	RedirectURI *string `json:"redirect_uri,omitempty"`
+	Scopes      *string `json:"scopes,omitempty"`
+	Tenant      *string `json:"tenant,omitempty"`  // microsoft only
+	TeamID      *string `json:"team_id,omitempty"` // apple only
+	KeyID       *string `json:"key_id,omitempty"`  // apple only
 }
 
 // extraPatch is the JSON object written to the row's extra column: only the
@@ -618,6 +714,25 @@ func (in *socialWriteReq) extraPatch() string {
 	}
 	b, _ := json.Marshal(m)
 	return string(b)
+}
+
+// requestedCallbackHosts resolves what the request asks for: callback_hosts when sent, else the host of a
+// legacy redirect_uri, else nil (unchanged on update, none on create). The redirect URI is checked for shape
+// first, exactly as before, so an older client still gets the same refusal for a URL that could never work.
+func (in *socialWriteReq) requestedCallbackHosts() (*[]string, string) {
+	if in.CallbackHosts != nil {
+		return in.CallbackHosts, ""
+	}
+	if in.RedirectURI == nil || strings.TrimSpace(*in.RedirectURI) == "" {
+		return nil, ""
+	}
+	raw := strings.TrimSpace(*in.RedirectURI)
+	if msg := validateSocialRedirectURI(raw); msg != "" {
+		return nil, msg
+	}
+	u, _ := url.Parse(raw)
+	hosts := []string{u.Hostname()}
+	return &hosts, ""
 }
 
 // validateSocialWrite checks the provider-specific fields of a create
@@ -682,9 +797,46 @@ func (s *server) socialProvidersRoutes() http.Handler {
 	return r
 }
 
+// storeSocialSecret hands a secret to scd, which seals it and keeps it out of the plaintext column. ok=false
+// with an operator-readable reason; the secret itself never appears in it.
+func (s *server) storeSocialSecret(r *http.Request, id, secret string) (bool, string) {
+	if s.scd == nil {
+		return false, "the secret could not be stored: the service is unavailable"
+	}
+	status, body, err := s.scd.call(r.Context(), http.MethodPut, scdSocialSecretPath(id),
+		map[string]string{"secret": secret})
+	if err != nil {
+		return false, "the secret could not be stored: the service is unavailable"
+	}
+	if status >= 300 {
+		var e struct {
+			Message string `json:"message"`
+			Error   string `json:"error"`
+		}
+		_ = json.Unmarshal(body, &e)
+		if e.Message != "" {
+			return false, e.Message
+		}
+		return false, "the secret could not be stored (" + e.Error + ")"
+	}
+	return true, ""
+}
+
+// reloadSocial asks scd to rebuild its providers now. Best-effort: scd reloads every 60 s regardless.
+func (s *server) reloadSocial() {
+	if s.scd != nil {
+		s.scdReloadWarn(scdSocialReload)
+	}
+}
+
 func (s *server) listSocialProviders(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
+	st, err := s.loadPortalTLSState(ctx)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
 	rows, err := s.db.Query(ctx,
 		`SELECT `+socialCols+` FROM social_oauth_providers WHERE tenant_id=$1 ORDER BY provider, created_at`,
 		s.tenantID)
@@ -693,16 +845,20 @@ func (s *server) listSocialProviders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rows.Close()
-	var out []edgeSocialProvider
+	out := []edgeSocialProvider{}
 	for rows.Next() {
 		var p edgeSocialProvider
 		if err := scanSocial(rows, &p); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
 			return
 		}
+		decorateSocial(&p, st)
 		out = append(out, p)
 	}
-	writeList(w, out)
+	// The hostnames are returned beside the list too, so the Add form can offer them before any provider exists.
+	writeJSON(w, http.StatusOK, map[string]any{"data": out, "meta": listMeta{},
+		"callback_urls": portalHostnames(st), "https_active": st.HTTPSActive,
+		"canonical_hostname": st.CanonicalHostname, "onegate_hostname": st.OneGateHostname})
 }
 
 func (s *server) getSocialProvider(w http.ResponseWriter, r *http.Request) {
@@ -721,7 +877,22 @@ func (s *server) getSocialProvider(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
 	}
+	st, err := s.loadPortalTLSState(ctx)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	decorateSocial(&p, st)
 	writeJSON(w, http.StatusOK, p)
+}
+
+// resolveCallbackHosts turns the request into the hosts to store: nil means "unchanged".
+func resolveCallbackHosts(in *socialWriteReq, st portalTLSState) ([]string, string) {
+	req, msg := in.requestedCallbackHosts()
+	if msg != "" || req == nil {
+		return nil, msg
+	}
+	return validateCallbackHosts(*req, st)
 }
 
 func (s *server) createSocialProvider(w http.ResponseWriter, r *http.Request) {
@@ -735,32 +906,45 @@ func (s *server) createSocialProvider(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "provider must be google|apple|facebook|microsoft")
 		return
 	}
-	if strDeref(in.ClientID) == "" || strDeref(in.ClientSecret) == "" || strDeref(in.RedirectURI) == "" {
-		jsonErr(w, http.StatusBadRequest, "bad_request", "client_id, client_secret, redirect_uri required")
+	if strings.TrimSpace(strDeref(in.ClientID)) == "" || strDeref(in.ClientSecret) == "" {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "client_id and client_secret are required")
 		return
 	}
 	if msg := validateSocialWrite(in.Provider, &in, true); msg != "" {
 		jsonErr(w, http.StatusBadRequest, "bad_request", msg)
 		return
 	}
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	st, err := s.loadPortalTLSState(ctx)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "the portal hostnames could not be read")
+		return
+	}
+	hosts, msg := resolveCallbackHosts(&in, st)
+	if msg != "" {
+		jsonErr(w, http.StatusBadRequest, "bad_request", msg)
+		return
+	}
+	if hosts == nil {
+		hosts = []string{}
+	}
 	enabled := true
 	if in.Enabled != nil {
 		enabled = *in.Enabled
 	}
-	ctx, cancel := dbCtx(r)
-	defer cancel()
 	var p edgeSocialProvider
-	err := scanSocial(s.db.QueryRow(ctx, `
+	err = scanSocial(s.db.QueryRow(ctx, `
         INSERT INTO social_oauth_providers(
             tenant_id, provider, enabled, display_name,
-            client_id, client_secret, redirect_uri, scopes, extra
+            client_id, client_secret, redirect_uri, callback_hosts, scopes, extra
         ) VALUES (
             $1, $2, $3, NULLIF($4,''),
-            $5, $6, $7, NULLIF($8,''), $9::jsonb
+            $5, NULL, NULL, $6, NULLIF($7,''), $8::jsonb
         )
         RETURNING `+socialCols,
 		s.tenantID, in.Provider, enabled, strDeref(in.DisplayName),
-		strDeref(in.ClientID), strDeref(in.ClientSecret), strDeref(in.RedirectURI),
+		strings.TrimSpace(strDeref(in.ClientID)), hosts,
 		strDeref(in.Scopes), in.extraPatch(),
 	), &p)
 	if err != nil {
@@ -771,9 +955,20 @@ func (s *server) createSocialProvider(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "insert failed")
 		return
 	}
+	// The row exists, so scd can seal against its id. A refused secret undoes the row: a provider without a
+	// secret could never sign anyone in, and secret_set would no longer be true by construction.
+	if ok, msg := s.storeSocialSecret(r, p.ID, strDeref(in.ClientSecret)); !ok {
+		if _, derr := s.db.Exec(ctx, `DELETE FROM social_oauth_providers WHERE id=$1 AND tenant_id=$2`, p.ID, s.tenantID); derr != nil {
+			slog.Error("social provider: secret refused and the row could not be removed", "id", p.ID, "err", derr)
+		}
+		jsonErr(w, http.StatusBadGateway, "secret_not_stored", msg)
+		return
+	}
 	s.audit(r, "social_oauth_provider.created", "social_oauth_provider", p.ID, map[string]any{
-		"provider": in.Provider,
+		"provider": in.Provider, "callback_hosts": hosts,
 	})
+	s.reloadSocial()
+	decorateSocial(&p, st)
 	writeJSON(w, http.StatusCreated, p)
 }
 
@@ -803,22 +998,38 @@ func (s *server) patchSocialProvider(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", msg)
 		return
 	}
+	st, err := s.loadPortalTLSState(ctx)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "the portal hostnames could not be read")
+		return
+	}
+	hosts, msg := resolveCallbackHosts(&in, st) // nil = unchanged
+	if msg != "" {
+		jsonErr(w, http.StatusBadRequest, "bad_request", msg)
+		return
+	}
+	// The secret first: if scd refuses it, nothing else in the request has been applied either.
+	if secret := strDeref(in.ClientSecret); secret != "" {
+		if ok, msg := s.storeSocialSecret(r, id, secret); !ok {
+			jsonErr(w, http.StatusBadGateway, "secret_not_stored", msg)
+			return
+		}
+	}
 	var p edgeSocialProvider
 	err = scanSocial(s.db.QueryRow(ctx, `
         UPDATE social_oauth_providers SET
-            enabled       = COALESCE($3, enabled),
-            display_name  = COALESCE($4, display_name),
-            client_id     = COALESCE(NULLIF($5,''), client_id),
-            client_secret = COALESCE(NULLIF($6,''), client_secret),
-            redirect_uri  = COALESCE(NULLIF($7,''), redirect_uri),
-            scopes        = COALESCE($8, scopes),
-            extra         = COALESCE(extra,'{}'::jsonb) || $9::jsonb,
-            updated_at    = now()
+            enabled        = COALESCE($3, enabled),
+            display_name   = COALESCE($4, display_name),
+            client_id      = COALESCE(NULLIF($5,''), client_id),
+            callback_hosts = COALESCE($6, callback_hosts),
+            scopes         = COALESCE($7, scopes),
+            extra          = COALESCE(extra,'{}'::jsonb) || $8::jsonb,
+            updated_at     = now()
          WHERE id = $1 AND tenant_id = $2
          RETURNING `+socialCols,
 		id, s.tenantID,
 		in.Enabled, in.DisplayName,
-		strDeref(in.ClientID), strDeref(in.ClientSecret), strDeref(in.RedirectURI),
+		strings.TrimSpace(strDeref(in.ClientID)), hosts,
 		in.Scopes, in.extraPatch(),
 	), &p)
 	if isNoRows(err) {
@@ -833,7 +1044,11 @@ func (s *server) patchSocialProvider(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "update failed")
 		return
 	}
-	s.audit(r, "social_oauth_provider.updated", "social_oauth_provider", id, nil)
+	s.audit(r, "social_oauth_provider.updated", "social_oauth_provider", id, map[string]any{
+		"secret_replaced": strDeref(in.ClientSecret) != "", "callback_hosts": hosts,
+	})
+	s.reloadSocial()
+	decorateSocial(&p, st)
 	writeJSON(w, http.StatusOK, p)
 }
 
@@ -852,6 +1067,7 @@ func (s *server) deleteSocialProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(r, "social_oauth_provider.deleted", "social_oauth_provider", id, nil)
+	s.reloadSocial()
 	w.WriteHeader(http.StatusNoContent)
 }
 

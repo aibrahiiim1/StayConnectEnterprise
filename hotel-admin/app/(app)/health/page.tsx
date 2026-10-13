@@ -9,6 +9,7 @@
 // page can read them; Recheck and Restart are writes, so they are only offered to a role that may use them.
 // Restart additionally requires a reason and password confirmation, which the server enforces.
 
+import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
 import { api, ApiError, Whoami } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
@@ -58,7 +59,9 @@ type ServiceHealth = {
   updated_at: string;
 };
 type Boot = { converged: boolean; alert_open: boolean; pending: string[]; boot_at?: string; converged_at?: string; deadline_at?: string };
-type Summary = { overall: string; counts: Record<string, number>; services: ServiceHealth[]; boot: Boot | null; generated_at: string };
+/** Checks that are not supervised services (today: portal_https, the HTTP-fallback alert). */
+type Check = { name: string; level: "ok" | "warn" | "critical" | string; reason?: string; message: string };
+type Summary = { overall: string; counts: Record<string, number>; services: ServiceHealth[]; boot: Boot | null; checks?: Check[]; generated_at: string };
 type RecoveryEvent = { id: number; service: string; event: string; cause: string; action: string; backoff_level: number; result: string; duration_ms: number; actor: string; created_at: string };
 
 type Tone = "ok" | "warn" | "err" | "default" | "info";
@@ -268,6 +271,18 @@ export default function HealthPage() {
           {sum.boot.alert_open && <> This has taken longer than expected — check the waiting services below.</>}
         </Callout>
       )}
+
+      {/* Non-service checks. Only a check that is not ok is raised; an ok one says nothing worth reading. */}
+      {(sum?.checks ?? []).filter((c) => c.level !== "ok").map((c) => (
+        <Callout
+          key={c.name}
+          tone={c.level === "critical" ? "danger" : "warning"}
+          title={c.name === "portal_https" ? "Client Portal HTTPS" : c.name}
+        >
+          {c.message}{" "}
+          {c.name === "portal_https" && <Link className="underline" href="/portal-https">Open Portal HTTPS</Link>}
+        </Callout>
+      ))}
 
       {/* Count tiles */}
       <div className={cn("grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-7", refreshing && sum && refreshingClass)}>
