@@ -213,3 +213,52 @@ they carry hostnames, the portal address, CSRs and certificate status — no gue
 * A site whose own DNS server applies DNS-rebinding protection must allow `gw.onegate.work` (and its hotel
   domain) to resolve to a private address.
 * With external DHCP, the hotel's DHCP server must hand out option 114 itself if wanted; probes still work.
+
+## 11. Implementation decisions taken during delivery (2026-10-13)
+
+* **The hostname travels in the sync answer, not the signed assignment.** The mutual-TLS, appliance-JWT-bound
+  sync endpoint already authenticates Central to the appliance; adding a tail field to the signed assignment
+  would have re-issued every assignment for no extra assurance.
+* **DHCP option 114 is emitted by code 114, never by the name `v4-captive-portal`.** Kea 2.0 (the appliance runs
+  2.0.2) resolves that name to code 160, the obsolete RFC 7710 assignment, so until this delivery no appliance
+  on Kea 2.0 delivered option 114 at all (found by capturing a real exchange on PRE-LIVE).
+* **The portal address is explicitly dropped on every non-guest interface and in the forward chain** (netd).
+  The input policy alone did not protect it: the interface-wide SSH and admin accepts matched, and a missing
+  `ogportal0` let a signed-in guest's packet to it be forwarded and NATed. Both were proven on a real kernel
+  before the rules were added.
+* **Redirects:** page loads get 302; other methods 307 so a form submitted just before HTTPS came up is not
+  turned into a GET. An unknown Host over TLS gets 421.
+* **A certificate Central reports revoked is removed at once and a new one ordered**; the portal is on the HTTP
+  fallback for the seconds that takes (about 30 s on PRE-LIVE) rather than serve a revoked certificate.
+* **portald switches to the fallback after two failed polls of scd** (15–30 s), so an scd restart does not flap
+  guests between schemes.
+* **A production build never registers the social-login stub** (it accepts any identity named in its code).
+* **Central console:** the page is System → Portal certificates; reads need `fleet.view`, writes
+  `security.manage` plus a password step-up.
+* **Central refuses certificate orders (503) while it is not configured**, so none pile up before the DNS token
+  exists.
+
+## 12. Verified on Central and PRE-LIVE (2026-10-13), with a temporary test CA
+
+The full chain ran on the real Central (`172.21.96.196`) and the PRE-LIVE appliance (`172.21.60.25`) against a
+temporary Pebble ACME CA (15-minute certificates) and a challenge-test DNS server standing in for Let's Encrypt
+and Cloudflare, then both were removed and the configuration reset (the appliance is back on `NOT_CONFIGURED`).
+Phones do not trust that CA, so this proves the machinery, not public trust.
+
+| Proven | Evidence |
+|---|---|
+| Hostname allocation, A-record publication | `t89b76xm.gw.onegate.work` → `10.255.255.1`, DNS SYNCED |
+| Issuance (DNS-01) for an appliance CSR; key 0640 on the appliance only | order ISSUED, chain verified on install |
+| Guest device: option 114 = `https://<host>/captive-portal/api`, DNS, RFC 8908 API, TLS, no HSTS, probe and page redirects, nothing else intercepted | `scripts/portal-https-e2e-test.sh` 18/18 |
+| Voucher and account + free package sign-in over HTTPS, enforcement, real internet, captive API → not captive, sign-out | `scripts/portal-https-signin-e2e-test.sh` 12/12 |
+| Renewal with a NEW key, not counted as new, previous SUPERSEDED, served without restart | two CSRs with different public keys |
+| Central down: HTTPS unaffected | 18/18 while ctrlapi was stopped |
+| CA down until expiry: HTTP fallback, option 114 back to HTTP, critical admin alert; automatic recovery | fallback 18:16:29, recovered 18:22:30 UTC with no action |
+| Hotel domain: three records, two-resolver verification, delegated DNS-01, canonical switch, old name redirects, API on both | 18/18 on `wifi.nilehotel-test.example` |
+| Hotel domain removed: certificate revoked (CA confirms reason 5), files and DNS answer removed, back to OneGate hostname | — |
+| Operator revocation: appliance replaces the certificate by itself | back on HTTPS in 30 s |
+| Social offering: sealed secret, button only when the callback host is canonical, authorize with HTTPS callback + PKCE S256 + nonce, forged state refused, WebView page, garden pairs | `scripts/portal-social-offering-test.sh` 15/15 (placeholder Microsoft app) |
+
+**Not yet verified** (needs the Product Owner, see the runbook and the acceptance checklist): a production
+Let's Encrypt certificate (needs the Cloudflare zone and token), real iPhone/Android behaviour, and a real
+social-provider round trip (needs the hotel's own provider apps).
