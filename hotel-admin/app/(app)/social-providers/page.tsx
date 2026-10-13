@@ -1,6 +1,7 @@
 "use client";
 
-// SOCIAL LOGIN — the OAuth apps a guest can use instead of a room number or a voucher.
+// SOCIAL LOGIN — the OAuth apps a guest can use instead of a room number or a voucher. Each hotel registers
+// and owns its own apps (docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md §5).
 //
 // The Add and Edit forms were two cards that appeared above the table, and the Edit one could be open while the
 // Add one was too. Both are dialogs now, for the reason that applies everywhere in this admin: on a list with
@@ -10,9 +11,16 @@
 // BLANK client secret means "keep the one you have". The field is therefore not pre-filled (there is nothing to
 // pre-fill it with — the secret is write-only) and an empty value is omitted from the request rather than sent as
 // an empty string, which would erase it.
+//
+// THERE IS NO REDIRECT URI FIELD ANY MORE. The callback is https://<portal host name>/auth/social/callback, one
+// per host name the appliance has (its OneGate host name and, once set up, the hotel portal domain). The page
+// shows each one with a copy button and asks the hotel to tick the ones it registered in its app; a provider is
+// offered only while HTTPS is active and the portal's current host name is ticked.
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { api, ListResp, Whoami, SocialOAuthProvider } from "@/lib/api";
+import { PROVIDER_CONSOLE_HELP, PROVIDER_LABELS, PortalCallbackURL, keepAvailable, offeredWords } from "@/lib/portal-https";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody } from "@/components/ui/card";
@@ -21,21 +29,21 @@ import { Button } from "@/components/ui/button";
 import { Input, Field, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ErrorBanner } from "@/components/ui/error-banner";
+import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { DialogForm, ConfirmDialog } from "@/components/ui/dialog";
 import { Switch, SkeletonRows } from "@/components/ui/misc";
+import { CopyButton, ReadOnlyNotice } from "@/components/ui/patterns";
 import { Plus, KeyRound, AtSign } from "lucide-react";
 import { canWrite } from "@/lib/roles";
-import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { formatRelative } from "@/lib/utils";
 
 const PROVIDERS = ["google", "apple", "facebook", "microsoft"] as const;
-const PROVIDER_LABELS: Record<string, string> = {
-  google: "Google",
-  apple: "Apple",
-  facebook: "Facebook",
-  microsoft: "Microsoft",
+
+type SocialList = ListResp<SocialOAuthProvider> & {
+  callback_urls?: PortalCallbackURL[];
+  https_active?: boolean;
+  canonical_hostname?: string;
 };
 
 type FormState = {
@@ -43,7 +51,7 @@ type FormState = {
   display_name: string;
   client_id: string;
   client_secret: string;
-  redirect_uri: string;
+  callback_hosts: string[];
   scopes: string;
   tenant: string;
   team_id: string;
@@ -53,7 +61,7 @@ type FormState = {
 
 const EMPTY: FormState = {
   provider: "google", display_name: "", client_id: "", client_secret: "",
-  redirect_uri: "", scopes: "", tenant: "", team_id: "", key_id: "", enabled: true,
+  callback_hosts: [], scopes: "", tenant: "", team_id: "", key_id: "", enabled: true,
 };
 
 // What each provider calls its two values, so the form uses the words on the provider's own console.
@@ -74,6 +82,8 @@ function providerExtras(f: FormState): Record<string, string> {
 export default function SocialProvidersPage() {
   const toast = useToast();
   const [rows, setRows] = useState<SocialOAuthProvider[] | null>(null);
+  const [callbacks, setCallbacks] = useState<PortalCallbackURL[]>([]);
+  const [httpsActive, setHttpsActive] = useState<boolean | null>(null);
   const [roles, setRoles] = useState<string[] | null>(null);
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
@@ -88,8 +98,12 @@ export default function SocialProvidersPage() {
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((p) => ({ ...p, [k]: v }));
 
   async function load() {
-    try { setRows((await api.get<ListResp<SocialOAuthProvider>>("/social-providers")).data); }
-    catch (e) { setErr(e); }
+    try {
+      const r = await api.get<SocialList>("/social-providers");
+      setRows(r.data);
+      setCallbacks(r.callback_urls ?? []);
+      setHttpsActive(typeof r.https_active === "boolean" ? r.https_active : null);
+    } catch (e) { setErr(e); }
   }
   useEffect(() => {
     load();
@@ -106,7 +120,7 @@ export default function SocialProvidersPage() {
       client_id: p.client_id,
       // Deliberately blank. The secret cannot be read back, and a placeholder value here would be sent on save.
       client_secret: "",
-      redirect_uri: p.redirect_uri,
+      callback_hosts: keepAvailable(p.callback_hosts ?? [], callbacks),
       scopes: p.scopes ?? "",
       tenant: p.tenant ?? "",
       team_id: p.team_id ?? "",
@@ -114,6 +128,13 @@ export default function SocialProvidersPage() {
       enabled: p.enabled,
     });
     setEditing(p); setFormErr(null); setMode("edit");
+  }
+
+  function toggleHost(host: string, on: boolean) {
+    setF((p) => ({
+      ...p,
+      callback_hosts: on ? Array.from(new Set([...p.callback_hosts, host])) : p.callback_hosts.filter((h) => h !== host),
+    }));
   }
 
   async function onSubmit() {
@@ -125,7 +146,7 @@ export default function SocialProvidersPage() {
           display_name: f.display_name.trim() || undefined,
           client_id: f.client_id.trim(),
           client_secret: f.client_secret,
-          redirect_uri: f.redirect_uri.trim(),
+          callback_hosts: f.callback_hosts,
           scopes: f.scopes.trim() || undefined,
           ...providerExtras(f),
           enabled: f.enabled,
@@ -134,7 +155,7 @@ export default function SocialProvidersPage() {
         const body: Record<string, unknown> = {
           display_name: f.display_name,
           client_id: f.client_id.trim() || undefined,
-          redirect_uri: f.redirect_uri.trim() || undefined,
+          callback_hosts: f.callback_hosts,
           scopes: f.scopes,
           ...providerExtras(f),
           enabled: f.enabled,
@@ -163,9 +184,10 @@ export default function SocialProvidersPage() {
 
   const canSubmit =
     mode === "new"
-      ? f.client_id.trim() !== "" && f.client_secret !== "" && f.redirect_uri.trim() !== "" &&
+      ? f.client_id.trim() !== "" && f.client_secret !== "" &&
         (f.provider !== "apple" || (f.team_id.trim() !== "" && f.key_id.trim() !== ""))
       : true;
+  const providerName = PROVIDER_LABELS[f.provider] ?? f.provider;
 
   return (
     <PageShell>
@@ -178,15 +200,16 @@ export default function SocialProvidersPage() {
           <>
             <HelpSection title="What a provider entry is">
               <p>
-                Each entry is an OAuth application you register with that provider (for example Google). The values
-                on it come from that registered application.
+                Each entry is an OAuth application your hotel registers and owns with that provider (for example
+                Google). The values on it come from that registered application.
               </p>
             </HelpSection>
             <HelpSection title="Setting one up">
               <HelpList
                 items={[
+                  <>Register the <strong>callback URL</strong> shown in the form in your app, then tick it. The portal offers the provider only over HTTPS, at a host name you ticked.</>,
                   <>The <strong>client secret</strong> is stored write-only and is never shown again. When editing, leave it blank to keep the one already stored.</>,
-                  <>The <strong>redirect URI</strong> is the Client Portal&apos;s callback, <code>https://&lt;portal name&gt;/auth/social/callback</code>, and must match the one registered with the provider exactly. The portal name must be one clients&apos; devices reach the portal by.</>,
+                  <><strong>Google</strong> needs your hotel portal domain (set it up under Portal HTTPS); it does not accept the OneGate host name.</>,
                   <><strong>Apple</strong> needs the Services ID, the Team ID, the Key ID and the contents of the .p8 private key; the key is stored write-only.</>,
                   <><strong>Microsoft</strong> accepts a directory (tenant) ID to admit only that organisation, or <code>common</code>, <code>organizations</code> or <code>consumers</code>.</>,
                   <>The provider of an entry cannot be changed; remove it and add it again instead.</>,
@@ -202,6 +225,13 @@ export default function SocialProvidersPage() {
       {roles !== null && !writable && <ReadOnlyNotice>Your role can see the social login providers but not change them.</ReadOnlyNotice>}
       <ErrorBanner err={err} className="mb-0" />
 
+      {httpsActive === false && (
+        <Callout tone="warning" title="Social sign-in is not offered right now">
+          The Client Portal is on the HTTP fallback, and providers accept HTTPS callbacks only. See{" "}
+          <Link className="underline" href="/portal-https">Portal HTTPS</Link>.
+        </Callout>
+      )}
+
       <Card>
         <CardBody className="p-0">
           {rows === null ? (
@@ -216,21 +246,23 @@ export default function SocialProvidersPage() {
           ) : (
             <Table>
               <THead>
-                <TR><TH>Provider</TH><TH>Client ID</TH><TH>Redirect URI</TH><TH>Last used</TH><TH>Offered</TH><TH /></TR>
+                <TR><TH>Provider</TH><TH>Client ID</TH><TH>Status</TH><TH>Last used</TH><TH /></TR>
               </THead>
               <TBody>
                 {rows.map((p) => (
                   <TR key={p.id}>
                     <TD className="font-medium">{p.display_name || PROVIDER_LABELS[p.provider] || p.provider}</TD>
                     <TD className="max-w-xs truncate font-mono text-xs" title={p.client_id}>{p.client_id}</TD>
-                    <TD className="max-w-xs truncate font-mono text-xs" title={p.redirect_uri}>{p.redirect_uri}</TD>
+                    <TD className="max-w-sm">
+                      <div className="flex flex-col gap-1">
+                        {p.offered
+                          ? <Badge tone="ok" dot>Offered</Badge>
+                          : <Badge tone={p.enabled ? "warn" : "default"}>{p.enabled ? "Not offered" : "Hidden"}</Badge>}
+                        {!p.offered && <span className="text-xs text-muted-foreground">{offeredWords(p.offered_reason, p.provider)}</span>}
+                      </div>
+                    </TD>
                     <TD className="text-sm text-muted-foreground">
                       {p.last_success_at ? formatRelative(p.last_success_at) : "Never"}
-                    </TD>
-                    <TD>
-                      {p.enabled
-                        ? <Badge tone="ok" dot>On the portal</Badge>
-                        : <Badge tone="default">Hidden</Badge>}
                     </TD>
                     <TD className="whitespace-nowrap text-right">
                       {writable && <Button size="sm" variant="ghost" onClick={() => openEdit(p)}>Edit</Button>}
@@ -252,7 +284,8 @@ export default function SocialProvidersPage() {
         open={mode !== "closed"}
         onOpenChange={(v) => { if (!v) { setMode("closed"); setEditing(null); } }}
         title={mode === "edit" ? `Edit ${editing?.display_name || PROVIDER_LABELS[editing?.provider ?? ""] || "provider"}` : "Add an identity provider"}
-        description="These values come from the OAuth application you registered with the provider."
+        description="These values come from the OAuth application your hotel registered with the provider."
+        size="lg"
         submitLabel={mode === "edit" ? "Save changes" : "Add provider"}
         busy={busy}
         error={formErr}
@@ -268,7 +301,7 @@ export default function SocialProvidersPage() {
             </Field>
           ) : (
             <Field label="Provider" hint="The provider cannot be changed; remove and re-add instead.">
-              <Input value={PROVIDER_LABELS[f.provider] ?? f.provider} readOnly disabled />
+              <Input value={providerName} readOnly disabled />
             </Field>
           )}
           <Field label="Name on the portal" hint="Leave empty to use the provider's own name.">
@@ -291,14 +324,6 @@ export default function SocialProvidersPage() {
               placeholder={mode === "edit" ? "Unchanged" : ""}
             />
           </Field>
-          <Field label="Redirect URI" required hint="The Client Portal's callback over HTTPS, registered with the provider exactly as typed here.">
-            <Input
-              value={f.redirect_uri}
-              onChange={(e) => set("redirect_uri", e.target.value)}
-              required
-              placeholder="https://portal.stayconnect.local/auth/social/callback"
-            />
-          </Field>
           <Field label="Scopes" hint="Space separated.">
             <Input value={f.scopes} onChange={(e) => set("scopes", e.target.value)} placeholder="openid email profile" />
           </Field>
@@ -318,6 +343,47 @@ export default function SocialProvidersPage() {
             </>
           )}
         </div>
+
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-medium">Callback URLs</legend>
+          <p className="text-xs text-muted-foreground">{PROVIDER_CONSOLE_HELP[f.provider]}</p>
+          {callbacks.length === 0 ? (
+            <Callout tone="warning">
+              This appliance has no portal host name yet, so there is no callback URL to register. See{" "}
+              <Link className="underline" href="/portal-https">Portal HTTPS</Link>.
+            </Callout>
+          ) : (
+            <ul className="space-y-2">
+              {callbacks.map((c) => {
+                const id = `cb-${c.hostname}`;
+                const googleOnOneGate = f.provider === "google" && c.kind === "ONEGATE";
+                return (
+                  <li key={c.hostname} className="rounded-md border border-border px-3 py-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="break-all font-mono text-xs">{c.url}</span>
+                      <CopyButton value={c.url} variant="ghost" />
+                      {c.canonical && <Badge tone="ok">Current portal address</Badge>}
+                    </div>
+                    <label htmlFor={id} className="mt-1 flex items-center gap-2 text-sm">
+                      <input
+                        id={id}
+                        type="checkbox"
+                        className="size-4 accent-primary"
+                        checked={f.callback_hosts.includes(c.hostname)}
+                        onChange={(e) => toggleHost(c.hostname, e.target.checked)}
+                      />
+                      I registered this callback URL in my {providerName} app
+                    </label>
+                    {googleOnOneGate && (
+                      <p className="mt-1 text-xs text-muted-foreground">Google does not accept this host name; use your hotel portal domain.</p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </fieldset>
+
         <div className="flex items-center justify-between rounded-md border border-border bg-surface/50 px-3.5 py-2.5">
           <div>
             <div className="text-sm font-medium">Offer this on the sign-in page</div>

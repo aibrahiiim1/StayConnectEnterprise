@@ -20,7 +20,7 @@ const SURFACES = [
   "network", "notification-providers", "operational-alerts", "operators", "payment-providers", "pms-events",
   "pms-financial-onboarding", "pms-interfaces", "pms-reconciliation", "pms-resolutions",
   "pms-roster-reconciliation", "pms-routing", "pms-source-conflicts", "pms-stays", "portal-assets",
-  "portal-branding", "post-stay-profiles", "reports", "sessions", "social-providers", "stay-transfers", "usage",
+  "portal-branding", "portal-https", "post-stay-profiles", "reports", "sessions", "social-providers", "stay-transfers", "usage",
   "voucher-code-settings", "voucher-codes", "vouchers", "walled-garden",
 ];
 

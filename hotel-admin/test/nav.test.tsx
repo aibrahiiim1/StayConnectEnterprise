@@ -50,7 +50,7 @@ const SERVED = [
   "guest-signin-protection", "guest-signin-restrictions", "license", "network", "notification-providers",
   "operational-alerts", "operators", "pms-events", "pms-interfaces", "pms-reconciliation", "pms-resolutions",
   "pms-roster-reconciliation", "pms-routing", "pms-source-conflicts", "pms-stays", "portal-assets",
-  "portal-branding", "reports", "sessions", "social-providers", "payment-providers", "modules", "pms-financial-onboarding", "usage", "walled-garden",
+  "portal-branding", "portal-https", "reports", "sessions", "social-providers", "payment-providers", "modules", "pms-financial-onboarding", "usage", "walled-garden",
 ];
 
 async function renderNavWith(surfaces: string[], roles: string[]) {
@@ -90,6 +90,15 @@ describe("the navigation contract", () => {
       .filter((e: any) => screen.queryAllByText(e.label).length === 0)
       .map((e: any) => `${e.label} (${e.route})`);
     expect(missing, "contract-required destinations missing from the sidebar").toEqual([]);
+  });
+
+  it("offers Portal HTTPS under Networking to the roles that may read it", async () => {
+    await renderNavWith(SERVED, ["hotel_it_manager"]);
+    const links = Array.from(document.querySelectorAll("a[href]")).map((a) => a.getAttribute("href"));
+    expect(links).toContain("/portal-https");
+    cleanup();
+    await renderNavWith(SERVED, ["front_office_operator"]);
+    expect(screen.queryByText("Portal HTTPS")).toBeNull();
   });
 
   it("hides a destination whose surface this appliance does not serve", async () => {
