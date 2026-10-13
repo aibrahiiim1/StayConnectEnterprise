@@ -113,6 +113,12 @@ type cfg struct {
 	SecretsDir      string
 	DurableThrottle bool
 	OTPHMAC         bool
+
+	// The Client Portal's HTTPS certificates (portal_tls.go). PortalTLSExtraRoots is an OPT-IN PEM bundle of extra
+	// trust anchors for staging or test issuance (Let's Encrypt staging, Pebble); empty -- the default and the
+	// only production value -- trusts the system roots alone.
+	PortalTLSDir        string
+	PortalTLSExtraRoots string
 }
 
 func loadCfg() cfg {
@@ -143,6 +149,9 @@ func loadCfg() cfg {
 		SecretsDir:      envOr("SCD_SECRETS_DIR", "/etc/stayconnect/secrets"),
 		DurableThrottle: os.Getenv("SCD_DURABLE_THROTTLE") == "true",
 		OTPHMAC:         os.Getenv("SCD_OTP_HMAC") == "true",
+
+		PortalTLSDir:        envOr("SCD_PORTAL_TLS_DIR", "/etc/stayconnect/portal-tls"),
+		PortalTLSExtraRoots: os.Getenv("SCD_PORTAL_TLS_EXTRA_ROOTS"),
 	}
 }
 
@@ -331,6 +340,10 @@ type server struct {
 	removed atomic.Pointer[removedRecord]
 	// restartFn replaces the systemd restart in tests.
 	restartFn func()
+
+	// portalTLS is the Client Portal's HTTPS certificate agent and the one answer to "is the portal on HTTPS"
+	// (portal_tls.go). Nil-safe: a nil agent reports the HTTP fallback.
+	portalTLS *portalTLSAgent
 }
 
 func (s *server) currentPMSReg() *pms.Registry {
@@ -803,6 +816,7 @@ func main() {
 	s.initOpenAccess(c.SecretsDir)
 	s.initClientResume(c.SecretsDir)
 	s.initNotifyKey(c.SecretsDir)
+	s.portalTLS = s.initPortalTLS(c, ident != nil && talksToCentral)
 	s.registerModuleProbes()
 	// CRASH RECOVERY FOR OFFLINE FIRST ACTIVATION. Runs after the licence state is loaded, because deciding
 	// whether an interrupted activation completed means asking whether the licence actually landed. Either
@@ -924,6 +938,11 @@ func main() {
 	r.Post("/v1/hotel-admin-cert/check", s.hotelAdminCertCheck)
 	r.Post("/v1/hotel-admin-cert/rotate", s.hotelAdminCertRotate)
 	r.Post("/v1/hotel-admin-cert/renew", s.hotelAdminCertRenew)
+	// The Client Portal's HTTPS state (portal_tls.go): read by portald every 15 seconds and by edged; kick and
+	// renew are edged's, after the operator's permission and step-up.
+	r.Get("/v1/portal/tls-state", s.portalTLSState)
+	r.Post("/v1/portal/tls/kick", s.portalTLSKick)
+	r.Post("/v1/portal/tls/renew", s.portalTLSRenew)
 
 	// Phase 2 (DARK): guest-portal commerce routes are mounted ONLY when the portal surface is ON. While
 	// dark they are ABSENT (404) and the commerce engine holds a nil repository, so zero Phase-2 SQL runs.
@@ -1057,6 +1076,9 @@ func main() {
 		}()
 	}
 	go s.pmsHealthFlushLoop(rootCtx)
+	// The Client Portal's HTTPS certificates (portal_tls.go). Runs on every appliance: one that cannot reach
+	// Central still decides HTTPS from the certificate it has, and keeps serving it until it expires.
+	go s.portalTLS.run(rootCtx)
 	// The legacy session reaper is REMOVED with the public.sessions domain it swept. Expiry in the current
 	// model is entitlement exhaustion, owned by internal/enforce over iam_v2.sessions and its entitlement
 	// bindings -- a single authority deciding when access ends.
