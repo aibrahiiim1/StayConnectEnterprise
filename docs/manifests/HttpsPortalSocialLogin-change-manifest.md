@@ -2,7 +2,7 @@
 
 - **Base commit:** `3fbbe7dc789e82f34911fd57c146e81436fc5500`
 - **HEAD commit:** `700a3564`
-- **Provenance (generation HEAD = inventory_head):** `700a35647d16563870fae10f4a02ad73ef1eaba1`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `edf6c2f940758177b4166ba1e8eba8d52837bbd0`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/https-portal-social`
 - **Remote branch:** `origin/delivery/https-portal-social`
 - **Changed files:** 360
@@ -262,18 +262,18 @@
 | `docs/architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | A full provider refund ends only the access it paid for; disputes and chargebacks are reviewed, never automatic |
 | `docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Docs: the portal-certificate messages in the licensing-plane tables; the contract records delivery decisions and PRE-LIVE evidence |
 | `docs/architecture/ONEGATE_MODULES_AND_ACQUISITION.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Client access: the acquisition contract names the renamed Admin Console section |
-| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0226 records the first FULL CHECK's findings fixed |
-| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0226 records the first FULL CHECK's findings fixed |
-| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0226 records the first FULL CHECK's findings fixed |
-| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0226 records the first FULL CHECK's findings fixed |
+| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0227 records the review findings fixed and Central redeployed |
+| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0227 records the review findings fixed and Central redeployed |
+| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0227 records the review findings fixed and Central redeployed |
+| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0227 records the review findings fixed and Central redeployed |
 | `docs/manifests/ClientAccessIdentity-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | The export packs and the change manifest carry the T0224 state |
-| `docs/manifests/HttpsPortalSocialLogin-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | The export packs and the change manifest carry the T0226 state |
+| `docs/manifests/HttpsPortalSocialLogin-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: T0227 records the review findings fixed and Central redeployed |
 | `docs/runbooks/ONEGATE_WORK_DNS_AND_CERTIFICATES.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | The onegate.work DNS/certificate runbook and the real-device acceptance checklist |
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0226 state |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0226 state |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0226 state |
 | `exports/chatgpt/phase-evidence/GIT_STAT_24f4c734.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | The export packs and the change manifest carry the T0214 state |
-| `exports/chatgpt/phase-evidence/GIT_STAT_85e07e44.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | The export packs and the change manifest carry the T0226 state |
+| `exports/chatgpt/phase-evidence/GIT_STAT_edf6c2f9.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0226 state |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0226 state |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0225 state |
@@ -281,9 +281,9 @@
 | `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0226 state |
 | `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0226 state |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0226 state |
-| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0226 records the first FULL CHECK's findings fixed |
+| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0227 records the review findings fixed and Central redeployed |
 | `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0226 state |
-| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0226 records the first FULL CHECK's findings fixed |
+| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0227 records the review findings fixed and Central redeployed |
 | `exports/chatgpt/stayconnectenterprise/STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0225 state |
 | `exports/chatgpt/stayconnectenterprise/SYSTEM_OVERVIEW.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0214 state |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0226 state |
@@ -291,7 +291,7 @@
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0226 state |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0226 state |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: D49 (HTTPS Client Portal and customer-owned social login) and T0225 record the delivery to PRE-LIVE and Central |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0226 records the first FULL CHECK's findings fixed |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0227 records the review findings fixed and Central redeployed |
 | `governance/transitions/T0214.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0214 records the client-access deployment to PRE-LIVE, with the exact provenance |
 | `governance/transitions/T0215.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0215 records the client-access corrections deployed to PRE-LIVE, with the exact provenance |
 | `governance/transitions/T0216.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0216 records temporary internet, guest IPv6/DNS hardening, device-bound codes and provider-managed conversion on PRE-LIVE, with the exact provenance |
@@ -305,7 +305,7 @@
 | `governance/transitions/T0224.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0224 records the fourth FULL CHECK's finding fixed (a test-isolation defect) and corrects the run-2 flake reading |
 | `governance/transitions/T0225.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: D49 (HTTPS Client Portal and customer-owned social login) and T0225 record the delivery to PRE-LIVE and Central |
 | `governance/transitions/T0226.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0226 records the first FULL CHECK's findings fixed |
-| `governance/transitions/T0227.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | (no commit subject in range) |
+| `governance/transitions/T0227.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0227 records the review findings fixed and Central redeployed |
 | `hotel-admin/app/(app)/client-groups/page.tsx` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Admin Console: the rule summary lives beside the Client groups page, not in it |
 | `hotel-admin/app/(app)/client-groups/rule-summary.ts` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Admin Console: the rule summary lives beside the Client groups page, not in it |
 | `hotel-admin/app/(app)/financial-review/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | A full provider refund ends only the access it paid for; disputes and chargebacks are reviewed, never automatic |
@@ -630,13 +630,13 @@
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |    6 +-
  docs/context/StayConnect-IAM-Handoff.md            |    6 +-
  .../ClientAccessIdentity-change-manifest.md        |  582 ++++++
- .../HttpsPortalSocialLogin-change-manifest.md      |  850 +++++++++
+ .../HttpsPortalSocialLogin-change-manifest.md      |  846 +++++++++
  docs/runbooks/ONEGATE_WORK_DNS_AND_CERTIFICATES.md |   71 +
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 350325 -> 350578 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 155549 -> 156191 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 44042 -> 44029 bytes
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 350325 -> 350582 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 155549 -> 156197 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 44042 -> 44023 bytes
  .../chatgpt/phase-evidence/GIT_STAT_24f4c734.txt   |    4 -
- .../chatgpt/phase-evidence/GIT_STAT_85e07e44.txt   |    4 +
+ .../chatgpt/phase-evidence/GIT_STAT_edf6c2f9.txt   |    4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |    6 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |    6 +-
  .../governance/decision-register.json              |   13 +
@@ -735,23 +735,32 @@
  scripts/portaltls-pebble-test.sh                   |   99 +
  scripts/prod-privilege-integration.sh              |    2 +-
  scripts/sitedb-dev.sh                              |    2 +-
- 360 files changed, 38888 insertions(+), 1475 deletions(-)
+ 360 files changed, 38884 insertions(+), 1475 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-M  docs/architecture/StayConnect-IAM-Phase0-Contract.md
-M  docs/architecture/StayConnect-IAM-Phase1A-Plan.md
-M  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
-M  docs/context/StayConnect-IAM-Handoff.md
-M  exports/chatgpt/stayconnectenterprise/00-START-HERE.md
-M  exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md
-M  governance/project-state.json
-A  governance/transitions/T0227.json
+M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
+M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
+M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
+D  exports/chatgpt/phase-evidence/GIT_STAT_85e07e44.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_edf6c2f9.txt
+M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
+M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/MANIFEST.md
+M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md
+M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: edf6c2f9 Governance: T0227 records the review findings fixed and Central redeployed
 HISTORICAL: 700a3564 Central portal TLS: a directory switch renews every certificate the old directory issued; deletion is refused while cleanup is impossible; the zone is fixed under live hostnames
 HISTORICAL: 3cfeb44d The export packs and the change manifest carry the T0226 state
 HISTORICAL: 85e07e44 Governance: T0226 records the first FULL CHECK's findings fixed
