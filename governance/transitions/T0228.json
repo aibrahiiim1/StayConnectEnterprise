@@ -1,0 +1,50 @@
+{
+  "transition_id": "T0228",
+  "seq": 228,
+  "timestamp": "2026-10-14T00:21:30+03:00",
+  "timestamp_derivation": "Written after GitHub merged PR #212 (f9310bb8, committer date 2026-10-14T00:20:05+03:00) and before the commit that introduces this receipt, so it neither pre-dates the merge it records nor post-dates its own commit.",
+  "record_type": "HTTPS_CLIENT_PORTAL_AND_SOCIAL_LOGIN_MERGED_TO_MASTER_AND_CLOSED",
+  "authorisation": "The 'Full HTTPS & Social Login Delivery Mission' of 2026-10-13, which authorised the protected merges this delivery needed (D49). It did NOT authorise Go-Live.",
+  "merge": {
+    "pull_request": 212,
+    "merge_commit": "f9310bb8be45497c4f549f50b9ba4649fddfa2bf",
+    "merged_at": "2026-10-13T21:20:05Z",
+    "parents": [
+      "3fbbe7dc789e82f34911fd57c146e81436fc5500",
+      "dd20564b146285cb94c0f84ca8c794849e595449"
+    ],
+    "tested_head": "dd20564b146285cb94c0f84ca8c794849e595449",
+    "tree_equality": "the merge commit's tree equals the tested head's tree (2391237d3ea1b207d35c0a9b23d14e548c8aa12a): the merge introduced no content",
+    "full_check_on_tested_head": "PASS -- governance 38464348141, phase3-full-software-gate 38464352590, phase4-financial-core-gate 38464356526, phase5-post-stay-transfer-gate 38464359841",
+    "review_conversations": "three automated-review findings fixed (T0227), answered and resolved before the merge",
+    "pr_211": "PR #211 (client access and identity, head 602b37ef), on which PR #212 is built, is contained in this merge; GitHub records it as merged."
+  },
+  "delivery_chain": {
+    "decisions": "D49 (HTTPS Client Portal and customer-owned social login, 2026-10-13); PR #211's own decisions as recorded by T0214-T0224.",
+    "receipts": "T0225-T0227 (this delivery), after T0214-T0224 (PR #211)."
+  },
+  "deployment_provenance": "Unchanged by this closure. PRE-LIVE 172.21.60.25 runs scd, edged, portald and keybootstrap e9b72aab, netd dedd94a9, pmsd 6a403326, acctd 99ba9f10, sitemigrate and svc-run 29a6b21f, the Admin Console dedd94a9, site migrations through 0116; Central runs ctrlapi and console 700a3564, Central migrations through 0050. Every one of those commits is now contained in master (verified with git merge-base --is-ancestor).",
+  "outstanding": "The production certificate needs the Product Owner to host onegate.work at Cloudflare and enter the zone token in the Central console; real-device and real social-provider tests follow it. PRE-LIVE is on the HTTP fallback (NOT_CONFIGURED) until then.",
+  "cleanup": "The merged branches delivery/https-portal-social (tip dd20564b) and delivery/client-access-identity (tip 602b37ef) are contained in master and are deleted on GitHub and locally after this closure merges, together with this closure branch.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0227."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "f9310bb8be45497c4f549f50b9ba4649fddfa2bf",
+  "base_note": "Master after the merge of PR #212; this closure lineage is built on it.",
+  "head": "f9310bb8",
+  "head_note": "No content commit: this lineage is governance only. The closed delivery's last content commit is 700a3564 (T0227).",
+  "previous_delivery": "T0227",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
