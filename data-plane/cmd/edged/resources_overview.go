@@ -522,7 +522,13 @@ func (s *server) reportsOverview(w http.ResponseWriter, r *http.Request) {
 		out.DNS = s.withResolverHealth(ctx, out.DNS)
 	}
 
-	out.Attention = deriveAttention(s.moduleScopedAttention(ctx, attentionInputFrom(out)))
+	attIn := s.moduleScopedAttention(ctx, attentionInputFrom(out))
+	if can("portal-https") {
+		if c, ok := s.portalHTTPSHealth(ctx); ok {
+			attIn.PortalHTTPS = &c
+		}
+	}
+	out.Attention = deriveAttention(attIn)
 	writeJSON(w, http.StatusOK, out)
 }
 

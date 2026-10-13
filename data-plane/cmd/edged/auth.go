@@ -204,6 +204,10 @@ var rolePerms = map[string]map[string]perm{
 		// approved by site_admin only.
 		"modules": permRead, "pms-financial-onboarding": permRead,
 		"network": permWrite,
+		// PORTAL HTTPS (portal_https.read / portal_https.manage). The portal address and the hotel portal domain
+		// are network configuration, which this role already owns; Renew now is the same kind of action as the
+		// Admin Console certificate's Rotate. Every change additionally requires the password step-up.
+		"portal-https": permWrite,
 		// Phase 2 (DARK) commercial packages: revisioned CRUD is a manager action.
 		"commercial-packages": permWrite,
 		// Phase 3 (DARK): the IT manager owns the PMS integration, so publishing the checkout-grace policy
@@ -382,6 +386,8 @@ var rolePerms = map[string]map[string]perm{
 		"walled-garden": permRead, "client-groups": permRead, "portal-branding": permRead, "portal-assets": permRead, "notification-providers": permRead, "social-providers": permRead,
 		"payment-providers": permRead, "modules": permRead, "audit": permRead, "reports": permRead,
 		"backups": permRead, "license": permRead, "network": permRead, "diagnostics": permRead,
+		// Portal HTTPS state is operational evidence of the same kind as the network it sits under.
+		"portal-https":        permRead,
 		"commercial-packages": permRead,
 		// Phase 3 (DARK): a viewer sees the evidence and never acts on it.
 		"pms-stays": permRead, "pms-events": permRead, "pms-resolutions": permRead,

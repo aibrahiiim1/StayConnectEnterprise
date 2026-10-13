@@ -521,6 +521,11 @@ func main() {
 			mountResource(r, s, "reports", s.reportsRoutes)
 			mountResource(r, s, "backups", s.backupsRoutes)
 			mountResource(r, s, "network", s.networkRoutes)
+			// PORTAL HTTPS (contract §8): the portal address, the hotel portal domain, the hostnames and certificates
+			// scd installed, Check now and Renew now. Its own key -- portal_https.read / portal_https.manage -- rather
+			// than "network", because who may see the portal's certificate state and who may move it are decided
+			// here, not inherited from the guest-network editor. See resources_portal_https.go.
+			mountResource(r, s, "portal-https", s.portalHTTPSRoutes)
 			// NOTE: mounted at "diagnostics", NOT "health" — the unauthenticated
 			// GET /edge/v1/health summary (common.go) must not be shadowed.
 			mountResource(r, s, "diagnostics", s.healthRoutes)
