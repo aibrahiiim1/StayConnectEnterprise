@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0115, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0116, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -9309,6 +9309,18 @@ BEGIN
 END $$;
 
 
+--
+-- Name: portal_https_settings_changes_append_only(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.portal_https_settings_changes_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'portal_https_settings_changes is append-only';
+END $$;
+
+
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
@@ -12697,6 +12709,32 @@ COMMENT ON COLUMN iam_v2.site_voucher_code_settings.code_length IS 'Number of ch
 
 
 --
+-- Name: social_provider_secret_generations; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.social_provider_secret_generations (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    provider_id uuid NOT NULL,
+    generation_no integer NOT NULL,
+    ciphertext bytea NOT NULL,
+    nonce bytea NOT NULL,
+    key_id text NOT NULL,
+    cipher_version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    superseded_at timestamp with time zone,
+    CONSTRAINT spsg_generation CHECK ((generation_no >= 1))
+);
+
+
+--
+-- Name: TABLE social_provider_secret_generations; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.social_provider_secret_generations IS 'The client secret (or Apple .p8 key) of a public.social_oauth_providers row, sealed by scd with AES-256-GCM under social_dek.key and AAD bound to (tenant, provider, generation). Exactly one current generation per provider. social_oauth_providers.client_secret is cleared once sealed (0116).';
+
+
+--
 -- Name: stay_guests; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -13626,6 +13664,138 @@ CREATE TABLE public.pms_providers (
 
 
 --
+-- Name: portal_certificates; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.portal_certificates (
+    hostname text NOT NULL,
+    kind text NOT NULL,
+    serial text,
+    not_before timestamp with time zone,
+    not_after timestamp with time zone,
+    renew_after timestamp with time zone,
+    fingerprint text,
+    installed_at timestamp with time zone,
+    pending_order_id uuid,
+    pending_since timestamp with time zone,
+    last_error text,
+    last_attempt_at timestamp with time zone,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT portal_certificates_hostname_check CHECK ((((length(hostname) >= 4) AND (length(hostname) <= 253)) AND (hostname = lower(hostname)))),
+    CONSTRAINT portal_certificates_kind_check CHECK ((kind = ANY (ARRAY['ONEGATE'::text, 'CUSTOM'::text])))
+);
+
+
+--
+-- Name: TABLE portal_certificates; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.portal_certificates IS 'The publicly trusted certificate this appliance serves for each portal hostname (0116). The private key is generated on the appliance, never leaves it, and is a file, not a column.';
+
+
+--
+-- Name: portal_https_settings; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.portal_https_settings (
+    id boolean DEFAULT true NOT NULL,
+    portal_ip inet NOT NULL,
+    custom_domain text,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_by text,
+    CONSTRAINT portal_https_settings_custom_domain_check CHECK (((custom_domain IS NULL) OR (((length(custom_domain) >= 4) AND (length(custom_domain) <= 253)) AND (custom_domain = lower(custom_domain)) AND (custom_domain ~ '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$'::text) AND (custom_domain !~~ '%.onegate.work'::text) AND (custom_domain <> 'onegate.work'::text)))),
+    CONSTRAINT portal_https_settings_id_check CHECK (id),
+    CONSTRAINT portal_https_settings_portal_ip_check CHECK (((family(portal_ip) = 4) AND (masklen(portal_ip) = 32) AND ((portal_ip << '10.0.0.0/8'::inet) OR (portal_ip << '172.16.0.0/12'::inet) OR (portal_ip << '192.168.0.0/16'::inet))))
+);
+
+
+--
+-- Name: TABLE portal_https_settings; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.portal_https_settings IS 'The portal address (one RFC 1918 /32 that exists only inside the appliance on a dummy interface, reachable from guest networks on 443/80 only, never routed, never NATed, never on the WAN) and the hotel portal domain requested by the site. A change to portal_ip is a network change applied through netd''s validate/apply/confirm workflow. Every change is recorded in portal_https_settings_changes (0116).';
+
+
+--
+-- Name: portal_https_settings_changes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.portal_https_settings_changes (
+    id bigint NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by text NOT NULL,
+    field text NOT NULL,
+    old_value text,
+    new_value text,
+    source_ip inet,
+    CONSTRAINT portal_https_settings_changes_changed_by_check CHECK (((length(changed_by) >= 1) AND (length(changed_by) <= 200))),
+    CONSTRAINT portal_https_settings_changes_field_check CHECK ((field = ANY (ARRAY['portal_ip'::text, 'custom_domain'::text])))
+);
+
+
+--
+-- Name: TABLE portal_https_settings_changes; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.portal_https_settings_changes IS 'Append-only history of portal_https_settings (0116).';
+
+
+--
+-- Name: portal_https_settings_changes_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.portal_https_settings_changes_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: portal_https_settings_changes_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.portal_https_settings_changes_id_seq OWNED BY public.portal_https_settings_changes.id;
+
+
+--
+-- Name: portal_tls_state; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.portal_tls_state (
+    id boolean DEFAULT true NOT NULL,
+    central_available boolean DEFAULT false NOT NULL,
+    onegate_hostname text,
+    dns_state text DEFAULT 'UNKNOWN'::text NOT NULL,
+    custom_domain text,
+    custom_domain_status text,
+    custom_domain_records jsonb DEFAULT '[]'::jsonb NOT NULL,
+    custom_domain_error text,
+    canonical_hostname text,
+    https_active boolean DEFAULT false NOT NULL,
+    fallback_reason text,
+    fallback_since timestamp with time zone,
+    last_sync_at timestamp with time zone,
+    last_sync_error text,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT portal_tls_state_check CHECK ((https_active = (fallback_reason IS NULL))),
+    CONSTRAINT portal_tls_state_check1 CHECK (((NOT https_active) OR (canonical_hostname IS NOT NULL))),
+    CONSTRAINT portal_tls_state_custom_domain_status_check CHECK (((custom_domain_status IS NULL) OR (custom_domain_status = ANY (ARRAY['PENDING'::text, 'VERIFIED'::text, 'FAILED'::text, 'REMOVED'::text])))),
+    CONSTRAINT portal_tls_state_dns_state_check CHECK ((dns_state = ANY (ARRAY['UNKNOWN'::text, 'PENDING'::text, 'SYNCED'::text, 'ERROR'::text]))),
+    CONSTRAINT portal_tls_state_fallback_reason_check CHECK (((fallback_reason IS NULL) OR (fallback_reason = ANY (ARRAY['NOT_CONFIGURED'::text, 'NO_HOSTNAME'::text, 'NO_CERTIFICATE'::text, 'CERTIFICATE_EXPIRED'::text, 'PORTAL_ADDRESS_NOT_ACTIVE'::text, 'CENTRAL_UNREACHABLE'::text])))),
+    CONSTRAINT portal_tls_state_id_check CHECK (id)
+);
+
+
+--
+-- Name: TABLE portal_tls_state; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.portal_tls_state IS 'The portal''s HTTPS state as scd last established it (0116). https_active=false means the approved HTTP fallback is in force: manual code entry only, code-only emails, no social sign-in; fallback_reason says why. Recovery is automatic when a valid certificate is installed again.';
+
+
+--
 -- Name: schema_migrations; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -13663,8 +13833,8 @@ CREATE TABLE public.social_oauth_providers (
     enabled boolean DEFAULT true NOT NULL,
     display_name text,
     client_id text NOT NULL,
-    client_secret text NOT NULL,
-    redirect_uri text NOT NULL,
+    client_secret text,
+    redirect_uri text,
     scopes text,
     extra jsonb DEFAULT '{}'::jsonb NOT NULL,
     last_success_at timestamp with time zone,
@@ -13672,8 +13842,16 @@ CREATE TABLE public.social_oauth_providers (
     last_error_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    callback_hosts text[] DEFAULT '{}'::text[] NOT NULL,
     CONSTRAINT social_oauth_providers_provider_check CHECK ((provider = ANY (ARRAY['google'::text, 'apple'::text, 'facebook'::text, 'microsoft'::text])))
 );
+
+
+--
+-- Name: COLUMN social_oauth_providers.callback_hosts; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.social_oauth_providers.callback_hosts IS 'Portal hostnames whose callback URL (https://<host>/auth/social/callback) the hotel registered in its own provider app. The portal offers the provider only while HTTPS is active and the canonical hostname is one of these (0116).';
 
 
 --
@@ -13691,7 +13869,9 @@ CREATE TABLE public.social_oauth_states (
     user_agent text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     expires_at timestamp with time zone NOT NULL,
-    consumed_at timestamp with time zone
+    consumed_at timestamp with time zone,
+    code_verifier text,
+    nonce text
 );
 
 
@@ -13785,6 +13965,13 @@ CREATE TABLE public.walled_garden_rules (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT walled_garden_rules_kind_check CHECK ((kind = ANY (ARRAY['domain'::text, 'cidr'::text, 'ip'::text])))
 );
+
+
+--
+-- Name: portal_https_settings_changes id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.portal_https_settings_changes ALTER COLUMN id SET DEFAULT nextval('public.portal_https_settings_changes_id_seq'::regclass);
 
 
 --
@@ -15356,6 +15543,22 @@ ALTER TABLE ONLY iam_v2.site_voucher_code_settings
 
 
 --
+-- Name: social_provider_secret_generations social_provider_secret_genera_tenant_id_provider_id_generat_key; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.social_provider_secret_generations
+    ADD CONSTRAINT social_provider_secret_genera_tenant_id_provider_id_generat_key UNIQUE (tenant_id, provider_id, generation_no);
+
+
+--
+-- Name: social_provider_secret_generations social_provider_secret_generations_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.social_provider_secret_generations
+    ADD CONSTRAINT social_provider_secret_generations_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: stay_events stay_events_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -15761,6 +15964,38 @@ ALTER TABLE ONLY public.pms_attempts
 
 ALTER TABLE ONLY public.pms_providers
     ADD CONSTRAINT pms_providers_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: portal_certificates portal_certificates_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.portal_certificates
+    ADD CONSTRAINT portal_certificates_pkey PRIMARY KEY (hostname);
+
+
+--
+-- Name: portal_https_settings_changes portal_https_settings_changes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.portal_https_settings_changes
+    ADD CONSTRAINT portal_https_settings_changes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: portal_https_settings portal_https_settings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.portal_https_settings
+    ADD CONSTRAINT portal_https_settings_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: portal_tls_state portal_tls_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.portal_tls_state
+    ADD CONSTRAINT portal_tls_state_pkey PRIMARY KEY (id);
 
 
 --
@@ -16423,6 +16658,13 @@ CREATE INDEX sign_in_attempts_site_room ON iam_v2.sign_in_attempts USING btree (
 --
 
 CREATE INDEX site_module_changes_lookup ON iam_v2.site_module_changes USING btree (tenant_id, site_id, changed_at DESC);
+
+
+--
+-- Name: spsg_one_current; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE UNIQUE INDEX spsg_one_current ON iam_v2.social_provider_secret_generations USING btree (tenant_id, provider_id) WHERE (superseded_at IS NULL);
 
 
 --
@@ -17662,6 +17904,13 @@ CREATE TRIGGER voucher_issuance_gate BEFORE INSERT ON iam_v2.vouchers FOR EACH R
 --
 
 CREATE TRIGGER voucher_revocations_append_only BEFORE DELETE OR UPDATE ON iam_v2.voucher_revocations FOR EACH ROW EXECUTE FUNCTION iam_v2.voucher_revocations_append_only();
+
+
+--
+-- Name: portal_https_settings_changes portal_https_settings_changes_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER portal_https_settings_changes_append_only BEFORE DELETE OR UPDATE ON public.portal_https_settings_changes FOR EACH ROW EXECUTE FUNCTION public.portal_https_settings_changes_append_only();
 
 
 --
@@ -20972,7 +21221,7 @@ GRANT SELECT ON TABLE iam_v2.internet_packages TO svc_pmsd;
 -- Name: TABLE notification_provider_secret_generations; Type: ACL; Schema: iam_v2; Owner: -
 --
 
-GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.notification_provider_secret_generations TO svc_scd;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE iam_v2.notification_provider_secret_generations TO svc_scd;
 
 
 --
@@ -21547,6 +21796,13 @@ GRANT SELECT ON TABLE iam_v2.site_payment_domains TO svc_edged;
 
 
 --
+-- Name: TABLE social_provider_secret_generations; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE iam_v2.social_provider_secret_generations TO svc_scd;
+
+
+--
 -- Name: TABLE stay_guests; Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -21868,6 +22124,46 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.pms_providers TO svc_edged;
 
 
 --
+-- Name: TABLE portal_certificates; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.portal_certificates TO svc_scd;
+GRANT SELECT ON TABLE public.portal_certificates TO svc_edged;
+
+
+--
+-- Name: TABLE portal_https_settings; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT ON TABLE public.portal_https_settings TO svc_scd;
+GRANT SELECT,INSERT,UPDATE ON TABLE public.portal_https_settings TO svc_edged;
+GRANT SELECT ON TABLE public.portal_https_settings TO svc_netd;
+
+
+--
+-- Name: TABLE portal_https_settings_changes; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT ON TABLE public.portal_https_settings_changes TO svc_edged;
+
+
+--
+-- Name: SEQUENCE portal_https_settings_changes_id_seq; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT USAGE ON SEQUENCE public.portal_https_settings_changes_id_seq TO svc_edged;
+
+
+--
+-- Name: TABLE portal_tls_state; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,UPDATE ON TABLE public.portal_tls_state TO svc_scd;
+GRANT SELECT ON TABLE public.portal_tls_state TO svc_edged;
+GRANT SELECT ON TABLE public.portal_tls_state TO svc_netd;
+
+
+--
 -- Name: TABLE schema_migrations; Type: ACL; Schema: public; Owner: -
 --
 
@@ -21887,6 +22183,13 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.sites TO svc_scd;
 
 GRANT SELECT,DELETE ON TABLE public.social_oauth_providers TO svc_scd;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.social_oauth_providers TO svc_edged;
+
+
+--
+-- Name: COLUMN social_oauth_providers.client_secret; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT UPDATE(client_secret) ON TABLE public.social_oauth_providers TO svc_scd;
 
 
 --
