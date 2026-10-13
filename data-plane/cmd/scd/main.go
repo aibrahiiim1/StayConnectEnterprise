@@ -205,7 +205,7 @@ type server struct {
 	// sign-in; nil or noPortalHTTPS{} means the HTTP fallback (no real social provider is offered). It is the
 	// portal certificate agent (portalTLS) once that starts.
 	socialPortal portalHosts
-	loginRL   *loginLimiter // layered throttling for guest username/password logins (optional fast in-memory layer)
+	loginRL      *loginLimiter // layered throttling for guest username/password logins (optional fast in-memory layer)
 
 	// Phase 1B dark-auth machinery. All are inert unless explicitly enabled at deploy time:
 	//   - authThrottle: durable, DB-backed authoritative throttle (D4). nil => legacy in-memory only.

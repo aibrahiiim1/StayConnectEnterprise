@@ -60,8 +60,8 @@ func socialHandler(t *testing.T, f *fakeSCD) *handler {
 	}
 	return &handler{
 		portalTLS: holder,
-		designs:  &designCache{},
-		arpCache: func(net.IP) (net.HardwareAddr, bool) { return net.HardwareAddr{0xaa, 0xbb, 0xcc, 1, 2, 3}, true },
+		designs:   &designCache{},
+		arpCache:  func(net.IP) (net.HardwareAddr, bool) { return net.HardwareAddr{0xaa, 0xbb, 0xcc, 1, 2, 3}, true },
 		scd: &http.Client{Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 				var d net.Dialer

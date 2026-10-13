@@ -150,6 +150,39 @@ CREATE TABLE IF NOT EXISTS public.notification_providers (
   last_error_at   timestamptz,
   created_at      timestamptz NOT NULL DEFAULT now(),
   updated_at      timestamptz NOT NULL DEFAULT now());
+-- Social sign-in providers and attempts, as the production baseline declares them after 0116 (callback hosts,
+-- nullable secret and redirect URI, PKCE verifier and nonce on the attempt).
+CREATE TABLE IF NOT EXISTS public.social_oauth_providers (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id       uuid NOT NULL,
+  provider        text NOT NULL CHECK (provider IN ('google','apple','facebook','microsoft')),
+  enabled         boolean NOT NULL DEFAULT true,
+  display_name    text,
+  client_id       text NOT NULL,
+  client_secret   text,
+  redirect_uri    text,
+  scopes          text,
+  extra           jsonb NOT NULL DEFAULT '{}'::jsonb,
+  last_success_at timestamptz,
+  last_error      text,
+  last_error_at   timestamptz,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now(),
+  callback_hosts  text[] NOT NULL DEFAULT '{}');
+CREATE TABLE IF NOT EXISTS public.social_oauth_states (
+  state         text PRIMARY KEY,
+  tenant_id     uuid NOT NULL,
+  appliance_id  uuid,
+  provider      text NOT NULL,
+  client_ip     inet,
+  client_mac    macaddr,
+  redirect_uri  text NOT NULL,
+  user_agent    text,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  expires_at    timestamptz NOT NULL,
+  consumed_at   timestamptz,
+  code_verifier text,
+  nonce         text);
 INSERT INTO public.appliances(id, tenant_id, site_id, serial, name) VALUES
   ('44444444-4444-4444-4444-444444444444','11111111-1111-1111-1111-111111111111',
    '22222222-2222-2222-2222-222222222222','APP-FIXTURE-0001','fixture-appliance')
