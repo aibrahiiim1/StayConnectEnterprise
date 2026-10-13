@@ -214,6 +214,7 @@ on. Everything the appliance says to Central is HTTPS to `ctrlapi`:
 | `/v1/appliance/license`, `/offline-reconcile` | the licence itself, and accounting for a consumed offline package |
 | `/v1/appliance/hello` | licence **enforcement**: how a deleted appliance discovers it has been removed and stops admitting new guests |
 | `/v1/appliance/assignment`, `/assignment-registry`, `/assignment/ack` | the signed tenant/site binding the licence is scoped to (mutual TLS only) |
+| `/v1/appliance/portal-tls/sync`, `/portal-tls/orders` | the Client Portal's hostname and certificate lifecycle, which the Product Owner placed with Central on 2026-10-13 (hostname, portal address, hotel domain, CSR, certificate status; no guest data; mutual TLS only; [contract](docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md) §7) |
 
 **Adding a new kind of message from the appliance to Central is a product decision, not an implementation
 detail.** Do not reclassify a message as licensing because it shares an endpoint, a service or a name with one.

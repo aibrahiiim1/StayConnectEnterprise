@@ -19,8 +19,9 @@ var (
 		RuleDateWindow:    {"from": true, "until": true},
 		RuleAuthMethod:    {"methods": true},
 		RuleSubjectKind:   {"kinds": true},
-		RulePriorPurchase: {"requires_prior": true, "forbids_prior": true},
+		RulePriorPurchase: {"requires_prior": true, "forbids_prior": true, "within_hours": true, "also_by_device": true},
 		RuleSiteNetwork:   {"guest_network_ids": true},
+		RuleClientGroup:   {"group_ids": true, "public": true},
 		// The PMS rule types. Phase 2 refused to publish these because nothing could evaluate them; Phase 3
 		// supplies authoritative Stay evidence, so they are publishable — and are validated as strictly as
 		// the others, because a property that writes a rule expects it to mean what it says.
@@ -180,7 +181,34 @@ func ValidateEligibilityRule(r EligibilityRule) error {
 		if _, err := normalizedEnumList(r.Value["kinds"], validSubjectKinds); err != nil {
 			return err
 		}
+	case RuleClientGroup:
+		pub, pubHas := r.Value["public"]
+		if pubHas {
+			if _, ok := pub.(bool); !ok {
+				return &Error{Code: ErrInvalidInput, Msg: "CLIENT_GROUP public must be true or false"}
+			}
+		}
+		if ids, has := r.Value["group_ids"]; has {
+			if arr, ok := ids.([]any); !ok || len(arr) > 0 {
+				if _, err := normalizedUUIDList(ids); err != nil {
+					return &Error{Code: ErrInvalidInput, Msg: "CLIENT_GROUP group_ids must be a list of group ids"}
+				}
+			}
+		}
+		if pb, _ := pub.(bool); !pb {
+			if _, err := normalizedUUIDList(r.Value["group_ids"]); err != nil {
+				return &Error{Code: ErrInvalidInput, Msg: "CLIENT_GROUP needs at least one group, or public"}
+			}
+		}
 	case RulePriorPurchase:
+		if n, present, ok := parseIntField(r.Value, "within_hours"); present && (!ok || n < 1 || n > 8760) {
+			return &Error{Code: ErrInvalidInput, Msg: "PRIOR_PURCHASE within_hours must be a whole number of hours from 1 to 8760"}
+		}
+		if raw, has := r.Value["also_by_device"]; has {
+			if _, ok := raw.(bool); !ok {
+				return &Error{Code: ErrInvalidInput, Msg: "PRIOR_PURCHASE also_by_device must be true or false"}
+			}
+		}
 		req, reqHas := r.Value["requires_prior"]
 		forb, forHas := r.Value["forbids_prior"]
 		reqB, reqOK := req.(bool)

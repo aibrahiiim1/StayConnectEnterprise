@@ -6,19 +6,21 @@ package social
 //   1. AuthorizeURL builds
 //      https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize
 //      with our client_id, redirect_uri, scope, state, response_mode=query,
-//      prompt=select_account.
+//      prompt=select_account, the attempt's OIDC nonce and its PKCE S256
+//      code_challenge (the identity platform accepts PKCE from confidential
+//      web clients alongside the client secret).
 //   2. Microsoft redirects back to our callback with ?code=...&state=...
-//   3. Exchange POSTs the code to .../{tenant}/oauth2/v2.0/token and receives
-//      an id_token.
+//   3. Exchange POSTs the code and the attempt's code_verifier to
+//      .../{tenant}/oauth2/v2.0/token and receives an id_token.
 //   4. The id_token is verified here: RS256 signature against the tenant's
 //      key set (.../{tenant}/discovery/v2.0/keys), exp/nbf/iat, aud ==
-//      client_id, and iss == https://login.microsoftonline.com/{tid}/v2.0
-//      where tid is the token's own tenant claim (the multi-tenant
-//      endpoints — common, organizations, consumers — issue tokens whose
-//      issuer names the user's home tenant, so the issuer cannot be a
-//      constant).
+//      client_id, nonce == the attempt's, and iss ==
+//      https://login.microsoftonline.com/{tid}/v2.0 where tid is the token's
+//      own tenant claim (the multi-tenant endpoints — common, organizations,
+//      consumers — issue tokens whose issuer names the user's home tenant, so
+//      the issuer cannot be a constant).
 //
-// Why the id_token rather than a userinfo call (the Google shape):
+// Why the id_token rather than a userinfo call:
 //   Microsoft's userinfo lives on Graph and returns no verification signal
 //   for email at all. The id_token is where the claims that justify trusting
 //   an email live (see emailFromClaims), and it is signed, so verifying it is
@@ -156,7 +158,10 @@ func (m *Microsoft) keySet() *jwksCache {
 	return m.jwks
 }
 
-func (m *Microsoft) AuthorizeURL(state, redirectURI string) string {
+// Binding: PKCE S256 and the OIDC nonce, both supported for confidential web clients.
+func (m *Microsoft) Binding() Binding { return Binding{PKCE: true, Nonce: true} }
+
+func (m *Microsoft) AuthorizeURL(a AuthRequest) string {
 	scope := m.Scopes
 	if scope == "" {
 		scope = defaultMicrosoftScope
@@ -167,19 +172,29 @@ func (m *Microsoft) AuthorizeURL(state, redirectURI string) string {
 	}
 	q := u.Query()
 	q.Set("client_id", m.ClientID)
-	q.Set("redirect_uri", redirectURI)
+	q.Set("redirect_uri", a.RedirectURI)
 	q.Set("response_type", "code")
 	q.Set("response_mode", "query") // the portal callback reads code/state from the query
 	q.Set("scope", scope)
-	q.Set("state", state)
+	q.Set("state", a.State)
 	q.Set("prompt", "select_account") // shared devices: always show the account picker
+	if a.Nonce != "" {
+		q.Set("nonce", a.Nonce)
+	}
+	if a.CodeChallenge != "" {
+		q.Set("code_challenge", a.CodeChallenge)
+		q.Set("code_challenge_method", "S256")
+	}
 	u.RawQuery = q.Encode()
 	return u.String()
 }
 
-func (m *Microsoft) Exchange(ctx context.Context, code, redirectURI string) (*UserInfo, error) {
-	if code == "" {
+func (m *Microsoft) Exchange(ctx context.Context, x ExchangeRequest) (*UserInfo, error) {
+	if x.Code == "" {
 		return nil, ErrBadCode
+	}
+	if err := requireBinding(m.Binding(), x); err != nil {
+		return nil, fmt.Errorf("microsoft: %w", err)
 	}
 	scope := m.Scopes
 	if scope == "" {
@@ -188,10 +203,11 @@ func (m *Microsoft) Exchange(ctx context.Context, code, redirectURI string) (*Us
 	form := url.Values{}
 	form.Set("client_id", m.ClientID)
 	form.Set("client_secret", m.ClientSecret)
-	form.Set("code", code)
+	form.Set("code", x.Code)
 	form.Set("grant_type", "authorization_code")
-	form.Set("redirect_uri", redirectURI)
+	form.Set("redirect_uri", x.RedirectURI)
 	form.Set("scope", scope)
+	form.Set("code_verifier", x.CodeVerifier)
 	tk, err := postTokenForm(ctx, m.HTTPClient, "microsoft",
 		m.base()+"/"+url.PathEscape(m.tenant())+"/oauth2/v2.0/token", form)
 	if err != nil {
@@ -228,6 +244,9 @@ func (m *Microsoft) Exchange(ctx context.Context, code, redirectURI string) (*Us
 			return nil, fmt.Errorf("microsoft: %w: personal accounts are not accepted", errIDToken)
 		}
 	}
+	if err := checkNonce(c, x.Nonce); err != nil {
+		return nil, fmt.Errorf("microsoft: %w", err)
+	}
 
 	// Stable subject: oid is the user's immutable id across every app in the
 	// tenant; scoped by tid it is globally unique. sub (pairwise per app) is
@@ -237,7 +256,10 @@ func (m *Microsoft) Exchange(ctx context.Context, code, redirectURI string) (*Us
 		sub = tid + ":" + oid
 	}
 	email, verified := emailFromClaims(c, tid)
-	info := &UserInfo{Sub: sub, Email: email, EmailVerified: verified, Name: c.str("name")}
+	info := &UserInfo{Sub: sub, Email: email, EmailVerified: verified, Name: c.str("name"),
+		// The directory tenant is the organisation: it is what an IDP_TENANT Client Group rule reads. It came
+		// out of a verified id_token, so it is Microsoft's assertion about the account, not the user's.
+		Claims: map[string]string{"tid": tid, "oid": c.str("oid")}}
 	if !verified {
 		// Caller maps this to ErrEmailUnverified for a friendlier message at
 		// the portal layer, as with Google.

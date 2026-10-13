@@ -319,6 +319,15 @@ const portalBaseCSS = `
     font-weight: 600; text-decoration: none;
   }
   .social-btn:hover { background: var(--sc-recess); }
+  /* The quick row: the identity providers sit above the primary form and are never a tab. */
+  .panel.quick { display: block; margin: 0 0 14px; }
+  /* Welcome back: one card, one button, for a device that already proved who it is. */
+  .welcome { margin: 0 0 16px; padding: 16px; border: 1px solid var(--sc-line); border-radius: var(--sc-r-ctl); background: var(--sc-card); }
+  .welcome h2 { margin: 0 0 4px; font-size: 1.15rem; }
+  .welcome .welcome-id { margin: 0 0 6px; font-size: 1.05rem; overflow-wrap: anywhere; }
+  .welcome .welcome-lead { margin: 0 0 12px; color: var(--sc-muted, inherit); }
+  .welcome form { margin: 0 0 8px; }
+  .welcome button.link { background: none; border: 0; padding: 0; color: var(--sc-link); text-decoration: underline; cursor: pointer; font: inherit; }
   .choices-title { margin: 0 0 12px; font-size: 1rem; font-weight: 700; }
   button.choice {
     display: flex; align-items: center;
@@ -864,15 +873,20 @@ main.card { display: block; }
 .panel:not(.active) { display: none; }
 #tabs { display: grid; }
 #tabs .tab, .pill { display: inline-flex; }
+/* The ways in under "Or sign in with" (the one-journey landing, contract §6.2). The page's script hides the row
+   with an inline style when there is only one way in; an inline style still wins over this sheet. */
+#alt-methods { display: block; }
+#alt-methods button.link { display: inline-flex; }
 .page, main.card, .sc-signin, .panels, .panel.active, .panels form, .panels .field, .panels label,
 .panels input:not([type=hidden]), .panels button, #tabs, #tabs .tab, .pill, .langbar, #lang,
+#alt-methods, #alt-methods button.link,
 #server-error, .notice.show, .panels .err {
   visibility: visible; pointer-events: auto; filter: none; clip-path: none; content-visibility: visible;
   transform: none; translate: none; scale: none; rotate: none;
 }
 .page, main.card, .sc-signin, .panels, .panel.active, .panels form, .panels .field, .panels label,
-.panels input:not([type=hidden]), #tabs, #tabs .tab, #server-error, .notice.show, .panels .err,
-.panels button:not(:disabled) { opacity: 1; }
+.panels input:not([type=hidden]), #tabs, #tabs .tab, #alt-methods, #alt-methods button.link, #server-error,
+.notice.show, .panels .err, .panels button:not(:disabled) { opacity: 1; }
 .sc-signin, .panels, .panels form, .panels .field, .panels input:not([type=hidden]), .panels button {
   height: auto; max-height: none; overflow: visible;
 }

@@ -1,0 +1,51 @@
+{
+  "transition_id": "T0225",
+  "seq": 225,
+  "timestamp": "2026-10-13T21:46:30+03:00",
+  "timestamp_derivation": "Written after PRE-LIVE and Central were deployed, the lifecycle tests ran and the test CA was removed, before the commit that introduces it (Cairo time computed from UTC by hand).",
+  "record_type": "HTTPS_CLIENT_PORTAL_AND_SOCIAL_LOGIN_DELIVERED_TO_PRE_LIVE",
+  "authorisation": "Product-Owner decision D49 and the 'Full HTTPS & Social Login Delivery Mission' of 2026-10-13 (implementation, DNS/certificate configuration, Central and PRE-LIVE deployment, protected merges).",
+  "delivery": {
+    "pull_request": 212,
+    "branch": "delivery/https-portal-social",
+    "content_head": "8f3f328284b015ccf08c73a5253b8f73781c7809",
+    "built_on": "PR #211 (delivery/client-access-identity, head 602b37ef), whose reviewed commits this branch carries",
+    "pr_state": "OPEN at the time of this receipt."
+  },
+  "delivered": [
+    "Central: portal hostnames under gw.onegate.work, A-record publication, ACME DNS-01 issuance for appliance CSRs, ARI renewal, weekly new-certificate cap, revocation on retirement/domain removal/operator action, hotel-domain verification and delegated issuance, console page; migration 0050.",
+    "Appliance: migration 0116; netd portal address 10.255.255.1 on ogportal0 (guest networks only, explicit WAN/management and forward drops), local DNS for portal names, option 114 = the RFC 8908 API while HTTPS is active; scd certificate agent and HTTPS-or-fallback state; portald TLS by SNI, RFC 8908 API, redirects, no HSTS; code-only emails in fallback.",
+    "Social sign-in: sealed secrets (social_dek.key), PKCE S256 and nonce, Google identity from the verified ID token, canonical-host redirect URI, offered only when the callback host is registered, Android-WebView open-in-browser page; the dev stub never registered in a production build.",
+    "Admin Console: Network -> Portal HTTPS; callback URLs on Identity providers; portal_https health alert.",
+    "Defect fixed: option 114 had been emitted by a name Kea 2.0.2 maps to code 160, so it was never delivered as 114."
+  ],
+  "verified_on_prelive_and_central": {
+    "ca": "a TEMPORARY Pebble ACME CA (15-minute certificates) and challenge-test DNS on Central, removed afterwards; the appliance trusted its root only through the opt-in SCD_PORTAL_TLS_EXTRA_ROOTS, also removed",
+    "guest_https_path": "18/18 (scripts/portal-https-e2e-test.sh)",
+    "signin_over_https": "12/12 (scripts/portal-https-signin-e2e-test.sh), no PMS posting or payment",
+    "social_offering": "15/15 with a placeholder app (scripts/portal-social-offering-test.sh)",
+    "lifecycle": "issuance; renewal with a new key; Central outage without effect; CA outage to expiry -> HTTP fallback (18:16:29Z) with a critical alert -> automatic recovery (18:22:30Z); hotel-domain issuance, canonical switch and removal with CA-confirmed revocation; operator revocation -> automatic replacement",
+    "not_verified": "a production Let's Encrypt certificate (needs the Cloudflare zone and token from the Product Owner), real iPhone/Android behaviour, a real social-provider round trip (needs the hotel's own provider apps)"
+  },
+  "deployment_provenance": "PRE-LIVE 172.21.60.25, read back from the installed bytes on 2026-10-13: netd dedd94a9; scd e9b72aab; edged e9b72aab; pmsd 6a403326; portald e9b72aab; acctd 99ba9f10; the helpers keybootstrap e9b72aab, sitemigrate and svc-run 29a6b21f; Admin Console release 20261013-181126 (dedd94a9, BUILD_ID k5PsBm_gIdlTTkgaTxP3p); schema 0116. Central 172.21.96.196: ctrlapi and console e9b72aab (console BUILD_ID FjmQRQBbGXPKTaPDRvx-v); Central schema 0050.",
+  "prelive_end_state": "HTTP fallback with reason NOT_CONFIGURED (no DNS token yet); hostname t89b76xm.gw.onegate.work allocated; no test configuration left on either host.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0224."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "head": "8f3f3282",
+  "head_note": "The last CONTENT commit of PR #212 at the time of this receipt; governance commits follow it.",
+  "previous_delivery": "T0224",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

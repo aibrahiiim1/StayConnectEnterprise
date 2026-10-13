@@ -42,16 +42,37 @@ var (
 	ErrAttemptsExceeded = errors.New("otp: too many wrong attempts")
 	ErrAlreadyUsed      = errors.New("otp: code already used")
 	ErrCodeMismatch     = errors.New("otp: incorrect code")
+	// ErrOtherDevice: the code (or the email's link, which carries the same code) was presented from a device
+	// other than the one it was issued to. It is not a wrong guess and does not count as one.
+	ErrOtherDevice = errors.New("otp: code was requested from another device")
 )
 
 type IssueParams struct {
 	TenantID    string
 	ApplianceID string
-	TemplateID  string // ticket_template to apply on successful verify
+	TemplateID  string // kept for callers; auth_otps lost its template_id column in migration 0049 and it is no longer stored
 	Channel     string // "email" or "sms"
 	Destination string // email address or phone number
 	IP          string // source IP of requester (for forensics)
 	UserAgent   string
+	// DeviceMAC is the requesting device's kernel-resolved hardware address. When set, the challenge is bound
+	// to it (iam_v2.otp_device_bindings, migration 0110) and VerifyFrom refuses any other device.
+	DeviceMAC string
+}
+
+// bindDevice records which device a challenge was issued to, and prunes bindings a day old. A failure here
+// is a failure to issue: an unbound code would be verifiable from anywhere, which is what the binding exists
+// to prevent.
+func bindDevice(ctx context.Context, db *pgxpool.Pool, challengeID, tenantID, mac string) error {
+	if strings.TrimSpace(mac) == "" {
+		return nil
+	}
+	if _, err := db.Exec(ctx, `INSERT INTO iam_v2.otp_device_bindings (challenge_id, tenant_id, device_mac)
+	     VALUES ($1::uuid, $2::uuid, $3::macaddr)`, challengeID, tenantID, mac); err != nil {
+		return fmt.Errorf("otp: bind device: %w", err)
+	}
+	_, _ = db.Exec(ctx, `DELETE FROM iam_v2.otp_device_bindings WHERE issued_at < now() - interval '1 day'`)
+	return nil
 }
 
 type Issued struct {
@@ -119,17 +140,20 @@ func Issue(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, p IssuePara
 		var id string
 		if err := db.QueryRow(ctx, `
         INSERT INTO auth_otps
-          (tenant_id, appliance_id, template_id, channel, destination,
+          (tenant_id, appliance_id, channel, destination,
            code_hash, expires_at, max_attempts, ip, user_agent)
         VALUES
-          ($1, NULLIF($2,'')::uuid, NULLIF($3,'')::uuid, $4, $5,
-           $6, $7, $8,
-           CASE WHEN $9 = '' THEN NULL ELSE $9::inet END,
-           NULLIF($10,''))
+          ($1, NULLIF($2,'')::uuid, $3, $4,
+           $5, $6, $7,
+           CASE WHEN $8 = '' THEN NULL ELSE $8::inet END,
+           NULLIF($9,''))
         RETURNING id
-    `, p.TenantID, p.ApplianceID, p.TemplateID, p.Channel, dest,
+    `, p.TenantID, p.ApplianceID, p.Channel, dest,
 			salt+":"+hash, expires, DefaultMaxAttempts, p.IP, p.UserAgent).Scan(&id); err != nil {
 			return nil, fmt.Errorf("otp: insert: %w", err)
+		}
+		if err := bindDevice(ctx, db, id, p.TenantID, p.DeviceMAC); err != nil {
+			return nil, err
 		}
 		return &Issued{ChallengeID: id, Code: code, ExpiresAt: expires}, nil
 	}
@@ -148,16 +172,19 @@ func Issue(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, p IssuePara
 	}
 	if _, err := db.Exec(ctx, `
         INSERT INTO auth_otps
-          (id, tenant_id, appliance_id, template_id, channel, destination,
+          (id, tenant_id, appliance_id, channel, destination,
            code_hash, otp_key_generation, expires_at, max_attempts, ip, user_agent)
         VALUES
-          ($1::uuid, $2, NULLIF($3,'')::uuid, NULLIF($4,'')::uuid, $5, $6,
-           $7, $8, $9, $10,
-           CASE WHEN $11 = '' THEN NULL ELSE $11::inet END,
-           NULLIF($12,''))
-    `, id, p.TenantID, p.ApplianceID, p.TemplateID, p.Channel, dest,
+          ($1::uuid, $2, NULLIF($3,'')::uuid, $4, $5,
+           $6, $7, $8, $9,
+           CASE WHEN $10 = '' THEN NULL ELSE $10::inet END,
+           NULLIF($11,''))
+    `, id, p.TenantID, p.ApplianceID, p.Channel, dest,
 		digestHex, gen, expires, DefaultMaxAttempts, p.IP, p.UserAgent); err != nil {
 		return nil, fmt.Errorf("otp: insert: %w", err)
+	}
+	if err := bindDevice(ctx, db, id, p.TenantID, p.DeviceMAC); err != nil {
+		return nil, err
 	}
 	return &Issued{ChallengeID: id, Code: code, ExpiresAt: expires}, nil
 }
@@ -178,7 +205,35 @@ type Verified struct {
 // while unexpired (the compatibility window — no new legacy rows are issued once the ring is on). When
 // ring is nil the legacy verify path runs unchanged (and does not reference otp_key_generation, so it
 // is safe against a pre-0008 database). Attempt-increment and consume are atomic in one FOR UPDATE tx.
+//
+// Verify does NOT check the device: it exists for the package's own tests of code, expiry and attempt
+// handling. Every guest path calls VerifyFrom.
 func Verify(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, challengeID, code string) (*Verified, error) {
+	return verify(ctx, db, ring, challengeID, code)
+}
+
+// VerifyFrom is Verify from a named device, and it FAILS CLOSED: no device, or a challenge bound to another
+// device, or a challenge with no binding at all, is refused with ErrOtherDevice BEFORE the code is compared --
+// no attempt is counted and nothing is learned about the code. Every challenge issued since migration 0110 is
+// bound (scd refuses to issue one it cannot bind), so an unbound challenge can only be one issued before it,
+// which expired within its ten minutes -- refusing it costs nothing and closes the any-device path for good.
+func VerifyFrom(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, challengeID, code, deviceMAC string) (*Verified, error) {
+	mac := strings.TrimSpace(deviceMAC)
+	if mac == "" {
+		return nil, ErrOtherDevice
+	}
+	var bound *string
+	if err := db.QueryRow(ctx, `SELECT device_mac::text FROM iam_v2.otp_device_bindings WHERE challenge_id = $1::uuid`,
+		challengeID).Scan(&bound); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("otp: device binding: %w", err)
+	}
+	if bound == nil || !strings.EqualFold(*bound, mac) {
+		return nil, ErrOtherDevice
+	}
+	return verify(ctx, db, ring, challengeID, code)
+}
+
+func verify(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, challengeID, code string) (*Verified, error) {
 	tx, err := db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return nil, err
@@ -197,17 +252,17 @@ func Verify(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, challengeI
 		// Legacy SELECT — does not reference otp_key_generation (pre-0008 safe).
 		err = tx.QueryRow(ctx, `
         SELECT tenant_id::text, channel, destination, code_hash,
-               template_id::text, expires_at, attempts, max_attempts, consumed_at
+               expires_at, attempts, max_attempts, consumed_at
           FROM auth_otps WHERE id = $1 FOR UPDATE
     `, challengeID).Scan(&tenantID, &channel, &destination, &codeHash,
-			&templateID, &expiresAt, &attempts, &maxAttempts, &consumedAt)
+			&expiresAt, &attempts, &maxAttempts, &consumedAt)
 	} else {
 		err = tx.QueryRow(ctx, `
         SELECT tenant_id::text, channel, destination, code_hash,
-               template_id::text, expires_at, attempts, max_attempts, consumed_at, otp_key_generation
+               expires_at, attempts, max_attempts, consumed_at, otp_key_generation
           FROM auth_otps WHERE id = $1 FOR UPDATE
     `, challengeID).Scan(&tenantID, &channel, &destination, &codeHash,
-			&templateID, &expiresAt, &attempts, &maxAttempts, &consumedAt, &keyGen)
+			&expiresAt, &attempts, &maxAttempts, &consumedAt, &keyGen)
 	}
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

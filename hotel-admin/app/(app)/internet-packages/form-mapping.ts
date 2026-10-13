@@ -76,10 +76,22 @@ export function rulesToForm(rules: PackageCurrent["eligibility_rules"]): Eligibi
         from: toLocalInput(value.from as string | undefined) ?? "",
         until: toLocalInput(value.until as string | undefined) ?? "",
       }); break;
+      // THE FREE ALLOWANCE. The window and the device switch are read back only when the stored rule names
+      // them: a rule that never did keeps the server's defaults, and republishing it must not pin a value the
+      // operator never set.
       case "PRIOR_PURCHASE": out.push({
         type: "PRIOR_PURCHASE", mode: value.requires_prior ? "requires_prior" : "forbids_prior",
+        ...(typeof value.within_hours === "number" && Number.isFinite(value.within_hours) ? { within_hours: String(value.within_hours) } : {}),
+        ...(typeof value.also_by_device === "boolean" ? { also_by_device: value.also_by_device } : {}),
       }); break;
       case "SITE_NETWORK": out.push({ type: "SITE_NETWORK", guest_network_ids: list("guest_network_ids") }); break;
+      case "CLIENT_GROUP": out.push({
+        type: "CLIENT_GROUP",
+        group_ids: Array.isArray(value.group_ids)
+          ? (value.group_ids as unknown[]).filter((x): x is string => typeof x === "string")
+          : [],
+        public: value.public === true,
+      }); break;
       // THE STAY DIMENSIONS. A bound that is absent stays absent: reading a missing max_nights back as "0"
       // would republish "up to zero nights", i.e. a package for nobody.
       case "STAY_LENGTH": out.push({

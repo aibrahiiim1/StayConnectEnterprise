@@ -62,6 +62,39 @@ export function domainProblem(raw: string): string | null {
 
 const KIND_LABEL: Record<string, string> = { account: "Provider account", domains: "Payment domains", settings: "Timings" };
 
+type PackageCurrencyRow = { package_id: string; code: string; active?: boolean; price_minor?: number | null; currency?: string | null; settlement_methods?: string[] | null };
+
+/**
+ * CurrencyMismatchNotice — a card payment is never converted (the appliance refuses a settlement in a currency
+ * the account does not settle), so a package priced in any other currency is NOT offered by card. Found live:
+ * a GBP test account and a USD package, and the client told "card payment is not available" after choosing.
+ * This names the packages concerned next to the accounts, where the operator can fix either side.
+ */
+function CurrencyMismatchNotice({ accounts }: { accounts: AccountsResp | null }) {
+  const [pkgs, setPkgs] = useState<PackageCurrencyRow[] | null>(null);
+  useEffect(() => {
+    api.get<{ data?: PackageCurrencyRow[] } | PackageCurrencyRow[]>("/commercial-packages")
+      .then((r) => setPkgs(Array.isArray(r) ? r : r?.data ?? []))
+      .catch(() => setPkgs([]));
+  }, []);
+  const settles = useMemo(() => new Set((accounts?.accounts ?? []).filter((a) => a.status === "ACTIVE").map((a) => (a.currency ?? "").trim().toUpperCase()).filter(Boolean)), [accounts]);
+  // A default account the provider converts for takes other currencies: nothing to warn about here (the
+  // provider may still refuse a currency it does not support, which the client is told at checkout).
+  const converts = (accounts?.accounts ?? []).some((a) => a.status === "ACTIVE" && a.is_default && a.provider_converts);
+  if (!accounts || settles.size === 0 || !pkgs || converts) return null;
+  const mismatched = pkgs.filter((p) => p.active !== false && (p.price_minor ?? 0) > 0
+    && (p.settlement_methods ?? []).includes("ONLINE_PAYMENT") && !settles.has((p.currency ?? "").trim().toUpperCase()));
+  if (mismatched.length === 0) return null;
+  return (
+    <p className="mt-3 rounded-md border border-warning/40 bg-warning-subtle px-3.5 py-2.5 text-xs text-warning-subtle-foreground" role="status" data-testid="card-currency-mismatch">
+      <strong>Not offered by card:</strong>{" "}
+      {mismatched.map((p) => `${p.code} (${(p.currency ?? "").toUpperCase()})`).join(", ")}. Your active account
+      {settles.size > 1 ? "s settle " : " settles "}{Array.from(settles).join(", ")} and a card payment is never
+      converted, so these packages are withheld from the card option until their price or the account currency matches.
+    </p>
+  );
+}
+
 function summariseDetail(detail: unknown): string {
   if (detail === null || detail === undefined || detail === "") return "—";
   if (typeof detail === "string") return detail;
@@ -164,6 +197,7 @@ function AccountsCard({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, TestResult>>({});
+  const [converting, setConverting] = useState<PaymentAccount | null>(null);
 
   const providerLabel = (id: string) => providers?.find((p) => p.id === id)?.label ?? id;
 
@@ -223,6 +257,7 @@ function AccountsCard({
                 <TH>Account</TH>
                 <TH>Provider</TH>
                 <TH>Currency</TH>
+                <TH>Other currencies</TH>
                 <TH>Mode</TH>
                 <TH>Status</TH>
                 <TH>Credentials</TH>
@@ -241,6 +276,20 @@ function AccountsCard({
                     </TD>
                     <TD>{providerLabel(a.provider)}</TD>
                     <TD className="font-mono">{a.currency}</TD>
+                    <TD>
+                      {a.conversion_supported ? (
+                        <div className="flex flex-col items-start gap-1">
+                          <Badge tone={a.provider_converts ? "ok" : "default"}>{a.provider_converts ? "Provider converts" : "Not converted"}</Badge>
+                          {writable && (
+                            <Button size="sm" variant="ghost" onClick={() => setConverting(a)}>
+                              {a.provider_converts ? "Stop converting" : "Let the provider convert"}
+                            </Button>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">Settles {a.currency} only</span>
+                      )}
+                    </TD>
                     <TD><Badge tone={a.mode === "LIVE" ? "warn" : "info"}>{a.mode}</Badge></TD>
                     <TD>
                       <Badge tone={a.status === "ACTIVE" ? "ok" : "default"} dot={a.status === "ACTIVE"}>
@@ -291,6 +340,13 @@ function AccountsCard({
           </Table>
         )}
       </TableWrap>
+      <CurrencyMismatchNotice accounts={accounts} />
+      <ConversionDialog account={converting} providerName={converting ? providerLabel(converting.provider) : ""}
+        onClose={() => setConverting(null)} onSaved={async () => {
+          setConverting(null);
+          toastSuccess("Saved", "Card currencies follow the account now.");
+          await onChanged();
+        }} />
       {providers && (
         <AccountDialog
           open={dialogOpen}
@@ -628,5 +684,48 @@ function HistoryCard({ changes }: { changes: PaymentChange[] | null }) {
         )}
       </TableWrap>
     </Card>
+  );
+}
+
+/**
+ * ConversionDialog — marks an account PROVIDER-CONVERTS (migration 0112). The client is charged the package's
+ * own price in the package's own currency; the provider settles into the account's currency at its own rate,
+ * and OneGate records the provider's report of what it settled. OneGate never sets or computes a rate. A
+ * financial setting: the reason and the operator's password are the step-up the server requires.
+ */
+function ConversionDialog({ account, providerName, onClose, onSaved }: { account: PaymentAccount | null; providerName: string; onClose: () => void; onSaved: () => void | Promise<void> }) {
+  const [reason, setReason] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  useEffect(() => { setReason(""); setPassword(""); setError(null); }, [account]);
+  const turningOn = !!account && !account.provider_converts;
+  return (
+    <ConfirmDialog
+      open={account !== null}
+      onOpenChange={(v) => !v && onClose()}
+      title={turningOn ? "Let the provider convert other currencies?" : "Stop converting other currencies?"}
+      description={turningOn
+        ? `Packages priced in another currency will be offered by card. The client pays the package price in that currency; ${providerName} settles it into ${account?.currency ?? ""} at its own exchange rate and fee, and the settlement it reports is recorded with each payment.`
+        : "Card will be offered only for packages priced in the account currency again. Payments already made are unaffected."}
+      confirmLabel={turningOn ? "Let the provider convert" : "Stop converting"}
+      busy={busy}
+      error={error}
+      onConfirm={async () => {
+        if (!account) return;
+        setBusy(true); setError(null);
+        try {
+          await api.post(`/payment-providers/accounts/${account.id}/conversion`, { provider_converts: turningOn, reason: reason.trim(), password });
+          await onSaved();
+        } catch (e) { setError(e); } finally { setBusy(false); }
+      }}
+    >
+      <Field label="Reason" required hint="Recorded in the change history.">
+        <Input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} aria-label="Reason" />
+      </Field>
+      <Field label="Confirm your password" required>
+        <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} aria-label="Confirm your password" />
+      </Field>
+    </ConfirmDialog>
   );
 }

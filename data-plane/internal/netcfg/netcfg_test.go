@@ -181,6 +181,9 @@ func TestKeaRenderOption114(t *testing.T) {
 	var found string
 	for _, o := range opts {
 		if o["name"] == "v4-captive-portal" {
+			t.Fatal(`option 114 must be emitted by code: Kea 2.0 maps the name "v4-captive-portal" to code 160`)
+		}
+		if o["code"] == 114 {
 			found = o["data"].(string)
 		}
 	}

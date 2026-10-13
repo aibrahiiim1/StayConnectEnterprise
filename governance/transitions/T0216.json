@@ -1,0 +1,58 @@
+{
+  "transition_id": "T0216",
+  "seq": 216,
+  "timestamp": "2026-10-12T00:20:00+03:00",
+  "timestamp_derivation": "Written after the final PRE-LIVE verification pass of 2026-10-11 (migrations 0111 and 0112 applied, netd and edged at the content head, scd and portald provably equivalent, Admin Console switched, Gate-P reconciled, the live checks and the Stripe sandbox run complete) and before the commit that introduces it.",
+  "record_type": "CLIENT_ACCESS_TEMPORARY_INTERNET_SECURITY_AND_CONVERSION_DEPLOYED_TO_PRE_LIVE",
+  "authorisation": "Product-Owner mission of 2026-10-11 on PR #211: configurable temporary internet access for email-code verification; guest IPv6 protection; DNS tunnelling protection; OTP device binding and link hardening; provider-managed currency conversion for card payments (financial-contract change limited to that, sandbox only); directly related corrections; migrations; controlled networking changes; PRE-LIVE deployment, verification, rollback preparation and documentation. It authorises NO merge, no LIVE payment, no PMS financial operation, no destructive migration, no Central deployment and no Go-Live.",
+  "delivery": {
+    "pull_request": 211,
+    "branch": "delivery/client-access-identity",
+    "base": "3fbbe7dc789e82f34911fd57c146e81436fc5500",
+    "content_head": "3bcd246ed3bca84b9f89fc979e56d33b0296e96f",
+    "pr_state": "OPEN. NOT MERGED. po-merge-approved NOT applied.",
+    "contract": "docs/architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md (sections 6.6, 9, 10.1)"
+  },
+  "what_was_found": [
+    "During the round itself: a closed verification window's in-progress flows carried on through the established accept, unmetered (a 3 MB cap let 8 MB through); fixed with a conntrack mark.",
+    "The pre-auth DNS limiter sat after the established accept, so a client's UDP socket was metered only until the first reply; fixed by moving both limiters before it.",
+    "The netd boot reconcile replayed the stored unbound fragment, so new resolver settings waited for a network change; boot now renders it from the current renderer.",
+    "The Stripe adapter could never create a checkout on a Managed Payments account (the default for new accounts) because it always sent payment_method_types; fixed with card-only variants under their own idempotency keys.",
+    "Correction of the previous round: guest IPv6 was already dropped (meta nfproto ipv6); the earlier count missed that form."
+  ],
+  "delivered": [
+    "Temporary internet while reading the code (migration 0111): after an email code is issued and sent, a timed, quota-capped, rate-policed WAN-only window for the requesting device, separate from every entitlement; defaults 10 min, 2/1 Mbps, 25 MB, 3 per device and per address per 24 h, 50 at once; persisted, bounded, audited settings; one live window per device; restore after restart with what is left.",
+    "Guest IPv6 guard extended to the return path, before the established accept, counted.",
+    "DNS: pre-auth devices 20 qps per address (burst 40) on gateway and public resolvers, counted; unbound ip-ratelimit 100, ratelimit 1000, deny-any.",
+    "OTP: issue refused without a kernel-resolved device; verification fails closed without a matching binding; query strings never logged; the link page sends no Referer and is not indexed.",
+    "Provider-managed conversion (migration 0112): Stripe accounts may be marked provider-converts (audited, step-up; Paymob refused); presentment kept; the provider settlement report recorded once; shown in Settlements; no local FX; room charge unchanged."
+  ],
+  "database_schema": "Appliance migrations 0111 (verification_access_grants) and 0112 (payment_account_conversion with its change log and setter, payment_settlement_reports with its recorder, the identity gate replaced). Both additive with a .down; 0112 proven up, down and up on PostgreSQL 16; both built into the full-schema Phase-4 harness. Applied on PRE-LIVE through scripts/edge-migrate.sh as iam_v2_owner with the SHA pinned (0111 4bbea219..., 0112 d3cb0e77...); Gate-P reconciled (GATEP_RECONCILE = OK), new grants verified.",
+  "deployment_provenance": "PRE-LIVE 172.21.60.25, read back from the installed bytes on 2026-10-11: netd 3bcd246e, scd 20690a95, edged 3bcd246e, pmsd 6a403326, portald 30eb88c0, acctd 99ba9f10; DEPLOYED_BINARIES 6/6 OK. scd (20690a95) and portald (30eb88c0) are content-equivalent to the head for their own dependency sets (go list -deps; later commits touch only internal/netcfg, which neither imports). Admin Console release 20261011-192916 from 30eb88c0 (BUILD_ID g83TMG5leAy377bvUGtIy; no Admin change after it). Site migrations through 0112. PRE-LIVE is AHEAD of master, as the standing decision intends.",
+  "live_verification": "/root/verify_round5.sh from client network namespaces: 39/39 (window opened only after a sent code; general internet; management unreachable; download ~512 and upload ~256 kbps measured; no reset on a second request; restore after kernel loss with the counted bytes; survives an scd restart; a running download stops on cancel; 3 MB cap holds at 3.03 MB of 8; ends at expiry; per-device limit; verification ends it and leads to packages; no issue without a device; link code not in the journal; IPv6 refused and counted; DNS flood on an established socket throttled and counted, resolution recovers). Stripe TEST mode: a USD 1.00 package on the site GBP test account was offered by card only after the account was marked provider-converts; the sandbox checkout was paid with the published test card; the reconciler captured it (USD 1.00); Stripe reported GBP 0.76 at 0.755608, fee 0.24, net 0.52, with its balance-transaction id; settlement SETTLED, purchase GRANTED, entitlement ACTIVE; conversion switched back off. Rollback drill: the previous scd installed and healthy, the current one reinstalled, manifest 6/6.",
+  "security_findings_open": "Anonymous-device abuse of the window is bounded (per device, per address, site cap, ledger-counted), not eliminated: a new hardware address with a fresh deliverable address gets a window. DNS tunnelling is throttled, not made impossible.",
+  "financial": "TEST mode only. payment_transactions on PRE-LIVE: one CAPTURED sandbox charge (USD 1.00) and five FAILED rows whose checkout Stripe provably refused to create (no money). The two card-test identities that own them are kept with their sandbox ledger rows. No LIVE key, no PMS posting, no FX by OneGate.",
+  "cleanup": "Test senders deleted, the site SMTP sender back on, the email method and portal settings restored, test windows, codes and bindings removed, other test identities removed, the provider-converts mark switched back off (its change log keeps the history), no live window left.",
+  "not_validated": "A real phone with a real mail app on the new window (the Product Owner test), a real-traffic appliance reboot, the Paymob sandbox, Playwright browser suites and FULL CHECK.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0215."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. A PRE-LIVE deployment for Product Owner testing; nothing merged, no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Nothing is merged. Go-Live remains unauthorised.",
+  "base": "3fbbe7dc789e82f34911fd57c146e81436fc5500",
+  "base_note": "Master at the start of the mission (the merge of PR #210, T0213 completion).",
+  "head": "3bcd246e",
+  "head_note": "The last CONTENT commit of PR #211 at the time of this receipt; governance commits follow it.",
+  "previous_delivery": "T0215",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

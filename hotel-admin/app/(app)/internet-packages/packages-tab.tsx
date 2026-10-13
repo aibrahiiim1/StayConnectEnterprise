@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, Ban, CheckCircle2, Gauge, Package, Pencil, Plus, Trash2, Users } from "lucide-react";
 import { api, ListResp } from "@/lib/api";
+import type { AccountsResp } from "@/lib/payment-admin";
 import {
   getActivity, getPackageDeletability, deletePackage, priceText, type PackageSummary, type RevisionInfo,
 } from "@/lib/api/commerce";
@@ -31,7 +32,7 @@ import { MonoId, SkeletonRows } from "@/components/ui/misc";
 import { useToast } from "@/components/ui/toast";
 import { DeleteDialog } from "@/components/commerce/delete-dialog";
 import { focusSheetItself } from "@/components/commerce/sheet-focus";
-import { PackageForm, type PackageFormInitial, type PackageFormValue, type PlanOption } from "./package-form";
+import { PackageForm, type ClientGroupOption, type PackageFormInitial, type PackageFormValue, type PlanOption } from "./package-form";
 import { decideSave, saveOutcomeMessage } from "@/lib/package-save";
 import { formatSpeed, formatData, formatDuration, formatDevices, DEVICE_LIMIT_POLICIES } from "@/lib/units";
 import { allocationFromPolicy, stayLengthWarnings, readStayLength, type PackageStayRange } from "@/lib/stay-packages";
@@ -78,11 +79,21 @@ export function PackagesTab({
   // null = loading; "error" = could not be read, which the form treats as not selectable (fail closed).
   const [modules, setModules] = useState<ModulesReport | "error" | null>(null);
   const [roomIfaces, setRoomIfaces] = useState<RoomChargeInterface[] | "error" | null>(null);
+  // THE CLIENT GROUPS AN AUDIENCE CAN NAME, read with the module state for the same reason: a group created in
+  // another tab must be offered the next time the form opens, not the next time the page loads.
+  const [clientGroups, setClientGroups] = useState<ClientGroupOption[] | "error" | null>(null);
+  // THE CURRENCIES AN ACTIVE PAYMENT ACCOUNT SETTLES. A card payment is never converted, so a package priced in
+  // any other currency is not offered by card; the form says so beside the price instead of letting the
+  // operator find out from a client. null = unknown (not licensed, or not readable): no claim is made.
+  const [cardCurrencies, setCardCurrencies] = useState<string[] | null>(null);
   const formOpen = adding || editing !== null;
   useEffect(() => {
     if (!formOpen) return;
     let live = true;
-    setModules(null); setRoomIfaces(null);
+    setModules(null); setRoomIfaces(null); setClientGroups(null); setCardCurrencies(null);
+    api.get<ListResp<ClientGroupOption>>("/client-groups")
+      .then((g) => { if (live) setClientGroups(g?.data ?? []); })
+      .catch(() => { if (live) setClientGroups("error"); });
     // The PMS interfaces room charge can map to are asked for only when Room charge is licensed: a site
     // without it never calls the room-charge surface.
     api.get<ModulesReport>("/modules")
@@ -95,6 +106,17 @@ export function PackagesTab({
             .catch(() => { if (live) setRoomIfaces("error"); });
         } else {
           setRoomIfaces([]);
+        }
+        if (m?.modules?.card_payment?.licensed) {
+          api.get<AccountsResp>("/payment-providers/accounts")
+            .then((a) => {
+              if (!live) return;
+              // A default account the provider converts for takes other currencies: make no claim (the
+              // provider is the authority on which it supports).
+              if ((a?.accounts ?? []).some((x) => x.status === "ACTIVE" && x.is_default && x.provider_converts)) { setCardCurrencies(null); return; }
+              setCardCurrencies(Array.from(new Set((a?.accounts ?? []).filter((x) => x.status === "ACTIVE").map((x) => (x.currency ?? "").trim().toUpperCase()).filter(Boolean))));
+            })
+            .catch(() => { /* unknown: the form makes no claim about card currencies */ });
         }
       })
       .catch(() => { if (live) { setModules("error"); setRoomIfaces([]); } });
@@ -496,7 +518,7 @@ export function PackagesTab({
           <DialogBody className="space-y-4">
             <ErrorBanner err={formErr} />
             <PackageForm mode="add" plans={plans} busy={busy} onSave={(v) => save(v, "add")} onCancel={() => setAdding(false)}
-              modules={modules} roomChargeInterfaces={roomIfaces} />
+              modules={modules} roomChargeInterfaces={roomIfaces} clientGroups={clientGroups} cardCurrencies={cardCurrencies} />
           </DialogBody>
         </DialogContent>
       </Dialog>
@@ -514,7 +536,8 @@ export function PackagesTab({
             <ErrorBanner err={formErr} />
             {editing && (
               <PackageForm mode="edit" initial={editing} plans={plans} busy={busy} onSave={(v) => save(v, "edit")}
-                onCancel={() => setEditing(null)} modules={modules} roomChargeInterfaces={roomIfaces} />
+                onCancel={() => setEditing(null)} modules={modules} roomChargeInterfaces={roomIfaces} clientGroups={clientGroups}
+                cardCurrencies={cardCurrencies} />
             )}
           </DialogBody>
         </DialogContent>

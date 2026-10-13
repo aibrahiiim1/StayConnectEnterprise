@@ -40,7 +40,7 @@ import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { formatBytes, formatRelative, formatDate, errMsg } from "@/lib/utils";
 import {
-  identifySession, methodLabel, stateWords, endReasonWords, speedPair,
+  identifySession, methodLabel, stateWords, endReasonWords, speedPair, acquisitionOrdinal,
 } from "@/lib/session-words";
 import { moduleHasHistory, moduleLicensed, useCapabilities } from "@/lib/capabilities";
 import { Users, Monitor, ArrowDownUp, Hotel, KeyRound, Ticket, UserCircle, Power, PackageOpen } from "lucide-react";
@@ -471,7 +471,15 @@ const SessionRow = memo(function SessionRow({
       <TD className="hidden lg:table-cell">
         {s.package_name || s.package_code ? (
           <>
-            <div className="text-sm">{s.package_name || s.package_code}</div>
+            <div className="flex items-center gap-1.5 text-sm">
+              <span>{s.package_name || s.package_code}</span>
+              {/* A repeat is said on the row: "3rd time" is the fact behind "why did this client get it again". */}
+              {acquisitionOrdinal(s.package_acquisitions) && (
+                <span title="How many times this client has had this package, counting this one">
+                  <Badge tone="warn">{acquisitionOrdinal(s.package_acquisitions)}</Badge>
+                </span>
+              )}
+            </div>
             <div className="text-2xs text-muted-foreground">
               {speedPair(s.down_kbps, s.up_kbps) ?? s.service_plan_code ?? ""}
             </div>
@@ -604,6 +612,12 @@ function SessionDetail({ s }: { s: Session }) {
                 {s.package_name || s.package_code}
               </Link>
             ) : "—",
+          },
+          {
+            label: "Times this client had this package",
+            value: typeof s.package_acquisitions === "number" && s.package_acquisitions > 0
+              ? `${s.package_acquisitions}${s.package_acquisitions === 1 ? " (first time)" : ""}`
+              : "—",
           },
           {
             label: "Service plan",

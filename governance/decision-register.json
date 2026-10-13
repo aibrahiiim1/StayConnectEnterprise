@@ -783,6 +783,19 @@
       "supersedes": "The 0012 financial freshness axis 2 ('a valid event within feed_freshness_ms') for room charge.",
       "does_not_authorize": "Merging PR #202; Go-Live; another real charge unless strictly necessary; any change to guest room sign-in freshness.",
       "implementation": "PR #202 (unmerged), recorded by T0205: migration 0103; pmsd financial resync scheduler; edged setting route; Room charge page 'Guest list proof' card; tests across all six stages."
+    },
+    {
+      "id": "D49",
+      "title": "HTTPS CLIENT PORTAL AND CUSTOMER-OWNED SOCIAL LOGIN (2026-10-13). Central manages licensing, activation, appliance portal hostnames and the HTTPS certificate lifecycle (allocation, issuance, renewal, monitoring, revocation) under onegate.work; every appliance has its own hostname, its own publicly trusted certificate and its own locally generated private key; Client Portal authentication, sessions, entitlements and guest traffic stay local; each hotel owns, registers, pays for and manages its own Google, Apple, Microsoft and Facebook applications and configures them self-service in the Admin Console; when HTTPS is unavailable the existing HTTP portal keeps manual code entry, emails carry the code only, administrators are alerted, and HTTPS recovers automatically.",
+      "decided_on": "2026-10-13",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-13",
+      "authorization_evidence": "Product-Owner decisions of 2026-10-13 in the HTTPS architecture reviews (Central certificate management approved in principle; confirmed decisions 1-6 of the final review) and the 'Full HTTPS & Social Login Delivery Mission' of 2026-10-13, which authorized implementation, DNS and certificate configuration, deployment to Central and PRE-LIVE, and protected merges.",
+      "supersedes": "The earlier recorded position that the portal carries no certificate or PKI (render_nft_no_tls_portal_test.go), for the portal address only: arbitrary guest 443 is still never intercepted. The documentation address 192.0.2.1 considered in review is replaced by a private RFC 1918 portal address.",
+      "does_not_authorize": "Go-Live; deployment to any appliance other than PRE-LIVE; domain transfer; purchases; destructive operations.",
+      "implementation": "PR #212, recorded by T0225: Central migration 0050, appliance migration 0116, contract docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md."
     }
   ]
 }

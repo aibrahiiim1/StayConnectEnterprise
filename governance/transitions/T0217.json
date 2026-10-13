@@ -1,0 +1,66 @@
+{
+  "transition_id": "T0217",
+  "seq": 217,
+  "timestamp": "2026-10-12T00:44:00+03:00",
+  "timestamp_derivation": "Written after the PRE-LIVE verification pass of 2026-10-12 (migration 0113 applied, scd and edged at 26869648 and the Admin Console installed and read back, Gate-P reconciled, the staff-help check and the regression re-run, the Stripe TEST-mode page inspected, the card-test access ended) and before the commit that introduces it.",
+  "record_type": "CLIENT_ACCESS_CARD_ONLY_RETRY_WAIT_AND_STAFF_HELP_DEPLOYED_TO_PRE_LIVE",
+  "authorisation": "Continuation of the PR #211 mission under its existing authorisation (Product Owner, 2026-10-11/12): resolve the Stripe Checkout payment-method fallback risk, verify that only approved payment methods can be offered, reconcile governance and documentation inconsistencies without changing protected-master policy, end residual test access while preserving financial evidence, directly related security and regression corrections, a real-phone acceptance checklist, an explicit statement of the HTTP code-link risk, PRE-LIVE verification and evidence; and the Product Owner's two additions of 2026-10-12 -- a configurable wait after which a device may have temporary internet again, and staff able to let a device try again or read a client's live code -- with the migration they need (0113). It authorises NO merge, no LIVE payment, no PMS financial operation, no destructive migration, no Central deployment and no Go-Live.",
+  "delivery": {
+    "pull_request": 211,
+    "branch": "delivery/client-access-identity",
+    "base": "3fbbe7dc789e82f34911fd57c146e81436fc5500",
+    "content_head": "26869648d52f04b70035774d93fe4bd9a87309c3",
+    "pr_state": "OPEN. NOT MERGED. po-merge-approved NOT applied.",
+    "contract": "docs/architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md (sections 9, 10.1, 10.2)",
+    "acceptance_checklist": "docs/acceptance/ClientAccessIdentity-Real-Phone-Acceptance-Checklist.md"
+  },
+  "what_was_found": [
+    "The Stripe adapter's third checkout variant omitted payment_method_types, so an account that refused both card-only requests would have let Stripe choose the methods (Link, wallets, bank debits, asynchronous methods). PRE-LIVE never reached it, but nothing prevented it.",
+    "The hosted page offered Link ('Save my information for faster checkout') beside the card form even on a card-only session; Link may be reported as its own payment-method type.",
+    "Neither adapter checked, at capture, which method the client actually paid with.",
+    "A provider refund of the PRE-LIVE sandbox charge (recorded by the reconciler, settlement REVERSED) left the entitlement it paid for ACTIVE: a refund does not end access. Recorded as an open Product-Owner decision."
+  ],
+  "corrections_of_record": [
+    "T0216 said the Managed Payments defect was 'fixed with card-only variants'. The fix as deployed in T0216 also carried a third variant that let Stripe choose the methods; it is removed here.",
+    "T0216 and current_delivery listed guest IPv6 forwarding, DNS tunnelling and the currency-conversion design as open decisions; all three were decided and implemented in T0216 itself.",
+    "T0216's current_delivery.decision_note read '(T0216, after T0216)'; the previous delivery was T0215.",
+    "The contract's section 10.1 still called a mail-services-only window the recommended design, contradicting the Product Owner's decision for a general window in section 6.6; corrected in the contract.",
+    "current_state_facts.ci_delivery_model.protection_unchanged (written 2026-09-10) says four checks are required on master. That was true when written and was superseded by D42 (T0196). The live ruleset, read on 2026-10-12 without a token, requires exactly one context, po-merge-authorization (strict; pull request with 0 approvals; merge commits only; deletion and non-fast-forward blocked). The historical field is kept and annotated; repository protection was NOT modified."
+  ],
+  "delivered": [
+    "Stripe: both checkout variants ask for card only and set wallet_options[link][display]=never; an account that refuses both is 'not created' and the client is told Card is unavailable; a created session whose payment_method_types is not exactly [card] is expired before any client sees it.",
+    "Stripe and Paymob: a capture whose method is not card is never reported CAPTURED; it stays unresolved and after the grace becomes UNKNOWN for financial review.",
+    "OneGate: a unit test pins that only Free, Voucher and Card are ever offered outside the Room sign-in path, whatever a revision lists (the database already refuses MANUAL_APPROVAL, CASH and an empty set).",
+    "Contract sections 9, 10.1 and 10.2; the real-phone acceptance checklist.",
+    "Wait before another window (setting retry_after_minutes, default 30, 0-1440, audited with the others): a device may have another temporary-internet window once that long has passed since its last one ended; a window ended by choosing a different address does not start it; the daily limits still apply.",
+    "Staff help (migration 0113, contract 6.7): Sign-in methods -> Code requests lists the last 24 hours of code requests with the device, the code's state and the window. 'Let them try again' (code-requests write) marks the device's ended windows cleared so they stop counting; nothing is deleted and no access is granted. 'Show code' (code-reveal write) reads a live code from a sealed copy kept only while the code can be used. Both take the password and a reason and are audited without the code. Guest relations may clear but not reveal; a viewer reads the list."
+  ],
+  "database_schema": "Appliance migration 0113 (verification_access_grants.cleared_at/cleared_by with three checks; iam_v2.otp_code_escrow; svc_scd SELECT/INSERT/DELETE on it). Additive with a .down, proven up, down and up on PostgreSQL 16 (dev site database). Applied on PRE-LIVE through scripts/edge-migrate.sh as iam_v2_owner, --target-kind live-site, SHA pinned (f6e96977...); Gate-P reconciled (GATEP_RECONCILE = OK), the grant mirrored in deploy/gatep/svc-scd-iamv2-guest-auth-grants.sql.",
+  "deployment_provenance": "PRE-LIVE 172.21.60.25, read back from the installed bytes on 2026-10-12: netd 3bcd246e; scd 26869648; edged 26869648; pmsd 6a403326; portald 30eb88c0; acctd 99ba9f10; DEPLOYED_BINARIES 6/6 OK. scd and edged at 26869648 (scd passed through 36b73b27 and d6fd1805 earlier the same night). netd (3bcd246e) and portald (30eb88c0) are content-equivalent to the head: no non-test package in their dependency sets changed after them (go list -deps). pmsd (6a403326) and acctd (99ba9f10) are master-base builds, as they have been throughout PR #211; their dependency set includes internal/iamv2, which this PR changes, and they were not redeployed (restarting pmsd restarts the live FIAS link, which was not requested). Admin Console release 20261011-213235 from 26869648 (BUILD_ID RPLOjgKd-b4km8saQNIzw). PRE-LIVE is AHEAD of master, as the standing decision intends.",
+  "live_verification": "From client network namespaces on the final build: verify_staff.sh 22/22 (a device waits after a window ends while its code is still sent; Code requests lists it without the code; clearing needs the password, keeps the cleared window on record and gives the device a window at once; showing a code needs a reason and the password, returns the sent code, which signs in on the device that asked and is then unavailable, its sealed copy gone; both actions audited without the code; the code in no service log; a change of address does not start the wait) and the verify_round5.sh regression 39/39. Stripe TEST mode: the site account accepted the card-only request (a session was created, so its payment_method_types was exactly [card]); the hosted page showed the Card form and the card-wallet express frame only, with no Link and no 'save my information'. Two unpaid TEST sessions were left to expire at Stripe; nothing was paid on them. Provider-converts switched back off.",
+  "test_access_ended": "The card-test client's TEST-mode entitlement was ended through iam_v2.terminate_entitlement_at_boundary (reason ADMIN) with an audit_log row (entitlement.terminated). Before and after: 9 payment_transactions, 1 settlement report, 172 settlements, 226 purchases -- nothing deleted. No device remained bound. Older ACTIVE entitlements from earlier harness runs and Room sign-ins were not touched: they were not created by this mission's tests. Test identities with commerce history (4) are kept as evidence with no live access and no unrevoked device credential; those without were removed. One aborted harness run left the site sender off and a test sender on for a few minutes; both were restored and read back (smtp on, email method as before).",
+  "financial": "TEST mode only. payment_transactions on PRE-LIVE: one CAPTURED sandbox charge (USD 1.00) with its provider-recorded full REFUND (settlement REVERSED), five FAILED rows whose checkout Stripe refused to create, and two PENDING rows for the unpaid TEST sessions of this round (they resolve when the sessions expire). No LIVE key, no PMS posting, no FX by OneGate.",
+  "security_findings_open": "Showing a client's code lets the desk vouch for an address the client did not prove by reading their own mail; bounded by the device binding, a separate permission, step-up, a reason and the audit record (contract 6.7), and decided by the Product Owner. The email code link is plain HTTP: the code is in clear text on the client network and in the email (contract 10.2). Closed only by an HTTPS portal with a publicly trusted certificate, a separate decision.",
+  "not_validated": "A real phone (the Product Owner's checklist), Apple Pay / Google Pay on a real device, the Paymob sandbox, Playwright browser suites and FULL CHECK. FULL CHECK was NOT run.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0216."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. A PRE-LIVE deployment for Product Owner testing; nothing merged, no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Nothing is merged. Go-Live remains unauthorised.",
+  "base": "3fbbe7dc789e82f34911fd57c146e81436fc5500",
+  "base_note": "Master at the start of the mission (the merge of PR #210, T0213 completion).",
+  "head": "26869648",
+  "head_note": "The last CONTENT commit of PR #211 at the time of this receipt; governance commits follow it.",
+  "previous_delivery": "T0216",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

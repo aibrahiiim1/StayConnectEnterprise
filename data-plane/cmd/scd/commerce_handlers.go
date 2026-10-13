@@ -83,7 +83,7 @@ func (s *server) commercePackages(w http.ResponseWriter, r *http.Request) {
 	if items == nil {
 		items = []iamv2.PackageListItem{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"packages": items})
+	writeJSON(w, http.StatusOK, map[string]any{"packages": items, "free_allowance_used": res.FreeAllowanceUsed})
 }
 
 // commerceQuote resolves a one-time free offer quote for the guest's package selection.

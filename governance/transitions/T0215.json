@@ -1,0 +1,61 @@
+{
+  "transition_id": "T0215",
+  "seq": 215,
+  "timestamp": "2026-10-11T20:40:00+03:00",
+  "timestamp_derivation": "Written after the last PRE-LIVE verification pass of 2026-10-11 (migrations 0109 and 0110 applied, netd, scd, portald and edged installed, the Admin Console release switched, the live checks run) and before the commit that introduces this receipt.",
+  "record_type": "CLIENT_ACCESS_CORRECTIONS_DEPLOYED_TO_PRE_LIVE_FOR_PRODUCT_OWNER_TESTING",
+  "authorisation": "Product-Owner instruction of 2026-10-11 on PR #211: complete the outstanding Client Access corrections to Product-Owner-testable quality -- the sign-in journey, empty-package and repeat-acquisition defaults, session attribution and directly related bugs; investigate the email walled garden end to end and harden directly related defects within the accepted model; review the HTTP one-time-code link keeping verification single-use and device-bound; assess bounded verification access and the presentment/settlement currency question as proposals; deploy to PRE-LIVE 172.21.60.25 under the standing decision; synchronise evidence and documentation. It authorises NO merge, no new networking/security architecture, no financial-contract change, no FX, no real transaction, no PMS change and no Go-Live.",
+  "delivery": {
+    "pull_request": 211,
+    "branch": "delivery/client-access-identity",
+    "base": "3fbbe7dc789e82f34911fd57c146e81436fc5500",
+    "content_head": "e56cd10bb2ccb1dc0d71d06c33f27ef28a447d84",
+    "pr_state": "OPEN. NOT MERGED. po-merge-approved NOT applied.",
+    "contract": "docs/architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md (sections 5, 6.4, 6.5, 9, 10.1)"
+  },
+  "what_was_found": [
+    "A refused card payment returned the client to the sign-in page; the refusal was PAYMENT_ACCOUNT_CURRENCY (a GBP test account, a USD package), right at confirm and wrong at listing.",
+    "The Free package had no limit and was granted again after its allowance ran out (07:15, 07:24, 07:43 the same Client); a new package's default made a priced package once-per-client too.",
+    "Sessions recorded PRINCIPAL for every email, phone or social sign-in; the channel or provider was kept nowhere.",
+    "Walled garden, measured from a device that had not signed in: every port open to every garden address (80, QUIC, any TCP port), a rule's Ports stored and ignored, the baseline resolvers reachable on 443 (DNS over HTTPS), and a mail service's address also serving YouTube, Search, Drive, Docs and Translate.",
+    "A one-time code was single-use but not device-bound: any device holding the code, or the email's link that carries it over plain HTTP on the client LAN, could verify it.",
+    "IPv6 forwarding enabled on the host with no ip6 rule in the StayConnect table; no client receives a v6 address and nothing is reachable over v6 today (latent)."
+  ],
+  "delivered": [
+    "A refused acquisition re-renders package selection signed in, with the reason; the landing page continues an unfinished journey at /packages for the commerce session's lifetime.",
+    "Card is offered only in a currency an ACTIVE payment account settles (SiteMethods.CardCurrencies); the Admin Console says which packages are withheld and why, on Payment methods and in the package editor.",
+    "A new Free package defaults to once per client, a new priced package to repeatable; the default follows the price until the operator chooses; existing packages keep their rules. The PRE-LIVE Free package was republished (revision 13) once per client through the audited publish route.",
+    "Migration 0109: a credential label on auth_contexts and principal_device_credentials (EMAIL_OTP, SMS_OTP, WHATSAPP_OTP, SOCIAL_<provider>, VOUCHER, ACCOUNT, OPEN) copied onto sessions.credential_method; sessions carry package_acquisitions; the sessions screen and the dashboard read the words.",
+    "Reading the code: email-service presets and bounded custom host names under Sign-in methods, opened only while Email code is on, resolved through the guest resolver (unbound).",
+    "Walled garden in three sets: address-only rules keep every port; (address, port) pairs for a rule's Ports, TCP 443/993/5228/5223 for an email service, TCP 443 for identity providers and payment pages, port 53 only for the baseline resolvers; planned by one pure function, synced in one transaction, carried across a netd structural replace.",
+    "Migration 0110: a one-time code is bound at issue to the kernel-resolved MAC of the device that asked; another device is refused before the code is compared, no attempt counted, in six languages."
+  ],
+  "database_schema": "Appliance migrations 0109 (two nullable label columns, CHECKed, no row touched) and 0110 (one table, iam_v2.otp_device_bindings, with svc_scd SELECT/INSERT/DELETE mirrored in deploy/gatep). Both additive, both with a .down, both applied on PRE-LIVE through scripts/edge-migrate.sh as iam_v2_owner with --target-kind live-site and the file SHA pinned (0109 c2951b43..., 0110 915bea68...).",
+  "deployment_provenance": "PRE-LIVE 172.21.60.25, read back from the installed bytes on 2026-10-11: netd e56cd10b, scd e56cd10b, edged e56cd10b, pmsd 6a403326, portald e56cd10b, acctd 99ba9f10; DEPLOYED_BINARIES 6/6 OK. Admin Console release 20261011-173043 from e56cd10b (BUILD_ID A8T-lnVRUf5N0XytRKF_S, source_state clean). Site migrations through 0110. PRE-LIVE is AHEAD of master, as the standing deployment decision intends.",
+  "live_verification": "Scripts on the appliance (/root/verify_round3.sh, /root/verify_round4.sh; additive, self-restoring), from client network namespaces on the guest bridge: round 3 (journey, credential, acquisition count, mail providers) 17/17 on 9429e3fd; round 4 (garden port enforcement, DoH closed, Ports honoured, device-bound code) 22/22 on e56cd10b. The probe that established the garden findings (/root/probe_garden.sh) was run before and after the hardening.",
+  "security_findings_open": "Address-based filtering cannot isolate a domain behind a shared front end: with an email service open, the other services its addresses serve answer on 443 to a device that has not signed in. Two bounded designs are written in the contract (10.1) for decision: a per-device, time-boxed verification window restricted to the mail services (recommended), or TLS server-name filtering. IPv6 forwarding with no ip6 policy is recorded for decision. DNS tunnelling through the guest resolver is an inherent captive-portal property, recorded, not changed.",
+  "financial": "No financial change. The presentment-vs-settlement currency design (provider-managed conversion with the provider's rate, fee, net and balance-transaction id recorded on the settlement) is a recommendation in the contract (9) and needs the Product Owner's decision; PAYMENT_ACCOUNT_CURRENCY keeps refusing a mismatch and the method is withheld at listing. payment_transactions on PRE-LIVE remains unchanged.",
+  "cleanup": "Every test identity (op@, r3@, r4@example.com), its auth contexts (under the auth_context operation scope), device credentials, one-time challenges and device bindings removed; test senders deleted; the site's SMTP sender, the Email switch, the portal journey settings and the walled-garden rules restored to their original values; orphaned sealed generations 0. Retained on purpose: the harness's network-namespace devices (network observations) and the append-only group-change rows from T0214.",
+  "not_validated": "Real identity providers and a real mail app on a real phone over the hardened garden (the Product Owner's test). Playwright browser suites and FULL CHECK were not run. Three iamv2 database tests fail on the shared development database exactly as they do on master (shared state), and pass alone.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0214."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. This transition records a PRE-LIVE deployment of corrections for Product Owner testing; it changed no phase, merged nothing and performed no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Nothing is merged. Go-Live remains unauthorised.",
+  "base": "3fbbe7dc789e82f34911fd57c146e81436fc5500",
+  "base_note": "Master at the start of the mission (the merge of PR #210, T0213 completion).",
+  "head": "e56cd10b",
+  "head_note": "The last CONTENT commit of PR #211 at the time of this receipt. The governance commits that carry this receipt, the rendered state blocks, the packs and the manifest follow it on the same branch.",
+  "previous_delivery": "T0214",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

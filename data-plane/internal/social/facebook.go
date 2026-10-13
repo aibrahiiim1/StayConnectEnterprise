@@ -19,7 +19,7 @@ package social
 //
 // Facebook Login is plain OAuth 2.0, not OIDC: there is no id_token to verify
 // on this flow. The Graph call with the proof is what establishes the
-// identity, as Google's userinfo call does in google.go.
+// identity (the contract's "verified profile").
 //
 // EMAIL VERIFICATION — Facebook returns no email_verified field. Graph
 //   returns `email` only when the user has a CONFIRMED primary address and
@@ -82,17 +82,21 @@ func NewFacebook(clientID, clientSecret, scopes string) (*Facebook, error) {
 
 func (f *Facebook) Name() string { return "facebook" }
 
-func (f *Facebook) AuthorizeURL(state, redirectURI string) string {
+// Binding: none beyond `state`. Facebook Login on this flow issues no id_token for a nonce to bind, and the
+// Graph call is authenticated by appsecret_proof, which only the holder of the app secret can compute.
+func (f *Facebook) Binding() Binding { return Binding{} }
+
+func (f *Facebook) AuthorizeURL(a AuthRequest) string {
 	u, err := url.Parse(orDefault(f.authBase, defaultFacebookAuthBase))
 	if err != nil {
 		return ""
 	}
 	q := u.Query()
 	q.Set("client_id", f.ClientID)
-	q.Set("redirect_uri", redirectURI)
+	q.Set("redirect_uri", a.RedirectURI)
 	q.Set("response_type", "code")
 	q.Set("scope", orDefault(f.Scopes, defaultFacebookScope))
-	q.Set("state", state)
+	q.Set("state", a.State)
 	u.RawQuery = q.Encode()
 	return u.String()
 }
@@ -104,15 +108,15 @@ func appSecretProof(accessToken, appSecret string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-func (f *Facebook) Exchange(ctx context.Context, code, redirectURI string) (*UserInfo, error) {
-	if code == "" {
+func (f *Facebook) Exchange(ctx context.Context, x ExchangeRequest) (*UserInfo, error) {
+	if x.Code == "" {
 		return nil, ErrBadCode
 	}
 	form := url.Values{}
 	form.Set("client_id", f.ClientID)
 	form.Set("client_secret", f.ClientSecret)
-	form.Set("code", code)
-	form.Set("redirect_uri", redirectURI)
+	form.Set("code", x.Code)
+	form.Set("redirect_uri", x.RedirectURI)
 	tk, err := postTokenForm(ctx, f.HTTPClient, "facebook", orDefault(f.tokenURL, defaultFacebookTokenURL), form)
 	if err != nil {
 		return nil, err

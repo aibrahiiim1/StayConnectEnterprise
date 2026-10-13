@@ -276,6 +276,9 @@ func (c *Client) elementIn(ctx context.Context, set, iface string, ip net.IP, tt
 type Element struct {
 	Iface string
 	IP    net.IP
+	// Port is the service part of an `ipv4_addr . inet_service` element (the port-restricted walled-garden
+	// sets); 0 on a set keyed by address or by (interface, address).
+	Port int
 	// Timeout is the lease the element was created with; Expires is how much of it is LEFT. Renewal decisions
 	// need the remainder, not the original: an element created with a 90s lease 89 seconds ago is one second
 	// from cutting its guest off, and only Expires says so.

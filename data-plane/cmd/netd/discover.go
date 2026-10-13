@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
 )
 
 // Interface is an observed appliance interface (from `ip -j addr`).
@@ -94,6 +96,10 @@ func Discover(ctx context.Context) ([]Interface, error) {
 
 func skipIface(name string) bool {
 	if name == "lo" {
+		return true
+	}
+	// The portal interface carries one /32 and nothing else; it is never a parent for a client network.
+	if name == netcfg.PortalIface {
 		return true
 	}
 	for _, p := range []string{"docker", "veth", "br-", "vcli", "veth", "kube", "cni", "flannel"} {

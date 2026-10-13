@@ -1,0 +1,58 @@
+{
+  "transition_id": "T0220",
+  "seq": 220,
+  "timestamp": "2026-10-12T10:32:00+03:00",
+  "timestamp_derivation": "Written after the fixes below were verified locally and portald was installed and read back on PRE-LIVE, before the commit that introduces it.",
+  "record_type": "CLIENT_ACCESS_FULL_CHECK_FINDINGS_FIXED",
+  "authorisation": "The 'PR #211 Final Closure Mission' of 2026-10-12 (T0218): run FULL CHECK and resolve its failures without weakening validation; the standing PRE-LIVE deployment decision.",
+  "delivery": {
+    "pull_request": 211,
+    "branch": "delivery/client-access-identity",
+    "content_head": "e1cd6d179a3389d9f19f401f7415961d688dc73a",
+    "pr_state": "OPEN. NOT MERGED. po-merge-approved NOT applied."
+  },
+  "full_check_first_run": {
+    "ref": "delivery/client-access-identity",
+    "head": "5050dde67f2ed2723af4da0114706ca31c41f609",
+    "result": "FAIL",
+    "gates": {
+      "governance": "failure, run 38213274963 -- current-state parity: the provenance note named four heads where five run (the keybootstrap helper at 4c4acf07 was omitted)",
+      "phase3-full-software-gate": "failure, run 38213277226 -- the factory-clean production baseline stopped at 0103 (Gate-P's 0107 attrs grant failed; 644 facts disagreed)",
+      "phase4-financial-core-gate": "failure, run 38213279527 -- the full browser suite: specs still targeted master's group tabs",
+      "phase5-post-stay-transfer-gate": "success, run 38213281970"
+    }
+  },
+  "what_was_found": [
+    "The provenance note omitted the keybootstrap helper's head.",
+    "The factory-clean baseline had not been regenerated since 0103, so a NEW appliance built from it would have lacked 0104-0115.",
+    "Three browser specs still targeted the two group tabs the one-journey landing (contract 6.2) replaced with method chips.",
+    "A real product gap, found by making the hostile-stylesheet test attack the chips: the cascade guard protected the old tabs but not the chips, so a hotel stylesheet could hide every other way in."
+  ],
+  "delivered": [
+    "The provenance note names every head, the helpers included.",
+    "The baseline regenerated through 0115 with scripts/generate-production-baseline.sh; the baseline-top pins moved with it; factory-clean-baseline-verify: IDENTICAL to the upgrade path's end state (11456 catalog facts).",
+    "The specs use the chips and the real voucher path, with the same assertions; the hostile stylesheet now attacks the chips too.",
+    "The guard covers #alt-methods and its buttons; the page's own inline hide still wins. portald redeployed with it."
+  ],
+  "deployment_provenance": "PRE-LIVE 172.21.60.25, read back from the installed bytes on 2026-10-12: netd d0600e2c; scd d0600e2c; edged d0600e2c; pmsd 6a403326; portald e1cd6d17; acctd 99ba9f10; the helpers keybootstrap 4c4acf07, sitemigrate and svc-run 29a6b21f. DEPLOYED_BINARIES 6/6 OK. Only portald changed since T0218 (the guard). scd, edged and netd (d0600e2c) are content-equivalent to the head: nothing after d0600e2c touches their dependency sets (test fixtures, a test file, portald's stylesheet, the browser specs, the baseline and scripts). Admin Console release 20261012-052406 unchanged.",
+  "verification": "Locally: portald tests green; the three updated browser specs 51/51; factory-clean-baseline-verify PASS; the Phase-4 harness and the full browser suite re-run on this head (recorded on PR #211). FULL CHECK is re-run on the governance head that follows and recorded on PR #211.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0219."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; nothing merged, no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Nothing is merged. Go-Live remains unauthorised.",
+  "head": "e1cd6d17",
+  "head_note": "The last CONTENT commit of PR #211 at the time of this receipt; governance commits follow it.",
+  "previous_delivery": "T0219",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

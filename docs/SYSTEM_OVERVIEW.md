@@ -247,7 +247,7 @@ Standalone enrollment/NATS smoke tester: default hello flow, `--replay` (JWT rep
 | `session` | guests/sessions row management; `CheckConcurrency` against effective limits; `Start` / `StartOTP` / `StartPMS` / `End` / `FindActive` |
 | `shape` | tc HTB per-session classes; WAN=upload (src match), LAN=download (dst match); classid minor = `0x1000 + last IP octet` (range `1:1000..1:10ff`); fq_codel leaf; deterministic filter pref; 0 kbps = 1 Gbps uncapped; `Stats()` regex-parses plaintext `tc -s class show` |
 | `nft` | idempotent wrapper over `/usr/sbin/nft`: `Allow(ip, ttl)`, `Deny(ip)`, JSON `List()` of `auth_ipv4` |
-| `social`, `socialloader` | OAuth providers: **Google** (real OIDC: accounts.google.com auth, token exchange, userinfo; requires verified email) + **Stub**; apple/facebook/microsoft are placeholders that keep the stub |
+| `social`, `socialloader` | OAuth / OIDC providers: Google, Microsoft, Apple, Facebook (verified `id_token` / Graph) + **Stub**. The provider's `sub` is the identity; verified organisation claims (`hd`, `tid`) ride with it; `PreAuthDomains` names what the walled garden opens. See `docs/architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md` |
 | `notifyloader` | Resolves tenant's enabled email/SMS provider rows; wraps them with metrics + `last_success_at`/`last_error` DB health writes; falls back to stubs |
 | `tenantcfg` | Uncached read of `tenants.auth_methods` JSON (which portal tabs to show, PMS mode/lockout settings) |
 | `voucher` | Crockford-normalized code validation/consumption against `vouchers`+`ticket_templates`; returns remaining duration/bytes + bandwidth |
@@ -344,7 +344,7 @@ Auth legend: **PUBLIC**, **SESSION** (sc_session cookie), **+TENANT** (tenant sc
 
 **PMS providers:** CRUD `/v1/pms-providers[/{name}]` (`?site_id=` scoping, secrets write-only, publishes config push), `POST .../{name}/test`, `GET .../{name}/cache`, `GET .../{name}/health` (all proxied live to the appliance via transport).
 
-**Provider admin:** CRUD `/v1/notification-providers` (email: stub/sendgrid/ses; sms: stub/twilio; one enabled per channel), `/v1/social-providers` (google/apple/facebook/microsoft), `/v1/stripe-accounts` (one enabled per tenant; secret_key/webhook_secret write-only).
+**Provider admin:** CRUD `/notification-providers` (email: stub/sendgrid/**smtp**; sms: stub/twilio; whatsapp: meta/twilio; one enabled per channel; secrets sealed by scd under `notify_dek.key`, `POST /{id}/test` sends a test message, every write reloads scd), `/social-providers` (google/apple/facebook/microsoft), `/client-groups` (audience policy; see the client-access contract). The legacy `stripe-accounts` surface is removed; card payment lives under `payment-providers`.
 
 ### Internal packages (control-plane)
 

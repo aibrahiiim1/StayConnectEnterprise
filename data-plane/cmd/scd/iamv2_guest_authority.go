@@ -105,6 +105,13 @@ type iamv2GuestResult struct {
 	// per-entitlement device slots. Before this, every sign-in bought again and the new grant superseded the
 	// old one, knocking the guest's other devices offline.
 	LiveEntitlementID string `json:"live_entitlement_id,omitempty"`
+	// ResumeToken is the remembered-device credential issued after a verified OTP / SOCIAL sign-in
+	// (client_resume.go); the portal stores it in an HttpOnly cookie. Absent when devices are not remembered.
+	ResumeToken string `json:"resume_token,omitempty"`
+	// IdentityLabel is the masked factor the Client proved (a•••@example.com), for guest pages only.
+	IdentityLabel string `json:"identity_label,omitempty"`
+	// ClientGroupName is the effective Client Group pinned on the context ("" = Public).
+	ClientGroupName string `json:"client_group_name,omitempty"`
 }
 
 // iamv2MethodEnabled reports whether IAM-v2 is the configured authority for a
@@ -174,14 +181,34 @@ func (s *server) authorizeViaIAMv2(w http.ResponseWriter, r *http.Request,
 		if s.met != nil && s.met.AuthContextsCreated != nil {
 			s.met.AuthContextsCreated.WithLabelValues(string(method)).Inc()
 		}
-		writeJSON(w, http.StatusOK, iamv2GuestResult{
+		out := iamv2GuestResult{
 			AuthContextID:     res.AuthContextID,
 			DeviceID:          res.DeviceID,
 			GuestNetworkID:    nc.NetworkID,
 			Method:            string(method),
 			Authority:         "iam_v2",
 			LiveEntitlementID: s.liveEntitlementForContext(r.Context(), res.AuthContextID),
-		})
+			IdentityLabel:     res.IdentityLabel,
+			ClientGroupName:   res.ClientGroupName,
+		}
+		// A verified factor on this device earns the device a resume credential (contract §2.3). A resumed
+		// sign-in already holds one and gets no second.
+		// A sign-in completed with a code staff showed the client earns NO remembered device (contract §6.7): the
+		// next visit proves the address again.
+		if req.ResumedPrincipalID == "" && res.Subject.PrincipalID != "" && !iamv2.IsAssistedCredential(req.Credential) {
+			out.ResumeToken = s.issueResumeCredential(r.Context(), res.Subject.PrincipalID, res.DeviceID, method, req.Credential)
+		}
+		// A SUCCESSFUL SIGN-IN ENDS THE DEVICE'S TEMPORARY VERIFICATION WINDOW (verify_access.go): from here the
+		// device's access is whatever its own entitlement says, never the metered window.
+		endReason := "SIGNED_IN"
+		if method == iamv2.MethodOTP {
+			endReason = "VERIFIED"
+		}
+		s.endVerifyAccess(r.Context(), req.Device.MAC, endReason)
+		if len(res.IdentityConflicts) > 0 {
+			slog.Info("iamv2 identity link conflict", "method", string(method), "factors", res.IdentityConflicts)
+		}
+		writeJSON(w, http.StatusOK, out)
 		return true
 
 	case iamv2.DecisionDisabled:
@@ -195,9 +222,11 @@ func (s *server) authorizeViaIAMv2(w http.ResponseWriter, r *http.Request,
 		return true
 
 	default: // DecisionDeny
-		writeJSON(w, http.StatusForbidden, map[string]any{
-			"error": "AUTH_DENIED", "reason": res.Reason, "authority": "iam_v2",
-		})
+		out := map[string]any{"error": "AUTH_DENIED", "reason": res.Reason, "authority": "iam_v2"}
+		if res.Reason == "assisted_existing_client" {
+			out["key"] = "err.otp.assisted" // the portal says it in the client's language
+		}
+		writeJSON(w, http.StatusForbidden, out)
 		return true
 	}
 }

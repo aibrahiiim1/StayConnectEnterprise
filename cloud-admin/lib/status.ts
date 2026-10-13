@@ -125,6 +125,42 @@ export function credentialStatusInfo(v: string | null | undefined): StateInfo {
   }
 }
 
+/** A portal hostname's public A record (System → Portal certificates). */
+export function portalDNSInfo(v: string | null | undefined): StateInfo {
+  switch (v) {
+    case "SYNCED": return { label: "Published", tone: "ok", explain: "The name resolves to the appliance's portal address." };
+    case "PENDING": return { label: "Pending", tone: "info", explain: "Central publishes the record on its next pass." };
+    case "ERROR": return { label: "DNS error", tone: "err", explain: "The DNS provider refused the change; Central keeps retrying." };
+    case "RELEASED": return { label: "Released", tone: "default", explain: "The appliance was retired; its name is never reused." };
+    default: return unknown(v);
+  }
+}
+
+/** A hotel's own portal domain. */
+export function portalDomainInfo(v: string | null | undefined): StateInfo {
+  switch (v) {
+    case "VERIFIED": return { label: "Verified", tone: "ok", explain: "All three records are published and seen by both resolvers." };
+    case "PENDING": return { label: "Waiting for records", tone: "info", explain: "The hotel has not published all three records yet." };
+    case "FAILED": return { label: "Broken", tone: "err", explain: "A record the delegation depends on is missing or wrong; renewals are stopped." };
+    case "REMOVED": return { label: "Removed", tone: "default", explain: "" };
+    default: return unknown(v);
+  }
+}
+
+/** A portal certificate order. */
+export function portalCertInfo(v: string | null | undefined, revoked = false): StateInfo {
+  if (revoked && v !== "REVOKED") return { label: "Revoking", tone: "warn", explain: "Revocation is queued; Central sends it to the CA on its next pass." };
+  switch (v) {
+    case "QUEUED": return { label: "Queued", tone: "info", explain: "Waiting for its turn, or for a slot under the weekly limit on new certificates." };
+    case "PROCESSING": return { label: "Issuing", tone: "info", explain: "" };
+    case "ISSUED": return { label: "Issued", tone: "ok", explain: "" };
+    case "FAILED": return { label: "Failed", tone: "err", explain: "" };
+    case "REVOKED": return { label: "Revoked", tone: "err", explain: "" };
+    case "SUPERSEDED": return { label: "Replaced", tone: "default", explain: "" };
+    default: return unknown(v);
+  }
+}
+
 /** Sentence-case a machine word ("false_positive" → "False positive"). */
 export function sentenceCase(s?: string | null): string {
   if (!s) return "—";

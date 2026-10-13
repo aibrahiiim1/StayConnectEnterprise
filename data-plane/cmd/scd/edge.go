@@ -10,13 +10,16 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
+	"github.com/stayconnect/enterprise/data-plane/internal/mailreach"
 	"github.com/stayconnect/enterprise/data-plane/internal/nft"
+	"github.com/stayconnect/enterprise/data-plane/internal/social"
 	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
 	lic "github.com/stayconnect/enterprise/license"
 )
@@ -193,73 +196,242 @@ func (s *server) hotelAdminCertRenew(w http.ResponseWriter, r *http.Request) {
 
 // ----- walled-garden reconciliation ------------------------------------------
 
-// reconcileWalledGarden loads walled_garden_rules from the site DB, resolves
-// domain rules via DNS, and syncs the nft walled_garden_ip set. Baseline
-// elements (public DNS used by captive-portal probes) are always kept.
-var gardenBaseline = []string{"1.1.1.1", "8.8.8.8", "8.8.4.4"}
+// THE GARDEN IS LEAST PRIVILEGE BY PORT AS WELL AS BY ADDRESS (internal/nft/garden.go).
+//
+// The three baseline resolvers are reachable on port 53 only. What this appliance adds for a sign-in opens the
+// port that sign-in needs and nothing else: an identity provider's consent page and a payment page on TCP 443,
+// an email service on the ports a mail app reads with. An operator's own rule keeps its stated meaning: the
+// ports it names, or every port when it names none.
+var (
+	gardenBaselineDNS = []string{"1.1.1.1", "8.8.8.8", "8.8.4.4"}
+	// mailReachPorts: HTTPS (webmail, every mail app's API), IMAPS (Apple Mail, most clients), Google's push
+	// channel (mtalk, 5228) and Apple's (APNs, 5223). No SMTP: reading a code sends nothing. No UDP: QUIC falls
+	// back to TCP, and a UDP path is one more thing a device that has not signed in does not need.
+	mailReachPorts = []int{443, 993, 5228, 5223}
+)
 
+// gardenRule is one operator rule as stored (walled_garden_rules). Ports empty = every port.
+type gardenRule struct {
+	Kind, Value string
+	Ports       []int
+}
+
+// gardenSources is everything the garden is built from, gathered by reconcileWalledGarden.
+type gardenSources struct {
+	Rules   []gardenRule
+	Payment []string // host names -> TCP 443
+	Social  []string // host names -> TCP 443
+	Mail    []string // host names -> TCP mailReachPorts
+}
+
+// planGarden turns the sources into the three sets' contents. resolve answers a host name with its IPv4
+// addresses (nil when it cannot). Pure, so the classification is tested without a kernel or a resolver.
+func planGarden(src gardenSources, resolve func(name string) []string) nft.GardenPlan {
+	ip, tcp, udp := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	pair := func(set map[string]bool, addr string, port int) {
+		if e := nft.GardenPortElem(addr, port); e != "" {
+			set[e] = true
+		}
+	}
+	for _, b := range gardenBaselineDNS {
+		pair(tcp, b, 53)
+		pair(udp, b, 53)
+	}
+	addrsOf := func(r gardenRule) []string {
+		switch r.Kind {
+		case "ip", "cidr":
+			if nft.ValidGardenElem(r.Value) {
+				return []string{r.Value}
+			}
+			slog.Warn("walled-garden: skipping invalid element", "kind", r.Kind, "value", r.Value)
+		case "domain":
+			return resolve(r.Value)
+		}
+		return nil
+	}
+	for _, r := range src.Rules {
+		for _, a := range addrsOf(r) {
+			if len(r.Ports) == 0 {
+				if nft.ValidGardenElem(a) {
+					ip[a] = true
+				}
+				continue
+			}
+			for _, p := range r.Ports {
+				pair(tcp, a, p)
+				pair(udp, a, p)
+			}
+		}
+	}
+	for _, d := range append(append([]string{}, src.Payment...), src.Social...) {
+		for _, a := range resolve(d) {
+			pair(tcp, a, 443)
+		}
+	}
+	for _, d := range src.Mail {
+		for _, a := range resolve(d) {
+			for _, p := range mailReachPorts {
+				pair(tcp, a, p)
+			}
+		}
+	}
+	keys := func(m map[string]bool) []string {
+		out := make([]string, 0, len(m))
+		for k := range m {
+			out = append(out, k)
+		}
+		sort.Strings(out)
+		return out
+	}
+	return nft.GardenPlan{IP: keys(ip), TCP: keys(tcp), UDP: keys(udp)}
+}
+
+// reconcileWalledGarden loads the operator rules and the sign-in-derived host names, resolves names through
+// the guest resolver, and syncs the three garden sets in one transaction. It returns the element count.
 func (s *server) reconcileWalledGarden(ctx context.Context) (int, error) {
 	rows, err := s.db.Query(ctx, `
-        SELECT kind, value FROM walled_garden_rules
+        SELECT kind, value, COALESCE(ports, '{}') FROM walled_garden_rules
          WHERE tenant_id = $1 AND (site_id IS NULL OR site_id::text = $2)
     `, s.tenID, s.siteID)
 	if err != nil {
 		return 0, err
 	}
 	defer rows.Close()
-
-	want := map[string]bool{}
-	for _, b := range gardenBaseline {
-		want[b] = true
-	}
-	type domain struct{ name string }
-	var domains []domain
+	var src gardenSources
 	for rows.Next() {
-		var kind, value string
-		if err := rows.Scan(&kind, &value); err != nil {
+		var r gardenRule
+		if err := rows.Scan(&r.Kind, &r.Value, &r.Ports); err != nil {
 			return 0, err
 		}
-		switch kind {
-		case "ip", "cidr":
-			if nft.ValidGardenElem(value) {
-				want[value] = true
-			} else {
-				slog.Warn("walled-garden: skipping invalid element", "kind", kind, "value", value)
-			}
-		case "domain":
-			domains = append(domains, domain{value})
-		}
+		src.Rules = append(src.Rules, r)
 	}
-	// Resolve domains (best effort, short timeout each). DNS answers churn;
-	// re-resolution every reconcile pass keeps the set fresh enough for
-	// login/payment endpoints, which is the walled garden's purpose.
 	// Card payment's hosted-page domains (least privilege: only while card payment is licensed, enabled and
 	// deployed, only the providers in use, plus the site's bounded extra list).
-	for _, d := range s.paymentGardenDomains(ctx) {
-		domains = append(domains, domain{d})
-	}
-	resolver := &net.Resolver{}
-	for _, d := range domains {
+	src.Payment = s.paymentGardenDomains(ctx)
+	// The identity providers' consent pages (contract §8): only providers that are deployed, licensed and
+	// switched on, with an enabled application. The token exchange is server-side and needs none of these.
+	src.Social = s.socialGardenDomains(ctx)
+	// The email services a device may read its one-time code from (internal/mailreach): only while the Email
+	// code method is on, only the presets and host names the site chose.
+	src.Mail = s.mailGardenDomains(ctx)
+
+	// Resolve names (best effort, short timeout each, once per name per pass). DNS answers churn; re-resolution
+	// every reconcile pass keeps the sets fresh enough for login/payment endpoints, which is the garden's purpose.
+	resolver := gardenResolver()
+	cache := map[string][]string{}
+	resolve := func(name string) []string {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if v, ok := cache[name]; ok {
+			return v
+		}
 		rctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		ips, err := resolver.LookupIP(rctx, "ip4", d.name)
+		ips, err := resolver.LookupIP(rctx, "ip4", name)
 		cancel()
+		var out []string
 		if err != nil {
-			slog.Warn("walled-garden: domain resolve failed", "domain", d.name, "err", err)
-			continue
+			slog.Warn("walled-garden: domain resolve failed", "domain", name, "err", err)
 		}
 		for _, ip := range ips {
-			want[ip.String()] = true
+			if v4 := ip.To4(); v4 != nil {
+				out = append(out, v4.String())
+			}
 		}
+		cache[name] = out
+		return out
 	}
-	elems := make([]string, 0, len(want))
-	for e := range want {
-		elems = append(elems, e)
-	}
-	sort.Strings(elems)
-	if err := s.nft.client.GardenSync(ctx, elems); err != nil {
+	plan := planGarden(src, resolve)
+	if err := s.nft.client.GardenSync(ctx, plan); err != nil {
 		return 0, err
 	}
-	return len(elems), nil
+	return len(plan.IP) + len(plan.TCP) + len(plan.UDP), nil
+}
+
+// socialGardenDomains lists the pre-auth host names of every social provider the site currently offers.
+func (s *server) socialGardenDomains(ctx context.Context) []string {
+	if s.db == nil {
+		return nil
+	}
+	snap := s.moduleSnapshot(ctx)
+	st := snap.Modules[lic.ModuleSocialLogin]
+	if !(st.Deployed && st.Licensed && st.Enabled) {
+		return nil
+	}
+	cfg, err := tenantcfg.Load(ctx, s.db, s.tenID)
+	if err != nil || cfg == nil {
+		return nil
+	}
+	rows, err := s.db.Query(ctx, `SELECT DISTINCT provider FROM social_oauth_providers WHERE tenant_id=$1 AND enabled`, s.tenID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	seen := map[string]bool{}
+	var out []string
+	for rows.Next() {
+		var p string
+		if rows.Scan(&p) != nil {
+			continue
+		}
+		if m := cfg.Social[p]; m == nil || !m.Enabled {
+			continue
+		}
+		for _, d := range social.PreAuthDomains(p) {
+			if !seen[d] {
+				seen[d] = true
+				out = append(out, d)
+			}
+		}
+	}
+	return out
+}
+
+// mailGardenDomains lists the email services' host names the site chose (Sign-in methods → "Reading the
+// code"), only while the Email code method is switched on. A device that cannot reach its mail service cannot
+// read the code it was sent; a device that can reach nothing else is still captive.
+func (s *server) mailGardenDomains(ctx context.Context) []string {
+	if s.db == nil {
+		return nil
+	}
+	var cfg *tenantcfg.AuthMethods
+	var err error
+	if s.methodSwitches != nil {
+		cfg, err = s.methodSwitches(ctx)
+	} else {
+		cfg, err = tenantcfg.Load(ctx, s.db, s.tenID)
+	}
+	if err != nil || cfg == nil || cfg.Email == nil || !cfg.Email.Enabled || cfg.Portal == nil {
+		return nil
+	}
+	// NOT WHILE TEMPORARY INTERNET IS ON (contract §6.6, §10.1). A mail service's addresses also serve the
+	// provider's other services (measured: mail.google.com's address answers for YouTube, Search, Drive), and the
+	// garden opens them to EVERY device that has not signed in. The temporary window gives the one device that
+	// asked for a code what it needs, so while it is on the site-wide mail allowlist is not applied at all.
+	if cfg.Email.TemporaryAccess.Effective().Enabled {
+		return nil
+	}
+	return mailreach.Domains(cfg.Portal.MailProviders, cfg.Portal.MailDomains)
+}
+
+// gardenResolver resolves garden host names THROUGH THE GUEST RESOLVER (unbound on the appliance, which is the
+// nameserver every client device is handed by DHCP), so the addresses opened are the ones the clients were
+// told -- answers cached by unbound are served to scd and to the phone alike. The appliance's own
+// systemd-resolved can answer differently for a service behind a large CDN, which left a client holding an
+// address the garden had never opened. SCD_GARDEN_RESOLVER overrides the address; "system" uses the host's.
+func gardenResolver() *net.Resolver {
+	addr := strings.TrimSpace(os.Getenv("SCD_GARDEN_RESOLVER"))
+	if addr == "" {
+		addr = "127.0.0.1:53"
+	}
+	if addr == "system" {
+		return &net.Resolver{}
+	}
+	return &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			d := net.Dialer{Timeout: 2 * time.Second}
+			return d.DialContext(ctx, network, addr)
+		},
+	}
 }
 
 func (s *server) gardenReconcileLoop(ctx context.Context) {

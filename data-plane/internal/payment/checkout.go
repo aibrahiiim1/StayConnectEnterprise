@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -245,6 +246,9 @@ RETURNING id::text, amount_minor, currency, currency_exponent`,
 		return out, nil
 	case errors.Is(cerr, ErrCheckoutNotCreated):
 		// PROVABLY nothing exists at the provider: no money can move. The outcome authority records FAILED.
+		// The adapter's message names the provider's refusal by type and code only (never a credential or a
+		// card detail), and it is the one thing an operator needs to fix the configuration.
+		slog.Warn("card checkout not created by the provider", "provider", acct.Provider, "currency", strings.TrimSpace(currency), "reason", cerr.Error())
 		e.Health.Record(acct.ID, false)
 		_, _ = e.Runtime.Exec(ctx, `UPDATE iam_v2.payment_checkouts SET creation_outcome='NOT_CREATED' WHERE transaction_id=$1`, out.TransactionID)
 		_ = e.applyOutcome(ctx, ref, "create:"+ref, "CHECKOUT_NOT_CREATED", "FAILED", "", "checkout_not_created")
@@ -381,6 +385,7 @@ func (e *CheckoutEngine) queryAndApply(ctx context.Context, t txnRow) error {
 			return err
 		}
 		_, gerr := e.grant(ctx, t.tenant, t.site, t.settlement)
+		e.recordSettlementReport(ctx, t, res.Settlement)
 		e.recordReversals(ctx, t, res.Events)
 		return gerr
 	case CheckoutDeclined, CheckoutExpired:
@@ -449,13 +454,51 @@ func (e *CheckoutEngine) grant(ctx context.Context, tenantID, siteID, settlement
 	return eid, nil
 }
 
-// recordReversals records provider-originated refunds and chargebacks on a captured charge. OneGate never
-// initiates one; it records what the provider reports so the ledger is true.
+// recordSettlementReport records, once, what the provider says it settled the captured charge as (contract §9,
+// migration 0112): presentment as quoted, and the provider's settlement currency, gross, rate, fee, net and
+// balance reference exactly as reported. Never computed here: no rate, no FX.
+func (e *CheckoutEngine) recordSettlementReport(ctx context.Context, t txnRow, r *SettlementReport) {
+	// Nothing reported yet: record nothing (the table is append-only, so a NOT_REPORTED row would stand in the
+	// way of the real report). For a card charge Stripe books the balance transaction at capture.
+	if e.Outcome == nil || r == nil || r.Currency == "" {
+		return
+	}
+	var cur, rate, ref *string
+	var amount, fee, net *int64
+	if r != nil && r.Currency != "" {
+		c, rt, rf, a, f, n := strings.ToUpper(r.Currency), r.ExchangeRate, r.BalanceRef, r.AmountMinor, r.FeeMinor, r.NetMinor
+		cur, rate, ref, amount, fee, net = &c, &rt, &rf, &a, &f, &n
+	}
+	var status string
+	if err := e.Outcome.QueryRow(ctx, `SELECT iam_v2.p4_record_settlement_report($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		t.tenant, t.site, t.id, cur, amount, rate, fee, net, ref).Scan(&status); err != nil {
+		// A missing report never blocks the grant; the charge and its money are already recorded.
+		slog.Warn("card settlement report not recorded", "err", err)
+	}
+}
+
+// recordReversals records provider-originated refunds and chargebacks on a captured charge, opens a review case
+// for a dispute, and then applies the refund policy to the charge (migration 0115): a confirmed FULL refund ends
+// only the access that charge paid for; a partial refund changes nothing; a chargeback or dispute never ends
+// access by itself -- it is a case an operator resolves. OneGate never initiates a reversal and never retries
+// money; it records what the provider reports so the ledger is true.
 func (e *CheckoutEngine) recordReversals(ctx context.Context, t txnRow, events []ProviderEvent) {
+	touched := false
 	for _, ev := range events {
+		if ev.Kind == "DISPUTE" && ev.ProviderRef != "" {
+			var r string
+			if err := e.Outcome.QueryRow(ctx, `SELECT iam_v2.p4_open_dispute_review($1,$2,$3,$4)`,
+				t.tenant, t.site, t.id, ev.ProviderRef).Scan(&r); err != nil {
+				slog.Warn("card dispute review not opened", "err", err)
+			} else if r == "OPENED" {
+				slog.Info("card dispute opened for review")
+			}
+			continue
+		}
 		if ev.Kind != "REFUND" && ev.Kind != "CHARGEBACK" || ev.EventID == "" || ev.AmountMinor <= 0 {
 			continue
 		}
+		touched = true
 		amount := ev.AmountMinor
 		if ev.Cumulative {
 			var recorded int64
@@ -469,6 +512,20 @@ func (e *CheckoutEngine) recordReversals(ctx context.Context, t txnRow, events [
 		var r string
 		_ = e.Outcome.QueryRow(ctx, `SELECT iam_v2.p4_record_provider_reversal($1,$2,$3,$4,$5,$6,$7)`,
 			t.tenant, t.site, t.id, ev.Kind, amount, ev.EventID, nullIfEmpty(ev.ProviderRef)).Scan(&r)
+	}
+	if !touched {
+		return
+	}
+	var outcome string
+	if err := e.Outcome.QueryRow(ctx, `SELECT iam_v2.p4_apply_refund_policy($1,$2,$3)`, t.tenant, t.site, t.id).Scan(&outcome); err != nil {
+		slog.Warn("card refund policy not applied", "err", err)
+		return
+	}
+	switch outcome {
+	case "ACCESS_ENDED":
+		slog.Info("card fully refunded: the access it paid for was ended")
+	case "CHARGEBACK_REVIEW":
+		slog.Info("card chargeback: opened for review, access unchanged")
 	}
 }
 

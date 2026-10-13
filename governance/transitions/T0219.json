@@ -1,0 +1,73 @@
+{
+  "transition_id": "T0219",
+  "seq": 219,
+  "timestamp": "2026-10-12T09:09:00+03:00",
+  "timestamp_derivation": "Written after the FULL CHECK preflight of 2026-10-12 found the defects below, and before the commit that introduces it.",
+  "record_type": "CLIENT_ACCESS_FULL_CHECK_PREPARATION",
+  "authorisation": "The same 'PR #211 Final Closure Mission' of 2026-10-12 (T0218), which asks for FULL CHECK and for any failure to be resolved without weakening validation.",
+  "delivery": {
+    "pull_request": 211,
+    "branch": "delivery/client-access-identity",
+    "content_head": "ca344d03141fb2ed278b1696687310f4a8547136",
+    "pr_state": "OPEN. NOT MERGED. po-merge-approved NOT applied."
+  },
+  "what_was_found": [
+    "The local FULL CHECK preflight (tools/preflight.sh) refused five things before any gate was dispatched.",
+    "Three receipts of this PR (T0215, T0216, T0217) carry hand-typed times later than the commits that introduced them.",
+    "The disposable platform fixture (iam_v2_scratch/00_platform_fixture.sql) defined neither public.auth_otps nor public.notification_providers, which integration suites read.",
+    "The PR body no longer stated Phase 7's recorded status with its decision (D48).",
+    "One test file was not gofmt-clean."
+  ],
+  "delivered": [
+    "Forward corrections of the three late receipts, measured from the repository (timestamp_corrections); the receipts are left exactly as written and the rule is not relaxed.",
+    "Both tables added to the fixture as the production baseline declares them.",
+    "The PR body states Phase 7 ACCEPTED_AND_CLOSED under D48.",
+    "gofmt applied."
+  ],
+  "timestamp_corrections": [
+    {
+      "transition_id": "T0215",
+      "recorded_timestamp": "2026-10-11T20:40:00+03:00",
+      "introducing_commit": "004b92bd6b98b08abacb6d40a9cae95bcbf4d97c",
+      "introducing_commit_time": "2026-10-11T20:31:42+03:00",
+      "late_by_seconds": 498,
+      "what_is_true": "The transition T0215 records happened no later than 2026-10-11T20:31:42+03:00, when the commit that introduced its receipt was made; the receipt's hand-typed time is 498s too late (a Cairo time computed by hand on a workstation without timezone data). The receipt is left exactly as written."
+    },
+    {
+      "transition_id": "T0216",
+      "recorded_timestamp": "2026-10-12T00:20:00+03:00",
+      "introducing_commit": "4998ef4278ac716f369167661d1030d05af6fd9e",
+      "introducing_commit_time": "2026-10-11T23:11:27+03:00",
+      "late_by_seconds": 4113,
+      "what_is_true": "The transition T0216 records happened no later than 2026-10-11T23:11:27+03:00, when the commit that introduced its receipt was made; the receipt's hand-typed time is 4113s too late (a Cairo time computed by hand on a workstation without timezone data). The receipt is left exactly as written."
+    },
+    {
+      "transition_id": "T0217",
+      "recorded_timestamp": "2026-10-12T00:44:00+03:00",
+      "introducing_commit": "fc88bb0c4ebc2665893c1aacabdf233cc138cb45",
+      "introducing_commit_time": "2026-10-12T00:42:58+03:00",
+      "late_by_seconds": 62,
+      "what_is_true": "The transition T0217 records happened no later than 2026-10-12T00:42:58+03:00, when the commit that introduced its receipt was made; the receipt's hand-typed time is 62s too late (a Cairo time computed by hand on a workstation without timezone data). The receipt is left exactly as written."
+    }
+  ],
+  "deployment_provenance": "Unchanged from T0218: no runtime file changed (a test fixture and a test file only).",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0218."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; nothing merged, no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Nothing is merged. Go-Live remains unauthorised.",
+  "head": "ca344d03",
+  "head_note": "The last CONTENT commit of PR #211 at the time of this receipt; governance commits follow it.",
+  "previous_delivery": "T0218",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

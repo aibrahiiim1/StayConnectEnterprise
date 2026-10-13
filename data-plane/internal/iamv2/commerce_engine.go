@@ -102,7 +102,10 @@ type CommerceTx interface {
 	// Empty is the normal answer. A read failure is an error, never an empty slice: silently losing the lineage
 	// would silently narrow eligibility, which is the defect this closes.
 	GuestNetworkAncestors(ctx context.Context, tenantID, siteID, guestNetworkID string) ([]string, error)
-	HasPriorPurchase(ctx context.Context, tenantID, siteID, packageRevisionID string, subj CommerceSubject) (bool, error)
+	// HasPriorPurchase answers whether the subject (and, when the policy says so, the device) already acquired
+	// the PACKAGE -- any revision of it -- within the policy window. Keyed on the package so a republish never
+	// resets a free allowance (contract §5).
+	HasPriorPurchase(ctx context.Context, tenantID, siteID string, q PriorPurchaseQuery) (bool, error)
 	InsertOfferQuote(ctx context.Context, q OfferQuoteSpec) (string, error)
 
 	// --- ConfirmFreePurchase (deterministic lock order) ---
@@ -165,6 +168,15 @@ type AuthContextRow struct {
 	ExpiresAt      time.Time
 	Consumed       bool
 	StayID         string // non-empty only for PMS (unused in Phase 2)
+	// ClientGroupID is the effective Client Group pinned at sign-in ("" = Public).
+	ClientGroupID string
+}
+
+// PriorPurchaseQuery is one history question: did this subject (or this device) get this package before?
+type PriorPurchaseQuery struct {
+	PackageID string
+	Subject   CommerceSubject
+	Policy    PriorPurchasePolicy
 }
 
 // PackageRevisionRow is the resolved active/published immutable package revision.

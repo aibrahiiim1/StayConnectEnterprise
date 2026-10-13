@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
 import { ManualReviewView } from "@/components/phase4/manual-review-view";
+import { CardCasesCard } from "@/components/phase4/card-cases";
 
 export default function FinancialReviewPage() {
   const [roles, setRoles] = useState<string[] | null>(null);
@@ -16,5 +17,13 @@ export default function FinancialReviewPage() {
       .then((m) => setRoles(m.roles ?? []))
       .catch(() => setRoles([]));
   }, []);
-  return <ManualReviewView canAct={roles === null ? false : canWrite("financial-review", roles)} />;
+  const canAct = roles === null ? false : canWrite("financial-review", roles);
+  return (
+    <>
+      <ManualReviewView canAct={canAct} />
+      <div className="mx-auto w-full max-w-7xl px-4 pb-8 sm:px-6">
+        <CardCasesCard canAct={canAct} />
+      </div>
+    </>
+  );
 }

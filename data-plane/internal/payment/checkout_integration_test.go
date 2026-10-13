@@ -28,6 +28,7 @@ type scriptedHosted struct {
 	creates   int
 	queries   int
 	lastRef   string
+	last      CheckoutRequest // the last checkout asked for: presentment currency and amount
 }
 
 func (p *scriptedHosted) Name() string { return "stripe" }
@@ -36,6 +37,7 @@ func (p *scriptedHosted) CreateCheckout(_ context.Context, r CheckoutRequest) (C
 	defer p.mu.Unlock()
 	p.creates++
 	p.lastRef = r.ClientRef
+	p.last = r
 	if p.createErr != nil {
 		return Checkout{}, p.createErr
 	}

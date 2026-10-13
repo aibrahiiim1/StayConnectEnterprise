@@ -43,6 +43,8 @@ type Matrix = Record<string, Record<string, Perm>>;
 // 403s on click.
 const MATRIX: Matrix = {
   hotel_it_manager: {
+    // Code requests (contract §6.7): list and let a device try again; code-reveal reads a live code.
+    "code-requests": "write", "code-reveal": "write",
     // Guest sign-in attempts. Two keys, mirroring edged exactly: the list, and the credential comparison.
     // "View_Guest_SignIn_Attempts" and "View_Guest_SignIn_Credentials" are the same two permissions under
     // the names the Product Owner uses.
@@ -72,13 +74,15 @@ const MATRIX: Matrix = {
     "guest-accounts": "write",
     sessions: "write",
     usage: "read",
-    "auth-methods": "write", "walled-garden": "write",
+    "auth-methods": "write", "walled-garden": "write", "client-groups": "write",
     "portal-branding": "write", "notification-providers": "write",
     "social-providers": "write",
     // Card payment provider accounts (site-local; credentials write-only). Modules and a PMS interface's
     // financial onboarding are READ here: switching a module and approving room charge are site_admin only.
     "payment-providers": "write", modules: "read", "pms-financial-onboarding": "read",
     network: "write",
+    // Portal HTTPS (portal_https.read / portal_https.manage): follows network; changes also need the password.
+    "portal-https": "write",
     "financial-review": "read", "financial-ops": "read",
     // Vouchers: prints and cancels cards, and CHOOSES THE FORMAT -- which is a property configuration
     // decision, the same reasoning that puts auth-methods here. Not "voucher-codes": this role owns
@@ -90,6 +94,8 @@ const MATRIX: Matrix = {
     reports: "read", backups: "read", license: "read", diagnostics: "write",
   },
   front_office_operator: {
+    // Code requests (contract §6.7): list and let a device try again; code-reveal reads a live code.
+    "code-requests": "write", "code-reveal": "write",
     // The reception desk: the role this screen was asked for, and the one that needs the comparison.
     "guest-signin-attempts": "read", "guest-signin-credentials": "read",
     // The desk RELEASES and does not re-tune: the restricted guest is standing there now, but making
@@ -109,9 +115,11 @@ const MATRIX: Matrix = {
     "guest-accounts": "write", sessions: "write", usage: "read",
     vouchers: "write", "voucher-codes": "write", "voucher-code-settings": "read",
     "account-password-settings": "read",
-    "auth-methods": "read", "walled-garden": "read", reports: "read", audit: "read", license: "read", backups: "read", diagnostics: "read",
+    "auth-methods": "read", "walled-garden": "read", "client-groups": "read", reports: "read", audit: "read", license: "read", backups: "read", diagnostics: "read",
   },
   guest_relations_operator: {
+    // Code requests (contract §6.7): list and let a device try again; code-reveal reads a live code.
+    "code-requests": "write",
     "guest-signin-attempts": "read", "guest-signin-credentials": "read",
     "guest-signin-restrictions": "write", "guest-signin-protection": "read",
     "guest-device-self-service": "read",
@@ -124,7 +132,7 @@ const MATRIX: Matrix = {
     vouchers: "write", "voucher-codes": "write", "voucher-code-settings": "read",
     "account-password-settings": "read",
     "auth-methods": "read", reports: "read",
-    audit: "read", license: "read", backups: "read", "walled-garden": "read", diagnostics: "read",
+    audit: "read", license: "read", backups: "read", "walled-garden": "read", "client-groups": "read", diagnostics: "read",
   },
   voucher_operator: {
     // THE DRIFT THIS FILE CARRIED: `usage: "read"` was here and is not in edged's matrix, so the sidebar
@@ -146,6 +154,8 @@ const MATRIX: Matrix = {
     vouchers: "read",
   },
   site_viewer: {
+    // Code requests (contract §6.7): list and let a device try again; code-reveal reads a live code.
+    "code-requests": "read",
     // The list only. A read-only observer has no reason to hold thirty days of what guests typed, so the
     // credentials key is absent here rather than merely unused — and edged enforces that, not this file.
     "guest-signin-attempts": "read",
@@ -160,9 +170,9 @@ const MATRIX: Matrix = {
     "post-stay-profiles": "read", "stay-transfers": "read",
     "financial-review": "read", "financial-ops": "read",
     "guest-accounts": "read", sessions: "read", usage: "read", "auth-methods": "read",
-    "walled-garden": "read", "portal-branding": "read", "notification-providers": "read", "social-providers": "read",
+    "walled-garden": "read", "client-groups": "read", "portal-branding": "read", "notification-providers": "read", "social-providers": "read",
     "payment-providers": "read", modules: "read", audit: "read", reports: "read",
-    backups: "read", license: "read", network: "read", diagnostics: "read",
+    backups: "read", license: "read", network: "read", diagnostics: "read", "portal-https": "read",
     // Sees which cards exist and in what state; reads no code, for the same reason
     // guest-signin-credentials is absent from this role.
     vouchers: "read", "voucher-code-settings": "read", "account-password-settings": "read",

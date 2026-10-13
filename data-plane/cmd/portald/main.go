@@ -29,11 +29,12 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
 )
 
+// The HTTPS listener's certificates are no longer configured here: scd installs one per portal hostname under
+// /etc/stayconnect/portal-tls and portald serves them by SNI (portal_https.go). PORTALD_CERT / PORTALD_KEY are
+// therefore gone -- a static certificate for a fixed name cannot follow a hostname Central assigns.
 type cfg struct {
 	HTTPAddr   string
 	HTTPSAddr  string
-	CertFile   string
-	KeyFile    string
 	ScdSocket  string
 	PortalFQDN string
 }
@@ -42,8 +43,6 @@ func loadCfg() cfg {
 	return cfg{
 		HTTPAddr:   envOr("PORTALD_HTTP_ADDR", ":8380"),
 		HTTPSAddr:  envOr("PORTALD_HTTPS_ADDR", ":8343"),
-		CertFile:   envOr("PORTALD_CERT", "/etc/stayconnect/tls/portal.crt"),
-		KeyFile:    envOr("PORTALD_KEY", "/etc/stayconnect/tls/portal.key"),
 		ScdSocket:  envOr("PORTALD_SCD_SOCKET", "/run/stayconnect/scd.sock"),
 		PortalFQDN: envOr("PORTALD_FQDN", "portal.stayconnect.local"),
 	}
@@ -62,6 +61,9 @@ type handler struct {
 	tmplLand *template.Template
 	tmplSucc *template.Template
 	arpCache arpLookup
+	// pendingOTP holds each device's in-flight one-time code so the landing page can reopen on the code box
+	// after the captive browser was dismissed (otp_pending.go).
+	pendingOTP *pendingOTPStore
 	// arpNudge asks the kernel to resolve a neighbour the cache does not have yet (arp_resolve.go). A seam, so
 	// a test can drive resolution without a network.
 	arpNudge arpNudge
@@ -82,6 +84,10 @@ type handler struct {
 	// clock drives the Phase-3 guest response-time budget (pms_phase3_budget.go). Nil means the real clock;
 	// only tests set it, so they can assert the budget arithmetic instead of measuring a loaded CI runner.
 	clock phase3Clock
+
+	// portalTLS is portald's copy of scd's portal HTTPS state (portal_https.go), refreshed every 15 seconds. Nil
+	// (the tests' literal handlers) means the HTTP fallback: the portal exactly as it was before HTTPS existed.
+	portalTLS *tlsStateHolder
 }
 
 func newHandler(c cfg) (*handler, error) {
@@ -110,9 +116,11 @@ func newHandler(c cfg) (*handler, error) {
 		tmplLand:    tland,
 		tmplSucc:    tsucc,
 		arpCache:    defaultArp,
+		pendingOTP:  newPendingOTPStore(),
 		arpNudge:    defaultArpNudge,
 		commerceCfg: commCfg,
 		designs:     &designCache{},
+		portalTLS:   &tlsStateHolder{},
 	}
 	// THE STORE EXISTS ONLY WHERE THERE IS SOMEWHERE FOR IT TO LEAD.
 	//
@@ -206,10 +214,25 @@ func (h *handler) landing(w http.ResponseWriter, r *http.Request, errMsg string)
 	if !ok || d == nil {
 		d = map[string]any{}
 	}
-	_ = h.tmplLand.Execute(w, newLandingView(r, d, nonce, errMsg, ipStr, macStr))
+	v := newLandingView(r, d, nonce, errMsg, ipStr, macStr)
+	// The greeting is offered only on a plain visit: a refusal being rendered (errMsg) is answered as itself.
+	if errMsg == "" && r.Method == http.MethodGet {
+		v.Welcome = h.welcomeFor(r, macStr)
+	}
+	_ = h.tmplLand.Execute(w, v)
 }
 
 func (h *handler) index(w http.ResponseWriter, r *http.Request) {
+	// A CLIENT WHO HAS SIGNED IN AND NOT YET CHOSEN IS STILL CHOOSING. While their commerce session is valid
+	// (10 minutes from sign-in) a reload of the landing page -- a refused card payment, a tab reopened, the
+	// captive browser popped again -- continues at package selection instead of asking for another code.
+	// Captive-portal probes carry no cookie and are unaffected.
+	if r.Method == http.MethodGet {
+		if sess, ok := h.resolveCommerceSession(r); ok && !sess.acquired {
+			http.Redirect(w, r, "/packages", http.StatusSeeOther)
+			return
+		}
+	}
 	h.landing(w, r, "")
 }
 
@@ -397,6 +420,16 @@ func (h *handler) logout(w http.ResponseWriter, r *http.Request) {
 	req, _ := http.NewRequestWithContext(r.Context(), "POST", "http://unix/v1/sessions/revoke", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	_, _ = h.scd.Do(req)
+	// Signing out also forgets the device (contract §2.3): the next visit asks for a code again.
+	if token := h.resumeToken(r); token != "" {
+		rb, _ := json.Marshal(map[string]string{"resume_token": token})
+		rq, _ := http.NewRequestWithContext(r.Context(), "POST", "http://unix/v1/sessions/resume-revoke", bytes.NewReader(rb))
+		rq.Header.Set("Content-Type", "application/json")
+		if resp, err := h.scd.Do(rq); err == nil {
+			resp.Body.Close()
+		}
+		clearClientResumeCookie(w)
+	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
@@ -480,6 +513,10 @@ func (h *handler) routes() http.Handler {
 	//
 	// If a real reverse proxy is ever introduced, the fix is not to re-add this line: it is to trust exactly
 	// that proxy's address and strip client-supplied forwarding headers at the edge.
+	// QUERY STRINGS ARE NEVER LOGGED. The email's tap-to-connect link carries the one-time code in its query
+	// (/connect?c=&k=), and the request log is the journal: the logged line keeps the path and drops the query.
+	// Handlers read r.URL, which is untouched.
+	r.Use(redactLoggedQuery)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(15 * time.Second))
@@ -489,7 +526,15 @@ func (h *handler) routes() http.Handler {
 	r.Get("/", h.index)
 	r.Post("/auth/voucher", h.authVoucher)
 	r.Post("/auth/credentials", h.authCredentials)
+	// The remembered device: Connect, and Not-you (client_resume.go).
+	r.Post("/auth/resume", h.authResume)
+	r.Post("/auth/resume/forget", h.authResumeForget)
 	r.Post("/auth/otp/request", h.authOTPRequest)
+	// The pending code survives the captive browser (otp_pending.go): resend, forget, and the email's link.
+	r.Post("/auth/otp/resend", h.authOTPResend)
+	r.Post("/auth/otp/forget", h.authOTPForget)
+	r.Get("/connect", h.connectPage)
+	r.Post("/auth/otp/link", h.authOTPLink)
 	r.Post("/auth/otp/verify", h.authOTPVerify)
 	r.Get("/auth/social/start", h.socialStart)
 	r.Get("/auth/social/callback", h.socialCallback)
@@ -558,6 +603,8 @@ func (h *handler) routes() http.Handler {
 	r.Get("/gen_204", h.googleProbe)
 	r.Get("/connecttest.txt", h.windowsProbe)
 	r.Get("/ncsi.txt", h.windowsProbe)
+	// RFC 8908 captive portal API (portal_https.go). Answers over TLS only; over HTTP it is a 404.
+	r.Get("/captive-portal/api", h.captivePortalAPI)
 
 	// Any other path: show the portal.
 	r.NotFound(func(w http.ResponseWriter, req *http.Request) { h.index(w, req) })
@@ -583,8 +630,16 @@ func main() {
 
 	mux := h.routes()
 
-	httpSrv := &http.Server{Addr: c.HTTPAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
-	httpsSrv := &http.Server{Addr: c.HTTPSAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	// The portal's HTTPS state, from scd, at startup and every 15 seconds (portal_https.go).
+	go h.pollTLSState(rootCtx)
+
+	// HTTP: while HTTPS is active every portal page is sent to the canonical HTTPS origin; otherwise httpFront is
+	// transparent. TLS: certificates by SNI, the canonical-hostname rule, and the TLS security headers.
+	httpSrv := &http.Server{Addr: c.HTTPAddr, Handler: h.httpFront(mux), ReadHeaderTimeout: 5 * time.Second}
+	httpsSrv := &http.Server{
+		Addr: c.HTTPSAddr, Handler: h.tlsFront(mux), ReadHeaderTimeout: 5 * time.Second,
+		TLSConfig: portalTLSConfig(newPortalCertServer(h.tlsState)), ErrorLog: httpsErrorLog(),
+	}
 
 	go func() {
 		slog.Info("portald HTTP", "addr", c.HTTPAddr)
@@ -593,12 +648,11 @@ func main() {
 		}
 	}()
 	go func() {
-		if _, err := os.Stat(c.CertFile); err != nil {
-			slog.Warn("portald HTTPS disabled — cert missing", "cert", c.CertFile)
-			return
-		}
+		// ALWAYS LISTENING. Until scd installs the first certificate every handshake fails, which is harmless:
+		// nothing sends a guest here before scd reports HTTPS active, and a certificate installed later is
+		// picked up by SNI on the next handshake without a restart.
 		slog.Info("portald HTTPS", "addr", c.HTTPSAddr)
-		if err := httpsSrv.ListenAndServeTLS(c.CertFile, c.KeyFile); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := httpsSrv.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("https serve", "err", err)
 		}
 	}()
@@ -620,4 +674,15 @@ func humanDuration(d time.Duration) string {
 		return fmt.Sprintf("%dh %dm", h, m)
 	}
 	return fmt.Sprintf("%dm", m)
+}
+
+// redactLoggedQuery strips the query from r.RequestURI -- the field the request logger prints -- so a code in a
+// link never reaches the journal. Routing and handlers use r.URL and are unaffected.
+func redactLoggedQuery(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if i := strings.IndexByte(r.RequestURI, '?'); i >= 0 {
+			r.RequestURI = r.RequestURI[:i] + "?[redacted]"
+		}
+		next.ServeHTTP(w, r)
+	})
 }

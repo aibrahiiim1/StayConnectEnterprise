@@ -270,7 +270,7 @@ func TestCreateRefusesBeforeSending(t *testing.T) {
 func sessRef(exp time.Time) string { return fmt.Sprintf("pi_test_abc|98765|%d", exp.Unix()) }
 
 func txn(fields string) string {
-	return `{"id":424242,"amount_cents":25000,"currency":"EGP","order":{"id":98765,"merchant_order_id":"` + ref + `"},"data":{"txn_response_code":"DECLINED"},` + fields + `}`
+	return `{"id":424242,"amount_cents":25000,"currency":"EGP","order":{"id":98765,"merchant_order_id":"` + ref + `"},"data":{"txn_response_code":"DECLINED"},"source_data":{"type":"card","sub_type":"MasterCard"},` + fields + `}`
 }
 
 func statusServer(t *testing.T, code int, body string) (*fake, *httptest.Server) {
@@ -299,6 +299,8 @@ func TestStatusMapping(t *testing.T) {
 		reason string
 	}{
 		{"captured", open, 200, txn(`"success":true,"pending":false`), payment.CheckoutCaptured, ""},
+		{"paid by a wallet", open, 200, strings.Replace(txn(`"success":true,"pending":false`), `"type":"card"`, `"type":"wallet"`, 1), payment.CheckoutOpen, "payment_method_not_approved"},
+		{"paid by an unknown method", open, 200, strings.Replace(txn(`"success":true,"pending":false`), `"source_data":{"type":"card","sub_type":"MasterCard"},`, ``, 1), payment.CheckoutOpen, "payment_method_not_approved"},
 		{"pending", open, 200, txn(`"success":false,"pending":true`), payment.CheckoutOpen, "pending"},
 		{"declined while payable", open, 200, txn(`"success":false,"pending":false`), payment.CheckoutOpen, "declined_retryable"},
 		{"declined after expiry", past, 200, txn(`"success":false,"pending":false`), payment.CheckoutDeclined, "DECLINED"},

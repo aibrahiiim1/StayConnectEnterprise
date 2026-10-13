@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -37,6 +38,9 @@ func (s *server) tenantAuthMethods(w http.ResponseWriter, r *http.Request) {
 	// can deliver (provider readiness).
 	s.applyLicenseToMethods(cfg)
 	s.applyProviderReadiness(r.Context(), cfg)
+	// And a social provider is listed only while it can actually be started: HTTPS active and the canonical
+	// hostname registered in the hotel's app (social_secrets.go). Under the HTTP fallback the buttons go.
+	s.applySocialOffering(cfg)
 
 	// CAN THIS SITE GIVE A GUEST ANYTHING AT ALL?
 	//
@@ -110,11 +114,35 @@ type otpIssueReq struct {
 	Channel     string `json:"channel"`     // "email" | "sms" | "whatsapp"
 	Destination string `json:"destination"` // email address, or a phone number (normalised to E.164)
 	IP          string `json:"ip"`
+	// MAC is the requesting device's hardware address as portald resolved it from the kernel. The challenge is
+	// bound to it (migration 0110): the code, and the email's link that carries it, verify from this device only.
+	MAC string `json:"mac"`
+	// PortalBase is the origin the device reached the portal by, as portald saw it. STILL ACCEPTED, NEVER USED
+	// FOR THE LINK: it is the Host header of a guest's request, and a link in an email must not be built from
+	// something a guest typed. The link's origin is the canonical HTTPS hostname scd itself established
+	// (otpLinkBase). Kept so an older portald's request still decodes.
+	PortalBase string `json:"portal_base,omitempty"`
+}
+
+// otpLinkBase is the origin of the tap-to-connect link: https://<canonical hostname> while the portal is on
+// HTTPS, and "" -- no link, the code alone -- on the HTTP fallback (contract section 4). A link to the plain-HTTP
+// portal is deliberately not sent: it would teach clients to follow http:// links from a message, and social
+// sign-in and the browser's own trust indicators exist only on the HTTPS portal.
+func otpLinkBase(st PortalTLSState) string {
+	if !st.HTTPSActive || st.Canonical == "" {
+		return ""
+	}
+	return "https://" + st.Canonical
 }
 
 type otpIssueResp struct {
 	ChallengeID string `json:"challenge_id"`
 	TTLSeconds  int    `json:"ttl_seconds"`
+	// TemporaryAccess is the internet window this issue opened for the device (email only; absent when none
+	// was opened -- the setting is off, a limit was reached, or the device could not be placed).
+	TemporaryAccess *verifyAccessView `json:"temporary_access,omitempty"`
+	// TemporaryAccessWithheld says a limit kept the window closed, and when the device may ask again.
+	TemporaryAccessWithheld *verifyAccessWithheld `json:"temporary_access_withheld,omitempty"`
 }
 
 func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
@@ -192,6 +220,15 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusForbidden, channelLabel+" auth disabled for this tenant")
 		return
 	}
+	// A CODE IS ISSUED TO A DEVICE OR NOT AT ALL (migration 0110). The hardware address is the kernel's answer
+	// for the requesting connection, resolved by portald; without it the code could not be bound, and an unbound
+	// code would verify from any device -- so the issue is refused rather than made unbound.
+	devHW, merr := net.ParseMAC(strings.TrimSpace(req.MAC))
+	if merr != nil || net.ParseIP(req.IP) == nil {
+		httpErr(w, http.StatusBadRequest, "device identity required")
+		return
+	}
+	devMAC := devHW.String()
 	// A code is issued only when an enabled sender exists for the channel: it is never "sent" to nowhere.
 	if s.providerReadiness != nil || s.db != nil {
 		if channels, _, ok := s.readProviderReadiness(r.Context()); !ok || !channels[req.Channel] {
@@ -222,6 +259,7 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 		Destination: dest,
 		IP:          req.IP,
 		UserAgent:   r.UserAgent(),
+		DeviceMAC:   devMAC,
 	})
 	if err != nil {
 		switch {
@@ -240,42 +278,78 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 
 	sentBody = fmt.Sprintf("Your one-time code is: %s\n\nIt expires in %d minutes.",
 		issued.Code, int(otp.DefaultTTL.Minutes()))
+	// THE LINK THE CLIENT CAN TAP FROM THE MAIL APP. It opens the portal in the phone's real browser -- reachable
+	// before sign-in -- on a page with one Connect button; nothing is verified by merely opening it. The code in
+	// it is the same secret this email already carries, single-use and ten minutes long. Only while the portal is
+	// on HTTPS (contract section 4); on the approved HTTP fallback the message carries the code alone.
+	link := ""
+	if base := otpLinkBase(s.portalTLS.State()); base != "" {
+		link = fmt.Sprintf("%s/connect?c=%s&k=%s", base, url.QueryEscape(issued.ChallengeID), url.QueryEscape(issued.Code))
+	}
+	if link != "" && channelLabel == "email" {
+		sentBody += "\n\nOr tap to connect this device:\n" + link
+	}
 
+	// A FAILED SEND IS A FAILURE. The code used to be reported as sent while the delivery error went to the
+	// log alone, which left the client waiting for a message that was never coming. The sender's error is
+	// recorded on the provider row by the instrumented wrapper (the Delivery page shows it); the client is told
+	// the code could not be sent, with no detail that would say whether the address is known here.
+	mailer, smsSender, waSender := s.senders()
+	var sendErr error
 	switch channelLabel {
 	case "email":
-		if err := s.mail.Send(r.Context(), mail.Message{
+		sendErr = mailer.Send(r.Context(), mail.Message{
 			To:      dest,
 			Subject: "Your Wi-Fi access code",
 			Text:    sentBody,
-		}); err != nil {
-			slog.Warn("mail send", "err", err)
-		}
+		})
 	case "sms":
 		shortText := fmt.Sprintf("Wi-Fi code: %s (expires in %dm)", issued.Code, int(otp.DefaultTTL.Minutes()))
-		if err := s.sms.Send(r.Context(), sms.Message{
+		if link != "" {
+			shortText += " " + link
+		}
+		sendErr = smsSender.Send(r.Context(), sms.Message{
 			To:   dest,
 			Text: shortText,
-		}); err != nil {
-			slog.Warn("sms send", "err", err)
-		}
+		})
 	case "whatsapp":
 		// The code travels as a parameter of the provider-approved authentication template, never as text.
-		if s.whatsapp == nil {
-			slog.Warn("whatsapp send: no sender configured")
-		} else if err := s.whatsapp.Send(r.Context(), whatsapp.Message{
-			To:         dest,
-			Code:       issued.Code,
-			TTLMinutes: int(otp.DefaultTTL.Minutes()),
-		}); err != nil {
-			slog.Warn("whatsapp send", "err", err)
+		if waSender == nil {
+			sendErr = errors.New("no whatsapp sender configured")
+		} else {
+			sendErr = waSender.Send(r.Context(), whatsapp.Message{
+				To:         dest,
+				Code:       issued.Code,
+				TTLMinutes: int(otp.DefaultTTL.Minutes()),
+			})
 		}
+	}
+	if sendErr != nil {
+		slog.Warn("otp delivery failed", "channel", channelLabel, "err", sendErr)
+		s.met.OTPIssued.WithLabelValues(channelLabel + "_undelivered").Inc()
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "DELIVERY_FAILED"})
+		return
 	}
 
 	s.met.OTPIssued.WithLabelValues(channelLabel).Inc()
-	writeJSON(w, http.StatusOK, otpIssueResp{
+	// A sealed copy of the SENT code, readable only by an operator holding the code-reveal permission, for a
+	// client whose message does not arrive (contract §6.7). Gone when the code is used or expires.
+	s.escrowOTPCode(r.Context(), issued.ChallengeID, issued.Code, issued.ExpiresAt)
+	out := otpIssueResp{
 		ChallengeID: issued.ChallengeID,
 		TTLSeconds:  int(time.Until(issued.ExpiresAt).Seconds()),
-	})
+	}
+	// THE CODE IS ISSUED AND SENT: the device may now reach its mail (verify_access.go). Only for an email code,
+	// only after a successful send, and never a condition of the code itself -- a refused window leaves the
+	// code exactly as valid as it is.
+	if channelLabel == "email" {
+		if v, ok, why := s.grantVerifyAccessDetail(r.Context(), devMAC, net.ParseIP(req.IP), issued.ChallengeID, dest); ok {
+			out.TemporaryAccess = &v
+		} else if why != nil {
+			out.TemporaryAccessWithheld = why
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // ---- /v1/sessions/authorize-otp --------------------------------------------
@@ -312,10 +386,16 @@ func (s *server) authorizeOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v, err := otp.Verify(r.Context(), s.db, s.otpRing, req.ChallengeID, req.Code)
+	// FROM THIS DEVICE ONLY: the challenge was bound at issue to the MAC the kernel resolved for the device that
+	// asked (migration 0110). Another device presenting the code -- or the email's link -- is refused before
+	// the code is compared, and the refusal counts as no attempt.
+	v, err := otp.VerifyFrom(r.Context(), s.db, s.otpRing, req.ChallengeID, req.Code, mac.String())
 	if err != nil {
 		result := "internal"
 		switch {
+		case errors.Is(err, otp.ErrOtherDevice):
+			result = "other_device"
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "OTHER_DEVICE"})
 		case errors.Is(err, otp.ErrNotFound):
 			result = "not_found"
 			httpErr(w, http.StatusNotFound, "challenge not found")
@@ -340,6 +420,22 @@ func (s *server) authorizeOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.met.OTPVerify.WithLabelValues(v.Channel, "ok").Inc()
+	s.dropOTPEscrow(r.Context(), req.ChallengeID)
+	// STAFF-ASSISTED (0114, contract §6.7): the code was shown to the client by a staff member. The sign-in may
+	// create a new Client, marked staff_assisted, and never reaches an existing one. Fails closed: if the record
+	// cannot be read, the verification is treated as staff-assisted.
+	assisted := true
+	if s.db != nil {
+		var revealed bool
+		if err := s.db.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM iam_v2.otp_code_reveals WHERE challenge_id=$1::uuid)`,
+			req.ChallengeID).Scan(&revealed); err == nil {
+			assisted = revealed
+		}
+	}
+	credential := iamv2.CredentialForOTP(v.Channel)
+	if assisted {
+		credential = iamv2.AssistedCredential(credential)
+	}
 
 	// THE CHALLENGE IS VERIFIED; THE IDENTITY IS IAM-v2's.
 	//
@@ -353,9 +449,11 @@ func (s *server) authorizeOTP(w http.ResponseWriter, r *http.Request) {
 	// shaping are not properties of the credential in the current model -- they come from the package the
 	// guest selects in the commerce flow after authentication.
 	s.authorizeViaIAMv2(w, r, iamv2.MethodOTP, iamv2.Request{
-		FactorType:  otpFactorType(v.Channel),
-		FactorValue: v.Destination,
-		Device:      iamv2.DeviceContext{MAC: mac.String()},
+		FactorType:    otpFactorType(v.Channel),
+		FactorValue:   v.Destination,
+		Credential:    credential,
+		StaffAssisted: assisted,
+		Device:        iamv2.DeviceContext{MAC: mac.String()},
 	}, ip)
 }
 

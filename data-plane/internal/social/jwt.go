@@ -1,26 +1,31 @@
 package social
 
-// Minimal, dependency-free JWT support for the OIDC providers (Microsoft,
-// Apple): verify an RS256 id_token against the issuer's published JWKS, and
-// sign the ES256 client-secret JWT Apple demands in place of a static
-// secret.
+// Minimal, dependency-free JWT support for the OIDC providers (Google,
+// Microsoft, Apple): verify an RS256 id_token against the issuer's published
+// JWKS, and sign the ES256 client-secret JWT Apple demands in place of a
+// static secret.
 //
 // Why hand-rolled rather than a JWT library:
 //   - The data plane carries no JWT dependency today, and the surface we need
-//     is tiny: one algorithm to verify (RS256 — the only one Microsoft and
-//     Apple sign id_tokens with) and one to sign (ES256, Apple only).
+//     is tiny: one algorithm to verify (RS256 — the only one Google, Microsoft
+//     and Apple sign id_tokens with) and one to sign (ES256, Apple only).
 //   - A narrow verifier is easier to reason about than a general one. The
 //     classic JWT failures — alg=none, alg confusion (an HS256 token
 //     "verified" with the RSA public key as the HMAC secret), a missing kid
 //     falling through to "any key" — cannot happen here, because RS256 is the
 //     only accepted alg and the kid must name a key the issuer published.
 //
-// No nonce is sent or checked. OIDC requires a nonce for the implicit and
-// hybrid flows, where the id_token travels through the browser. Here it never
-// does: every id_token arrives on the server-to-server token response, over
-// TLS, in exchange for a single-use code plus our client credentials, and the
-// CSRF binding of the browser leg is the `state` row scd keeps (device IP/MAC,
-// expiry, single consumption).
+// THE NONCE IS SENT AND CHECKED (attempt.go). Every id_token here arrives on
+// the server-to-server token response, so the nonce is not what stops a
+// token being injected through the browser, as it is in the implicit and
+// hybrid flows. What it adds is a binding from the provider's ANSWER to the
+// one attempt scd started: `state` proves the browser came back to the device
+// that left, the PKCE verifier (Google, Microsoft) proves the code is redeemed
+// by the party that asked for it, and the nonce proves the id_token was
+// minted for this attempt and no other. The three are generated per attempt
+// and kept on the same single-use social_oauth_states row (device IP/MAC,
+// 10-minute expiry, consumed once). Facebook issues no id_token on this flow
+// and keeps `state` plus appsecret_proof.
 
 import (
 	"context"

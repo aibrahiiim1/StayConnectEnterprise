@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
@@ -73,6 +75,28 @@ type applier struct {
 	// memberFn answers which interface is enslaved to a bridge right now (default: /sys/class/net/<br>/brif). A
 	// seam so the "this bridge is attached to the wrong VLAN" refusal can be exercised without a kernel.
 	memberFn func(bridge string) string
+
+	// ---- the portal address and the portal's HTTPS state (portal.go) ----
+	//
+	// unboundPortalFrag is the SEPARATE resolver fragment for the portal's public names
+	// (/etc/unbound/unbound.conf.d/stayconnect-portal.conf). "" disables it.
+	unboundPortalFrag string
+	// portalMu guards portal, the intent and portal address IN FORCE plus the latest HTTPS state.
+	portalMu sync.Mutex
+	portal   portalInForce
+	// keaMu serialises every Kea config-set against the runtime refresh's read-compare-push.
+	keaMu sync.Mutex
+	// busy counts apply / rollback / boot reconcile in progress; the runtime refresh stands aside while > 0.
+	busy atomic.Int32
+	// Seams: the configured portal address, the HTTPS state, the host's addresses, the portal link's state,
+	// the Kea control socket, and the editable intent (for the validate endpoint). Defaults read the database,
+	// `ip -j -4 addr`, /sys/class/net and the real Kea socket.
+	portalIPFn   func(ctx context.Context) (string, error)
+	portalTLSFn  func(ctx context.Context) (netcfg.PortalTLS, error)
+	hostAddrsFn  func(ctx context.Context) ([]netcfg.HostAddr, error)
+	portalLinkFn func(name string) (exists, up bool)
+	keaRTSeam    keaRuntime
+	intentFn     func(ctx context.Context) ([]netcfg.GuestNetwork, error)
 }
 
 // bridgeMemberOf is the bridge-membership seam with its default.
@@ -162,7 +186,10 @@ func (a *applier) Validate(ctx context.Context, summary, actor string) (*applyRe
 	if err != nil {
 		return nil, err
 	}
-	res := netcfg.ValidateSet(intent, a.topo, avail, known)
+	res, _, err := a.validateWithPortal(ctx, intent, avail, known)
+	if err != nil {
+		return nil, err
+	}
 	id, seq, err := a.st.CreateRevision(ctx, summary, intent, actor)
 	if err != nil {
 		return nil, err
@@ -181,6 +208,9 @@ func (a *applier) Validate(ctx context.Context, summary, actor string) (*applyRe
 // health checks, and enters pending_confirmation with a watchdog. On any
 // pre-commit failure it rolls back to the previous active revision.
 func (a *applier) Apply(ctx context.Context, summary, actor string) (*applyResult, error) {
+	// The runtime portal refresh stands aside for the whole apply, including any rollback it ends in.
+	a.busy.Add(1)
+	defer a.busy.Add(-1)
 	intent, err := a.st.LoadIntent(ctx)
 	if err != nil {
 		return nil, err
@@ -189,7 +219,10 @@ func (a *applier) Apply(ctx context.Context, summary, actor string) (*applyResul
 	if err != nil {
 		return nil, err
 	}
-	res := netcfg.ValidateSet(intent, a.topo, avail, known)
+	res, vip, err := a.validateWithPortal(ctx, intent, avail, known)
+	if err != nil {
+		return nil, err
+	}
 	id, seq, err := a.st.CreateRevision(ctx, summary, intent, actor)
 	if err != nil {
 		return nil, err
@@ -204,17 +237,25 @@ func (a *applier) Apply(ctx context.Context, summary, actor string) (*applyResul
 		return out, nil
 	}
 
+	// THIS INTENT AND THIS PORTAL ADDRESS ARE NOW WHAT EVERY RENDER USES. Set before generating, so the bundle,
+	// the converge and the Kea push all describe the same thing; put back if nothing reaches the wire, and
+	// replaced by the rollback's own target if the apply fails after it has.
+	before := a.snapshotInForce()
+	a.setInForce(intent, vip)
+
 	bundle := filepath.Join(a.generatedDir, fmt.Sprintf("revision-%06d", seq))
 	if err := a.generate(bundle, intent); err != nil {
+		a.restoreInForce(before)
 		a.fail(ctx, id, out, "generate: "+err.Error())
 		return out, nil
 	}
-	a.st.Event(ctx, id, "generate", true, map[string]any{"bundle": bundle})
+	a.st.Event(ctx, id, "generate", true, map[string]any{"bundle": bundle, "portal_ip": vip})
 
 	// Pre-apply syntax gate: nft -c and netplan generate (kea config-test runs
 	// after bridges exist, inside apply()).
 	if !a.dryRun {
 		if err := a.run(ctx, "nft", "-c", "-f", filepath.Join(bundle, "stayconnect.nft")); err != nil {
+			a.restoreInForce(before)
 			a.fail(ctx, id, out, "nft syntax: "+err.Error())
 			return out, nil
 		}
@@ -271,6 +312,10 @@ func (a *applier) Confirm(ctx context.Context, id, actor string) error {
 	if err := a.st.MarkActive(ctx, id, actor); err != nil {
 		return err
 	}
+	// The address now in force is the confirmed one: it is what a later rollback returns to when the previous
+	// bundle records none.
+	_, vip, _ := a.inForce()
+	a.setActiveVIP(vip)
 	// Confirming is the operator saying to keep it, so the pre-bootstrap Kea snapshot is discarded: a later
 	// rollback to a DIFFERENT revision must not put a confirmed appliance back to stopped-and-disabled.
 	a.clearKeaSnapshot()
@@ -333,6 +378,30 @@ func (a *applier) Rollback(ctx context.Context, id, actor string) error {
 	}
 }
 
+// validateWithPortal is ValidateSet plus the portal address the apply would put in force. The address is read
+// from the setting AT THE MOMENT OF THE DECISION and checked against this intent and every address the appliance
+// carries now. FAIL CLOSED: a setting that cannot be read, or host addresses that cannot be listed, is an error,
+// not a pass -- the same rule presenceSets applies to interfaces.
+func (a *applier) validateWithPortal(ctx context.Context, intent []netcfg.GuestNetwork, avail, known map[string]bool) (netcfg.ValidationResult, string, error) {
+	vip, err := a.loadPortalIP(ctx)
+	if err != nil {
+		return netcfg.ValidationResult{}, "", fmt.Errorf("cannot read the portal address setting: %w", err)
+	}
+	a.refreshPortalTLS(ctx)
+	topo := a.renderTopo()
+	topo.PortalVIP = vip
+	res := netcfg.ValidateSet(intent, topo, avail, known)
+	issues, err := a.validatePortal(ctx, vip, intent)
+	if err != nil {
+		return res, vip, err
+	}
+	if len(issues) > 0 {
+		res.OK = false
+		res.Issues = append(res.Issues, issues...)
+	}
+	return res, vip, nil
+}
+
 func (a *applier) fail(ctx context.Context, id string, out *applyResult, reason string) {
 	_ = a.st.MarkFailed(ctx, id, reason)
 	a.st.Event(ctx, id, "generate", false, map[string]any{"error": reason})
@@ -345,12 +414,16 @@ func (a *applier) generate(bundle string, intent []netcfg.GuestNetwork) error {
 	if err := os.MkdirAll(bundle, 0o750); err != nil {
 		return err
 	}
+	topo := a.renderTopo()
 	files := map[string][]byte{
-		"stayconnect.nft":           netcfg.RenderNftables(intent, a.topo),
+		"stayconnect.nft":           netcfg.RenderNftables(intent, topo),
 		"50-stayconnect-guest.yaml": netcfg.RenderNetplan(a.netdManaged(intent)),
 		"stayconnect-guest.conf":    netcfg.RenderUnbound(intent),
+		// The portal address this revision is applied with ("" = none). A rollback to this revision, and a
+		// boot reconcile of it, restore exactly this address.
+		netcfg.PortalVIPBundleFile: []byte(strings.TrimSpace(topo.PortalVIP) + "\n"),
 	}
-	keaBytes, err := netcfg.RenderKeaFile(intent, a.topo, a.keaLeaseCSV, a.keaSocket)
+	keaBytes, err := netcfg.RenderKeaFile(intent, topo, a.keaLeaseCSV, a.keaSocket)
 	if err != nil {
 		return err
 	}

@@ -47,11 +47,22 @@ func RenderKeaDhcp4(nets []GuestNetwork, topo Topology, leaseCSVPath, ctrlSocket
 			{"name": "domain-name-servers", "data": dns},
 			{"name": "domain-name", "data": n.DomainName},
 		}
-		// RFC 8910 option 114 — plain-HTTP portal on this network's gateway.
+		// RFC 8910 option 114. While the portal's HTTPS is active it names the RFC 8908 captive API on the
+		// canonical hostname; otherwise it is the plain-HTTP portal on this network's own gateway, exactly as
+		// before (contract §4). The choice is CaptivePortalURL's alone, and netd's runtime refresh renders through
+		// this same function, so an apply and a refresh cannot disagree about what a device is told.
+		//
+		// BY CODE, NEVER BY NAME. Kea 2.0 (the appliance runs 2.0.2) maps the name "v4-captive-portal" to code
+		// 160, the obsolete RFC 7710 assignment; only Kea 2.2+ maps it to 114. Emitting the name therefore sent
+		// devices an option no current OS reads, and nothing was ever delivered as option 114 -- found on PRE-LIVE
+		// by capturing a real exchange: the client asked for 114 and the ACK carried no 114. Code 114 has a
+		// standard string definition in every Kea version this product supports, so the code is the same option
+		// everywhere.
 		if n.CaptiveEnabled {
 			optionData = append(optionData, map[string]any{
-				"name": "v4-captive-portal",
-				"data": PortalURLFor(n.GatewayIP, topo.PortalHTTPPort),
+				"code":  114,
+				"space": "dhcp4",
+				"data":  CaptivePortalURL(n.GatewayIP, topo),
 			})
 		}
 

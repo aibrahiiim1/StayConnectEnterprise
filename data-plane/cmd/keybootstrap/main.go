@@ -94,6 +94,25 @@ func main() {
 	}
 	log.Printf("keybootstrap: anonymous-access key ready at %s", anonPath)
 
+	// 2e) Notification-secret key: seals SMTP passwords, API keys and access tokens of the site's email, SMS
+	// and WhatsApp senders (iam_v2.notification_provider_secret_generations). Without it a sender whose secret
+	// was sealed cannot send and the method is not offered; nothing else is affected. Load-only at runtime.
+	notifyPath := filepath.Join(secretsDir, "notify_dek.key")
+	if _, err := localkeys.CreateKeyIfAbsent(notifyPath); err != nil {
+		log.Fatalf("keybootstrap: notification-secret key: %v", err)
+	}
+	log.Printf("keybootstrap: notification-secret sealing key ready at %s", notifyPath)
+
+	// 2f) Social sign-in key: seals the client secrets (and Apple .p8 keys) of the hotel's own Google, Microsoft,
+	// Apple and Facebook applications (iam_v2.social_provider_secret_generations). Without it scd builds no social
+	// provider and seals nothing -- it never falls back to a plaintext column -- and nothing else is affected.
+	// Load-only at runtime, for the same reason as every key above.
+	socialPath := filepath.Join(secretsDir, "social_dek.key")
+	if _, err := localkeys.CreateKeyIfAbsent(socialPath); err != nil {
+		log.Fatalf("keybootstrap: social sign-in key: %v", err)
+	}
+	log.Printf("keybootstrap: social sign-in sealing key ready at %s", socialPath)
+
 	// 3) OTP generation-1 key + DB lifecycle metadata, validated together.
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {

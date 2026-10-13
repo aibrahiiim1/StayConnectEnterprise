@@ -13,9 +13,10 @@
 // back, which hid the wrong thing: it let a package silently author technical settings belonging to a plan
 // that other packages also use. Those fields are shown here as read-only context and edited on Service Plans.
 
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
+import { Switch } from "@/components/ui/misc";
 import { Trash2, Plus, ChevronDown, ChevronRight } from "lucide-react";
 import { durationToSeconds } from "@/lib/units";
 import {
@@ -40,6 +41,10 @@ import {
   type DurationForm,
   type PublishPayload,
   type RuleType,
+  isDedicatedRule,
+  isPaidPrice,
+  WITHIN_HOURS_MIN,
+  WITHIN_HOURS_MAX,
 } from "@/lib/commerce-form";
 import { moduleLicensedIn } from "@/lib/commerce-form";
 import { AcquisitionSection } from "./acquisition-section";
@@ -61,6 +66,26 @@ export type PlanOption = {
   data_quota_bytes?: number | null; time_quota_seconds?: number | null;
   max_concurrent_devices?: number | null; speed_allocation?: string | null;
 };
+
+/** One Client group as GET /client-groups lists it (only what the audience picker shows). */
+export type ClientGroupOption = { id: string; name: string; enabled?: boolean; priority?: number };
+
+// THE AUDIENCE, as the operator chooses it. Four words for one CLIENT_GROUP rule (or none).
+type Audience = "everyone" | "groups" | "public" | "groups_public";
+type AudienceRule = Extract<EligibilityRuleForm, { type: "CLIENT_GROUP" }>;
+function audienceOf(r: AudienceRule | undefined): Audience {
+  if (!r) return "everyone";
+  if (r.public) return r.group_ids.length ? "groups_public" : "public";
+  return "groups";
+}
+
+// THE FREE ALLOWANCE, as the operator chooses it: no limit (no rule), once ever, or once every N hours.
+type FreeAccess = "unlimited" | "once" | "every";
+type FreeRule = Extract<EligibilityRuleForm, { type: "PRIOR_PURCHASE" }>;
+function freeAccessOf(r: FreeRule | undefined): FreeAccess {
+  if (!r) return "unlimited";
+  return r.within_hours !== undefined && r.within_hours !== "" ? "every" : "once";
+}
 
 export type PackageFormInitial = {
   code: string;
@@ -84,8 +109,11 @@ function emptyRule(type: RuleType): EligibilityRuleForm {
     case "AUTH_METHOD": return { type, methods: "" };
     case "SUBJECT_KIND": return { type, kinds: "" };
     case "DATE_WINDOW": return { type, from: "", until: "" };
-    case "PRIOR_PURCHASE": return { type, mode: "forbids_prior" };
+    // A generic row starts as "requires prior": the free allowance (forbids_prior) has its own control above
+    // the rows, and a row that started there would simply move into it.
+    case "PRIOR_PURCHASE": return { type, mode: "requires_prior" };
     case "SITE_NETWORK": return { type, guest_network_ids: "" };
+    case "CLIENT_GROUP": return { type, group_ids: [], public: false };
     case "STAY_LENGTH": return { type, min_nights: "", max_nights: "" };
     case "ROOM_TYPE": return { type, room_types: "" };
     case "RATE_PLAN": return { type, rate_plans: "" };
@@ -102,7 +130,8 @@ const num = (v: unknown): number | null => {
 };
 
 export function PackageForm({
-  mode, initial, plans, busy, onSave, onCancel, modules = null, roomChargeInterfaces = null,
+  mode, initial, plans, busy, onSave, onCancel, modules = null, roomChargeInterfaces = null, clientGroups = null,
+  cardCurrencies = null,
 }: {
   mode: "add" | "edit";
   initial?: PackageFormInitial;
@@ -115,12 +144,27 @@ export function PackageForm({
   modules?: ModulesReport | "error" | null;
   /** The PMS interfaces a room charge can be mapped to. null while loading; "error" when they cannot be listed. */
   roomChargeInterfaces?: RoomChargeInterface[] | "error" | null;
+  /** GET /client-groups: the groups an audience can name. null while loading; "error" when they cannot be read. */
+  clientGroups?: ClientGroupOption[] | "error" | null;
+  /** The currencies the site's ACTIVE payment accounts settle (upper-case). null = unknown: no claim is made. */
+  cardCurrencies?: string[] | null;
 }) {
   // HOSPITALITY decides whether hotel conditions and the per-night allowance are offered at all.
   const hotel = moduleLicensedIn("hospitality", modules ?? null);
   const [code, setCode] = useState(initial?.code ?? "");
   const [name, setName] = useState(initial?.name ?? "");
-  const [rules, setRules] = useState<EligibilityRuleForm[]>(initial?.rules ?? []);
+  // A NEW PACKAGE STARTS WITH "ONCE PER CLIENT". It starts Free, and a free package with no limit is handed
+  // out again every time the same client's allowance runs out -- what the Product Owner watched happen on
+  // PRE-LIVE (2026-10-11). The operator can still choose "every N hours" or "no limit" below; an existing
+  // package keeps exactly the rules it has.
+  const [rules, setRules] = useState<EligibilityRuleForm[]>(
+    initial ? (initial.rules ?? []) : [{ type: "PRIOR_PURCHASE", mode: "forbids_prior", also_by_device: true }],
+  );
+  // THE DEFAULT FOLLOWS THE PRICE UNTIL THE OPERATOR DECIDES. A Free package defaults to once per client; a
+  // PRICED package defaults to repeatable (a second purchase is a sale, not a loophole). While the limit is still
+  // the untouched default, giving a new package a price drops it and making it free again restores it. The
+  // moment the operator chooses a limit themselves it is theirs, whatever the price does afterwards.
+  const [freeDefaulted, setFreeDefaulted] = useState(!initial);
   // A package with no grant tier is offered to nobody, so a new one starts with the single open tier that
   // means "everyone who is eligible". The operator never has to know that.
   const [tiers, setTiers] = useState<GrantTierForm[]>(initial?.tiers?.length ? initial.tiers : [{ order: 10 }]);
@@ -187,6 +231,62 @@ export function PackageForm({
     setRules((rs) => rs.map((r, j) => (j === i ? ({ ...r, ...patch } as EligibilityRuleForm) : r)));
   const setTier = (i: number, patch: Partial<GrantTierForm>) =>
     setTiers((ts) => ts.map((t, j) => (j === i ? { ...t, ...patch } : t)));
+
+  // THE AUDIENCE AND THE FREE ALLOWANCE ARE RULES LIKE ANY OTHER -- one CLIENT_GROUP rule and one
+  // forbids-prior PRIOR_PURCHASE rule in the same list the generic rows edit. Each dedicated control finds its
+  // rule in that list and edits it in place, so a save republishes exactly one set of conditions and nothing
+  // can be stated twice. The generic rows below skip the two rules these controls own.
+  const audienceRule = rules.find((r): r is AudienceRule => r.type === "CLIENT_GROUP");
+  // The choice is held as state rather than derived from the rule: "These groups and public clients" with no
+  // group ticked yet is the same rule as "Public clients only", and deriving it would snap the picker shut the
+  // moment the operator chose it.
+  const [audience, setAudienceChoice] = useState<Audience>(() => audienceOf(audienceRule));
+  const setAudienceRule = (next: AudienceRule | null) =>
+    setRules((rs) => {
+      const rest = rs.filter((r) => r.type !== "CLIENT_GROUP");
+      return next ? [next, ...rest] : rest;
+    });
+  const setAudience = (v: Audience) => {
+    setAudienceChoice(v);
+    const ids = audienceRule?.group_ids ?? [];
+    if (v === "everyone") setAudienceRule(null);
+    else if (v === "public") setAudienceRule({ type: "CLIENT_GROUP", group_ids: [], public: true });
+    else setAudienceRule({ type: "CLIENT_GROUP", group_ids: ids, public: v === "groups_public" });
+  };
+  const toggleGroup = (id: string, on: boolean) => {
+    const cur = audienceRule ?? { type: "CLIENT_GROUP" as const, group_ids: [], public: false };
+    const ids = on ? Array.from(new Set([...cur.group_ids, id])) : cur.group_ids.filter((x) => x !== id);
+    setAudienceRule({ ...cur, group_ids: ids });
+  };
+
+  const freeRule = rules.find((r): r is FreeRule => r.type === "PRIOR_PURCHASE" && r.mode === "forbids_prior");
+  const freeAccess = freeAccessOf(freeRule);
+  const paid = isPaidPrice(acq.price, acq.currency, acq.currency_exponent);
+  const setFreeRule = (next: FreeRule | null) =>
+    setRules((rs) => {
+      const rest = rs.filter((r) => !(r.type === "PRIOR_PURCHASE" && r.mode === "forbids_prior"));
+      return next ? [...rest.filter((r) => r.type === "CLIENT_GROUP"), next, ...rest.filter((r) => r.type !== "CLIENT_GROUP")] : rest;
+    });
+  // A new package's untouched default follows the price: once per client while Free, repeatable once priced.
+  useEffect(() => {
+    if (initial || !freeDefaulted) return;
+    if (paid && freeRule) setFreeRule(null);
+    if (!paid && !freeRule) setFreeRule({ type: "PRIOR_PURCHASE", mode: "forbids_prior", also_by_device: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paid]);
+  const setFreeAccess = (v: FreeAccess) => {
+    setFreeDefaulted(false);
+    if (v === "unlimited") { setFreeRule(null); return; }
+    // A rule created here counts the device too on a Free package (the contract's default), and not on a
+    // priced one, where a second purchase from the same phone is a sale rather than a loophole.
+    const base: FreeRule = freeRule ?? { type: "PRIOR_PURCHASE", mode: "forbids_prior", also_by_device: !paid };
+    if (v === "once") { const { within_hours: _drop, ...rest } = base; setFreeRule(rest); }
+    else setFreeRule({ ...base, within_hours: base.within_hours && base.within_hours !== "" ? base.within_hours : "24" });
+  };
+  // Which groups the picker lists: every group the site has, plus any id the stored rule names that the list
+  // does not (a group removed since), so it can still be unticked rather than silently kept.
+  const groupOptions: ClientGroupOption[] = Array.isArray(clientGroups) ? clientGroups : [];
+  const unknownGroupIDs = (audienceRule?.group_ids ?? []).filter((id) => !groupOptions.some((g) => g.id === id));
 
 
   return (
@@ -371,15 +471,129 @@ export function PackageForm({
       </div>
 
       <AcquisitionSection value={acq} onChange={setAcq} modules={modules} interfaces={roomChargeInterfaces} />
+      {/* A card payment is never converted: a package priced in a currency no active account settles is not
+          offered by card. Said here, beside the price, rather than discovered by a client after choosing. */}
+      {paid && acq.methods.includes("ONLINE_PAYMENT") && Array.isArray(cardCurrencies)
+        && !cardCurrencies.includes((acq.currency || "").trim().toUpperCase()) && (
+        <p className="text-xs text-warning-subtle-foreground" role="status" data-testid="card-currency-note">
+          {cardCurrencies.length === 0
+            ? "No active payment account exists yet, so this package will not be offered by card until one is added under Payment methods."
+            : `Your active payment account${cardCurrencies.length > 1 ? "s settle" : " settles"} ${cardCurrencies.join(", ")}, not ${(acq.currency || "").toUpperCase()}. A card payment is never converted, so this package will not be offered by card until the price currency or the account matches.`}
+        </p>
+      )}
+
+      {/* THE AUDIENCE. Who a package is for is a question about the CLIENT -- employees, partners, the public --
+          not about how they signed in. A site that wants "employees free, everyone else paid" says so here
+          with a Client group; the sign-in method never decides the offer (ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md §4). */}
+      <div>
+        <h3 id={`${ids}-audience`} className="mb-1.5 text-sm font-semibold">Audience</h3>
+        <Select data-testid="audience" aria-labelledby={`${ids}-audience`} value={audience}
+          onChange={(e) => setAudience(e.target.value as Audience)}>
+          <option value="everyone">Everyone</option>
+          <option value="groups">Only these groups</option>
+          <option value="public">Public clients only</option>
+          <option value="groups_public">These groups and public clients</option>
+        </Select>
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          {audience === "everyone" && "Offered to every client who is otherwise eligible."}
+          {audience === "groups" && "Offered only to clients who are in one of the groups ticked below."}
+          {audience === "public" && "Offered only to clients who are in no client group at all — the public, as opposed to employees or partners."}
+          {audience === "groups_public" && "Offered to the groups ticked below and to clients who are in no group; other groups are not offered it."}
+        </p>
+        {(audience === "groups" || audience === "groups_public") && (
+          <div className="mt-2 space-y-1.5" role="group" aria-label="Client groups in the audience">
+            {clientGroups === null && <p className="text-xs text-muted-foreground">Loading client groups…</p>}
+            {clientGroups === "error" && (
+              <p className="text-xs text-warning-subtle-foreground" role="status">
+                The client groups could not be read. The groups already chosen are kept; try again to change them.
+              </p>
+            )}
+            {Array.isArray(clientGroups) && clientGroups.length === 0 && unknownGroupIDs.length === 0 && (
+              <p className="text-xs text-muted-foreground" role="status">
+                This site has no client groups yet.{" "}
+                <a href="/client-groups" className="underline">Create one under Client access → Client groups</a>, then come back.
+              </p>
+            )}
+            {groupOptions.map((g) => {
+              const on = (audienceRule?.group_ids ?? []).includes(g.id);
+              return (
+                <label key={g.id} className="flex cursor-pointer items-center gap-2 text-sm">
+                  <input type="checkbox" className="size-4 accent-primary" data-testid={`audience-group-${g.id}`}
+                    checked={on} onChange={(e) => toggleGroup(g.id, e.target.checked)} />
+                  <span>{g.name}</span>
+                  {g.enabled === false && <span className="text-xs text-muted-foreground">(switched off — matches nobody)</span>}
+                </label>
+              );
+            })}
+            {unknownGroupIDs.map((id) => (
+              <label key={id} className="flex cursor-pointer items-center gap-2 text-sm">
+                <input type="checkbox" className="size-4 accent-primary" data-testid={`audience-group-${id}`}
+                  checked onChange={() => toggleGroup(id, false)} />
+                <span className="font-mono text-xs">{id}</span>
+                <span className="text-xs text-muted-foreground">(group no longer exists)</span>
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* FREE ACCESS. The free allowance is the forbids-prior rule, keyed on the package rather than the
+          revision so a wording change does not hand everyone a fresh allowance (§5). It is offered on a priced
+          package too -- "one discounted purchase per client" is a real offer -- but it is Free packages that
+          need it, which is why the device switch defaults ON only for those. */}
+      <div>
+        <h3 id={`${ids}-free`} className="mb-1.5 text-sm font-semibold">Free access</h3>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Select data-testid="free-access" aria-labelledby={`${ids}-free`} value={freeAccess}
+            onChange={(e) => setFreeAccess(e.target.value as FreeAccess)}>
+            <option value="unlimited">No limit — a client may get this package again</option>
+            <option value="once">Once per client, ever</option>
+            <option value="every">Once per client every N hours</option>
+          </Select>
+          {freeAccess === "every" && freeRule && (
+            <Field label="Every (hours)" hint={`Whole hours, ${WITHIN_HOURS_MIN}–${WITHIN_HOURS_MAX} (one year). Default 24.`}>
+              <Input data-testid="free-access-hours" type="number" min={WITHIN_HOURS_MIN} max={WITHIN_HOURS_MAX} step={1}
+                value={freeRule.within_hours ?? ""}
+                onChange={(e) => setFreeRule({ ...freeRule, within_hours: e.target.value })} />
+            </Field>
+          )}
+        </div>
+        {freeRule && (
+          <div className="mt-2 flex items-start justify-between gap-3 rounded-md border border-border bg-surface/50 px-3.5 py-2.5">
+            <div>
+              <div className="text-sm font-medium">Count the device too</div>
+              <div className="text-xs text-muted-foreground">
+                Prevents a second free allowance by signing in with another email on the same phone. Turn it off
+                for a shared device, such as a family tablet.
+              </div>
+            </div>
+            <Switch
+              checked={freeRule.also_by_device ?? true}
+              onCheckedChange={(v) => setFreeRule({ ...freeRule, also_by_device: v })}
+              label="Count the device too"
+            />
+          </div>
+        )}
+        {freeRule && paid && (
+          <p className="mt-1.5 text-xs text-muted-foreground" data-testid="free-access-paid-note">
+            This package has a price. The limit still applies — a client may buy it the stated number of times.
+          </p>
+        )}
+        {!freeRule && paid && (
+          <p className="mt-1.5 text-xs text-muted-foreground" data-testid="free-access-repeatable-note">
+            A priced package may be bought again by the same client. Choose a limit above if you want one.
+          </p>
+        )}
+      </div>
 
       <div>
         <div className="flex items-center justify-between mb-1">
-          <h3 className="text-sm font-medium">Who this package is offered to</h3>
+          <h3 className="text-sm font-medium">More conditions</h3>
           <Button type="button" variant="ghost" onClick={() => setRules((rs) => [...rs, emptyRule("AUTH_METHOD")])}>
             <Plus size={14} /> Add condition
           </Button>
         </div>
-        {rules.length === 0 && <p className="text-xs text-muted-foreground">Everyone who signs in. Add a condition to narrow it.</p>}
+        {rules.filter((r) => !isDedicatedRule(r)).length === 0 && <p className="text-xs text-muted-foreground">No further conditions. Add one to narrow the audience by sign-in method, date, network or stay.</p>}
         {/* A PMS condition is only answerable for a guest who signed in through the PMS. Saying so here stops
             the reasonable assumption that adding "VIP guests only" merely narrows the audience — for a voucher
             guest there is no Stay to test, so the package is not offered to them at all. */}
@@ -392,14 +606,19 @@ export function PackageForm({
         {/* A condition row has no room for visible labels, so each control is named for the row it sits in:
             "Condition 1: type", not the test hook "rule-type-0" it used to announce. */}
         {rules.map((r, i) => {
-          const n = `Condition ${i + 1}`;
+          // The audience and the free allowance have their own controls above; their rules are not rows.
+          if (isDedicatedRule(r)) return null;
+          const vi = rules.slice(0, i).filter((x) => !isDedicatedRule(x)).length;
+          // Test hooks are numbered by VISIBLE row, like the accessible name: the dedicated rules above are not rows.
+          const n = `Condition ${vi + 1}`;
           return (
-          <div key={i} className="flex gap-2 items-center mb-2" data-testid={`rule-${i}`}>
-            <Select data-testid={`rule-type-${i}`} aria-label={`${n}: type`} className="h-9 w-auto shrink-0 ps-2.5"
+          <div key={i} className="flex gap-2 items-center mb-2" data-testid={`rule-${vi}`}>
+            <Select data-testid={`rule-type-${vi}`} aria-label={`${n}: type`} className="h-9 w-auto shrink-0 ps-2.5"
               value={r.type} onChange={(e) => setRules((rs) => rs.map((x, j) => (j === i ? emptyRule(e.target.value as RuleType) : x)))}>
-              {/* Conditions about a PMS stay only mean something at a hotel, so they are grouped as such. */}
+              {/* Conditions about a PMS stay only mean something at a hotel, so they are grouped as such. The
+                  audience (CLIENT_GROUP) is set by its own control and is not offered as a row. */}
               <optgroup label="General">
-                {SUPPORTED_RULE_TYPES.filter((t) => !isPMSRuleType(t)).map((t) => <option key={t} value={t}>{RULE_TYPE_LABELS[t]}</option>)}
+                {SUPPORTED_RULE_TYPES.filter((t) => !isPMSRuleType(t) && t !== "CLIENT_GROUP").map((t) => <option key={t} value={t}>{RULE_TYPE_LABELS[t]}</option>)}
               </optgroup>
               {/* Offered only with Hospitality; a stored condition of this kind stays visible so it can be changed. */}
               {(hotel || isPMSRuleType(r.type)) && (
@@ -408,40 +627,41 @@ export function PackageForm({
                 </optgroup>
               )}
             </Select>
-            {r.type === "AUTH_METHOD" && <Input data-testid={`rule-methods-${i}`} aria-label={`${n}: sign-in methods`} placeholder="account, voucher" value={r.methods} onChange={(e) => setRule(i, { methods: e.target.value })} />}
-            {r.type === "SUBJECT_KIND" && <Input data-testid={`rule-kinds-${i}`} aria-label={`${n}: client kinds`} placeholder="ACCOUNT, VOUCHER" value={r.kinds} onChange={(e) => setRule(i, { kinds: e.target.value })} />}
+            {r.type === "AUTH_METHOD" && <Input data-testid={`rule-methods-${vi}`} aria-label={`${n}: sign-in methods`} placeholder="account, voucher" value={r.methods} onChange={(e) => setRule(i, { methods: e.target.value })} />}
+            {r.type === "SUBJECT_KIND" && <Input data-testid={`rule-kinds-${vi}`} aria-label={`${n}: client kinds`} placeholder="ACCOUNT, VOUCHER" value={r.kinds} onChange={(e) => setRule(i, { kinds: e.target.value })} />}
             {r.type === "DATE_WINDOW" && <>
-              <Input data-testid={`rule-from-${i}`} aria-label={`${n}: from`} type="datetime-local" value={r.from} onChange={(e) => setRule(i, { from: e.target.value })} />
-              <Input data-testid={`rule-until-${i}`} aria-label={`${n}: until`} type="datetime-local" value={r.until} onChange={(e) => setRule(i, { until: e.target.value })} />
+              <Input data-testid={`rule-from-${vi}`} aria-label={`${n}: from`} type="datetime-local" value={r.from} onChange={(e) => setRule(i, { from: e.target.value })} />
+              <Input data-testid={`rule-until-${vi}`} aria-label={`${n}: until`} type="datetime-local" value={r.until} onChange={(e) => setRule(i, { until: e.target.value })} />
             </>}
             {r.type === "PRIOR_PURCHASE" && (
-              <Select data-testid={`rule-mode-${i}`} aria-label={`${n}: earlier purchase`} className="h-9 w-auto shrink-0 ps-2.5"
+              // Only "requires prior" is a row: the other mode is the Free access control above, and a row set
+              // to it would simply move there.
+              <Select data-testid={`rule-mode-${vi}`} aria-label={`${n}: earlier purchase`} className="h-9 w-auto shrink-0 ps-2.5"
                 value={r.mode} onChange={(e) => setRule(i, { mode: e.target.value as "requires_prior" | "forbids_prior" })}>
-                <option value="forbids_prior">forbids prior</option>
-                <option value="requires_prior">requires prior</option>
+                <option value="requires_prior">Only clients who already had a package here</option>
               </Select>
             )}
-            {r.type === "SITE_NETWORK" && <Input data-testid={`rule-networks-${i}`} aria-label={`${n}: client networks`} placeholder="uuid,uuid" value={r.guest_network_ids} onChange={(e) => setRule(i, { guest_network_ids: e.target.value })} />}
+            {r.type === "SITE_NETWORK" && <Input data-testid={`rule-networks-${vi}`} aria-label={`${n}: client networks`} placeholder="uuid,uuid" value={r.guest_network_ids} onChange={(e) => setRule(i, { guest_network_ids: e.target.value })} />}
             {/* STAY LENGTH. Either bound may be left empty — "8 nights or more" and "up to 7 nights" are both
                 real rules — so neither input is required and an empty one is omitted rather than sent as 0. */}
             {r.type === "STAY_LENGTH" && <>
-              <Input data-testid={`rule-min-nights-${i}`} aria-label={`${n}: from nights`} type="number" min={0} placeholder="from (nights)"
+              <Input data-testid={`rule-min-nights-${vi}`} aria-label={`${n}: from nights`} type="number" min={0} placeholder="from (nights)"
                 value={r.min_nights} onChange={(e) => setRule(i, { min_nights: e.target.value })} />
-              <Input data-testid={`rule-max-nights-${i}`} aria-label={`${n}: to nights`} type="number" min={0} placeholder="to (nights)"
+              <Input data-testid={`rule-max-nights-${vi}`} aria-label={`${n}: to nights`} type="number" min={0} placeholder="to (nights)"
                 value={r.max_nights} onChange={(e) => setRule(i, { max_nights: e.target.value })} />
             </>}
-            {r.type === "ROOM_TYPE" && <Input data-testid={`rule-room-types-${i}`} aria-label={`${n}: room types`} placeholder="DLX, SUITE" value={r.room_types} onChange={(e) => setRule(i, { room_types: e.target.value })} />}
-            {r.type === "RATE_PLAN" && <Input data-testid={`rule-rate-plans-${i}`} aria-label={`${n}: rate plans`} placeholder="BAR, CORP" value={r.rate_plans} onChange={(e) => setRule(i, { rate_plans: e.target.value })} />}
+            {r.type === "ROOM_TYPE" && <Input data-testid={`rule-room-types-${vi}`} aria-label={`${n}: room types`} placeholder="DLX, SUITE" value={r.room_types} onChange={(e) => setRule(i, { room_types: e.target.value })} />}
+            {r.type === "RATE_PLAN" && <Input data-testid={`rule-rate-plans-${vi}`} aria-label={`${n}: rate plans`} placeholder="BAR, CORP" value={r.rate_plans} onChange={(e) => setRule(i, { rate_plans: e.target.value })} />}
             {r.type === "VIP" && (
-              <Select data-testid={`rule-vip-${i}`} aria-label={`${n}: VIP status`} className="h-9 w-auto shrink-0 ps-2.5"
+              <Select data-testid={`rule-vip-${vi}`} aria-label={`${n}: VIP status`} className="h-9 w-auto shrink-0 ps-2.5"
                 value={r.is_vip} onChange={(e) => setRule(i, { is_vip: e.target.value as "true" | "false" })}>
                 <option value="true">VIP guests only</option>
                 <option value="false">Non-VIP guests only</option>
               </Select>
             )}
-            {r.type === "TRAVEL_AGENT" && <TravelAgentPicker testId={`rule-travel-agents-${i}`} label={`${n}: travel agents`} value={r.travel_agents} onChange={(v) => setRule(i, { travel_agents: v })} />}
-            {r.type === "PMS_INTERFACE" && <Input data-testid={`rule-pms-interfaces-${i}`} aria-label={`${n}: PMS interfaces`} placeholder="interface id" value={r.pms_interface_ids} onChange={(e) => setRule(i, { pms_interface_ids: e.target.value })} />}
-            <Button type="button" variant="ghost" data-testid={`remove-rule-${i}`} aria-label={`Remove condition ${i + 1}`} onClick={() => setRules((rs) => rs.filter((_, j) => j !== i))}><Trash2 size={14} /></Button>
+            {r.type === "TRAVEL_AGENT" && <TravelAgentPicker testId={`rule-travel-agents-${vi}`} label={`${n}: travel agents`} value={r.travel_agents} onChange={(v) => setRule(i, { travel_agents: v })} />}
+            {r.type === "PMS_INTERFACE" && <Input data-testid={`rule-pms-interfaces-${vi}`} aria-label={`${n}: PMS interfaces`} placeholder="interface id" value={r.pms_interface_ids} onChange={(e) => setRule(i, { pms_interface_ids: e.target.value })} />}
+            <Button type="button" variant="ghost" data-testid={`remove-rule-${vi}`} aria-label={`Remove condition ${vi + 1}`} onClick={() => setRules((rs) => rs.filter((_, j) => j !== i))}><Trash2 size={14} /></Button>
           </div>
           );
         })}

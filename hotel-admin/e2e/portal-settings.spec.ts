@@ -114,8 +114,9 @@ test("the preview renders the real guest portal, at every size", async ({ page }
   await expect(frame.locator(".card")).toBeVisible();
   await expect(frame.locator("#brand-name")).toHaveText("Semantics Demo Hotel");
   // And its script ran: the tabs are generated from the auth-methods answer, not present in the template.
-  await expect(frame.locator('.tab[data-group="guest"]')).toBeVisible();
-  await expect(frame.locator('.tab[data-group="account"]')).toBeVisible();
+  // (The ways in are chips under "Or sign in with" since the one-journey landing, contract §6.2.)
+  await expect(frame.locator('#alt-methods button[data-tab="pms"]')).toBeVisible();
+  await expect(frame.locator('#alt-methods button:is([data-tab="account"],[data-tab="voucher"])')).toBeVisible();
 
   // A change in the form reaches the preview without a save.
   await page.getByRole("tab", { name: /Content/ }).click();

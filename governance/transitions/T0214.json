@@ -1,0 +1,60 @@
+{
+  "transition_id": "T0214",
+  "seq": 214,
+  "timestamp": "2026-10-08T22:10:00+03:00",
+  "timestamp_derivation": "Written after the last PRE-LIVE verification pass of 2026-10-08 (edged c5fe1e88 installed 15:5x UTC, migration 0108 applied 16:0x UTC, live verification 36/36 afterwards) and before the commit that introduces this receipt, so it post-dates what it records and pre-dates its own commit.",
+  "record_type": "CLIENT_ACCESS_IDENTITY_DEPLOYED_TO_PRE_LIVE_FOR_PRODUCT_OWNER_TESTING",
+  "authorisation": "Product-Owner mission of 2026-10-08: design and implement the next evolution of OneGate Client Access, authorising investigation, architecture, implementation, tests, builds, CI, documentation, directly related fixes, additive non-destructive schema changes, the minimum pre-auth provider connectivity, and deployment to PRE-LIVE 172.21.60.25 under the standing deployment decision. It authorises NO merge, no real payment, no PMS posting, no Root-CA change, no topology change and no Go-Live. A continuation instruction of the same day asked that the authoritative state, the mission-created test state and the Free-to-Paid evidence be completed within the same boundary.",
+  "delivery": {
+    "pull_request": 211,
+    "branch": "delivery/client-access-identity",
+    "base": "3fbbe7dc789e82f34911fd57c146e81436fc5500",
+    "content_head": "259d3bae2ec64723d089899a12da5afdb4d727b0",
+    "pr_state": "OPEN. NOT MERGED. po-merge-approved NOT applied.",
+    "contract": "docs/architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md"
+  },
+  "what_was_found_on_master": [
+    "One-time-code and identity-provider sign-ins returned the legacy session reply to the portal and landed on /success?s=&t=0; they never reached package selection.",
+    "Every one-time code had failed since migration 0049 dropped auth_otps.template_id while internal/otp kept writing it (issue failed). Found by the live run; no test covered a post-0049 schema.",
+    "Social identity was keyed on the email string; the provider subject was discarded; no identity linking existed.",
+    "PRIOR_PURCHASE was keyed on the package revision, so a republish reset every free allowance; max_purchases_per_stay, renewable and plan_overrides were stored and never enforced.",
+    "Notification senders loaded once at scd boot; a failed send still answered that the code was sent; provider secrets were plaintext columns; no identity-provider host was reachable before sign-in; the walled garden was reset by every netd converge until scd's next minute."
+  ],
+  "delivered": [
+    "One Client across verified factors: the provider subject is the identity, a trusted issuer's verified email links (google, apple, microsoft; never facebook), conflicts are recorded and never merged, pre-0107 rows resolve.",
+    "Client Groups (EMAIL_DOMAIN, IDP_TENANT, IDP_HOSTED_DOMAIN) decided by scd at sign-in from verified factors and pinned on the auth context with evidence; CLIENT_GROUP package audience rule; lowest priority wins.",
+    "Free allowance keyed on the package with within_hours and also_by_device; the list reports free_allowance_used so the package page explains the upgrade instead of showing an error.",
+    "A remembered device: a device-bound HMAC credential issued after a verified factor, usable only from that device, revoked elsewhere; Remember devices 0-365 days.",
+    "Portal journey: Welcome back, primary method, quick sign-in row, Or sign in with; seven strings in six languages.",
+    "Delivery: SMTP sender, secrets sealed by scd under notify_dek.key, test message, delivery health, reload on every write, 502 DELIVERY_FAILED to the client.",
+    "Identity-provider consent hosts enter the walled garden while a provider is offered; netd carries walled_garden_ip across a converge.",
+    "Admin Console: Client access section (Sign-in methods with the journey card, Client groups, Identity providers, Delivery, Portal settings, Allowed sites); package editor Audience and Free access."
+  ],
+  "database_schema": "Appliance migrations 0107 (identity attrs, client groups and history, the pin on auth contexts, the remembered-device credentials, sealed sender secrets, the smtp kind) and 0108 (the pin's foreign key references the group's primary key alone, so deleting a group clears only client_group_id -- 0107's composite SET NULL nulled tenant_id and site_id and every pinned group became undeletable; found live). Both additive; both proven up, down and up on PostgreSQL 16; every grant survives a Gate-P reconcile. Applied on PRE-LIVE through scripts/edge-migrate.sh as iam_v2_owner with the SHA pinned (0107 9881a159..., 0108 7806f0d5...), the smtp kind extended by deploy/scripts/extend-notification-kinds-smtp.sql as the table owner, Gate-P reconciled, notify_dek.key created by the new keybootstrap.",
+  "deployment_provenance": "PRE-LIVE 172.21.60.25, read back from the installed bytes on 2026-10-08: scd 2950bb59, edged c5fe1e88, portald and netd 4c4acf07, keybootstrap 4c4acf07, pmsd 6a403326 and acctd 99ba9f10 unchanged; DEPLOYED_BINARIES 6/6 OK. Admin Console release 20261008-154300 from 75317745 (BUILD_ID bOBl7T5FOFHzfvRAfu91T, source_state clean). Site migrations through 0108. Every deployed commit is content-equivalent to the PR head 259d3bae for its own dependency set (go list -deps, checked per binary; the later commits touch only cmd/edged, internal/otp, tests and migrations, none of which the older binaries compile). PRE-LIVE is AHEAD of master, as the standing deployment decision intends.",
+  "live_verification": "scripts on the appliance (/root/verify_prelive.sh, additive and self-cleaning), from a client network namespace on the guest bridge, final pass 36/36: a code issued and delivered to a test-only sender; the verified code answers next=/packages with the commerce session and the device credential; the package page names the masked identity and never the address; Employees pinned on the auth context with evidence naming the rule; Welcome back greets by the masked identity, Connect leads to package selection, Not-you revokes; an SMTP sender saved with a sealed secret, plaintext column NULL, secret never returned, test message reports the provider's own error, delivery health recorded, a dead sender answers 502 DELIVERY_FAILED; an unused group deletes; the walled garden keeps its elements across a netd re-render; the Admin Console serves /client-groups, /notifications and /sign-in-methods.",
+  "free_to_paid_evidence": "Not a live financial action. The identity -> eligibility -> free -> free spent -> card -> provider-verified capture -> grant path is proven end to end on the real SQL pipeline by internal/payment/free_to_paid_integration_test.go under scripts/phase4-pg-integration.sh with the harness's scripted hosted-checkout provider: an open checkout grants nothing, a CAPTURED answer at the pinned amount settles and grants exactly once, the free entitlement is superseded, one live entitlement per Client, one CHARGE row. PRE-LIVE holds an ACTIVE Stripe TEST account; no checkout was created there and payment_transactions remains 0.",
+  "cleanup": "Mission-created state on PRE-LIVE removed: the test Client (ann@example.com) with its identity, its OTP auth contexts (under the auth_context operation scope), its device credentials, and the test one-time challenges; every test sender and group deleted through the Admin API; orphaned sealed generations of the deleted test senders removed; sign-in methods restored to their original values (email off, no journey settings). Retained on purpose: four rows in iam_v2.client_group_changes (CREATED/DELETED of 'CA-TEST Employees', twice) -- the table is append-only by trigger, the rows describe a group that no longer exists, no package names it, and eligibility never reads that table; and the harness's client network-namespace devices in iam_v2.devices, which are network observations exactly as every earlier guest-access run left them. Neither can affect Product Owner testing. The single iam_v2.pms_postings row dates from 2026-09-30 (D47) and was not touched.",
+  "not_validated": "Real identity providers: the portal hostname is portal.stayconnect.local under the local CA, which no real provider accepts as a redirect target; the providers are verified by fixture tests and the stub until the public hostname and certificate decision (deferred 2026-09-29). Playwright browser suites and FULL CHECK were not run.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0213."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed. This transition records a PRE-LIVE deployment for Product Owner testing; it changed no phase, merged nothing and performed no cutover. PRE-LIVE remains PRE-LIVE."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Nothing is merged. Go-Live remains unauthorised.",
+  "base": "3fbbe7dc789e82f34911fd57c146e81436fc5500",
+  "base_note": "Master at the start of the mission (the merge of PR #210, T0213 completion).",
+  "head": "259d3bae",
+  "head_note": "The last CONTENT commit of PR #211 at the time of this receipt. The governance commits that carry this receipt, the register update, the rendered state blocks and the manifest follow it on the same branch.",
+  "previous_delivery": "T0213",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

@@ -12,6 +12,7 @@
       "/audit",
       "/backups",
       "/checkout-grace",
+      "/client-groups",
       "/commercial-packages",
       "/dashboard",
       "/guest-accounts",
@@ -30,6 +31,7 @@
       "/pms-routing",
       "/pms-source-conflicts",
       "/portal-branding",
+      "/portal-https",
       "/room-charge",
       "/roster-reconciliation",
       "/service-plans",
@@ -132,12 +134,17 @@
         "surface": "walled-garden"
       },
       {
-        "label": "Social login",
+        "label": "Client groups",
+        "route": "/client-groups",
+        "surface": "client-groups"
+      },
+      {
+        "label": "Identity providers",
         "route": "/social-providers",
         "surface": "social-providers"
       },
       {
-        "label": "Email & SMS",
+        "label": "Delivery",
         "route": "/notifications",
         "surface": "notification-providers"
       },
@@ -145,6 +152,11 @@
         "label": "Client networks",
         "route": "/network",
         "surface": "network"
+      },
+      {
+        "label": "Portal HTTPS",
+        "route": "/portal-https",
+        "surface": "portal-https"
       },
       {
         "label": "Diagnostics",

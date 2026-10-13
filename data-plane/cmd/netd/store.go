@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
@@ -473,6 +474,46 @@ func (s *store) PendingRevision(ctx context.Context) (id, bundlePath string, dea
 		bundlePath = *p
 	}
 	return id, bundlePath, deadlinePassed, err
+}
+
+// --- the portal address and the portal's HTTPS state (0116) ---
+
+// undefinedTable reports a schema that predates 0116. That is not a fault netd should stop for: an appliance
+// whose database has no portal tables simply has no portal address, and renders exactly what it rendered before.
+func undefinedTable(err error) bool {
+	var pg *pgconn.PgError
+	return errors.As(err, &pg) && pg.Code == "42P01"
+}
+
+// LoadPortalIP returns the configured portal address (bare IPv4), or "" when none is configured.
+func (s *store) LoadPortalIP(ctx context.Context) (string, error) {
+	var ip *string
+	err := s.db.QueryRow(ctx, `SELECT host(portal_ip) FROM public.portal_https_settings LIMIT 1`).Scan(&ip)
+	if errors.Is(err, pgx.ErrNoRows) || undefinedTable(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if ip == nil {
+		return "", nil
+	}
+	return *ip, nil
+}
+
+// LoadPortalTLS returns scd's last word on the portal's HTTPS state. The hotel's domain is returned ONLY while
+// it is VERIFIED: an unverified name must never be answered by the appliance's resolver, because it is not yet
+// proven to belong to this hotel.
+func (s *store) LoadPortalTLS(ctx context.Context) (netcfg.PortalTLS, error) {
+	var p netcfg.PortalTLS
+	err := s.db.QueryRow(ctx, `
+        SELECT https_active, COALESCE(canonical_hostname,''), COALESCE(onegate_hostname,''),
+               CASE WHEN custom_domain_status = 'VERIFIED' THEN COALESCE(custom_domain,'') ELSE '' END
+          FROM public.portal_tls_state LIMIT 1`).Scan(&p.HTTPSActive, &p.CanonicalHostname, &p.OneGateHostname, &p.CustomDomain)
+	if errors.Is(err, pgx.ErrNoRows) || undefinedTable(err) {
+		return netcfg.PortalTLS{}, nil
+	}
+	return p, err
 }
 
 func (s *store) Event(ctx context.Context, revID, phase string, ok bool, detail map[string]any) {

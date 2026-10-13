@@ -536,6 +536,9 @@ type attentionInput struct {
 	RevisionPending    bool
 	RevisionSeq        int64
 	SystemNetPending   bool
+	// PortalHTTPS is the portal_https check (portal_https_health.go), set only for a caller who may read
+	// portal-https. nil means not known or not permitted, and raises nothing.
+	PortalHTTPS *portalHTTPSCheck
 }
 
 var serviceLabels = map[string]string{
@@ -683,6 +686,9 @@ func deriveAttention(in attentionInput) []attentionItem {
 			Title:  "A WAN/LAN change is waiting to be confirmed",
 			Detail: "If it is not confirmed in time it is rolled back automatically.",
 			Href:   "/network/system", Action: "Open WAN/LAN"})
+	}
+	if it, ok := portalHTTPSAttention(in.PortalHTTPS); ok {
+		add(it)
 	}
 	// Errors first, then warnings; stable within each, so the list does not reshuffle between polls.
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Severity == "err" && out[j].Severity != "err" })

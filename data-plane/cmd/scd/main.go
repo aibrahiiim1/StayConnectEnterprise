@@ -44,16 +44,15 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/metrics"
 	"github.com/stayconnect/enterprise/data-plane/internal/modules"
 	"github.com/stayconnect/enterprise/data-plane/internal/nft"
-	"github.com/stayconnect/enterprise/data-plane/internal/notifyloader"
 	"github.com/stayconnect/enterprise/data-plane/internal/otp"
 	"github.com/stayconnect/enterprise/data-plane/internal/otpkey"
 	"github.com/stayconnect/enterprise/data-plane/internal/pms"
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsloader"
+	"github.com/stayconnect/enterprise/data-plane/internal/sealbox"
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
 	"github.com/stayconnect/enterprise/data-plane/internal/signinattempt"
 	"github.com/stayconnect/enterprise/data-plane/internal/sms"
 	"github.com/stayconnect/enterprise/data-plane/internal/social"
-	"github.com/stayconnect/enterprise/data-plane/internal/socialloader"
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
 	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
 	"github.com/stayconnect/enterprise/data-plane/internal/throttle"
@@ -113,6 +112,12 @@ type cfg struct {
 	SecretsDir      string
 	DurableThrottle bool
 	OTPHMAC         bool
+
+	// The Client Portal's HTTPS certificates (portal_tls.go). PortalTLSExtraRoots is an OPT-IN PEM bundle of extra
+	// trust anchors for staging or test issuance (Let's Encrypt staging, Pebble); empty -- the default and the
+	// only production value -- trusts the system roots alone.
+	PortalTLSDir        string
+	PortalTLSExtraRoots string
 }
 
 func loadCfg() cfg {
@@ -143,6 +148,9 @@ func loadCfg() cfg {
 		SecretsDir:      envOr("SCD_SECRETS_DIR", "/etc/stayconnect/secrets"),
 		DurableThrottle: os.Getenv("SCD_DURABLE_THROTTLE") == "true",
 		OTPHMAC:         os.Getenv("SCD_OTP_HMAC") == "true",
+
+		PortalTLSDir:        envOr("SCD_PORTAL_TLS_DIR", "/etc/stayconnect/portal-tls"),
+		PortalTLSExtraRoots: os.Getenv("SCD_PORTAL_TLS_EXTRA_ROOTS"),
 	}
 }
 
@@ -186,8 +194,18 @@ type server struct {
 	whatsapp whatsapp.Sender
 	// otpIssuer issues a challenge; nil means otp.Issue against s.db. A test with no database supplies its own.
 	otpIssuer func(ctx context.Context, p otp.IssueParams) (*otp.Issued, error)
-	socialReg *social.Registry
-	loginRL   *loginLimiter // layered throttling for guest username/password logins (optional fast in-memory layer)
+	// Social sign-in (social_secrets.go): the live provider registry generation, swapped whole on reload;
+	// socialBase is what every generation starts from (the development stub, and nothing in production);
+	// socialKey seals provider secrets; socialMu serialises reloads.
+	socialSet  atomic.Pointer[socialSet]
+	socialBase []social.Provider
+	socialKey  sealbox.Key
+	socialMu   sync.Mutex
+	// socialPortal reports whether the portal is served over HTTPS and its canonical hostname, for social
+	// sign-in; nil or noPortalHTTPS{} means the HTTP fallback (no real social provider is offered). It is the
+	// portal certificate agent (portalTLS) once that starts.
+	socialPortal portalHosts
+	loginRL      *loginLimiter // layered throttling for guest username/password logins (optional fast in-memory layer)
 
 	// Phase 1B dark-auth machinery. All are inert unless explicitly enabled at deploy time:
 	//   - authThrottle: durable, DB-backed authoritative throttle (D4). nil => legacy in-memory only.
@@ -235,6 +253,22 @@ type server struct {
 	// openAccess issues OPEN auth contexts (open_access.go); nil when its key is missing.
 	openAccess  *iamv2.OpenAccess
 	openLimiter *recoveryLimiter
+	// resumeKey / resumeLimiter: the remembered-device credential (client_resume.go); nil = not remembered.
+	// verifyK overrides the kernel surface of temporary verification access (tests); nil = s.nft.client.
+	verifyK       verifyKernel
+	resumeKey     []byte
+	resumeLimiter *recoveryLimiter
+	// notify: the live sender trio, swappable on reload (notify_admin.go); notifyKey seals sender secrets.
+	notify         notifySet
+	notifyFallback struct {
+		mail     mail.Mailer
+		sms      sms.Sender
+		whatsapp whatsapp.Sender
+	}
+	notifyKey sealbox.Key
+	// otpEscrowKey seals the staff-readable copy of a live code (temp_access_admin.go); same local key file,
+	// its own domain.
+	otpEscrowKey sealbox.Key
 
 	// PMS registry is live-reloadable (phase 5.3). All readers must go
 	// through currentPMSReg(); the reload path atomically swaps it under
@@ -315,6 +349,10 @@ type server struct {
 	removed atomic.Pointer[removedRecord]
 	// restartFn replaces the systemd restart in tests.
 	restartFn func()
+
+	// portalTLS is the Client Portal's HTTPS certificate agent and the one answer to "is the portal on HTTPS"
+	// (portal_tls.go). Nil-safe: a nil agent reports the HTTP fallback.
+	portalTLS *portalTLSAgent
 }
 
 func (s *server) currentPMSReg() *pms.Registry {
@@ -420,7 +458,7 @@ func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 	//
 	// authorizeViaIAMv2 always handles the request -- success or refusal -- so there is nothing after it.
 	s.authorizeViaIAMv2(w, r, iamv2.MethodVoucher,
-		iamv2.Request{Secret: req.Voucher, Device: iamv2.DeviceContext{MAC: mac.String()}}, ip)
+		iamv2.Request{Secret: req.Voucher, Credential: iamv2.CredentialVoucher, Device: iamv2.DeviceContext{MAC: mac.String()}}, ip)
 }
 
 type revokeReq struct {
@@ -606,14 +644,15 @@ func main() {
 		slog.Warn("awaiting registration: this appliance has no registered identity yet")
 	}
 
-	// Social provider registry. Default: in-process Stub for "google" so
-	// dev environments work without OAuth credentials. The loader then
-	// overrides any provider that has an enabled social_oauth_providers
-	// row for this tenant — that's how the real Google client takes over
-	// in production.
-	stubAuthBase := envOr("SCD_OAUTH_STUB_BASE", "http://portal.stayconnect.local:8380/api/oauth/stub/authorize")
-	socialReg := social.NewRegistry()
-	socialReg.Register(&social.Stub{ProviderName: "google", AuthorizeBase: stubAuthBase})
+	// Social provider base. A DEVELOPMENT build keeps the in-process Stub for "google" so dev environments work
+	// without OAuth credentials (SCD_OAUTH_STUB_BASE, unchanged). A production build registers no stub: the stub
+	// mints whatever identity its code names, so a stub left standing in for an unconfigured provider would be
+	// a sign-in as anyone. The real providers are built from sealed secrets after the key loads (below).
+	var socialBase []social.Provider
+	if !buildprofile.Production {
+		stubAuthBase := envOr("SCD_OAUTH_STUB_BASE", "http://portal.stayconnect.local:8380/api/oauth/stub/authorize")
+		socialBase = append(socialBase, &social.Stub{ProviderName: "google", AuthorizeBase: stubAuthBase})
+	}
 
 	// awaiting = enrolled-but-unassigned OR un-enrolled: there is no tenant/site,
 	// so the tenant-scoped guest-plane subsystems (social/PMS providers, which
@@ -621,13 +660,6 @@ func main() {
 	// wizard + run the assignment agent; the guest data plane is pre-license until
 	// a signed assignment arrives, after which scd re-execs into the full path.
 	awaiting := c.TenantID == "" || c.SiteID == ""
-	if !awaiting {
-		sctx, scancel := context.WithTimeout(rootCtx, 10*time.Second)
-		if _, err := socialloader.Load(sctx, pool, c.TenantID, socialReg); err != nil {
-			slog.Warn("socialloader: load failed; using fallback stubs", "err", err)
-		}
-		scancel()
-	}
 
 	// PMS provider registry — config-driven from pms_providers (Phase 4.5.5a).
 	var pmsReg *pms.Registry
@@ -651,7 +683,7 @@ func main() {
 		mail:         mail.NewStub(c.MailLogPath),
 		sms:          sms.NewStub(c.SMSLogPath),
 		whatsapp:     whatsapp.NewStub(c.WhatsAppLogPath),
-		socialReg:    socialReg,
+		socialBase:   socialBase,
 		loginRL:      newLoginLimiter(),
 		pmsReg:       pmsReg,
 		pmsBuilt:     pmsBuilt,
@@ -672,6 +704,9 @@ func main() {
 	}
 	// Hand the metric registry to the nft wrapper, which was constructed before s existed.
 	s.nft.SetMetrics(s.met)
+	// The portal's HTTPS state for social sign-in (social_secrets.go portalHosts): the HTTP fallback until the
+	// portal certificate agent starts below and takes over (contract §4).
+	s.socialPortal = noPortalHTTPS{}
 
 	// Phase 1B dark-auth machinery (durable throttle, keyed-HMAC OTP ring, dark IAM-v2). Constructed
 	// here so handlers can reference the fields. All features are OFF unless explicitly enabled; an
@@ -785,6 +820,20 @@ func main() {
 	}
 	s.initCard(rootCtx, c.SecretsDir)
 	s.initOpenAccess(c.SecretsDir)
+	s.initClientResume(c.SecretsDir)
+	s.initNotifyKey(c.SecretsDir)
+	s.portalTLS = s.initPortalTLS(c, ident != nil && talksToCentral)
+	s.socialPortal = s.portalTLS
+	// Social sign-in: load the sealing key, seal any plaintext secret still in the provider table, build the
+	// providers from sealed secrets, and keep them current (social_secrets.go). An appliance awaiting its
+	// assignment has no tenant, and reloadSocial then serves only the base providers.
+	s.initSocialKey(c.SecretsDir)
+	if err := s.reloadSocial(rootCtx, true); err != nil {
+		slog.Warn("social sign-in: initial provider load failed", "err", err)
+	}
+	if !awaiting {
+		go s.socialReloadLoop(rootCtx)
+	}
 	s.registerModuleProbes()
 	// CRASH RECOVERY FOR OFFLINE FIRST ACTIVATION. Runs after the licence state is loaded, because deciding
 	// whether an interrupted activation completed means asking whether the licence actually landed. Either
@@ -808,18 +857,10 @@ func main() {
 	// chosen impl is then wrapped with metric instrumentation so every
 	// Send() emits scd_notification_send_* and updates the DB health
 	// columns (last_success_at / last_error_at) for the admin UI.
-	{
-		nctx, ncancel := context.WithTimeout(rootCtx, 10*time.Second)
-		nloaded, err := notifyloader.Load(nctx, pool, c.TenantID, s.mail, s.sms, s.whatsapp)
-		ncancel()
-		if err != nil {
-			slog.Warn("notifyloader: load failed; using stubs", "err", err)
-		}
-		s.mail = notifyloader.WrapMailer(nloaded.Mailer, nloaded.MailerKind, s.met, pool, c.TenantID)
-		s.sms = notifyloader.WrapSender(nloaded.Sender, nloaded.SenderKind, s.met, pool, c.TenantID)
-		s.whatsapp = notifyloader.WrapWhatsApp(nloaded.WhatsApp, nloaded.WhatsAppKind, s.met, pool, c.TenantID)
-		slog.Info("notification providers loaded", "email", nloaded.MailerKind, "sms", nloaded.SenderKind, "whatsapp", nloaded.WhatsAppKind)
-	}
+	// Senders are resolved here and again on every reload (notify_admin.go), so a change in the Admin
+	// Console is live without a restart. Sealed secrets are preferred; plaintext rows still work.
+	s.notifyFallback.mail, s.notifyFallback.sms, s.notifyFallback.whatsapp = s.mail, s.sms, s.whatsapp
+	s.loadNotify(rootCtx)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -867,8 +908,13 @@ func main() {
 	r.Post("/v1/sessions/revoke", s.revoke)
 	r.Get("/v1/sessions/status", s.status)
 	r.Post("/v1/auth/otp/issue", s.otpIssue)
+	r.Post("/v1/auth/otp/temporary-access/cancel", s.cancelVerifyAccess)
 	r.Post("/v1/auth/social/start", s.socialStart)
 	r.Post("/v1/sessions/authorize-social", s.authorizeSocial)
+	// The remembered device (client_resume.go): peek for the Welcome-back line, Connect, and sign-out.
+	r.Post("/v1/sessions/resume-peek", s.resumePeek)
+	r.Post("/v1/sessions/authorize-resume", s.authorizeResume)
+	r.Post("/v1/sessions/resume-revoke", s.resumeRevoke)
 	// /v1/auth/pms/verify is REMOVED. It resolved a stay and then created a public.sessions row through the
 	// superseded pipeline. The current PMS guest path is Phase 3: /v1/phase3/auth/pms/resolve then
 	// /v1/phase3/auth/pms/grant, which derives identity from the connection rather than the body and grants
@@ -901,12 +947,25 @@ func main() {
 	r.Post("/v1/license/install", s.licenseInstall)
 	r.Post("/v1/admin/pms/reload", s.pmsAdminReload)
 	r.Post("/v1/admin/walled-garden/reload", s.gardenReload)
+	s.notifyAdminRoutes(r)
+	// Social sign-in administration for edged (social_secrets.go): the write-only secret, its yes/no state,
+	// the reload edged pokes after a provider write, and the offered/why-not status line.
+	r.Put("/v1/social/providers/{id}/secret", s.socialSecretStore)
+	r.Get("/v1/social/providers/{id}/secret-state", s.socialSecretState)
+	r.Post("/v1/social/reload", s.socialReload)
+	r.Get("/v1/social/status", s.socialStatus)
+	s.tempAccessAdminRoutes(r)
 	// Hotel Admin TLS cert lifecycle: scd runs as root and drives the privileged
 	// manager here (edged is sandboxed with NoNewPrivileges and cannot). edged
 	// already enforced Hotel-IT permission + step-up before proxying to us.
 	r.Post("/v1/hotel-admin-cert/check", s.hotelAdminCertCheck)
 	r.Post("/v1/hotel-admin-cert/rotate", s.hotelAdminCertRotate)
 	r.Post("/v1/hotel-admin-cert/renew", s.hotelAdminCertRenew)
+	// The Client Portal's HTTPS state (portal_tls.go): read by portald every 15 seconds and by edged; kick and
+	// renew are edged's, after the operator's permission and step-up.
+	r.Get("/v1/portal/tls-state", s.portalTLSState)
+	r.Post("/v1/portal/tls/kick", s.portalTLSKick)
+	r.Post("/v1/portal/tls/renew", s.portalTLSRenew)
 
 	// Phase 2 (DARK): guest-portal commerce routes are mounted ONLY when the portal surface is ON. While
 	// dark they are ABSENT (404) and the commerce engine holds a nil repository, so zero Phase-2 SQL runs.
@@ -1040,12 +1099,17 @@ func main() {
 		}()
 	}
 	go s.pmsHealthFlushLoop(rootCtx)
+	// The Client Portal's HTTPS certificates (portal_tls.go). Runs on every appliance: one that cannot reach
+	// Central still decides HTTPS from the certificate it has, and keeps serving it until it expires.
+	go s.portalTLS.run(rootCtx)
 	// The legacy session reaper is REMOVED with the public.sessions domain it swept. Expiry in the current
 	// model is entitlement exhaustion, owned by internal/enforce over iam_v2.sessions and its entitlement
 	// bindings -- a single authority deciding when access ends.
 	// Edge-first refactor: walled-garden rules from the (site) DB are now
 	// actually enforced — reconciled into the nft walled_garden_ip set.
 	go s.gardenReconcileLoop(rootCtx)
+	// Temporary verification windows: restore after a restart, meter, end what is due (verify_access.go).
+	go s.verifyAccessLoop(rootCtx)
 	go s.cardReconcileLoop(rootCtx)
 	go s.postingLoop(rootCtx, s.initPostingWorker(rootCtx))
 	// Periodic safety-net reload: Hotel Admin changes reload immediately through /v1/admin/pms/reload, and a

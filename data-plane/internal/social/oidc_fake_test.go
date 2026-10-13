@@ -126,3 +126,14 @@ func (f *fakeIdP) form() url.Values {
 
 // fixedNow is the clock every provider test runs at.
 var fixedNow = time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+
+// The attempt secrets every provider test's sign-in carries. testNonce is what a well-formed id_token repeats.
+const (
+	testVerifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk" // RFC 7636 Appendix B's verifier
+	testNonce    = "n-0S6_WzA2Mj"
+)
+
+// xreq is the exchange of one test attempt: the code and redirect URI, plus the attempt's verifier and nonce.
+func xreq(code, redirectURI string) ExchangeRequest {
+	return ExchangeRequest{Code: code, RedirectURI: redirectURI, CodeVerifier: testVerifier, Nonce: testNonce}
+}

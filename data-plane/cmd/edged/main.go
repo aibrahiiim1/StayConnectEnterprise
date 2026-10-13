@@ -412,7 +412,13 @@ func main() {
 			// PMS Interface surface below; keeping both meant two operator screens configuring one property
 			// management system, and the older one could start a competing connector. See resources_providers.go.
 			mountResource(r, s, "auth-methods", s.authMethodsRoutes)
+			// Staff help for clients who asked for a code (contract §6.7): the list and "try again" on one key, reading a
+			// live code on its own key -- see resources_code_requests.go.
+			mountResource(r, s, "code-requests", s.codeRequestsRoutes)
+			mountResource(r, s, "code-reveal", s.codeRevealRoutes)
 			mountResource(r, s, "walled-garden", s.walledGardenRoutes)
+			// Client Groups: who a Client is, kept apart from what they may have (contract §3). Core, never a module.
+			mountResource(r, s, "client-groups", s.clientGroupsRoutes)
 			mountResource(r, s, "portal-branding", s.brandingRoutes)
 			mountResource(r, s, "portal-assets", s.portalAssetRoutes)
 			// payments is REMOVED. It was a read-only list over public.payments, a Stripe-session record
@@ -515,6 +521,11 @@ func main() {
 			mountResource(r, s, "reports", s.reportsRoutes)
 			mountResource(r, s, "backups", s.backupsRoutes)
 			mountResource(r, s, "network", s.networkRoutes)
+			// PORTAL HTTPS (contract §8): the portal address, the hotel portal domain, the hostnames and certificates
+			// scd installed, Check now and Renew now. Its own key -- portal_https.read / portal_https.manage -- rather
+			// than "network", because who may see the portal's certificate state and who may move it are decided
+			// here, not inherited from the guest-network editor. See resources_portal_https.go.
+			mountResource(r, s, "portal-https", s.portalHTTPSRoutes)
 			// NOTE: mounted at "diagnostics", NOT "health" — the unauthenticated
 			// GET /edge/v1/health summary (common.go) must not be shadowed.
 			mountResource(r, s, "diagnostics", s.healthRoutes)

@@ -62,6 +62,9 @@ func (s *server) financialReviewRoutes() http.Handler {
 	r.Get("/actions", s.listReviewActionCatalog)
 	r.Get("/postings/{id}", s.getReviewPosting)
 	r.Post("/postings/{id}/actions", s.postReviewAction)
+	// Card disputes and chargebacks (0115): cases resolved explicitly; full-refund terminations listed.
+	r.Get("/card-cases", s.listCardCases)
+	r.Post("/card-cases/{id}/resolve", s.resolveCardCase)
 	return r
 }
 

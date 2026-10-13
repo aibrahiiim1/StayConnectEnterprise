@@ -1,17 +1,83 @@
 package socialloader
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/social"
 )
+
+// THE SECRET COMES FROM THE OPENER AND NOWHERE ELSE. A row whose sealed secret opens is built with exactly that
+// secret; a row whose secret does not open is not built; without an opener (no sealing key) nothing is built and
+// the base stub, if any, stays.
+func TestAssembleBuildsOnlyFromOpenedSecrets(t *testing.T) {
+	rows := []Row{
+		{ID: "p-google", Provider: "google", ClientID: "gid", ExtraJSON: `{}`, CallbackHosts: []string{"WiFi.Hotel.example.", " "}},
+		{ID: "p-facebook", Provider: "facebook", ClientID: "fid", ExtraJSON: `{}`, CallbackHosts: []string{"ab12cd34.gw.onegate.work"}},
+		{ID: "p-microsoft", Provider: "microsoft", ClientID: "mid", ExtraJSON: `not json`},
+	}
+	var asked []string
+	open := func(_ context.Context, id string) (string, bool) {
+		asked = append(asked, id)
+		switch id {
+		case "p-google":
+			return "google-secret", true
+		case "p-microsoft":
+			return "ms-secret", true
+		}
+		return "", false // facebook: no sealed generation
+	}
+	stub := &social.Stub{ProviderName: "facebook"}
+	got := Assemble(context.Background(), rows, open, stub)
+
+	g, err := got.Registry.Get("google")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gg, ok := g.(*social.Google); !ok || gg.ClientSecret != "google-secret" || gg.ClientID != "gid" {
+		t.Fatalf("google not built from its opened secret: %#v", g)
+	}
+	if !reflect.DeepEqual(got.CallbackHosts["google"], []string{"wifi.hotel.example"}) {
+		t.Errorf("callback hosts not normalised: %v", got.CallbackHosts["google"])
+	}
+	if f, _ := got.Registry.Get("facebook"); f != social.Provider(stub) || got.Real["facebook"] {
+		t.Error("a provider whose secret does not open must not be built; the base entry stays")
+	}
+	if _, err := got.Registry.Get("microsoft"); err == nil || got.Real["microsoft"] {
+		t.Error("a row with invalid extra was built")
+	}
+	if !got.Real["google"] || len(got.Real) != 1 {
+		t.Errorf("real = %v", got.Real)
+	}
+
+	// No opener: the sealing key is missing. Nothing is built, nothing is opened.
+	none := Assemble(context.Background(), rows, nil)
+	if len(none.Real) != 0 || len(none.Registry.Names()) != 0 {
+		t.Fatalf("built without a sealing key: %v", none.Registry.Names())
+	}
+}
+
+// Each load is a fresh registry: a provider removed from the database disappears on the next load instead of
+// lingering in a registry that is only ever added to.
+func TestAssembleReturnsAFreshRegistryEachTime(t *testing.T) {
+	open := func(context.Context, string) (string, bool) { return "s", true }
+	first := Assemble(context.Background(), []Row{{ID: "1", Provider: "google", ClientID: "c", ExtraJSON: `{}`}}, open)
+	second := Assemble(context.Background(), nil, open)
+	if _, err := first.Registry.Get("google"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := second.Registry.Get("google"); err == nil {
+		t.Fatal("a removed provider survived the reload")
+	}
+}
 
 func p8(t *testing.T) string {
 	t.Helper()

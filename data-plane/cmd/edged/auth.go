@@ -163,6 +163,15 @@ const (
 //	guest-signin-protection    = Manage_Guest_SignIn_Protection  (WRITE changes the property's thresholds)
 //	guest-signin-restrictions  = Release_Guest_SignIn_Restriction (WRITE ends ONE device's wait early)
 //
+// TWO KEYS CARRY STAFF HELP FOR CODE REQUESTS (2026-10-12), and they are separate for the same reason:
+//
+//	code-requests  READ lists recent code requests and windows; WRITE lets ONE device try again (its ended
+//	               windows stop counting; nothing is deleted, no access is granted)
+//	code-reveal    WRITE reads a LIVE one-time code to the client it was sent to, under password step-up
+//
+// Clearing a device's history permits another attempt; revealing a code lets an operator vouch for an address
+// the client did not prove. Guest relations may do the first and not the second.
+//
 // The blast radii are not comparable. A release affects one device for the remainder of one restriction; a
 // policy change affects every guest on the property until somebody changes it back. So the desk holds the
 // release and reads the policy, and neither key implies the other or implies the credentials key — an
@@ -177,11 +186,14 @@ const (
 // calling the API directly give the same answer.
 var rolePerms = map[string]map[string]perm{
 	"hotel_it_manager": {
+		// Code requests (contract §6.7): the list of recent code requests and temporary-internet windows; WRITE
+		// clears one device's window history so it may try again. code-reveal reads a LIVE code to the client.
+		"code-requests": permWrite, "code-reveal": permWrite,
 		"guest-accounts": permWrite,
 		"sessions":       permWrite,
 		// The Usage Explorer only ever READS durable accounting; there is no write to grant.
 		"usage":        permRead,
-		"auth-methods": permWrite, "walled-garden": permWrite,
+		"auth-methods": permWrite, "walled-garden": permWrite, "client-groups": permWrite,
 		"portal-branding": permWrite, "portal-assets": permWrite, "notification-providers": permWrite,
 		"social-providers": permWrite,
 		// Card payment provider accounts (site-local; secrets write-only and sealed). Replaces the retired
@@ -192,6 +204,10 @@ var rolePerms = map[string]map[string]perm{
 		// approved by site_admin only.
 		"modules": permRead, "pms-financial-onboarding": permRead,
 		"network": permWrite,
+		// PORTAL HTTPS (portal_https.read / portal_https.manage). The portal address and the hotel portal domain
+		// are network configuration, which this role already owns; Renew now is the same kind of action as the
+		// Admin Console certificate's Rotate. Every change additionally requires the password step-up.
+		"portal-https": permWrite,
 		// Phase 2 (DARK) commercial packages: revisioned CRUD is a manager action.
 		"commercial-packages": permWrite,
 		// Phase 3 (DARK): the IT manager owns the PMS integration, so publishing the checkout-grace policy
@@ -258,6 +274,9 @@ var rolePerms = map[string]map[string]perm{
 		// one already in a guest's hand.
 	},
 	"front_office_operator": {
+		// Code requests (contract §6.7): the list of recent code requests and temporary-internet windows; WRITE
+		// clears one device's window history so it may try again. code-reveal reads a LIVE code to the client.
+		"code-requests": permWrite, "code-reveal": permWrite,
 		// THE RECEPTION DESK, and the role this feature was asked for. They already hold the guest's room,
 		// stay and access credentials; the comparison panel is how they answer the guest standing in front
 		// of them instead of asking that guest to try again while somebody watches a log.
@@ -286,7 +305,7 @@ var rolePerms = map[string]map[string]perm{
 		"stay-transfers":   permWrite,
 		"financial-review": permRead,
 		"financial-ops":    permRead,
-		"auth-methods":     permRead, "walled-garden": permRead, "reports": permRead, "audit": permRead, "license": permRead, "backups": permRead,
+		"auth-methods":     permRead, "walled-garden": permRead, "client-groups": permRead, "reports": permRead, "audit": permRead, "license": permRead, "backups": permRead,
 		// Phase 6 (DARK): the desk may SEE whether the property offers guest device self-service -- it is
 		// the answer to "why can't I remove my old phone" -- but changing a property capability is not a
 		// desk action.
@@ -300,6 +319,9 @@ var rolePerms = map[string]map[string]perm{
 		"voucher-code-settings": permRead, "account-password-settings": permRead,
 	},
 	"guest_relations_operator": {
+		// Code requests (contract §6.7): the list of recent code requests and temporary-internet windows; WRITE
+		// clears one device's window history so it may try again. code-reveal reads a LIVE code to the client.
+		"code-requests": permWrite,
 		// Same desk, same conversation with the guest, same need.
 		"guest-signin-attempts": permRead, "guest-signin-credentials": permRead,
 		"guest-signin-restrictions": permWrite, "guest-signin-protection": permRead,
@@ -312,7 +334,7 @@ var rolePerms = map[string]map[string]perm{
 		"pms-reconciliation": permRead, "pms-roster-reconciliation": permRead,
 		"post-stay-profiles": permWrite,
 		"stay-transfers":     permWrite,
-		"auth-methods":       permRead, "reports": permRead,
+		"auth-methods":       permRead, "reports": permRead, "client-groups": permRead,
 		"audit": permRead, "license": permRead, "backups": permRead, "walled-garden": permRead,
 		// Phase 6 (DARK): same readership as the front desk, for the same reason -- guest relations answers
 		// the same question and changes no property capability.
@@ -349,6 +371,9 @@ var rolePerms = map[string]map[string]perm{
 		"vouchers": permRead,
 	},
 	"site_viewer": {
+		// Code requests (contract §6.7): the list of recent code requests and temporary-internet windows; WRITE
+		// clears one device's window history so it may try again. code-reveal reads a LIVE code to the client.
+		"code-requests": permRead,
 		// THE ATTEMPTS LIST, AND NOT THE CREDENTIALS. A viewer may see that sign-in is failing and for which
 		// rooms — the same class of operational evidence they already read everywhere else. What a read-only
 		// observer has no reason to hold is thirty days of what every guest typed, so the second key is
@@ -358,9 +383,11 @@ var rolePerms = map[string]map[string]perm{
 		// evidence of the same kind they read everywhere else — and acts on neither.
 		"guest-signin-protection": permRead, "guest-signin-restrictions": permRead,
 		"guest-accounts": permRead, "sessions": permRead, "usage": permRead, "auth-methods": permRead,
-		"walled-garden": permRead, "portal-branding": permRead, "portal-assets": permRead, "notification-providers": permRead, "social-providers": permRead,
+		"walled-garden": permRead, "client-groups": permRead, "portal-branding": permRead, "portal-assets": permRead, "notification-providers": permRead, "social-providers": permRead,
 		"payment-providers": permRead, "modules": permRead, "audit": permRead, "reports": permRead,
 		"backups": permRead, "license": permRead, "network": permRead, "diagnostics": permRead,
+		// Portal HTTPS state is operational evidence of the same kind as the network it sits under.
+		"portal-https":        permRead,
 		"commercial-packages": permRead,
 		// Phase 3 (DARK): a viewer sees the evidence and never acts on it.
 		"pms-stays": permRead, "pms-events": permRead, "pms-resolutions": permRead,

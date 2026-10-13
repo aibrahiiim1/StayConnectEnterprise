@@ -241,9 +241,9 @@ func (o *OpenAccess) Begin(ctx context.Context, req OpenRequest) (OpenResult, er
 	}
 	// 5. The OPEN auth context.
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.auth_contexts
-		(tenant_id, site_id, method, anonymous_subject_id, device_id, guest_network_id, expires_at)
-		VALUES ($1,$2,'OPEN',$3::uuid,$4::uuid,$5::uuid,$6) RETURNING id::text`,
-		req.TenantID, req.SiteID, res.SubjectID, res.DeviceID, req.GuestNetworkID, now.Add(ttl)).Scan(&res.AuthContextID); err != nil {
+		(tenant_id, site_id, method, anonymous_subject_id, device_id, guest_network_id, expires_at, credential)
+		VALUES ($1,$2,'OPEN',$3::uuid,$4::uuid,$5::uuid,$6,$7) RETURNING id::text`,
+		req.TenantID, req.SiteID, res.SubjectID, res.DeviceID, req.GuestNetworkID, now.Add(ttl), CredentialOpen).Scan(&res.AuthContextID); err != nil {
 		return res, err
 	}
 	if err := tx.Commit(ctx); err != nil {

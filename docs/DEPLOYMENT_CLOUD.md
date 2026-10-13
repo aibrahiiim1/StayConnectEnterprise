@@ -319,3 +319,26 @@ The recurring answer in column two — "none" — is the acceptance test: no Cen
 ## 12. Pilot topology (HISTORICAL)
 
 The pilot ran Central **and** one appliance on a single VM. Superseded: Central has its own host (CLAUDE.md §0D).
+
+## 13. Portal certificates (ACME, DNS)
+
+Central obtains the appliances' portal certificates ([CENTRAL_CONTROL_PLANE.md §9](CENTRAL_CONTROL_PLANE.md#9-portal-hostnames-and-certificates)).
+Two secrets live on the host, root-only, under `CTRLAPI_PORTAL_TLS_DIR` (default `/etc/stayconnect/portal-tls`, 0700):
+`acme-account.key` (created by ctrlapi on first use, 0600) and `dns-api.token` (written from the console, 0600). Both
+belong with the other keys in backups and on a host move; neither ever reaches an appliance.
+
+Bring-up, all from **System → Portal certificates**:
+
+1. In Cloudflare, create an API token scoped to the `onegate.work` zone only, with *Zone: Read* and *DNS: Edit*.
+2. Set the ACME contact email (the directory stays **staging**), paste the token (write-only), **Test DNS access** —
+   it records the zone id and registers the staging ACME account.
+3. Let one appliance obtain a staging certificate. Then switch the directory to **production** (a new account is
+   registered on first use) and **Apply CAA**, which pins `onegate.work` to Let's Encrypt and this account and forbids
+   wildcards. Other CAs' existing `issue` records are kept and reported.
+
+**Test chain before a token exists** (TEST-ONLY, never on a production Central): run Pebble and pebble-challtestsrv
+beside ctrlapi and set `CTRLAPI_PORTAL_DNS_PROVIDER=challtestsrv`, `CTRLAPI_PORTAL_CHALLTESTSRV_URL`,
+`CTRLAPI_PORTAL_ACME_DIRECTORY_URL`, `CTRLAPI_PORTAL_ACME_CA_FILE` and `CTRLAPI_PORTAL_DNS_CHECK_SERVERS`
+(`deploy/env/ctrlapi.env.example`). ctrlapi logs a WARN at every start while any override is set, and the console
+lists them. Remove them and restart before the real token is entered. Locally, `scripts/portaltls-pebble-test.sh`
+runs the same chain against a throwaway database.

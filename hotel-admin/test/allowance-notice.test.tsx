@@ -12,6 +12,11 @@
 
 import { describe, it, expect } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+
+// jsdom implements no ResizeObserver; the Free access control's switch (rendered by default on a new package
+// since it starts at "once per client") measures itself on mount.
+class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
+(globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverStub;
 import { PackageForm, type PlanOption } from "@/app/(app)/internet-packages/package-form";
 import { allowanceNotice, NOTICE_EXAMPLE_NIGHTS } from "@/lib/stay-packages";
 

@@ -65,9 +65,11 @@ type Outcome struct {
 	TableWas  bool   `json:"table_existed"`
 }
 
-// AuthSets are the packet-authorization sets whose contents must survive a converge. They are the only sets
-// whose elements are runtime state rather than rendered structure.
-var AuthSets = []string{nft.AuthV4, nft.Phase3AuthV4}
+// AuthSets are the sets whose contents must survive a converge: the two packet-authorization sets, and the
+// walled garden. All three hold runtime state rather than rendered structure. The garden was missing here, so
+// every structural re-render reset it to the three baseline addresses until scd's next minute -- a sign-in
+// through an identity provider or a card payment page in progress at that moment lost its way out.
+var AuthSets = []string{nft.AuthV4, nft.Phase3AuthV4, nft.GardenV4, nft.GardenTCP, nft.GardenUDP, nft.VerifyV4}
 
 // tableName is the single StayConnect nft table. It is named once so that no read path can drift from the
 // table the render actually replaces.
@@ -121,7 +123,7 @@ func (e *Engine) Ensure(ctx context.Context, intent []netcfg.GuestNetwork, trigg
 				// would silently deauthorize whoever is in it. Refuse before touching anything.
 				return out, fmt.Errorf("%w: read live set %s: %v", ErrLiveStateUntrusted, set, err)
 			}
-			carried = append(carried, CarryOverCommands(set, els)...)
+			carried = append(carried, CarryOverCommands(set, withoutRendered(set, els))...)
 		}
 	}
 	out.Carried = len(carried)
@@ -290,6 +292,9 @@ func CarryOverCommands(set string, els []nft.Element) []string {
 		key := ip.String()
 		if e.Iface != "" {
 			key = fmt.Sprintf("%q . %s", e.Iface, ip.String())
+		} else if e.Port > 0 {
+			// A port-restricted garden element (`address . service`), carried as the pair it is.
+			key = fmt.Sprintf("%s . %d", ip.String(), e.Port)
 		}
 
 		switch {
@@ -304,6 +309,31 @@ func CarryOverCommands(set string, els []nft.Element) []string {
 		default:
 			out = append(out, fmt.Sprintf("add element inet stayconnect %s { %s }", set, key))
 		}
+	}
+	return out
+}
+
+// withoutRendered drops the elements the new render declares itself -- the baseline resolver pairs of the
+// port-restricted garden sets -- so the converge carries only RUNTIME state (authorizations, scd's garden
+// entries) and reports exactly that many.
+func withoutRendered(set string, els []nft.Element) []nft.Element {
+	if set != nft.GardenTCP && set != nft.GardenUDP {
+		return els
+	}
+	static := map[string]bool{}
+	for _, ip := range netcfg.BaselineResolvers {
+		static[ip] = true
+	}
+	out := make([]nft.Element, 0, len(els))
+	for _, e := range els {
+		ip := e.IP
+		if v4 := ip.To4(); v4 != nil {
+			ip = v4
+		}
+		if e.Port == netcfg.BaselineResolverPort && static[ip.String()] {
+			continue
+		}
+		out = append(out, e)
 	}
 	return out
 }

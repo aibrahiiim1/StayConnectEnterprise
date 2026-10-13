@@ -83,8 +83,8 @@ func TestPrincipalResolutionConcurrent(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			_ = repo.WithTx(ctx, func(tx Tx) error {
-				pid, err := tx.ResolvePrincipalByIdentity(ctx, testTenant, "EMAIL", "", "race@example.com", time.Now())
-				ids[i] = pid
+				rs, err := tx.ResolvePrincipalByFactors(ctx, testTenant, OTPFactor("EMAIL", "race@example.com"), nil, time.Now())
+				ids[i] = rs.PrincipalID
 				return err
 			})
 		}(i)
@@ -110,7 +110,9 @@ func TestPrincipalResolutionConcurrent(t *testing.T) {
 	}
 	// issuer namespaces independent: SOCIAL with same value is a different identity
 	_ = repo.WithTx(ctx, func(tx Tx) error {
-		_, err := tx.ResolvePrincipalByIdentity(ctx, testTenant, "SOCIAL_SUBJECT", "google", "race@example.com", time.Now())
+		// A bare subject with NO secondary factor links to nothing: the issuer namespace stays independent.
+		_, err := tx.ResolvePrincipalByFactors(ctx, testTenant,
+			FactorClaim{Type: "SOCIAL_SUBJECT", Issuer: "google", Value: "race@example.com"}, nil, time.Now())
 		return err
 	})
 	db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.guest_principals`).Scan(&principals)

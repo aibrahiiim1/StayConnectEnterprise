@@ -24,6 +24,7 @@ const HOSTILE_CSS = `
 form { display: none !important; }
 .panels, .sc-signin { visibility: hidden !important; height: 0 !important; overflow: hidden !important; }
 #tabs, .tab { display: none !important; opacity: 0 !important; }
+#alt-methods, .alt, .alt button { display: none !important; opacity: 0 !important; visibility: hidden !important; }
 input { opacity: 0 !important; pointer-events: none !important; }
 button.primary { pointer-events: none !important; transform: scale(0) !important; }
 main.card { display: none !important; }
@@ -72,8 +73,11 @@ async function signInBothWays(page: Page, posted: Posted[]) {
   await expect(page.locator("#pms-err")).toContainText("could not verify");
   expect(posted.some((p) => p.path === "/auth/pms/phase3" && p.body.includes('"room":"412"'))).toBe(true);
 
-  // Account Login: the voucher form, a plain HTML POST.
-  await page.locator('.tab[data-group="account"]').click();
+  // The account door: since the one-journey landing (contract §6.2) it is a chip under "Or sign in with",
+  // not a group tab. The voucher form behind it is a plain HTML POST.
+  await page.locator('#alt-methods button:is([data-tab="account"],[data-tab="voucher"])').click();
+  // The chip opens the shared account panel; a guest with a voucher turns "Use Personal Account" off.
+  await page.locator("#use-personal").uncheck();
   const voucher = page.locator("#voucher");
   await expect(voucher).toBeVisible();
   await voucher.fill("ABCD-1234");
@@ -117,7 +121,8 @@ for (const vp of VIEWPORTS) {
       const css = await page.locator("style#sc-hotel").textContent();
       expect(css).toContain("@layer hotel");
       expect(css).not.toMatch(/!\s*important/i);
-      await expect(page.locator(".tab").first()).toBeVisible();
+      // The ways in (chips under "Or sign in with", contract §6.2) survive the sheet that tries to hide them.
+      await expect(page.locator("#alt-methods button").first()).toBeVisible();
       await signInBothWays(page, posted);
     });
   }
@@ -178,7 +183,8 @@ test("the guard does not fight the page's own switches", async ({ page }) => {
     await page.unrouteAll({ behavior: "ignoreErrors" });
     await serve(page, tpl, { custom_css: HOSTILE_CSS }, posted);
     await page.goto("http://localhost/portal");
-    await page.locator('.tab[data-group="account"]').click();
+    await page.locator('#alt-methods button:is([data-tab="account"],[data-tab="voucher"])').click();
+    await page.locator("#use-personal").uncheck();
     await expect(page.locator("#form-voucher")).toBeVisible();
     await page.locator("#use-personal").check();
     await expect(page.locator("#form-voucher")).toBeHidden();

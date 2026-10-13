@@ -119,13 +119,27 @@ func (a *applier) applyBundle(ctx context.Context, revID string, intent []netcfg
 	}
 	a.st.Event(ctx, revID, "nft", true, nil)
 
+	// THE PORTAL ADDRESS, AFTER THE FIREWALL. The ruleset that admits it on guest networks only (and drops it
+	// everywhere else) is in force before the address exists, so there is no moment in which the appliance
+	// answers for the portal address under a ruleset that does not know it. A changed address replaces the old
+	// one; an empty one removes the interface.
+	_, vip, _ := a.inForce()
+	if changed, err := a.ensurePortalIface(ctx, vip); err != nil {
+		return fmt.Errorf("portal address: %w", err)
+	} else if changed {
+		a.st.Event(ctx, revID, "portal_address", true, map[string]any{"iface": netcfg.PortalIface, "address": vip})
+	}
+
 	// Kea — config-set re-detects interfaces (so freshly-created bridges are
 	// seen), validates, and applies atomically. We do NOT gate on config-test
 	// here because Kea caches its interface list from startup, so config-test
 	// cannot see a bridge created moments ago; config-set fails cleanly and
 	// atomically (no partial apply) if the config is bad, which is the gate we
 	// want. Structural validation already ran via netcfg.ValidateSet.
-	dhcp4 := netcfg.RenderKeaDhcp4(intent, a.topo, a.keaLeaseCSV, a.keaSocket)
+	//
+	// Rendered by renderKea, the same function the runtime portal refresh uses, so option 114 here is what the
+	// refresh would also have chosen for this intent and the current HTTPS state.
+	dhcp4 := a.renderKea(intent)
 
 	// A BRIDGE THAT IS NOT RUNNING YET CANNOT BE BOUND. `ip link add` returned moments ago, but a bridge is
 	// not IFF_RUNNING until a member settles, and the Kea configuration used to land in exactly that gap:
@@ -151,7 +165,7 @@ func (a *applier) applyBundle(ctx context.Context, revID string, intent []netcfg
 		if err := a.bootstrapKeaIfStopped(ctx, revID, full); err != nil {
 			return err
 		}
-		if err := a.kea.ConfigSet(dhcp4); err != nil {
+		if err := a.pushKea(dhcp4); err != nil {
 			return err
 		}
 		// AND NOW ASSERT THE THING THAT MATTERS. config-set does not reliably rebind Kea's sockets when the
@@ -179,6 +193,11 @@ func (a *applier) applyBundle(ctx context.Context, revID string, intent []netcfg
 		if err := os.WriteFile(a.unboundFrag, netcfg.RenderUnbound(intent), 0o644); err != nil {
 			return fmt.Errorf("write unbound: %w", err)
 		}
+	}
+	// The portal-names fragment follows the portal address of this apply. The restart below picks it up, and
+	// unbound-checkconf there validates both fragments together.
+	if _, _, err := a.writeUnboundPortal(vip, a.renderTopo().PortalTLS); err != nil {
+		return fmt.Errorf("portal resolver fragment: %w", err)
 	}
 	if err := a.applyUnbound(ctx); err != nil {
 		a.st.Event(ctx, revID, "unbound", false, map[string]any{"error": err.Error()})
@@ -366,6 +385,8 @@ func (a *applier) ReconcileActiveOnBoot(ctx context.Context) {
 	if a.dryRun {
 		return
 	}
+	a.busy.Add(1)
+	defer a.busy.Add(-1)
 	// THE CONFIRMED ACTIVE REVISION'S OWN INTENT SNAPSHOT — never the live guest_networks rows, which the
 	// Hotel-Admin UI edits directly and which may hold a draft nobody has applied or confirmed. See
 	// store.CurrentActiveIntent for why reconciling from those rows would let an unapplied edit take effect on
@@ -383,6 +404,17 @@ func (a *applier) ReconcileActiveOnBoot(ctx context.Context) {
 	if id == "" {
 		return
 	}
+	// THE PORTAL ADDRESS OF THE CONFIRMED REVISION, from its own bundle -- never the live setting, for the same
+	// reason the intent never comes from guest_networks: an address an operator saved but never applied must not
+	// take effect at the next restart. Only a revision applied BEFORE the portal address existed records none;
+	// that one appliance-wide upgrade step adopts the configured address, validated exactly as an apply would.
+	vip, recorded := readPortalBundle(bundle)
+	if !recorded {
+		vip = a.adoptPortalIP(ctx, bundle, intent)
+	}
+	a.setInForce(intent, vip)
+	a.setActiveVIP(vip)
+	a.refreshPortalTLS(ctx)
 	// Ensure managed bridges/VLANs exist (netplan should recreate them on boot,
 	// but a surgical create is idempotent and covers a generate-only apply).
 	var bootProblems []string
@@ -437,22 +469,50 @@ func (a *applier) ReconcileActiveOnBoot(ctx context.Context) {
 	// artifact on disk should say the same thing rather than remain a record of an older structure.
 	if res.Changed && bundle != "" {
 		if _, statErr := os.Stat(bundle); statErr == nil {
-			_ = os.WriteFile(filepath.Join(bundle, "stayconnect.nft"), netcfg.RenderNftables(intent, a.topo), 0o640)
+			_ = os.WriteFile(filepath.Join(bundle, "stayconnect.nft"), netcfg.RenderNftables(intent, a.renderTopo()), 0o640)
 		}
 	}
+	// The portal interface, after the ruleset that admits it (same order as an apply).
+	if _, perr := a.ensurePortalIface(ctx, vip); perr != nil {
+		bootProblems = append(bootProblems, "portal address: "+perr.Error())
+	}
+	portalFragChanged, portalFragPrev, pferr := a.writeUnboundPortal(vip, a.renderTopo().PortalTLS)
+	if pferr != nil {
+		bootProblems = append(bootProblems, "portal resolver fragment: "+pferr.Error())
+	}
+	unboundRestarted := false
 	if bundle != "" {
 		if _, statErr := os.Stat(bundle); statErr == nil {
-			// Re-push Kea config from the bundle (idempotent; ensures live == intent).
-			if raw, err := os.ReadFile(filepath.Join(bundle, "kea-dhcp4.json")); err == nil {
-				_ = a.pushKeaFile(raw)
+			// Re-push the Kea config (idempotent; ensures live == intent) -- RENDERED from the confirmed intent by
+			// renderKea, as nftables and Unbound are, rather than replayed: the stored file froze option 114 at
+			// whatever the portal's HTTPS state was when the revision was applied. Only a revision that configured
+			// Kea at all (it has the file) is pushed; the bundle is updated to match.
+			if _, err := os.Stat(filepath.Join(bundle, "kea-dhcp4.json")); err == nil {
+				dhcp4 := a.renderKea(intent)
+				if full, merr := json.MarshalIndent(map[string]any{"Dhcp4": dhcp4}, "", "  "); merr == nil {
+					_ = os.WriteFile(filepath.Join(bundle, "kea-dhcp4.json"), full, 0o640)
+				}
+				_ = a.pushKea(dhcp4)
 			}
-			// Re-install the Unbound fragment.
-			if raw, err := os.ReadFile(filepath.Join(bundle, "stayconnect-guest.conf")); err == nil {
-				_ = os.WriteFile(a.unboundFrag, raw, 0o644)
+			// Re-install the Unbound fragment FROM THE CURRENT RENDERER, exactly as the nft structure above: the
+			// stored copy is a record of whatever binary applied the revision, so replaying it would keep an
+			// upgraded appliance on an older resolver configuration (it would never gain the DNS abuse limits,
+			// for one) until the next network change. The bundle is updated to match. applyUnbound validates
+			// with unbound-checkconf first, so a fragment the resolver refuses never takes DNS down.
+			if _, err := os.ReadFile(filepath.Join(bundle, "stayconnect-guest.conf")); err == nil {
+				frag := netcfg.RenderUnbound(intent)
+				_ = os.WriteFile(filepath.Join(bundle, "stayconnect-guest.conf"), frag, 0o644)
+				_ = os.WriteFile(a.unboundFrag, frag, 0o644)
 				if uerr := a.applyUnbound(ctx); uerr != nil {
 					bootProblems = append(bootProblems, "guest resolver: "+uerr.Error())
 				}
+				unboundRestarted = true
 			}
+		}
+	}
+	if portalFragChanged && !unboundRestarted {
+		if rerr := a.reloadUnboundPortal(ctx, portalFragPrev); rerr != nil {
+			bootProblems = append(bootProblems, "portal resolver fragment: "+rerr.Error())
 		}
 	}
 	// THE RECORDED OUTCOME IS THE REAL OUTCOME. This used to be an unconditional ok=true, which is how a boot
@@ -470,6 +530,8 @@ func (a *applier) ReconcileActiveOnBoot(ctx context.Context) {
 // none, removes everything netd added. Management connectivity is preserved
 // throughout (mgmt/legacy interfaces are never touched here).
 func (a *applier) rollback(ctx context.Context, failedID, reason string) {
+	a.busy.Add(1)
+	defer a.busy.Add(-1)
 	a.event(ctx, failedID, "rollback", true, map[string]any{"reason": reason})
 
 	// IS THIS REVISION STILL ROLLBACKABLE? ASKED FIRST, FOR EVERY BRANCH.
@@ -558,7 +620,16 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) {
 				// bridge survived would be worse than an incomplete tear-down that says so.
 				a.event(ctx, failedID, "rollback_bridges", false, map[string]any{"not_destroyed": refused})
 			}
+			// Factory-clean has no portal address either: the interface goes, and the resolver stops answering
+			// the portal names with it.
+			if _, perr := a.ensurePortalIface(ctx, ""); perr != nil {
+				a.event(ctx, failedID, "rollback_portal_address", false, map[string]any{"error": perr.Error()})
+			}
+			if changed, prev, ferr := a.writeUnboundPortal("", netcfg.PortalTLS{}); ferr == nil && changed {
+				_ = a.reloadUnboundPortal(ctx, prev)
+			}
 		}
+		a.clearInForce()
 		a.restoreKeaBootstrap(ctx)
 		a.recordRolledBack(ctx, failedID, reason)
 		return
@@ -630,6 +701,15 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) {
 			})
 			slog.Error("netd rollback: no previous confirmed revision; nft structure left as-is")
 		default:
+			// THE PREVIOUS REVISION'S PORTAL ADDRESS COMES BACK WITH IT. Its bundle records the address it was
+			// applied with; a bundle from before the portal address existed records none, and then the address
+			// of the confirmed active revision -- which is what that revision has run with since boot -- is
+			// restored. It is put in force BEFORE the converge, so the restored ruleset names it.
+			pvip, recorded := readPortalBundle(prevBundle)
+			if !recorded {
+				pvip = a.activeVIP()
+			}
+			a.setInForce(prevIntent, pvip)
 			if _, nerr := a.ensureNftStructure(ctx, prevIntent, "rollback"); nerr != nil {
 				a.event(ctx, failedID, "rollback_nft", false, map[string]any{
 					"blocker": "safe reconciliation to the previous revision failed: " + nerr.Error(),
@@ -638,16 +718,34 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) {
 				slog.Error("netd rollback: safe nft reconciliation failed; NOT falling back to the stored ruleset file", "err", nerr)
 			} else {
 				nftRolledBack = true
+				// ...and the portal interface follows the restored address (after the restored ruleset).
+				if _, perr := a.ensurePortalIface(ctx, pvip); perr != nil {
+					a.event(ctx, failedID, "rollback_portal_address", false, map[string]any{"error": perr.Error()})
+				}
 			}
 		}
 		a.event(ctx, failedID, "rollback_nft", nftRolledBack, nil)
 		if raw, err := os.ReadFile(filepath.Join(prevBundle, "kea-dhcp4.json")); err == nil {
-			_ = a.pushKeaFile(raw)
+			if nftRolledBack {
+				// The previous intent is in force: render it (renderKea, so option 114 reflects the CURRENT
+				// HTTPS state rather than whatever it was when that revision was applied).
+				_ = a.pushKea(a.renderKea(prevIntent))
+			} else {
+				_ = a.pushKeaFile(raw)
+			}
 		}
+		_, inForceVIP, _ := a.inForce()
+		portalFragChanged, portalFragPrev, _ := a.writeUnboundPortal(inForceVIP, a.renderTopo().PortalTLS)
 		if raw, err := os.ReadFile(filepath.Join(prevBundle, "stayconnect-guest.conf")); err == nil {
+			portalFragChanged = false // the restart below reloads both fragments
 			_ = os.WriteFile(a.unboundFrag, raw, 0o644)
 			if uerr := a.applyUnbound(ctx); uerr != nil {
 				a.event(ctx, failedID, "rollback_unbound", false, map[string]any{"error": uerr.Error()})
+			}
+		}
+		if portalFragChanged {
+			if rerr := a.reloadUnboundPortal(ctx, portalFragPrev); rerr != nil {
+				a.event(ctx, failedID, "rollback_unbound", false, map[string]any{"error": rerr.Error()})
 			}
 		}
 	}
@@ -701,7 +799,7 @@ func (a *applier) pushKeaFile(raw []byte) error {
 	if err != nil {
 		return err
 	}
-	return a.kea.ConfigSet(dhcp4)
+	return a.pushKea(dhcp4)
 }
 
 // healthChecks runs post-apply verification. mgmt_reachable and kea_running are
@@ -754,6 +852,18 @@ func (a *applier) healthChecks(ctx context.Context, revID string, intent []netcf
 	// portal_listen: portald must still be listening on the HTTP portal port.
 	portalOK := a.dryRun || tcpListening(a.topo.PortalHTTPPort)
 	add("portal_listen", portalOK, itoa(a.topo.PortalHTTPPort))
+
+	// portal_address: the portal interface carries exactly the address this apply put in force (or does not
+	// exist when there is none). The firewall names the address; the address must actually be there for the
+	// HTTPS portal to answer, and scd's HTTPS verdict depends on it.
+	_, vip, _ := a.inForce()
+	paOK, paDetail := true, vip
+	if !a.dryRun {
+		if ok, detail := a.portalIfaceHealthy(vip); !ok {
+			paOK, paDetail = false, detail
+		}
+	}
+	add("portal_address", paOK, paDetail)
 
 	return out
 }

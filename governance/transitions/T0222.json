@@ -1,0 +1,40 @@
+{
+  "transition_id": "T0222",
+  "seq": 222,
+  "timestamp": "2026-10-12T12:40:00+03:00",
+  "timestamp_derivation": "Written after the lockfile was regenerated on Linux and npm ci verified there, before the commit that introduces it.",
+  "record_type": "CLIENT_ACCESS_LOCKFILE_RESOLVES_ON_LINUX",
+  "authorisation": "The 'PR #211 Final Closure Mission' of 2026-10-12 (T0218): dependency and lockfile corrections the mission requires.",
+  "delivery": {
+    "pull_request": 211,
+    "branch": "delivery/client-access-identity",
+    "content_head": "f27856014d9a1710cac76eb938998777b229baa8",
+    "pr_state": "OPEN. NOT MERGED. po-merge-approved NOT applied."
+  },
+  "what_was_found": [
+    "The lockfile written by the Windows npm install of T0221's upgrade omitted sharp's Linux-only optional packages (@emnapi/runtime, @emnapi/core) and a peer @types/node entry; the local preflight's Linux npm ci refused it before any gate was dispatched."
+  ],
+  "delivered": [
+    "Lockfile regenerated with npm install --package-lock-only in node:20, as docs/FAST_DELIVERY_AND_PARALLEL_AGENT_PROTOCOL.md prescribes; npm ci succeeds on Linux; npm audit --omit=dev reports 0. No runtime file changed: the Admin Console on PRE-LIVE (release 20261012-084337) carries the same resolved versions."
+  ],
+  "deployment_provenance": "Unchanged from T0221.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0221."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; nothing merged, no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Nothing is merged. Go-Live remains unauthorised.",
+  "head": "f2785601",
+  "head_note": "The last CONTENT commit of PR #211 at the time of this receipt; governance commits follow it.",
+  "previous_delivery": "T0221",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

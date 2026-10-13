@@ -13,6 +13,7 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
 	pki "github.com/stayconnect/enterprise/control-plane/internal/pki"
+	"github.com/stayconnect/enterprise/control-plane/internal/portaltls"
 )
 
 // ApplianceMTLSRouter builds the appliance API served over the mutual-TLS
@@ -21,7 +22,9 @@ import (
 // request JWT (application identity, RequireAppliance) — defence in depth. The
 // two identities MUST agree: the cert's bound appliance_id must equal the JWT
 // issuer, and the client cert must not be revoked.
-func ApplianceMTLSRouter(db *pgxpool.Pool, rdb *redis.Client, replay *applianceauth.ReplayCache, lic *licensing.Service, ca *pki.CA, assignKey, regRoot ed25519.PrivateKey) http.Handler {
+//
+// ptls may be nil (tests): the portal-TLS routes are then absent.
+func ApplianceMTLSRouter(db *pgxpool.Pool, rdb *redis.Client, replay *applianceauth.ReplayCache, lic *licensing.Service, ca *pki.CA, assignKey, regRoot ed25519.PrivateKey, ptls *portaltls.Service) http.Handler {
 	r := chi.NewRouter()
 
 	// ---- CERTIFICATE-ONLY channel ----
@@ -68,6 +71,18 @@ func ApplianceMTLSRouter(db *pgxpool.Pool, rdb *redis.Client, replay *appliancea
 			certBase := &CertBase{Base: &Base{DB: db}, CA: ca, ClientValid: 90 * 24 * time.Hour}
 			r.Post("/v1/appliance/csr", certBase.SubmitCSR)
 			r.Get("/v1/appliance/certificate", certBase.FetchCertificate)
+		}
+		if ptls != nil {
+			// Portal hostname and certificate lifecycle (contract §7). The appliance syncs every few minutes and
+			// orders a handful of certificates a year; the limits leave room for retries and nothing more. The
+			// daily order cap is enforced per appliance inside portaltls.
+			pt := &PortalTLSBase{Svc: ptls}
+			r.With(RateLimit(rdb, "portal-tls-sync", 30, time.Minute)).
+				Post("/v1/appliance/portal-tls/sync", pt.Sync)
+			r.With(RateLimit(rdb, "portal-tls-order", 10, time.Minute)).
+				Post("/v1/appliance/portal-tls/orders", pt.Order)
+			r.With(RateLimit(rdb, "portal-tls-order-get", 60, time.Minute)).
+				Get("/v1/appliance/portal-tls/orders/{id}", pt.GetOrder)
 		}
 	})
 	return r

@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
+	"time"
 )
 
 // ---- /api/auth-methods (proxy to scd) ---------------------------------------
@@ -44,7 +46,21 @@ func (h *handler) authMethods(w http.ResponseWriter, r *http.Request) {
 	defer resp.Body.Close()
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = io.Copy(w, resp.Body)
+	payload, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	// THE DEVICE'S PENDING CODE RIDES WITH THE METHODS: the page opens on the code box when one is in flight.
+	if h.pendingOTP != nil && resp.StatusCode == http.StatusOK {
+		if p, ok := h.pendingOTP.get(pendingKey(r)); ok {
+			var m map[string]any
+			if json.Unmarshal(payload, &m) == nil {
+				m["pending_otp"] = map[string]any{"channel": p.Channel, "challenge_id": p.ChallengeID,
+					"dest_masked": p.DestMasked, "ttl_seconds": int(time.Until(p.ExpiresAt).Seconds())}
+				if b, err := json.Marshal(m); err == nil {
+					payload = b
+				}
+			}
+		}
+	}
+	_, _ = w.Write(payload)
 }
 
 // ---- /auth/otp/request (channel-agnostic: email | sms) ----------------------
@@ -67,10 +83,25 @@ func (h *handler) authOTPRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ip := clientIP(r)
+	if ip == nil {
+		jsonErr(w, 400, "bad ip")
+		return
+	}
+	// THE CODE IS BOUND TO THIS DEVICE. The hardware address comes from the kernel's neighbour table, never from
+	// the client, resolved rather than only consulted (arp_resolve.go) -- the same guarantee every sign-in path
+	// gives. scd records it with the challenge, and the code (or the email's link) verifies from it alone.
+	mac, ok := h.deviceMAC(r.Context(), ip)
+	if !ok {
+		jsonErr(w, 400, "device not on this Wi-Fi network")
+		return
+	}
 	body, _ := json.Marshal(map[string]string{
 		"channel":     in.Channel,
 		"destination": in.Destination,
 		"ip":          ipString(ip),
+		"mac":         mac.String(),
+		// The origin this device reached the portal by: the email's tap-to-connect link uses it.
+		"portal_base": portalLinkBase(r),
 	})
 	req, _ := http.NewRequestWithContext(r.Context(), "POST",
 		"http://unix/v1/auth/otp/issue", bytes.NewReader(body))
@@ -82,9 +113,27 @@ func (h *handler) authOTPRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
+	payload, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	// THE CODE IS NOW IN FLIGHT FOR THIS DEVICE. Held server-side for the code's lifetime, so a landing page
+	// opened after the captive browser was dismissed reopens on the code box instead of starting over.
+	if resp.StatusCode == http.StatusOK && h.pendingOTP != nil {
+		var out struct {
+			ChallengeID string `json:"challenge_id"`
+			TTLSeconds  int    `json:"ttl_seconds"`
+		}
+		if json.Unmarshal(payload, &out) == nil && out.ChallengeID != "" {
+			ttl := time.Duration(out.TTLSeconds) * time.Second
+			if ttl <= 0 || ttl > time.Hour {
+				ttl = 10 * time.Minute
+			}
+			h.pendingOTP.put(pendingKey(r), pendingOTP{Channel: in.Channel, ChallengeID: out.ChallengeID,
+				DestMasked: maskDestination(in.Channel, in.Destination), dest: strings.TrimSpace(in.Destination),
+				ExpiresAt: time.Now().Add(ttl)})
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
+	_, _ = w.Write(payload)
 }
 
 // ---- /auth/otp/verify -------------------------------------------------------
@@ -129,9 +178,22 @@ func (h *handler) authOTPVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
+	payload, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	// A VERIFIED CODE IS AUTHENTICATION, NOT ACCESS. The IAM-v2 reply carries an auth context, and the Client
+	// still has to join their live access or choose a package. This used to copy the reply through, and the
+	// page -- reading the legacy session_id shape -- sent the Client to /success?s=&t=0. Now the same commerce
+	// session the voucher and account forms get is issued here, and the page is told where to go next.
+	if resp.StatusCode == http.StatusOK {
+		if h.pendingOTP != nil {
+			h.pendingOTP.clear(pendingKey(r))
+		}
+		if h.tryIAMv2AuthMode(w, r, payload, true) {
+			return
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
+	_, _ = w.Write(payload)
 }
 
 // ---- helpers ----------------------------------------------------------------

@@ -61,6 +61,7 @@ func appleClaims(extra map[string]any) map[string]any {
 		"exp":            fixedNow.Add(time.Hour).Unix(),
 		"email":          "x7y8z9@privaterelay.appleid.com",
 		"email_verified": "true",
+		"nonce":          testNonce,
 	}
 	for k, v := range extra {
 		if v == nil {
@@ -78,7 +79,7 @@ func TestAppleAuthorizeURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	u, err := url.Parse(a.AuthorizeURL("state-abc", "https://portal/auth/social/callback"))
+	u, err := url.Parse(a.AuthorizeURL(AuthRequest{State: "state-abc", RedirectURI: "https://portal/auth/social/callback", Nonce: testNonce}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,11 +90,28 @@ func TestAppleAuthorizeURL(t *testing.T) {
 	for k, want := range map[string]string{
 		"client_id": "com.hotel.wifi", "redirect_uri": "https://portal/auth/social/callback",
 		"response_type": "code", "response_mode": "form_post", "state": "state-abc",
-		"scope": "name email",
+		"scope": "name email", "nonce": testNonce,
 	} {
 		if q.Get(k) != want {
 			t.Errorf("query[%s] = %q, want %q", k, q.Get(k), want)
 		}
+	}
+	if b := a.Binding(); b.PKCE || !b.Nonce {
+		t.Errorf("apple binds with the nonce only, got %+v", b)
+	}
+}
+
+func TestAppleRefusesAnExchangeWithoutTheAttemptNonce(t *testing.T) {
+	a, f, _ := newAppleAt(t)
+	key, _ := rsaKeys(t)
+	f.respondIDToken(signRS256(t, key, testKid, appleClaims(nil)))
+	x := xreq("c", "https://portal/cb")
+	x.Nonce = ""
+	if _, err := a.Exchange(context.Background(), x); !errors.Is(err, ErrAttemptBinding) {
+		t.Fatalf("an attempt with no stored nonce must not exchange: %v", err)
+	}
+	if f.form() != nil {
+		t.Fatal("the code was sent to the token endpoint although the attempt carried no nonce")
 	}
 }
 
@@ -101,7 +119,7 @@ func TestAppleClientSecretJWT(t *testing.T) {
 	a, f, k := newAppleAt(t)
 	key, _ := rsaKeys(t)
 	f.respondIDToken(signRS256(t, key, testKid, appleClaims(nil)))
-	if _, err := a.Exchange(context.Background(), "code-1", "https://portal/cb"); err != nil {
+	if _, err := a.Exchange(context.Background(), xreq("code-1", "https://portal/cb")); err != nil {
 		t.Fatalf("Exchange: %v", err)
 	}
 	secret := f.form().Get("client_secret")
@@ -152,7 +170,7 @@ func TestAppleExchangeSuccess(t *testing.T) {
 			a, f, _ := newAppleAt(t)
 			key, _ := rsaKeys(t)
 			f.respondIDToken(signRS256(t, key, testKid, appleClaims(map[string]any{"email_verified": ev})))
-			info, err := a.Exchange(context.Background(), "c", "https://portal/cb")
+			info, err := a.Exchange(context.Background(), xreq("c", "https://portal/cb"))
 			if err != nil {
 				t.Fatalf("Exchange: %v", err)
 			}
@@ -173,7 +191,7 @@ func TestAppleUnverifiedOrMissingEmail(t *testing.T) {
 			a, f, _ := newAppleAt(t)
 			key, _ := rsaKeys(t)
 			f.respondIDToken(signRS256(t, key, testKid, appleClaims(extra)))
-			info, err := a.Exchange(context.Background(), "c", "https://portal/cb")
+			info, err := a.Exchange(context.Background(), xreq("c", "https://portal/cb"))
 			if !errors.Is(err, ErrEmailUnverified) {
 				t.Fatalf("expected ErrEmailUnverified, got %v", err)
 			}
@@ -197,11 +215,16 @@ func TestAppleRejectsBadTokens(t *testing.T) {
 		"wrong issuer": func() string {
 			return signRS256(t, key, testKid, appleClaims(map[string]any{"iss": "https://evil.example"}))
 		},
+		// A perfectly signed token minted for ANOTHER sign-in attempt.
+		"nonce of another attempt": func() string {
+			return signRS256(t, key, testKid, appleClaims(map[string]any{"nonce": "someone-elses-nonce"}))
+		},
+		"no nonce": func() string { return signRS256(t, key, testKid, appleClaims(map[string]any{"nonce": nil})) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			a, f, _ := newAppleAt(t)
 			f.respondIDToken(tok())
-			info, err := a.Exchange(context.Background(), "c", "https://portal/cb")
+			info, err := a.Exchange(context.Background(), xreq("c", "https://portal/cb"))
 			if err == nil || info != nil || errors.Is(err, ErrEmailUnverified) {
 				t.Fatalf("expected hard rejection, got info=%+v err=%v", info, err)
 			}
@@ -212,7 +235,7 @@ func TestAppleRejectsBadTokens(t *testing.T) {
 func TestAppleTokenError(t *testing.T) {
 	a, f, _ := newAppleAt(t)
 	f.respondError(http.StatusBadRequest, `{"error":"invalid_client"}`)
-	_, err := a.Exchange(context.Background(), "c", "https://portal/cb")
+	_, err := a.Exchange(context.Background(), xreq("c", "https://portal/cb"))
 	if err == nil || !strings.Contains(err.Error(), "invalid_client") {
 		t.Fatalf("err didn't include upstream details: %v", err)
 	}

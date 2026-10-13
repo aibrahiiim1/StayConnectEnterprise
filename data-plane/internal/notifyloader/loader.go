@@ -32,7 +32,14 @@ import (
 const (
 	KindMetaWhatsApp   = "meta_whatsapp"
 	KindTwilioWhatsApp = "twilio_whatsapp"
+	// KindSMTP is the site's own mail server (channel 'email'): host, port, security and username live in
+	// extra; the password is the sealed secret; from_address / from_name are the envelope sender.
+	KindSMTP = "smtp"
 )
+
+// SecretOpener returns the sealed secret of a provider row (iam_v2.notification_provider_secret_generations),
+// or ok=false when none is stored or it cannot be opened. nil means "plaintext api_key only".
+type SecretOpener func(ctx context.Context, providerID string) (secret string, ok bool)
 
 // Result holds the resolved channels. Either field is always non-nil; on
 // error the caller can still fall back without nil-checking everywhere.
@@ -51,8 +58,35 @@ type Result struct {
 
 // providerRow is one enabled notification_providers row.
 type providerRow struct {
+	id                                                         string
 	channel, kind, apiKey, apiUser, fromAddr, fromName, region string
 	extra                                                      map[string]string
+}
+
+// ProviderRow is the exported shape for building a single sender outside the boot path (the Admin Console's
+// "send a test" uses it on a freshly read row).
+type ProviderRow struct {
+	ID, Channel, Kind, Secret, APIUser, FromAddress, FromName, Region string
+	Extra                                                             map[string]string
+}
+
+// BuildOne constructs the sender for one row. Exactly one of the three results is non-nil; kind names the
+// implementation, "stub" when the row could not be built.
+func BuildOne(r ProviderRow, fallbackMail mail.Mailer, fallbackSMS sms.Sender, fallbackWA whatsapp.Sender) (mail.Mailer, sms.Sender, whatsapp.Sender, string) {
+	row := providerRow{id: r.ID, channel: r.Channel, kind: r.Kind, apiKey: r.Secret, apiUser: r.APIUser,
+		fromAddr: r.FromAddress, fromName: r.FromName, region: r.Region, extra: r.Extra}
+	switch r.Channel {
+	case "email":
+		m, k := buildMailer(row, fallbackMail)
+		return m, nil, nil, k
+	case "sms":
+		snd, k := buildSender(row.kind, row.apiUser, row.apiKey, row.fromAddr, fallbackSMS)
+		return nil, snd, nil, k
+	case "whatsapp":
+		wa, k := buildWhatsApp(row, fallbackWA)
+		return nil, nil, wa, k
+	}
+	return nil, nil, nil, "stub"
 }
 
 // Load picks one row per channel (the enabled one — at most one by the
@@ -61,11 +95,18 @@ type providerRow struct {
 // always boots with a usable sender pair.
 func Load(ctx context.Context, db *pgxpool.Pool, tenantID string,
 	fallbackMail mail.Mailer, fallbackSMS sms.Sender, fallbackWA whatsapp.Sender) (*Result, error) {
+	return LoadWithSecrets(ctx, db, tenantID, nil, fallbackMail, fallbackSMS, fallbackWA)
+}
+
+// LoadWithSecrets is Load with a sealed-secret opener. A sealed generation is preferred over the plaintext
+// api_key column; a row with neither keeps its fallback.
+func LoadWithSecrets(ctx context.Context, db *pgxpool.Pool, tenantID string, open SecretOpener,
+	fallbackMail mail.Mailer, fallbackSMS sms.Sender, fallbackWA whatsapp.Sender) (*Result, error) {
 
 	out := resolve(nil, fallbackMail, fallbackSMS, fallbackWA)
 
 	rows, err := db.Query(ctx, `
-        SELECT channel, kind,
+        SELECT id::text, channel, kind,
                COALESCE(api_key,''), COALESCE(api_user,''),
                COALESCE(from_address,''), COALESCE(from_name,''),
                COALESCE(region,''), COALESCE(extra,'{}'::jsonb)::text
@@ -80,12 +121,20 @@ func Load(ctx context.Context, db *pgxpool.Pool, tenantID string,
 	for rows.Next() {
 		var r providerRow
 		var extra string
-		if err := rows.Scan(&r.channel, &r.kind, &r.apiKey, &r.apiUser, &r.fromAddr, &r.fromName, &r.region, &extra); err != nil {
+		if err := rows.Scan(&r.id, &r.channel, &r.kind, &r.apiKey, &r.apiUser, &r.fromAddr, &r.fromName, &r.region, &extra); err != nil {
 			slog.Warn("notifyloader: scan failed", "err", err)
 			continue
 		}
 		r.extra = parseExtra(extra)
 		found = append(found, r)
+	}
+	rows.Close()
+	if open != nil {
+		for i := range found {
+			if sec, ok := open(ctx, found[i].id); ok {
+				found[i].apiKey = sec
+			}
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return out, err
@@ -119,7 +168,7 @@ func resolve(rows []providerRow, fallbackMail mail.Mailer, fallbackSMS sms.Sende
 	for _, r := range rows {
 		switch r.channel {
 		case "email":
-			out.Mailer, out.MailerKind = buildMailer(r.kind, r.apiKey, r.fromAddr, r.fromName, fallbackMail)
+			out.Mailer, out.MailerKind = buildMailer(r, fallbackMail)
 		case "sms":
 			out.Sender, out.SenderKind = buildSender(r.kind, r.apiUser, r.apiKey, r.fromAddr, fallbackSMS)
 		case "whatsapp":
@@ -154,20 +203,58 @@ func buildWhatsApp(r providerRow, fallback whatsapp.Sender) (whatsapp.Sender, st
 	return fallback, "stub"
 }
 
-func buildMailer(kind, apiKey, fromAddr, fromName string, fallback mail.Mailer) (mail.Mailer, string) {
-	switch kind {
+func buildMailer(r providerRow, fallback mail.Mailer) (mail.Mailer, string) {
+	switch r.kind {
 	case "sendgrid":
-		m, err := mail.NewSendGrid(apiKey, fromAddr, fromName)
+		m, err := mail.NewSendGrid(r.apiKey, r.fromAddr, r.fromName)
 		if err != nil {
 			slog.Warn("notifyloader: sendgrid construct failed; using stub", "err", err)
 			return fallback, "stub"
 		}
 		return m, "sendgrid"
+	case KindSMTP:
+		m, err := mail.NewSMTP(SMTPConfigFromRow(r.extra, r.apiKey, r.fromAddr, r.fromName))
+		if err != nil {
+			// The operator sees the same reason on save; here it is a boot-time fact for the log only.
+			slog.Warn("notifyloader: smtp construct failed; using stub", "err", err)
+			return fallback, "stub"
+		}
+		return m, KindSMTP
 	case "stub":
 		return fallback, "stub"
 	}
-	slog.Warn("notifyloader: unknown email kind; using stub", "kind", kind)
+	slog.Warn("notifyloader: unknown email kind; using stub", "kind", r.kind)
 	return fallback, "stub"
+}
+
+// SMTPConfigFromRow reads an smtp provider's non-secret settings from its extra column and joins the secret.
+// extra keys: host, port, security (starttls|tls|none), username, timeout_seconds.
+func SMTPConfigFromRow(extra map[string]string, password, fromAddr, fromName string) mail.SMTPConfig {
+	sec := mail.SMTPSecurity(extra["security"])
+	if sec == "" {
+		sec = mail.SMTPStartTLS
+	}
+	port := atoi(extra["port"])
+	if port == 0 {
+		port = mail.DefaultSMTPPort(sec)
+	}
+	timeout := time.Duration(atoi(extra["timeout_seconds"])) * time.Second
+	return mail.SMTPConfig{Host: extra["host"], Port: port, Security: sec, Username: extra["username"],
+		Password: password, FromAddress: fromAddr, FromName: fromName, Timeout: timeout}
+}
+
+func atoi(s string) int {
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0
+		}
+		n = n*10 + int(c-'0')
+		if n > 1<<20 {
+			return 0
+		}
+	}
+	return n
 }
 
 func buildSender(kind, accountSID, authToken, fromNumber string, fallback sms.Sender) (sms.Sender, string) {

@@ -50,6 +50,8 @@ the keys are unchanged, [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md)). Legen
 | guests | W | W | **W** | **W** | – | R | R |
 | pms-providers (+test/cache/health) | W | W | R | R | – | R | R |
 | auth-methods | W | W | R | R | – | R | R |
+| code-requests (list; W lets one device try again) | W | W | W | W | – | – | R |
+| code-reveal (W reads a live code to its client) | W | W | W | – | – | – | – |
 | guest-device-self-service | W | W | R | R | – | R | R |
 | guest-signin-attempts (`View_Guest_SignIn_Attempts`) | W | R | **R** | **R** | – | – | R |
 | guest-signin-credentials (`View_Guest_SignIn_Credentials`) | W | R | **R** | **R** | – | – | **–** |
@@ -58,15 +60,25 @@ the keys are unchanged, [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md)). Legen
 
 | guest-signin-restrictions (`Release_Guest_SignIn_Restriction`) | W | **W** | **W** | **W** | – | – | R |
 | walled-garden | W | W | R | R | – | R | R |
+| client-groups | W | W | R | R | – | – | R |
 | portal-branding | W | W | R | R | – | R | R |
 | payments (view) | W | W | R | R | – | **W** | R |
 | payments **refunds** | W | **–** | – | – | – | **W** | – |
 | stripe-accounts | W | W | R | R | – | R | R |
 | notification-providers | W | W | R | R | – | R | R |
 | social-providers | W | W | R | R | – | R | R |
+| portal-https | W | W | – | – | – | – | R |
 | audit | W(R) | R | R | R | – | R | R |
 | reports | R | R | R | R | – | R | R |
 | backups (view/trigger) | W | W | R | R | – | R | R |
+
+**portal-https** (`portal_https.read` = R, `portal_https.manage` = W) is the Portal HTTPS screen under
+Networking ([ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md](architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md)
+§8): the portal address, the hotel portal domain, the hostnames and certificates scd installed, Check now and
+Renew now. It follows `network`: the portal address is a network change and the domain points at it. Changing
+the address or the domain and Renew now additionally require the operator's password (step-up); Check now
+changes nothing and needs only **W**. Applying a new address still goes through the Client networks
+validate/apply/confirm flow, which needs `network` **W**.
 
 **The four guest sign-in keys (Room sign-in, in the Hotel module) are four keys on purpose, and none implies another.**
 
@@ -80,6 +92,8 @@ the keys are unchanged, [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md)). Legen
   departure event, so replaying an old one is not something the product can do — and a write permission would
   promise a power it does not have.
 * `guest-signin-restrictions` — **W** releases ONE device's wait early, with a mandatory reason.
+* `code-requests` — **R** lists recent code requests and temporary-internet windows; **W** lets ONE device try again (its ended windows stop counting; nothing deleted, no access granted), with password and reason (2026-10-12).
+* `code-reveal` — **W** reads a LIVE one-time code to the client it was sent to, with password and reason. Separate from `code-requests` because it lets the desk vouch for an address the client did not prove (contract §6.7).
 
 The blast radii are not comparable. A release affects one device for the remainder of one wait; a policy
 change affects every guest on the site until somebody changes it back. So the client-services desk holds the

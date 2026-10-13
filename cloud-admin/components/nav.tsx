@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
-  BadgeCheck, Building2, HardDrive, KeyRound, LayoutDashboard, LogOut, PanelLeftClose, PanelLeftOpen,
+  BadgeCheck, Building2, GlobeLock, HardDrive, KeyRound, LayoutDashboard, LogOut, PanelLeftClose, PanelLeftOpen,
   ScrollText, Server, Settings2, ShieldAlert, Users,
 } from "lucide-react";
 import { BySemantics, OneGateLockup } from "@/components/brand";
@@ -33,6 +33,7 @@ export const NAV_ITEMS: NavItem[] = [
 export const SYSTEM_PAGES: { href: string; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { href: "/system/security-alerts", label: "Security alerts", icon: ShieldAlert },
   { href: "/system/trust", label: "Trust & keys", icon: KeyRound },
+  { href: "/system/portal-certificates", label: "Portal certificates", icon: GlobeLock },
   { href: "/system/audit", label: "Audit log", icon: ScrollText },
   { href: "/system/team", label: "Team", icon: Users },
   { href: "/system/backup-health", label: "Backup health", icon: HardDrive },

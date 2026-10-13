@@ -1,0 +1,51 @@
+{
+  "transition_id": "T0226",
+  "seq": 226,
+  "timestamp": "2026-10-13T22:31:00+03:00",
+  "timestamp_derivation": "Written after the fixes were committed and checked locally, before the commit that introduces it (Cairo time from UTC by hand).",
+  "record_type": "HTTPS_PORTAL_FULL_CHECK_FIRST_RUN_FINDINGS_FIXED",
+  "authorisation": "D49 and the 'Full HTTPS & Social Login Delivery Mission' of 2026-10-13.",
+  "delivery": {
+    "pull_request": 212,
+    "branch": "delivery/https-portal-social",
+    "content_head": "ca20a4d8d2cc1419aaf844e46e137dc344c39f6d",
+    "pr_state": "OPEN at the time of this receipt."
+  },
+  "full_check_first_run": {
+    "head": "15ab142a7505",
+    "result": "FAIL",
+    "gates": {
+      "governance": "success, run 38449806102",
+      "phase3-full-software-gate": "failure, run 38449811077 -- gofmt",
+      "phase4-financial-core-gate": "failure, run 38449814705 -- gofmt",
+      "phase5-post-stay-transfer-gate": "failure, run 38449818503 -- gofmt (the evidence step then failed closed on the steps that never ran)"
+    }
+  },
+  "what_was_found": [
+    "Two files edited while merging the parallel workstreams were not gofmt-formatted (cmd/scd/main.go, cmd/portald/social_browser_test.go).",
+    "The local preflight's fixture parity: the new sealed-secret integration test reads public.social_oauth_providers and social_oauth_states, which the iam_v2 scratch fixture did not define."
+  ],
+  "delivered": [
+    "gofmt applied; the fixture defines both tables as the 0116 baseline declares them. FIXTURE_PARITY PASS; go vet with the production tag clean; the data-plane and control-plane suites pass locally."
+  ],
+  "deployment_provenance": "Unchanged from T0225 (formatting and a test fixture only).",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0225."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "head": "ca20a4d8",
+  "head_note": "The last CONTENT commit of PR #212 at the time of this receipt; governance commits follow it.",
+  "previous_delivery": "T0225",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

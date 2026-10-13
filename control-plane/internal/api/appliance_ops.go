@@ -714,6 +714,14 @@ func (b *Base) deleteAppliance(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := DBCtx(r)
 	defer cancel()
 	operatorID, _ := actorOf(r)
+	// Refused BEFORE anything is revoked when Central could not release the portal hostname and certificates
+	// afterwards (its portal-certificate configuration is incomplete while some exist): a refusal later would
+	// leave a half-retired appliance.
+	if err := b.PortalTLS.CanRelease(ctx, id); err != nil {
+		Fail(w, r, http.StatusConflict, "portal_tls_release_pending",
+			"The appliance's portal hostname or certificate cannot be released yet ("+err.Error()+"), so it was not deleted.")
+		return
+	}
 	// Defence in depth: nothing this appliance held may outlive it. Fail closed — a record whose certificate
 	// or licence could not be revoked is not deleted.
 	if err := b.revokeActiveCertificates(ctx, id, operatorID, "appliance deleted"); err != nil {
@@ -723,6 +731,13 @@ func (b *Base) deleteAppliance(w http.ResponseWriter, r *http.Request) {
 	revoked, err := b.revokeApplianceBoundLicenses(ctx, id)
 	if err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "The appliance's licence could not be revoked, so it was not deleted. Try again.")
+		return
+	}
+	// Deleting the record cascades its portal rows away, and with them the worker's memory of the A record
+	// to delete and the certificates to revoke. So that work happens now, before the record goes.
+	if err := b.PortalTLS.FinalizeRelease(ctx, id); err != nil {
+		Fail(w, r, http.StatusBadGateway, "portal_tls_release_failed",
+			"The appliance's portal hostname or certificate could not be released ("+err.Error()+"), so it was not deleted. Try again.")
 		return
 	}
 	tx, err := b.DB.Begin(ctx)

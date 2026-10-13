@@ -21,8 +21,10 @@ package stripe
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +35,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/payment"
@@ -84,6 +87,8 @@ type Adapter struct {
 	baseURL string
 	timeout time.Duration
 	now     func() time.Time
+	// variants remembers, per account (a key fingerprint), which checkout variant Stripe accepts.
+	variants sync.Map
 }
 
 var _ payment.HostedCheckoutProvider = (*Adapter)(nil)
@@ -313,14 +318,17 @@ func (a *Adapter) call(ctx context.Context, method, path string, form url.Values
 }
 
 var safeTokenRE = regexp.MustCompile(`^[a-z0-9_]{1,64}$`)
+var safeParamRE = regexp.MustCompile(`^[a-z0-9_\[\]]{1,96}$`)
 
 // providerCode extracts Stripe's error type/code identifiers only. Stripe's human message can quote a
 // masked key, so it is never copied into an error.
 func providerCode(b []byte) string {
 	var e struct {
 		Error struct {
-			Type string `json:"type"`
-			Code string `json:"code"`
+			Type    string `json:"type"`
+			Code    string `json:"code"`
+			Param   string `json:"param"`
+			Message string `json:"message"`
 		} `json:"error"`
 	}
 	if json.Unmarshal(b, &e) != nil {
@@ -332,10 +340,38 @@ func providerCode(b []byte) string {
 			parts = append(parts, s)
 		}
 	}
+	// The NAME of the field Stripe objected to (never its value): what an operator needs to fix a refusal
+	// that carries no code, e.g. "line_items[0][price_data][currency]".
+	if safeParamRE.MatchString(e.Error.Param) {
+		parts = append(parts, "param="+e.Error.Param)
+	}
+	// Stripe's own sentence, when it gave no code to name the refusal by (an account setting, typically). Any
+	// key-like token and any long digit run is removed first, so no credential or card number can pass.
+	if e.Error.Code == "" && e.Error.Param == "" {
+		if m := redactProviderMessage(e.Error.Message); m != "" {
+			parts = append(parts, "message="+m)
+		}
+	}
 	if len(parts) == 0 {
 		return "unspecified"
 	}
 	return strings.Join(parts, "/")
+}
+
+var (
+	keyLikeRE   = regexp.MustCompile(`(?i)\b(sk|pk|rk|whsec|acct|cus|pi|ch|cs)_[A-Za-z0-9_*]+`)
+	longDigitRE = regexp.MustCompile(`[0-9][0-9 -]{6,}[0-9]`)
+)
+
+// redactProviderMessage keeps a provider's sentence readable while removing anything that could identify a
+// credential, an account or a card, and bounds its length.
+func redactProviderMessage(m string) string {
+	m = strings.TrimSpace(keyLikeRE.ReplaceAllString(m, "[redacted]"))
+	m = longDigitRE.ReplaceAllString(m, "[redacted]")
+	if len(m) > 200 {
+		m = m[:200]
+	}
+	return m
 }
 
 // refusedWithoutObject lists the HTTP statuses at which Stripe refuses a create before any object exists:
@@ -358,6 +394,27 @@ type sessionCreated struct {
 	URL               string `json:"url"`
 	ExpiresAt         int64  `json:"expires_at"`
 	ClientReferenceID string `json:"client_reference_id"`
+	// PaymentMethodTypes is what the hosted page will actually offer. It must be exactly the approved set.
+	PaymentMethodTypes []string `json:"payment_method_types"`
+}
+
+// approvedMethodTypes is the complete set of Stripe payment-method types OneGate's Card payment may offer
+// or accept. Apple Pay and Google Pay are card wallets: Stripe reports them as type "card" (with
+// card.wallet set), so they pass; Link, bank debits, vouchers and every asynchronous method do not.
+var approvedMethodTypes = map[string]bool{"card": true}
+
+// onlyApproved reports whether a session offers approved methods and nothing else. An empty or absent
+// list is NOT approved: what the page will offer must be known, not assumed.
+func onlyApproved(types []string) bool {
+	if len(types) == 0 {
+		return false
+	}
+	for _, t := range types {
+		if !approvedMethodTypes[strings.ToLower(strings.TrimSpace(t))] {
+			return false
+		}
+	}
+	return true
 }
 
 // CreateCheckout creates one Stripe Checkout Session in payment mode for a single line item. The
@@ -411,8 +468,41 @@ func (a *Adapter) CreateCheckout(ctx context.Context, r payment.CheckoutRequest)
 		f.Set("cancel_url", r.CancelURL)
 	}
 	f.Set("expires_at", strconv.FormatInt(exp.Unix(), 10))
+	// Link is a separate stored-credential wallet that Stripe may report as its own payment-method type; it
+	// is not the approved Card method, so the page never offers it. Apple Pay and Google Pay are card wallets
+	// (type "card") and stay.
+	f.Set("wallet_options[link][display]", "never")
 
-	resp, err := a.call(ctx, http.MethodPost, "/v1/checkout/sessions", f, key, r.ClientRef)
+	// MANAGED PAYMENTS. On a Stripe account where Managed Payments is enabled (the default for new accounts,
+	// found live on PRE-LIVE 2026-10-11), Stripe refuses `payment_method_types` with a 400 before any object
+	// exists. The variants are tried in order -- card-only as before, then card-only with Managed Payments
+	// off -- and the one an account accepts is remembered for that account. THERE IS NO VARIANT THAT LETS
+	// STRIPE CHOOSE THE METHODS: an account that refuses both is refused as "not created", and the client is
+	// told Card payment is unavailable. Only approved methods may ever be offered. Stripe records a refused request against its idempotency key, so each
+	// variant carries its own key derived from the reference; that is safe because a refused create created
+	// nothing, and the engine never creates again (it resolves an ambiguous create by client reference).
+	acct := keyFingerprint(key)
+	start := 0
+	if v, ok := a.variants.Load(acct); ok {
+		start = v.(int)
+	}
+	var resp response
+
+	for v := start; v < len(checkoutVariants); v++ {
+		checkoutVariants[v](f)
+		idem := r.ClientRef
+		if v > 0 {
+			idem = fmt.Sprintf("%s-v%d", r.ClientRef, v)
+		}
+		resp, err = a.call(ctx, http.MethodPost, "/v1/checkout/sessions", f, key, idem)
+		if err == nil && resp.status == http.StatusBadRequest && managedPaymentsRefusal(resp.body) && v+1 < len(checkoutVariants) {
+			continue
+		}
+		if err == nil && resp.status >= 200 && resp.status <= 299 {
+			a.variants.Store(acct, v)
+		}
+		break
+	}
 	if err != nil {
 		var te *transportError
 		if errors.As(err, &te) && te.notSent {
@@ -433,6 +523,15 @@ func (a *Adapter) CreateCheckout(ctx context.Context, r payment.CheckoutRequest)
 	if s.ClientReferenceID != "" && s.ClientReferenceID != r.ClientRef {
 		return payment.Checkout{}, errf("create checkout returned a session for a different reference")
 	}
+	// The page must offer approved methods only. A session that would offer anything else is expired before
+	// any client sees it; once expired nothing can be paid on it, so it is truthfully "not created".
+	if !onlyApproved(s.PaymentMethodTypes) {
+		er, eerr := a.call(ctx, http.MethodPost, "/v1/checkout/sessions/"+url.PathEscape(s.ID)+"/expire", url.Values{}, key, r.ClientRef+"-expire")
+		if eerr == nil && er.status >= 200 && er.status <= 299 {
+			return payment.Checkout{}, notCreated("provider offered unapproved payment methods; the session was expired unused")
+		}
+		return payment.Checkout{}, errf("provider offered unapproved payment methods and the session could not be expired")
+	}
 	out := payment.Checkout{ProviderSessionRef: s.ID, RedirectURL: s.URL, ExpiresAt: exp}
 	if s.ExpiresAt > 0 {
 		out.ExpiresAt = time.Unix(s.ExpiresAt, 0).UTC()
@@ -447,7 +546,21 @@ func isHTTPURL(s string) bool {
 
 // ---------------------------------------------------------------- status
 
+type balanceTxn struct {
+	ID           string          `json:"id"`
+	Amount       int64           `json:"amount"`
+	Currency     string          `json:"currency"`
+	ExchangeRate json.RawMessage `json:"exchange_rate"`
+	Fee          int64           `json:"fee"`
+	Net          int64           `json:"net"`
+}
+
 type charge struct {
+	BalanceTxnRaw json.RawMessage `json:"balance_transaction"`
+	// PaymentMethodDetails.Type is the method the client actually paid with.
+	PaymentMethodDetails *struct {
+		Type string `json:"type"`
+	} `json:"payment_method_details"`
 	ID             string `json:"id"`
 	Status         string `json:"status"`
 	Paid           bool   `json:"paid"`
@@ -522,6 +635,8 @@ func (a *Adapter) QueryStatus(ctx context.Context, q payment.StatusQuery) (payme
 	f := url.Values{}
 	f.Add("expand[]", "payment_intent")
 	f.Add("expand[]", "payment_intent.latest_charge")
+	// The settlement as Stripe booked it: currency, gross, its exchange rate, fee and net (contract §9).
+	f.Add("expand[]", "payment_intent.latest_charge.balance_transaction")
 	resp, err := a.call(ctx, http.MethodGet, "/v1/checkout/sessions/"+url.PathEscape(sid), f, key, "")
 	if err != nil {
 		return payment.StatusResult{}, errf("status query failed: %v", err)
@@ -572,11 +687,21 @@ func (a *Adapter) mapSession(ctx context.Context, key string, s session, hasPI b
 		if !ch.Captured || ch.Status != "succeeded" {
 			return payment.StatusResult{State: payment.CheckoutOpen, ReasonCode: "charge_not_captured"}, nil
 		}
+		// Money taken by a method that is not approved never grants by itself: it stays unresolved, and after
+		// the grace it becomes UNKNOWN and goes to financial review for a person to decide.
+		if ch.PaymentMethodDetails == nil || !approvedMethodTypes[strings.ToLower(ch.PaymentMethodDetails.Type)] {
+			return payment.StatusResult{State: payment.CheckoutOpen, ReasonCode: "payment_method_not_approved"}, nil
+		}
 		res := payment.StatusResult{
 			State:          payment.CheckoutCaptured,
 			ProviderTxnRef: pi.ID,
 			AmountMinor:    pi.AmountReceived,
 			Currency:       strings.ToUpper(pi.Currency),
+		}
+		var bt balanceTxn
+		if ok, err := expandable(ch.BalanceTxnRaw, &bt); err == nil && ok && bt.ID != "" && bt.Currency != "" {
+			res.Settlement = &payment.SettlementReport{Currency: strings.ToUpper(bt.Currency), AmountMinor: bt.Amount,
+				ExchangeRate: stripeRate(bt.ExchangeRate), FeeMinor: bt.Fee, NetMinor: bt.Net, BalanceRef: bt.ID}
 		}
 		evs, err := a.events(ctx, key, ch)
 		if err != nil {
@@ -627,7 +752,9 @@ type listResp struct {
 
 // events reports provider-originated refunds and chargebacks on a captured charge. Only succeeded
 // refunds are reported (a pending refund can still fail and will be reported when it succeeds).
-// Disputes in a warning_* status are inquiries that withdraw no funds and are not reported.
+// Disputes in a warning_* status are inquiries that withdraw no funds and are not reported. A dispute is
+// reported as a CHARGEBACK (money returned) only once Stripe has decided it LOST; while it is open, or after
+// it was won, it is a DISPUTE -- a case for review that records no money (Product-Owner policy 2026-10-12).
 func (a *Adapter) events(ctx context.Context, key string, ch charge) ([]payment.ProviderEvent, error) {
 	var out []payment.ProviderEvent
 	if ch.AmountRefunded > 0 {
@@ -660,8 +787,13 @@ func (a *Adapter) events(ctx context.Context, key string, ch charge) ([]payment.
 			if err := json.Unmarshal(raw, &d); err != nil || d.ID == "" {
 				return errf("dispute list is malformed")
 			}
-			if !strings.HasPrefix(d.Status, "warning_") {
+			switch {
+			case strings.HasPrefix(d.Status, "warning_"):
+				// an inquiry: no funds withdrawn, nothing to record
+			case d.Status == "lost":
 				out = append(out, payment.ProviderEvent{EventID: d.ID, Kind: "CHARGEBACK", AmountMinor: d.Amount, ProviderRef: ch.ID})
+			default:
+				out = append(out, payment.ProviderEvent{EventID: "dispute:" + d.ID, Kind: "DISPUTE", AmountMinor: d.Amount, ProviderRef: d.ID})
 			}
 			return nil
 		})
@@ -802,4 +934,58 @@ func (a *Adapter) TestConnection(ctx context.Context, mode payment.Mode, merchan
 		return errf("Stripe reports a different mode than the configured account mode")
 	}
 	return nil
+}
+
+// stripeRate is Stripe's exchange_rate exactly as sent (null when no conversion took place). It is kept as
+// text so no float rounding ever touches a financial record.
+func stripeRate(raw json.RawMessage) string {
+	t := strings.TrimSpace(string(raw))
+	if t == "" || t == "null" || !rateRE.MatchString(t) {
+		return ""
+	}
+	return t
+}
+
+var rateRE = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$`)
+
+// stripePresentment is the conservative set of presentment currencies OneGate offers for Stripe conversion:
+// currencies Stripe documents as supported for card payments, limited to those the package editor can price.
+// Stripe remains the authority -- a currency it refuses at checkout creation is refused as "not created" and
+// the client is offered another way -- but a package in a currency outside this list is simply not offered by
+// card, rather than offered and refused.
+var stripePresentment = map[string]bool{
+	"USD": true, "EUR": true, "GBP": true, "AED": true, "SAR": true, "QAR": true, "EGP": true, "KWD": true,
+	"BHD": true, "OMR": true, "JOD": true, "CHF": true, "CAD": true, "AUD": true, "NZD": true, "JPY": true,
+	"CNY": true, "HKD": true, "SGD": true, "INR": true, "TRY": true, "MAD": true, "ZAR": true, "SEK": true,
+	"NOK": true, "DKK": true, "PLN": true, "CZK": true, "HUF": true, "RON": true,
+}
+
+// ConvertsPresentment: Stripe presents a charge in any supported currency and settles it into the account's
+// currency at its own rate, reporting the rate, fee and net on the balance transaction.
+func (a *Adapter) ConvertsPresentment(presentment, settlement string) bool {
+	p := strings.ToUpper(strings.TrimSpace(presentment))
+	s := strings.ToUpper(strings.TrimSpace(settlement))
+	return p == s || (stripePresentment[p] && stripePresentment[s])
+}
+
+// managedPaymentsRefusal recognises Stripe's refusal of payment_method_types on a Managed Payments account.
+func managedPaymentsRefusal(body []byte) bool {
+	b := strings.ToLower(string(body))
+	return strings.Contains(b, "managed payments") || strings.Contains(b, "managed_payments")
+}
+
+// checkoutVariants are the ways a checkout's payment methods are asked for, in order of preference. Every
+// variant asks for card and card only.
+var checkoutVariants = []func(url.Values){
+	func(f url.Values) { f.Set("payment_method_types[0]", "card"); f.Del("managed_payments[enabled]") },
+	func(f url.Values) {
+		f.Set("payment_method_types[0]", "card")
+		f.Set("managed_payments[enabled]", "false")
+	},
+}
+
+// keyFingerprint names an account for the variant memory without holding its key.
+func keyFingerprint(key string) string {
+	h := sha256.Sum256([]byte("stripe-variant:" + key))
+	return hex.EncodeToString(h[:8])
 }

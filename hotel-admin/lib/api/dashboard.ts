@@ -377,14 +377,28 @@ export function reasonText(reason?: string): string {
   return REASONS[reason] ?? "Not available on this appliance.";
 }
 
+// The session's credential label (iamv2/credential.go): how the client signed in. PRINCIPAL is what a session
+// recorded before the channel was kept (an email, phone or social sign-in, unspecified).
 const METHODS: Record<string, string> = {
   PMS: "Room number",
   VOUCHER: "Voucher",
   ACCOUNT: "Client account",
-  PRINCIPAL: "Returning client",
+  EMAIL_OTP: "Emailed code",
+  SMS_OTP: "Texted code",
+  WHATSAPP_OTP: "WhatsApp code",
+  SOCIAL_GOOGLE: "Google",
+  SOCIAL_APPLE: "Apple",
+  SOCIAL_MICROSOFT: "Microsoft",
+  SOCIAL_FACEBOOK: "Facebook",
+  OPEN: "No sign-in",
+  PRINCIPAL: "Email, phone or social (unspecified)",
   UNKNOWN: "Not recorded",
 };
-export const methodLabel = (m: string) => METHODS[m] ?? m.charAt(0) + m.slice(1).toLowerCase().replace(/_/g, " ");
+export const methodLabel = (m: string) => {
+  if (METHODS[m]) return METHODS[m];
+  if (m.startsWith("SOCIAL_")) return m.charAt(7) + m.slice(8).toLowerCase();
+  return m.charAt(0) + m.slice(1).toLowerCase().replace(/_/g, " ");
+};
 
 const RESULTS: Record<string, string> = {
   VERIFIED: "Verified",

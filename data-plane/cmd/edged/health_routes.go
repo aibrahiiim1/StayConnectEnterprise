@@ -52,8 +52,15 @@ func (s *server) healthServices(w http.ResponseWriter, r *http.Request) {
 				"boot_at": bootAt, "converged_at": convergedAt, "deadline_at": deadline}
 		}
 	}
+	// CHECKS that are not supervised services: today only portal_https, the administrator alert for the HTTP
+	// fallback (portal_https_health.go). They do not change `overall`, which describes the services; the page
+	// shows them beside it.
+	checks := []portalHTTPSCheck{}
+	if c, ok := s.portalHTTPSHealth(r.Context()); ok {
+		checks = append(checks, c)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"overall": overall, "counts": counts, "services": all, "boot": boot,
+		"overall": overall, "counts": counts, "services": all, "boot": boot, "checks": checks,
 		"generated_at": time.Now().UTC(),
 	})
 }

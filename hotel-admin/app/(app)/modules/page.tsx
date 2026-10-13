@@ -43,10 +43,10 @@ const CONFIGURE: Record<string, { href: string; label: string }> = {
   paid_access: { href: "/internet-packages", label: "Internet packages" },
   card_payment: { href: "/payment-methods", label: "Payment methods" },
   room_charge: { href: "/room-charge", label: "Room charge" },
-  sms_otp: { href: "/notifications", label: "Email & SMS" },
-  email_otp: { href: "/notifications", label: "Email & SMS" },
-  whatsapp_otp: { href: "/notifications", label: "Email & SMS" },
-  social_login: { href: "/social-providers", label: "Social login" },
+  sms_otp: { href: "/notifications", label: "Delivery" },
+  email_otp: { href: "/notifications", label: "Delivery" },
+  whatsapp_otp: { href: "/notifications", label: "Delivery" },
+  social_login: { href: "/social-providers", label: "Identity providers" },
 };
 
 // Display order: hospitality, then the paid-access chain, then identity, then platform.

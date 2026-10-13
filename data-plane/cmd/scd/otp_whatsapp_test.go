@@ -103,7 +103,7 @@ func newWAFixture(t *testing.T, l *licstate.Manager, cfg *tenantcfg.AuthMethods)
 
 func (f *waFixture) issue(t *testing.T, dest string) *httptest.ResponseRecorder {
 	t.Helper()
-	body, _ := json.Marshal(otpIssueReq{Channel: "whatsapp", Destination: dest, IP: "10.0.0.5"})
+	body, _ := json.Marshal(otpIssueReq{Channel: "whatsapp", Destination: dest, IP: "10.0.0.5", MAC: "aa:bb:cc:dd:ee:05"})
 	rec := httptest.NewRecorder()
 	f.srv.otpIssue(rec, httptest.NewRequest(http.MethodPost, "/v1/auth/otp/issue", bytes.NewReader(body)))
 	return rec

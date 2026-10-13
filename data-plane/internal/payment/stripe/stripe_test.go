@@ -97,7 +97,7 @@ func TestInterface(t *testing.T) {
 
 func TestCreateSuccess(t *testing.T) {
 	f, srv := newFake(t, func(w http.ResponseWriter, r *http.Request, form url.Values) {
-		fmt.Fprintf(w, `{"id":"cs_test_1","object":"checkout.session","url":"https://checkout.stripe.com/c/pay/cs_test_1","expires_at":%d,"client_reference_id":%q}`, fixedNow.Add(2*time.Hour).Unix(), ref)
+		fmt.Fprintf(w, `{"id":"cs_test_1","object":"checkout.session","url":"https://checkout.stripe.com/c/pay/cs_test_1","payment_method_types":["card"],"expires_at":%d,"client_reference_id":%q}`, fixedNow.Add(2*time.Hour).Unix(), ref)
 	})
 	co, err := adapter(srv).CreateCheckout(context.Background(), req())
 	if err != nil {
@@ -146,7 +146,7 @@ func TestCreateExpiryClamped(t *testing.T) {
 		{fixedNow.Add(72 * time.Hour), fixedNow.Add(maxExpiry)},
 	} {
 		f, srv := newFake(t, func(w http.ResponseWriter, r *http.Request, form url.Values) {
-			fmt.Fprint(w, `{"id":"cs_test_1","url":"https://checkout.stripe.com/x"}`)
+			fmt.Fprint(w, `{"id":"cs_test_1","url":"https://checkout.stripe.com/x","payment_method_types":["card"]}`)
 		})
 		r := req()
 		r.ExpiresAt = tc.in
@@ -254,7 +254,7 @@ func TestCreateRefusesBeforeSending(t *testing.T) {
 	}
 	// Accepted minor-unit rules.
 	ok, srv2 := newFake(t, func(w http.ResponseWriter, r *http.Request, form url.Values) {
-		fmt.Fprint(w, `{"id":"cs_test_1","url":"https://checkout.stripe.com/x"}`)
+		fmt.Fprint(w, `{"id":"cs_test_1","url":"https://checkout.stripe.com/x","payment_method_types":["card"]}`)
 	})
 	for _, c := range []struct {
 		cur string
@@ -327,7 +327,7 @@ func intent(status, charge string) string {
 }
 
 func chargeJSON(refunded int64, disputed bool) string {
-	return fmt.Sprintf(`{"id":"ch_1","status":"succeeded","paid":true,"captured":true,"amount_captured":1050,"amount_refunded":%d,"disputed":%t}`, refunded, disputed)
+	return fmt.Sprintf(`{"id":"ch_1","status":"succeeded","paid":true,"captured":true,"payment_method_details":{"type":"card"},"amount_captured":1050,"amount_refunded":%d,"disputed":%t}`, refunded, disputed)
 }
 
 func query(sessionRef string) payment.StatusQuery {
@@ -385,9 +385,11 @@ func TestStatusMapping(t *testing.T) {
 
 func TestStatusEvents(t *testing.T) {
 	w0 := &world{
-		session:  sess("complete", "paid", intent("succeeded", chargeJSON(700, true))),
-		refunds:  `{"data":[{"id":"re_1","amount":500,"status":"succeeded","charge":"ch_1"},{"id":"re_2","amount":200,"status":"succeeded","charge":"ch_1"},{"id":"re_3","amount":100,"status":"pending","charge":"ch_1"}],"has_more":false}`,
-		disputes: `{"data":[{"id":"dp_1","amount":1050,"status":"needs_response"},{"id":"dp_2","amount":1050,"status":"warning_needs_response"}],"has_more":false}`,
+		session: sess("complete", "paid", intent("succeeded", chargeJSON(700, true))),
+		refunds: `{"data":[{"id":"re_1","amount":500,"status":"succeeded","charge":"ch_1"},{"id":"re_2","amount":200,"status":"succeeded","charge":"ch_1"},{"id":"re_3","amount":100,"status":"pending","charge":"ch_1"}],"has_more":false}`,
+		// An open dispute is a case for review (no money); a lost one is a chargeback; a won one is a case (the
+		// merchant kept the money); an inquiry is nothing.
+		disputes: `{"data":[{"id":"dp_1","amount":1050,"status":"needs_response"},{"id":"dp_2","amount":1050,"status":"warning_needs_response"},{"id":"dp_3","amount":300,"status":"lost"},{"id":"dp_4","amount":1050,"status":"won"}],"has_more":false}`,
 	}
 	f, srv := worldServer(t, w0)
 	a := adapter(srv)
@@ -404,8 +406,10 @@ func TestStatusEvents(t *testing.T) {
 		for _, e := range res.Events {
 			got[e.EventID] = e
 		}
-		if len(got) != 3 || got["re_1"].Kind != "REFUND" || got["re_1"].AmountMinor != 500 || got["re_2"].AmountMinor != 200 ||
-			got["dp_1"].Kind != "CHARGEBACK" || got["dp_1"].ProviderRef != "ch_1" {
+		if len(got) != 5 || got["re_1"].Kind != "REFUND" || got["re_1"].AmountMinor != 500 || got["re_2"].AmountMinor != 200 ||
+			got["dispute:dp_1"].Kind != "DISPUTE" || got["dispute:dp_1"].ProviderRef != "dp_1" ||
+			got["dp_3"].Kind != "CHARGEBACK" || got["dp_3"].AmountMinor != 300 || got["dp_3"].ProviderRef != "ch_1" ||
+			got["dispute:dp_4"].Kind != "DISPUTE" || got["dp_2"].Kind != "" || got["dp_1"].Kind != "" {
 			t.Fatalf("events %+v", res.Events)
 		}
 		if i == 0 {
@@ -518,4 +522,165 @@ func TestTestConnection(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 	_ = f
+}
+
+// THE SETTLEMENT AS STRIPE BOOKED IT (contract §9): read from the charge's balance transaction, the exchange
+// rate kept exactly as Stripe sent it, nothing computed. Presentment stays what was charged (USD 10.50).
+func TestCapturedStatusCarriesTheProvidersSettlementReport(t *testing.T) {
+	bt := `{"id":"txn_1","object":"balance_transaction","amount":823,"currency":"gbp","exchange_rate":0.783912,"fee":44,"net":779}`
+	ch := strings.Replace(chargeJSON(0, false), `{"id":"ch_1"`, `{"id":"ch_1","balance_transaction":`+bt, 1)
+	f, srv := worldServer(t, &world{session: sess("complete", "paid", intent("succeeded", ch))})
+	res, err := adapter(srv).QueryStatus(context.Background(), query("cs_test_1"))
+	if err != nil || res.State != payment.CheckoutCaptured {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if res.Currency != "USD" || res.AmountMinor != 1050 {
+		t.Fatalf("presentment must stay as charged: %+v", res)
+	}
+	s := res.Settlement
+	if s == nil || s.Currency != "GBP" || s.AmountMinor != 823 || s.ExchangeRate != "0.783912" || s.FeeMinor != 44 || s.NetMinor != 779 || s.BalanceRef != "txn_1" {
+		t.Fatalf("settlement report: %+v", s)
+	}
+	expanded := false
+	for _, fm := range f.forms {
+		for _, v := range fm["expand[]"] {
+			if v == "payment_intent.latest_charge.balance_transaction" {
+				expanded = true
+			}
+		}
+	}
+	if !expanded {
+		t.Fatal("the status query must ask Stripe for the balance transaction")
+	}
+	// No conversion: the rate is null and is recorded as absent, never as 1.
+	ch2 := strings.Replace(chargeJSON(0, false), `{"id":"ch_1"`, `{"id":"ch_1","balance_transaction":{"id":"txn_2","amount":1050,"currency":"usd","exchange_rate":null,"fee":61,"net":989}`, 1)
+	_, srv = worldServer(t, &world{session: sess("complete", "paid", intent("succeeded", ch2))})
+	res, _ = adapter(srv).QueryStatus(context.Background(), query("cs_test_1"))
+	if res.Settlement == nil || res.Settlement.ExchangeRate != "" || res.Settlement.Currency != "USD" {
+		t.Fatalf("same-currency report: %+v", res.Settlement)
+	}
+	// Not expanded yet (an id string): no report, not an error.
+	ch3 := strings.Replace(chargeJSON(0, false), `{"id":"ch_1"`, `{"id":"ch_1","balance_transaction":"txn_3"`, 1)
+	_, srv = worldServer(t, &world{session: sess("complete", "paid", intent("succeeded", ch3))})
+	res, err = adapter(srv).QueryStatus(context.Background(), query("cs_test_1"))
+	if err != nil || res.State != payment.CheckoutCaptured || res.Settlement != nil {
+		t.Fatalf("unexpanded balance transaction: %+v %v", res, err)
+	}
+}
+
+func TestStripeConvertsOnlyBetweenSupportedCurrencies(t *testing.T) {
+	a := New()
+	var _ payment.CurrencyConverter = a
+	for _, c := range []struct {
+		p, s string
+		ok   bool
+	}{{"USD", "GBP", true}, {"egp", "usd", true}, {"KWD", "EUR", true}, {"XYZ", "GBP", false}, {"USD", "XYZ", false}, {"XYZ", "XYZ", true}} {
+		if got := a.ConvertsPresentment(c.p, c.s); got != c.ok {
+			t.Errorf("%s->%s: %v", c.p, c.s, got)
+		}
+	}
+	if stripeRate([]byte(`"1; DROP"`)) != "" || stripeRate([]byte(`1.2e-3`)) != "1.2e-3" {
+		t.Error("the rate is kept only as a plain number")
+	}
+}
+
+// A refusal without a code carries Stripe's sentence, with anything key-like or card-like removed.
+func TestProviderCodeCarriesARedactedSentenceWhenStripeGivesNoCode(t *testing.T) {
+	got := providerCode([]byte(`{"error":{"type":"invalid_request_error","message":"In order to use Checkout, you must set an account or business name at https://dashboard.stripe.com/account."}}`))
+	if !strings.Contains(got, "message=In order to use Checkout, you must set an account or business name") {
+		t.Fatalf("got %q", got)
+	}
+	got = providerCode([]byte(`{"error":{"type":"invalid_request_error","message":"Invalid API Key provided: sk_test_51AbCdEf****E123 for card 4242 4242 4242 4242"}}`))
+	if strings.Contains(got, "sk_test") || strings.Contains(got, "4242 4242") {
+		t.Fatalf("secret material leaked: %q", got)
+	}
+	if got := providerCode([]byte(`{"error":{"type":"card_error","code":"card_declined","message":"Your card was declined."}}`)); got != "card_error/card_declined" {
+		t.Fatalf("a coded refusal stays a code: %q", got)
+	}
+}
+
+// A MANAGED PAYMENTS ACCOUNT refuses payment_method_types; the adapter retries card-only with Managed Payments
+// off, and never creates twice. Found live on PRE-LIVE with the site's Stripe TEST account.
+func TestCreateCheckoutOnAManagedPaymentsAccount(t *testing.T) {
+	for _, accepts := range []string{"card_only", "neither"} {
+		var calls int
+		f, srv := newFake(t, func(w http.ResponseWriter, r *http.Request, form url.Values) {
+			calls++
+			pmt := form.Get("payment_method_types[0]")
+			mp := form.Get("managed_payments[enabled]")
+			switch {
+			case pmt == "":
+				t.Errorf("%s: a create without payment_method_types reached Stripe: %v", accepts, form)
+				fmt.Fprint(w, `{"id":"cs_dyn","url":"https://checkout.stripe.com/c/pay/cs_dyn","payment_method_types":["card","link","klarna"]}`)
+			case mp == "":
+				w.WriteHeader(400)
+				fmt.Fprint(w, `{"error":{"type":"invalid_request_error","message":"Unsupported parameter: payment_method_types. Managed Payments, which is enabled by default on your account, handles this parameter for you."}}`)
+			case mp == "false" && accepts != "card_only":
+				w.WriteHeader(400)
+				fmt.Fprint(w, `{"error":{"type":"invalid_request_error","message":"Managed Payments cannot be disabled on this account."}}`)
+			default:
+				fmt.Fprintf(w, `{"id":"cs_test_mp","url":"https://checkout.stripe.com/c/pay/cs_test_mp","payment_method_types":["card"],"client_reference_id":%q,"expires_at":%d}`, ref, fixedNow.Add(time.Hour).Unix())
+			}
+		})
+		co, err := adapter(srv).CreateCheckout(context.Background(), req())
+		if calls != 2 {
+			t.Fatalf("%s: %d calls, want 2 (card-only, then card-only with Managed Payments off; never a third)", accepts, calls)
+		}
+		if f.requests[0].Header.Get("Idempotency-Key") != ref || f.requests[1].Header.Get("Idempotency-Key") != ref+"-v1" {
+			t.Fatalf("keys: %q %q", f.requests[0].Header.Get("Idempotency-Key"), f.requests[1].Header.Get("Idempotency-Key"))
+		}
+		for _, fm := range f.forms {
+			if fm.Get("payment_method_types[0]") != "card" || fm.Get("payment_method_types[1]") != "" || fm.Get("wallet_options[link][display]") != "never" {
+				t.Fatalf("%s: every variant must ask for card only: %v", accepts, fm)
+			}
+		}
+		if accepts == "card_only" {
+			if err != nil || co.ProviderSessionRef != "cs_test_mp" {
+				t.Fatalf("card_only: %+v %v", co, err)
+			}
+			continue
+		}
+		// Refused both ways: not created, so the client is told Card payment is unavailable. No fallback.
+		if !errors.Is(err, payment.ErrCheckoutNotCreated) {
+			t.Fatalf("neither: want ErrCheckoutNotCreated, got %+v %v", co, err)
+		}
+	}
+}
+
+// A session that would offer anything but card is expired before any client sees it, and is not created.
+func TestCreateCheckoutRefusesASessionOfferingUnapprovedMethods(t *testing.T) {
+	for _, types := range []string{`["card","link"]`, `["klarna"]`, `[]`, ``} {
+		var expired bool
+		_, srv := newFake(t, func(w http.ResponseWriter, r *http.Request, form url.Values) {
+			if strings.HasSuffix(r.URL.Path, "/expire") {
+				expired = true
+				fmt.Fprint(w, `{"id":"cs_x","status":"expired"}`)
+				return
+			}
+			pm := ""
+			if types != "" {
+				pm = `,"payment_method_types":` + types
+			}
+			fmt.Fprintf(w, `{"id":"cs_x","url":"https://checkout.stripe.com/c/pay/cs_x","client_reference_id":%q%s}`, ref, pm)
+		})
+		co, err := adapter(srv).CreateCheckout(context.Background(), req())
+		if !errors.Is(err, payment.ErrCheckoutNotCreated) || co.RedirectURL != "" {
+			t.Fatalf("%q: want not created, got %+v %v", types, co, err)
+		}
+		if !expired {
+			t.Fatalf("%q: the unapproved session was not expired", types)
+		}
+	}
+}
+
+// A capture by a method that is not approved never reports CAPTURED; it stays unresolved for review.
+func TestCaptureByAnUnapprovedMethodIsNotCaptured(t *testing.T) {
+	for _, pm := range []string{`"payment_method_details":{"type":"link"},`, `"payment_method_details":{"type":"klarna"},`, ``} {
+		ch := strings.Replace(chargeJSON(0, false), `"payment_method_details":{"type":"card"},`, pm, 1)
+		_, srv := worldServer(t, &world{session: sess("complete", "paid", intent("succeeded", ch))})
+		res, err := adapter(srv).QueryStatus(context.Background(), query("cs_test_1"))
+		if err != nil || res.State != payment.CheckoutOpen || res.ReasonCode != "payment_method_not_approved" {
+			t.Fatalf("%q: %+v %v", pm, res, err)
+		}
+	}
 }
