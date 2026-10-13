@@ -21,6 +21,7 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
 	"github.com/stayconnect/enterprise/control-plane/internal/metrics"
 	"github.com/stayconnect/enterprise/control-plane/internal/pki"
+	"github.com/stayconnect/enterprise/control-plane/internal/portaltls"
 )
 
 type Deps struct {
@@ -35,8 +36,9 @@ type Deps struct {
 	CABundlePath  string                     // CA bundle handed to appliances in offline packages
 	ApplianceBase string                     // CTRLAPI_APPLIANCE_BASE, written into activation packages
 	Version       string
-	AllowOrigins  []string // CORS allowlist for the console in development
-	CookieSecure  bool     // set true behind HTTPS
+	AllowOrigins  []string           // CORS allowlist for the console in development
+	CookieSecure  bool               // set true behind HTTPS
+	PortalTLS     *portaltls.Service // portal hostnames and certificates; nil leaves /cloud/v1/portal-tls unavailable
 
 	rateCounter api.RateCounter // tests only; production counts in Redis
 }
@@ -124,7 +126,7 @@ func NewRouter(d Deps) http.Handler {
 	})
 
 	base := &api.Base{DB: d.DB, Redis: d.Redis, AssignKey: d.AssignKey, CA: d.CA,
-		ClientValid: 90 * 24 * time.Hour, Lic: d.Licensing}
+		ClientValid: 90 * 24 * time.Hour, Lic: d.Licensing, PortalTLS: d.PortalTLS}
 	if d.ApplianceBase == "" {
 		slog.Warn("offline activation packages are DISABLED: CTRLAPI_APPLIANCE_BASE is not set. Set it to " +
 			"the appliance-facing HTTPS endpoint (a stable FQDN, not an IP) that appliances dial, then restart.")

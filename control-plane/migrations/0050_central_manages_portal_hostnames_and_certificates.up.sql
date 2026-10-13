@@ -80,7 +80,10 @@ CREATE TABLE IF NOT EXISTS portal_certificate_orders (
   attempts         integer NOT NULL DEFAULT 0,
   next_attempt_at  timestamptz NOT NULL DEFAULT now(),
   acme_order_url   text,
-  created_at       timestamptz NOT NULL DEFAULT now(),
+  -- The ACME directory that issued (or is issuing) this certificate. Staging and production certificates
+  -- coexist while a deployment is switched over; ARI and revocation must go to the CA that issued each one.
+  acme_directory_url text,
+  created_at      timestamptz NOT NULL DEFAULT now(),
   issued_at        timestamptz,
   not_before       timestamptz,
   not_after        timestamptz,
