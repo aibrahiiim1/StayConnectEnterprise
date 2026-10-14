@@ -1,0 +1,47 @@
+{
+  "transition_id": "T0230",
+  "seq": 230,
+  "timestamp": "2026-10-14T19:04:00+03:00",
+  "timestamp_derivation": "Written after the PRE-LIVE deployments and the device evidence of 2026-10-14, before the commit that introduces it (Cairo time from UTC by hand).",
+  "record_type": "HTTPS_PORTAL_PRODUCTION_CERTIFICATE_LIVE_AND_FIRST_DEVICE_ROUND",
+  "authorisation": "D49 and the 'Full HTTPS & Social Login Delivery Mission' of 2026-10-13, continued by the Product Owner on 2026-10-14 (staging evidence, production certificate and CAA, the real-device round and its two issues).",
+  "delivery": {
+    "pull_request": 214,
+    "branch": "delivery/https-production-switch",
+    "content_head": "82c0dc4a8d99e19577e206648dc976c1f4a921cc",
+    "pr_state": "OPEN at the time of this receipt."
+  },
+  "production_certificate": {
+    "staging": "Central obtained staging certificates through the Cloudflare zone; the chain verifies against Let's Encrypt's published staging root (STAGING) Pretend Pear X1 and not against the system store, so the appliance refused it as designed (now named as a staging certificate in the refusal).",
+    "switch": "2026-10-14T14:46:20Z staging -> production by the Product Owner in the Central console; RENEWAL_FORCED marked the staging certificate due at once.",
+    "issued": "2026-10-14T14:47:19Z, Let's Encrypt production (issuer YE1), serial 068FF9014F5C7C668B155972C652D8CDC86D, valid to 2027-01-12; installed on PRE-LIVE 14:47:49Z after verification against the system roots only.",
+    "caa": "NOT yet applied (the Product Owner's 'Apply CAA' in the Central console is outstanding); public DNS carries no CAA record for onegate.work.",
+    "guest_device_checks": "portal-https-e2e-test 18/18, portal-https-signin-e2e-test 12/12, portal-social-offering-test 15/15, all against the system roots."
+  },
+  "device_round": {
+    "android_and_iphone": "the login opened by itself on the HTTPS page; both fetched the RFC 8908 API right after DHCP",
+    "macbook": "packet capture of a fresh join: the Mac requested option 114 and received the HTTPS API URL, then made no captive check at all (no captive.apple.com lookup, no probe, no API request); DNS manually set to 8.8.8.8; Firefox's own check was redirected to the portal. No OneGate defect; Mac-side confirmation steps documented.",
+    "temporary_access_defect": "an iPhone in its 10-minute email-verification window received captive=true from every captive-API call and kept Mail off the Wi-Fi (60 KB crossed the window). Fixed: the API reports a live, unexhausted window as not captive with seconds-remaining; firewall admission unchanged. Guest-device test portal-temporary-access-e2e-test: mail host unreachable before, API not captive (598 s) and https://outlook.live.com reachable during the window, probe 204.",
+    "not_yet_verified": "the real-phone retest of the email-code path (E1) and the Mac-side confirmation (E2) are NOT RUN."
+  },
+  "deployment_provenance": "PRE-LIVE 172.21.60.25, read back from the installed bytes on 2026-10-14: netd dedd94a9; scd dbafb5fa; edged e9b72aab; pmsd 6a403326; portald dbafb5fa; acctd 99ba9f10; the helpers keybootstrap e9b72aab, sitemigrate and svc-run 29a6b21f; DEPLOYED_BINARIES 6/6 OK. Central unchanged (ctrlapi and console 700a3564).",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0229."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "head": "82c0dc4a",
+  "head_note": "The last CONTENT commit of PR #214 at the time of this receipt; governance commits follow it.",
+  "previous_delivery": "T0229",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
