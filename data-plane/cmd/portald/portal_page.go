@@ -707,6 +707,10 @@ type scdStatus struct {
 	TimeMode               string   `json:"time_mode"`
 	RemainingOnlineSeconds *float64 `json:"remaining_online_seconds"`
 	HardExpiry             string   `json:"hard_expiry"`
+	// VerificationWindowSeconds is set while the address holds a live temporary-access window (email-code
+	// verification) and no session: limited connectivity the captive API reports as not captive.
+	VerificationWindowSeconds *int64 `json:"verification_window_seconds"`
+	VerificationWindowBytes   *int64 `json:"verification_window_bytes"`
 }
 
 // onlinePageHref is the way back to "You're online": the page the guest came from, rebuilt from the two values

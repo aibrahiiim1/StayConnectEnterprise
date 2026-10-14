@@ -1,0 +1,37 @@
+{
+  "transition_id": "T0231",
+  "seq": 231,
+  "timestamp": "2026-10-14T19:05:30+03:00",
+  "timestamp_derivation": "Written before the commit that introduces it; that commit's time is checked against this value before it is made.",
+  "record_type": "RECEIPT_TIME_CORRECTED_FORWARD",
+  "authorisation": "The governance rule that a late receipt is corrected forward, exactly, by a later receipt (tools/validate-transition-times.sh).",
+  "timestamp_corrections": [
+    {
+      "transition_id": "T0230",
+      "recorded_timestamp": "2026-10-14T19:04:00+03:00",
+      "introducing_commit": "e2ef9f4a96b37a2a323ad0e85af3001e6ef33ec0",
+      "introducing_commit_time": "2026-10-14T19:02:41+03:00",
+      "late_by_seconds": 79,
+      "what_is_true": "The state T0230 records held no later than 2026-10-14T19:02:41+03:00, when the commit that introduced its receipt was made; the receipt's hand-typed time is 79s too late. The receipt is left exactly as written."
+    }
+  ],
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0230."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "head": "82c0dc4a",
+  "head_note": "No content commit: governance only.",
+  "previous_delivery": "T0230",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

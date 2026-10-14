@@ -438,9 +438,30 @@ func (s *Store) VerifyChain(host string, chainPEM []byte, pub crypto.PublicKey) 
 		CurrentTime:   now,
 		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}); err != nil {
+		// A LET'S ENCRYPT STAGING CHAIN is refused here exactly like any other untrusted chain -- its roots are in no
+		// trust store, which is the point of staging -- but saying so turns an alarming "unknown authority" into
+		// the expected step it is: Central is still on the staging directory (runbook ONEGATE_WORK_DNS_AND_
+		// CERTIFICATES.md section 5). Verification is unchanged; only the words differ.
+		var ua x509.UnknownAuthorityError
+		if errors.As(err, &ua) && isStagingChain(certs) {
+			return nil, fmt.Errorf("certificate chain does not verify: it is a Let's Encrypt STAGING certificate, "+
+				"which no device trusts, so it is not installed (expected until Central switches to the production "+
+				"directory): %w", err)
+		}
 		return nil, fmt.Errorf("certificate chain does not verify: %w", err)
 	}
 	return describe(host, leaf), nil
+}
+
+// isStagingChain reports whether an intermediate or the leaf's issuer is a Let's Encrypt STAGING authority (their
+// names carry the "(STAGING)" marker). A description, never a trust decision.
+func isStagingChain(certs []*x509.Certificate) bool {
+	for _, c := range certs {
+		if strings.Contains(c.Issuer.CommonName, "(STAGING)") || strings.Contains(c.Subject.CommonName, "(STAGING)") {
+			return true
+		}
+	}
+	return false
 }
 
 func describe(host string, leaf *x509.Certificate) *Installed {

@@ -1,0 +1,50 @@
+{
+  "transition_id": "T0232",
+  "seq": 232,
+  "timestamp": "2026-10-14T20:16:00+03:00",
+  "timestamp_derivation": "Written before the commit that introduces it; that commit's time is checked against this value before it is made.",
+  "record_type": "HTTPS_PORTAL_REVIEW_FINDING_FIXED_AND_PRE_LIVE_REDEPLOYED",
+  "authorisation": "D49 and the delivery mission of 2026-10-13, continued 2026-10-14 (directly related fixes, PRE-LIVE deployment).",
+  "delivery": {
+    "pull_request": 214,
+    "branch": "delivery/https-production-switch",
+    "content_head": "249ee501ca5e9a6694953dfe77db6ea6d1880711",
+    "pr_state": "OPEN at the time of this receipt."
+  },
+  "full_check_on_previous_head": {
+    "head": "3103b6864ce0",
+    "result": "PASS",
+    "gates": {
+      "governance": "success, run 38598020920",
+      "phase3-full-software-gate": "success, run 38598025645",
+      "phase4-financial-core-gate": "success, run 38598030129",
+      "phase5-post-stay-transfer-gate": "success, run 38598034539"
+    }
+  },
+  "what_was_found": [
+    "The merge was held by an unresolved automated-review conversation (P2): the temporary-access window is data-capped as well as timed, and the captive API reported only seconds-remaining, so a phone that exhausted the cap early could keep believing it was online."
+  ],
+  "delivered": [
+    "scd reports the window's remaining bytes (kernel quota reconciled every 2 s); the captive API sends RFC 8908 bytes-remaining with seconds-remaining. Unit test; guest-device test portal-temporary-access-e2e-test 9/9 on PRE-LIVE (bytes-remaining 26214400 with seconds-remaining 600); regression 18/18, 12/12, 15/15. The test's nft check no longer trips pipefail."
+  ],
+  "deployment_provenance": "PRE-LIVE 172.21.60.25 read back on 2026-10-14: scd 21b77842 (sha256 5824ecf0351828e5918ea06fbe45cdc70e70dbd799be0dc233d90d2f3abaea2d), portald 21b77842 (sha256 66ea8a67a968c4985a5e7d3711d7e47de8e03ff4251f6883ca97afa4c923c421); other services as T0230; DEPLOYED_BINARIES 6/6 OK. Central unchanged.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0231."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "head": "249ee501",
+  "head_note": "The last CONTENT commit of PR #214 at the time of this receipt; governance commits follow it.",
+  "previous_delivery": "T0231",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

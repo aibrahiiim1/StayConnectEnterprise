@@ -406,6 +406,7 @@ type captiveAPIAnswer struct {
 	UserPortalURL       string `json:"user-portal-url"`
 	VenueInfoURL        string `json:"venue-info-url,omitempty"`
 	SecondsRemaining    *int64 `json:"seconds-remaining,omitempty"`
+	BytesRemaining      *int64 `json:"bytes-remaining,omitempty"`
 	AndroidUseCustomTab int    `json:"x-android-use-custom-tabs,omitempty"`
 }
 
@@ -424,9 +425,10 @@ func (h *handler) captivePortalAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	portalURL := "https://" + host + "/"
 	ans := captiveAPIAnswer{Captive: true, UserPortalURL: portalURL}
-	if online, remaining := h.deviceOnline(r.Context(), clientIP(r)); online {
+	if online, remaining, bytesLeft := h.deviceOnline(r.Context(), clientIP(r)); online {
 		ans.Captive = false
 		ans.SecondsRemaining = remaining
+		ans.BytesRemaining = bytesLeft
 	} else {
 		ans.VenueInfoURL = portalURL
 		ans.AndroidUseCustomTab = androidCustomTabsVersion
@@ -439,30 +441,41 @@ func (h *handler) captivePortalAPI(w http.ResponseWriter, r *http.Request) {
 // deviceOnline asks scd (the same /v1/sessions/status the Status page uses) whether this address has a live
 // session, and how long it has left when that is known. Any failure answers "captive": a device told it is
 // captive opens the portal, which is the recoverable mistake; one wrongly told it is online is stranded.
-func (h *handler) deviceOnline(ctx context.Context, ip net.IP) (bool, *int64) {
+func (h *handler) deviceOnline(ctx context.Context, ip net.IP) (bool, *int64, *int64) {
 	if ip == nil || h.scd == nil {
-		return false, nil
+		return false, nil, nil
 	}
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://unix/v1/sessions/status?ip="+ip.String(), nil)
 	resp, err := h.scd.Do(req)
 	if err != nil {
-		return false, nil
+		return false, nil, nil
 	}
 	defer resp.Body.Close()
 	var st scdStatus
-	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&st) != nil || !st.Active {
-		return false, nil
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&st) != nil {
+		return false, nil, nil
+	}
+	if !st.Active {
+		// THE TEMPORARY-ACCESS WINDOW. Answering "captive" while the kernel admits the device made iOS and Android
+		// keep the Wi-Fi out of ordinary app traffic, so the mail app could not fetch the code the window exists
+		// for (PRE-LIVE, 2026-10-14: 60 KB crossed a 10-minute window). seconds-remaining makes the OS ask again
+		// when the window closes, and it is captive again from then on.
+		if st.VerificationWindowSeconds != nil && *st.VerificationWindowSeconds > 0 {
+			n := *st.VerificationWindowSeconds
+			return true, &n, st.VerificationWindowBytes
+		}
+		return false, nil, nil
 	}
 	if st.RemainingOnlineSeconds != nil && *st.RemainingOnlineSeconds >= 0 && !math.IsInf(*st.RemainingOnlineSeconds, 0) {
 		n := int64(*st.RemainingOnlineSeconds)
-		return true, &n
+		return true, &n, nil
 	}
 	if st.HardExpiry != "" {
 		if t, err := time.Parse(time.RFC3339, st.HardExpiry); err == nil {
 			if n := int64(time.Until(t).Seconds()); n >= 0 {
-				return true, &n
+				return true, &n, nil
 			}
 		}
 	}
-	return true, nil
+	return true, nil, nil
 }

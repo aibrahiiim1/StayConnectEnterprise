@@ -58,11 +58,23 @@ Create it, and **keep the page open**: the token is shown once.
 ## 5. Prove issuance on staging, then switch to production
 
 1. On the PRE-LIVE appliance's Admin Console → **Network → Portal HTTPS**, the OneGate hostname appears within
-   five minutes and a staging certificate is issued (staging certificates are not trusted by phones — expected).
+   five minutes and DNS shows **Published**. Central obtains a **staging** certificate (Central → Portal
+   certificates shows it ISSUED), but the appliance **does not install it**: staging certificates chain to Let's
+   Encrypt's staging roots, which no device or trust store accepts, and the appliance verifies every chain against
+   the system roots. It reports "a Let's Encrypt STAGING certificate … not installed (expected until Central
+   switches to the production directory)" and stays on the HTTP fallback. That is the correct result of this step:
+   the staging issuance proves the token, the zone, the DNS record, DNS-01 and the ACME account. (Measured on
+   2026-10-14: the staging chain verifies against the published staging root *(STAGING) Pretend Pear X1* and fails
+   against the system store.)
 2. In Central → **Portal certificates**, set **ACME directory = production** → Save → **Test DNS access** again
    (registers the production account) → **Apply CAA** (restricts `onegate.work` to OneGate's Let's Encrypt
    account and forbids wildcard certificates).
-3. On the appliance → **Renew now**. A trusted certificate installs; the portal state turns **HTTPS active**.
+3. Nothing else is needed: switching the directory marks every staging certificate due for renewal, so within about
+   five minutes the appliance orders a production certificate with a new key, installs it, and the portal turns
+   **HTTPS active**. (**Renew now** on the appliance does the same at once.)
+4. Optional check, from any machine: `curl -v https://<hostname>/` fails to connect from outside (the portal
+   address is private) — use a phone on the guest Wi-Fi, see
+   `docs/acceptance/HTTPS-Portal-Real-Device-Acceptance-Checklist.md`.
 
 ## 6. Revoking the token
 
