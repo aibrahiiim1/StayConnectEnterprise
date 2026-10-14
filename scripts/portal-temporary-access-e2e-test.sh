@@ -45,9 +45,11 @@ R=$(ip netns exec $N curl -s -H 'Content-Type: application/json' -d "{\"channel\
 printf '%s' "$R" | python3 -c 'import sys,json;d=json.load(sys.stdin);t=d.get("temporary_access") or {};sys.exit(0 if d.get("challenge_id") and t.get("seconds",0)>0 else 1)' \
   && ok "code sent; temporary access opened ($(printf '%s' "$R" | python3 -c 'import sys,json;t=json.load(sys.stdin)["temporary_access"];print(t.get("seconds"),"s,",t.get("data_mb"),"MB")'))" \
   || { bad "request: $(printf '%s' "$R" | head -c 300)"; exit 1; }
-inv=0; for _ in $(seq 1 10); do nft list set inet stayconnect verify_ipv4 2>/dev/null | grep -q " $CIP " && { inv=1; break; }; sleep 1; done
+# The listing is captured BEFORE it is searched: with pipefail, `nft ... | grep -q` fails whenever grep exits early
+# and nft takes SIGPIPE, even though the element is there.
+inv=0; for _ in $(seq 1 10); do vs=$(nft list set inet stayconnect verify_ipv4 2>/dev/null); grep -q " $CIP " <<<"$vs" && { inv=1; break; }; sleep 1; done
 [ "$inv" = 1 ] && ok "device admitted to the verification set (limited window)" || bad "device not in verify_ipv4"
-nft list set inet stayconnect phase3_auth_ipv4 2>/dev/null | grep -q "$CIP" && bad "device in the AUTHENTICATED set" || ok "device is NOT in the authenticated set"
+as=$(nft list set inet stayconnect phase3_auth_ipv4 2>/dev/null); grep -q " $CIP " <<<"$as" && bad "device in the AUTHENTICATED set" || ok "device is NOT in the authenticated set"
 
 echo "== what the phone sees during the window"
 A=$(ip netns exec $N curl -s "$P/captive-portal/api")
