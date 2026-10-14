@@ -1,0 +1,4 @@
+commit e2ef9f4a96b37a2a323ad0e85af3001e6ef33ec0
+Date:   Wed Oct 14 19:02:41 2026 +0300
+
+    Governance: T0230 records the production certificate live on PRE-LIVE and the first real-device round
