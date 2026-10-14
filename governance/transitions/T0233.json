@@ -1,0 +1,45 @@
+{
+  "transition_id": "T0233",
+  "seq": 233,
+  "timestamp": "2026-10-14T21:02:00+03:00",
+  "timestamp_derivation": "Written after GitHub merged PR #214 (0c8a806a, committer date 2026-10-14T21:00:16+03:00) and before the commit that introduces this receipt; that commit's time is checked against this value before it is made.",
+  "record_type": "HTTPS_PORTAL_PRODUCTION_SWITCH_MERGED_TO_MASTER",
+  "authorisation": "The delivery mission of 2026-10-13 (protected merges), continued 2026-10-14. It did NOT authorise Go-Live.",
+  "merge": {
+    "pull_request": 214,
+    "merge_commit": "0c8a806ac0441aeee8f57317948732519c565556",
+    "merged_at": "2026-10-14T18:00:16Z",
+    "parents": [
+      "90730d38523bbdfda19203639a7fe9ca70d2826d",
+      "12c6e49009535429652ab7eb5368a7498eba71bc"
+    ],
+    "tested_head": "12c6e49009535429652ab7eb5368a7498eba71bc",
+    "tree_equality": "the merge commit's tree equals the tested head's tree (e9b0d3eb8bac55b943404a96f613b662487e77e5): the merge introduced no content",
+    "full_check_on_tested_head": "PASS -- governance 38605290053, phase3-full-software-gate 38605293587, phase4-financial-core-gate 38605297287, phase5-post-stay-transfer-gate 38605300990",
+    "review_conversations": "one automated-review finding fixed (T0232), answered and resolved before the merge"
+  },
+  "deployment_provenance": "Unchanged by this record. PRE-LIVE runs scd and portald 21b77842, netd dedd94a9, edged and keybootstrap e9b72aab, pmsd 6a403326, acctd 99ba9f10, the Admin Console dedd94a9; Central runs 700a3564. Every one of those commits is now contained in master.",
+  "outstanding": "CAA for onegate.work (the Product Owner's 'Apply CAA' in the Central console); the real-phone retest of the email-code path (checklist E1) and the MacBook confirmation (E2) are NOT RUN.",
+  "cleanup": "The merged branch delivery/https-production-switch (tip 12c6e490) is deleted on GitHub and locally after this record merges, together with the branch that carries it.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0232."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "0c8a806ac0441aeee8f57317948732519c565556",
+  "base_note": "Master after the merge of PR #214; this record's lineage is built on it.",
+  "head": "0c8a806a",
+  "head_note": "No content commit: governance only. The merged round's last content commit is 249ee501 (T0232).",
+  "previous_delivery": "T0232",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
