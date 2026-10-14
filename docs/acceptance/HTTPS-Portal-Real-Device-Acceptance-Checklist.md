@@ -58,3 +58,29 @@ until a person runs them.
 | D3 | Stop Central (or block it) for 30 min | No change for guests |
 | D4 | Force fallback (operator test on PRE-LIVE only) | Portal served over HTTP; email has **code only**; social hidden; Admin Console shows the alert |
 | D5 | Restore | HTTPS returns by itself within 5 minutes; alert clears |
+
+## E. Findings from the first real-device round (2026-10-14)
+
+| Device | What happened | Evidence | Outcome |
+|---|---|---|---|
+| Android (A71) | Login opened by itself on the HTTPS page | captive API requested at 15:07:51 UTC right after DHCP | PASS (A3/A4 behaviour) |
+| iPhone | Login sheet opened by itself on the HTTPS page | captive API requested at 15:09:09 UTC right after DHCP | PASS (A1) |
+| MacBook Air | No login window after forgetting and rejoining; `http://neverssl.com` redirected to the portal | the Mac never requested the captive API and no portal page load followed its join; it had no session; Firefox's own check (`success.txt`) was redirected | UNDER INVESTIGATION -- a packet capture of a fresh join is needed to tell "macOS did not probe" from "macOS probed and did not open its window" |
+| iPhone, email code | Code sent, but the mailbox could not be opened on the same Wi-Fi | the 10-minute window carried only 60 KB; every captive-API answer during it said `captive: true` | DEFECT, fixed (below) |
+
+**Temporary internet during email verification — root cause and fix.** The appliance admitted the device for
+its window, but the RFC 8908 captive API kept answering `captive: true`, so iOS (and Android) held the Wi-Fi as
+captive and kept ordinary apps such as Mail off it. Before the option-114 fix (2026-10-13) phones relied on the
+HTTP probe, which a device in its window already bypasses, so the problem only appeared once option 114 really
+reached phones. The API now reports `captive: false` with `seconds-remaining` equal to the window while the
+device holds a live, unexhausted window and no session; when the window ends the device is captive again. The
+firewall's admission, duration, data and rate limits, device binding and abuse limits are unchanged. Deployed to
+PRE-LIVE (scd and portald dbafb5fa). Guest-device test `scripts/portal-temporary-access-e2e-test.sh`: before the
+request the mail host is unreachable and the API says captive; during the window the API says not captive
+(598 s), `https://outlook.live.com/` answers, the OS probe answers 204, and the device is in the verification set
+only.
+
+**To retest on a phone (E1):** a client that has not signed in before; request an email code; when the sheet
+shows **Done**, tap it, open the mail app ON THE SAME Wi-Fi (mobile data off), read the code; then either tap the
+link in the email (it opens the HTTPS portal and connects this device) or reopen the portal and enter the code.
+Result: NOT RUN.
