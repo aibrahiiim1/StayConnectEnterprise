@@ -259,6 +259,17 @@ Phones do not trust that CA, so this proves the machinery, not public trust.
 | Operator revocation: appliance replaces the certificate by itself | back on HTTPS in 30 s |
 | Social offering: sealed secret, button only when the callback host is canonical, authorize with HTTPS callback + PKCE S256 + nonce, forged state refused, WebView page, garden pairs | `scripts/portal-social-offering-test.sh` 15/15 (placeholder Microsoft app) |
 
-**Not yet verified** (needs the Product Owner, see the runbook and the acceptance checklist): a production
-Let's Encrypt certificate (needs the Cloudflare zone and token), real iPhone/Android behaviour, and a real
+## 13. Verified with the real Cloudflare zone and Let's Encrypt (2026-10-14)
+
+onegate.work is hosted at Cloudflare; the zone-scoped token is on Central (entered by the Product Owner).
+
+| Step | Evidence |
+|---|---|
+| Staging | Central issued staging certificates for `t89b76xm.gw.onegate.work` through Cloudflare DNS-01. The chain verifies against Let's Encrypt's published staging root *(STAGING) Pretend Pear X1* (SHA-256 `E7:05:70:A9:…:02:91:21:98`) and fails against the system store; the appliance therefore refused it, as designed, and now says it is a staging certificate. |
+| Switch to production | 14:46:20 UTC: `SETTINGS_CHANGED` staging -> production and `RENEWAL_FORCED` (the staging certificate made due at once). The production ACME account was registered. |
+| Production certificate | 14:47:19 UTC order ISSUED (counted as new against the weekly cap); installed 14:47:49 UTC after verification against the system roots only. Issuer Let's Encrypt `YE1`, serial `068FF9014F5C7C668B155972C652D8CDC86D`, valid to 2027-01-12. |
+| Public DNS | `t89b76xm.gw.onegate.work A 10.255.255.1` (Cloudflare resolver). |
+| Guest device on PRE-LIVE, system roots only | `portal-https-e2e-test.sh` 18/18; `portal-https-signin-e2e-test.sh` 12/12; `portal-social-offering-test.sh` 15/15. |
+
+**Not yet verified** (needs the Product Owner): real iPhone/Android behaviour (checklist), and a real
 social-provider round trip (needs the hotel's own provider apps).

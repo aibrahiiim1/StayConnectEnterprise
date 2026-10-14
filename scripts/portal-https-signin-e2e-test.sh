@@ -20,6 +20,9 @@ PSQL="docker exec stayconnect-pg psql -U stayconnect -d stayconnect_site -tAc"
 PROBE=http://connectivitycheck.gstatic.com/generate_204
 CAOPT=(); [ -n "${CA:-}" ] && CAOPT=(--cacert "$CA")
 NS=(); VIDS=(); ACCTS=()
+# UNIQUE DEVICE NAMES PER RUN. systemd derives a virtual interface's MAC from its NAME, so a fixed name is the same
+# "device" on every run -- and a free package that is once per device then (correctly) refuses the second run.
+R4=$(printf '%04x' $((RANDOM % 65536)))
 cleanup(){
   for v in "${VIDS[@]:-}"; do [ -n "$v" ] && curl -sk $R -b $CK -o /dev/null -H 'Content-Type: application/json' \
       -d '{"password":"admin","reason":"https sign-in e2e cleanup"}' "$B/vouchers/$v/revoke"; done
@@ -64,16 +67,16 @@ if [ -z "$VREV" ]; then echo "  SKIP no active package allows vouchers"; else
   BID=$(printf '%s' "$out" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("batch_id",""))' 2>/dev/null)
   VID=$([ -n "$BID" ] && $PSQL "SELECT id FROM iam_v2.vouchers WHERE batch_id='$BID' LIMIT 1"); VIDS+=("$VID")
   [ -n "$CODE" ] && ok "voucher issued through the Admin Console API" || bad "voucher issue: $out"
-  client hv1; c=$(online hv1); [ "$c" != 204 ] && ok "device captive before sign-in ($c)" || bad "online before sign-in"
-  loc=$(post hv1 /auth/voucher --data-urlencode "code=$CODE"); SID=$(sidof "$loc")
+  client hv$R4; c=$(online hv$R4); [ "$c" != 204 ] && ok "device captive before sign-in ($c)" || bad "online before sign-in"
+  loc=$(post hv$R4 /auth/voucher --data-urlencode "code=$CODE"); SID=$(sidof "$loc")
   [ -n "$SID" ] && ok "voucher sign-in over HTTPS -> $loc" || bad "voucher sign-in -> '$loc'"
   [ "$($PSQL "SELECT state FROM iam_v2.sessions WHERE id='$SID'")" = active ] && ok "session active" || bad "session not active"
   inset "$CIP" && ok "device enforced (nft phase3_auth_ipv4)" || bad "device not enforced"
-  c=$(online hv1); [ "$c" = 204 ] && ok "REAL INTERNET after an HTTPS sign-in (204)" || bad "no internet ($c)"
-  A=$(ip netns exec hv1 curl -s "${CAOPT[@]}" "$P/captive-portal/api"); printf '%s' "$A" | grep -q '"captive":false' \
+  c=$(online hv$R4); [ "$c" = 204 ] && ok "REAL INTERNET after an HTTPS sign-in (204)" || bad "no internet ($c)"
+  A=$(ip netns exec hv$R4 curl -s "${CAOPT[@]}" "$P/captive-portal/api"); printf '%s' "$A" | grep -q '"captive":false' \
     && ok "captive API now answers captive=false ($A)" || bad "captive API after sign-in: $A"
-  ip netns exec hv1 curl -s "${CAOPT[@]}" -o /dev/null -X POST "$P/logout"; sleep 6
-  c=$(online hv1); [ "$c" != 204 ] && ok "sign-out over HTTPS takes the device offline ($c)" || bad "still online after sign-out"
+  ip netns exec hv$R4 curl -s "${CAOPT[@]}" -o /dev/null -X POST "$P/logout"; sleep 6
+  c=$(online hv$R4); [ "$c" != 204 ] && ok "sign-out over HTTPS takes the device offline ($c)" || bad "still online after sign-out"
 fi
 
 echo "== guest account + free package over HTTPS"
@@ -83,12 +86,12 @@ if [ -z "$FREE" ]; then echo "  SKIP no active free package"; else
   AID=$(printf '%s' "$out" | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d.get("id") or (d.get("account") or {}).get("id",""))' 2>/dev/null)
   PW=$(printf '%s' "$out" | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d.get("password") or d.get("generated_password",""))' 2>/dev/null)
   ACCTS+=("$AID")
-  client ha1
-  loc=$(post ha1 /auth/credentials --data-urlencode "username=$UN" --data-urlencode "password=$PW")
+  client ha$R4
+  loc=$(post ha$R4 /auth/credentials --data-urlencode "username=$UN" --data-urlencode "password=$PW")
   [ "$loc" = "/packages" ] && ok "account authenticated over HTTPS -> package selection" || bad "account sign-in -> '$loc'"
-  loc=$(post ha1 /packages/acquire --data-urlencode "package_id=$FREE"); SID=$(sidof "$loc")
+  loc=$(post ha$R4 /packages/acquire --data-urlencode "package_id=$FREE"); SID=$(sidof "$loc")
   [ -n "$SID" ] && ok "free package acquired over HTTPS (quote -> confirm -> activation)" || bad "acquire -> '$loc'"
-  inset "$CIP" && [ "$(online ha1)" = 204 ] && ok "account device enforced and online (204)" || bad "account device offline"
+  inset "$CIP" && [ "$(online ha$R4)" = 204 ] && ok "account device enforced and online (204)" || bad "account device offline"
 fi
 [ "$($PSQL "SELECT (SELECT count(*) FROM iam_v2.pms_postings)||'/'||(SELECT count(*) FROM iam_v2.payment_transactions)")" = "$FIN0" ] \
   && ok "no PMS posting or payment happened" || bad "financial counts changed"
