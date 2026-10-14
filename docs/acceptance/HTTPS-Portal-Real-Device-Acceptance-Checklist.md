@@ -65,7 +65,7 @@ until a person runs them.
 |---|---|---|---|
 | Android (A71) | Login opened by itself on the HTTPS page | captive API requested at 15:07:51 UTC right after DHCP | PASS (A3/A4 behaviour) |
 | iPhone | Login sheet opened by itself on the HTTPS page | captive API requested at 15:09:09 UTC right after DHCP | PASS (A1) |
-| MacBook Air | No login window after forgetting and rejoining; `http://neverssl.com` redirected to the portal | the Mac never requested the captive API and no portal page load followed its join; it had no session; Firefox's own check (`success.txt`) was redirected | UNDER INVESTIGATION -- a packet capture of a fresh join is needed to tell "macOS did not probe" from "macOS probed and did not open its window" |
+| MacBook Air | No login window after forgetting and rejoining; `http://neverssl.com` redirected to the portal | packet capture of a fresh join (15:58:59 UTC): the Mac REQUESTED option 114 and OneGate's ACK CARRIED `https://<host>/captive-portal/api`; macOS then made NO captive check at all -- no lookup of `captive.apple.com`, no Apple probe on port 80, no captive-API request. Its DNS goes to `8.8.8.8` (manually configured, not the DHCP-provided resolver). The only automatic portal traffic was Firefox's own check, which OneGate redirected to the HTTPS portal. | NO ONEGATE DEFECT: macOS on this Mac did not run its captive-network detection. Likely Mac-side configuration (captive network support disabled, a management profile, or a remembered per-network choice); see E2 |
 | iPhone, email code | Code sent, but the mailbox could not be opened on the same Wi-Fi | the 10-minute window carried only 60 KB; every captive-API answer during it said `captive: true` | DEFECT, fixed (below) |
 
 **Temporary internet during email verification — root cause and fix.** The appliance admitted the device for
@@ -84,3 +84,10 @@ only.
 shows **Done**, tap it, open the mail app ON THE SAME Wi-Fi (mobile data off), read the code; then either tap the
 link in the email (it opens the HTTPS portal and connects this device) or reopen the portal and enter the code.
 Result: NOT RUN.
+
+**MacBook (E2), to confirm on the Mac itself:** run `ipconfig getpacket en0` (the reply should list option 114 with
+the HTTPS API URL) and `curl -s https://<host>/captive-portal/api` (should answer `"captive":true`). Check whether the
+Mac is managed (System Settings -> Privacy & Security -> Profiles) or has captive detection turned off
+(`defaults read /Library/Preferences/SystemConfiguration/com.apple.captive.control Active` prints 0). On a Mac
+whose detection is off, opening any `http://` site (as with neverssl.com) or the portal hostname reaches the
+HTTPS portal; that is the documented workaround. Result: NOT RUN.
