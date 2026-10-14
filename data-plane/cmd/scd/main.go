@@ -517,6 +517,21 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 		"session_id": id,
 		"active":     active,
 	}
+	// A LIVE TEMPORARY-ACCESS WINDOW (email-code verification) is real, limited connectivity: the kernel admits
+	// this address (verify_ipv4) for the window's remaining time and data. The captive-portal API reports it as
+	// "not captive" for exactly that long (RFC 8908 `captive` = whether the client can reach the network), so the
+	// phone lets its mail app use the Wi-Fi instead of holding the network as captive -- which is what stranded
+	// the code on PRE-LIVE (2026-10-14). Same admission key as the kernel: the address, on a live, unexhausted grant.
+	if !active && s.db != nil {
+		var left int64
+		if err := s.db.QueryRow(r.Context(), `SELECT GREATEST(0, EXTRACT(EPOCH FROM (expires_at - now()))::bigint)
+		      FROM iam_v2.verification_access_grants
+		     WHERE tenant_id=$1 AND site_id=$2 AND ip=$3::inet AND ended_at IS NULL
+		       AND expires_at > now() AND used_bytes < data_cap_bytes
+		     ORDER BY started_at DESC LIMIT 1`, s.tenID, s.siteID, ip.String()).Scan(&left); err == nil && left > 0 {
+			out["verification_window_seconds"] = left
+		}
+	}
 	// PHASE 6 (DARK by default): a guest on an aggregate package needs both of their clocks. With the flag
 	// off nothing is queried and nothing is added, so this endpoint answers byte-for-byte as it did before.
 	if s.p6cfg.AggregateTimeOn() {

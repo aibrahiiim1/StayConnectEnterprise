@@ -450,7 +450,18 @@ func (h *handler) deviceOnline(ctx context.Context, ip net.IP) (bool, *int64) {
 	}
 	defer resp.Body.Close()
 	var st scdStatus
-	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&st) != nil || !st.Active {
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&st) != nil {
+		return false, nil
+	}
+	if !st.Active {
+		// THE TEMPORARY-ACCESS WINDOW. Answering "captive" while the kernel admits the device made iOS and Android
+		// keep the Wi-Fi out of ordinary app traffic, so the mail app could not fetch the code the window exists
+		// for (PRE-LIVE, 2026-10-14: 60 KB crossed a 10-minute window). seconds-remaining makes the OS ask again
+		// when the window closes, and it is captive again from then on.
+		if st.VerificationWindowSeconds != nil && *st.VerificationWindowSeconds > 0 {
+			n := *st.VerificationWindowSeconds
+			return true, &n
+		}
 		return false, nil
 	}
 	if st.RemainingOnlineSeconds != nil && *st.RemainingOnlineSeconds >= 0 && !math.IsInf(*st.RemainingOnlineSeconds, 0) {

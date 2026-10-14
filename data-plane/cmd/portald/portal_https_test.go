@@ -203,12 +203,15 @@ func TestNoResponseEverCarriesHSTS(t *testing.T) {
 
 func TestTheCaptiveAPIAnswersForTheConnectingDevice(t *testing.T) {
 	var askedIP atomic.Value
-	online := false
+	online, window := false, false
 	h := httpsHandler(t, activeState, func(r *http.Request) (int, any) {
 		if r.URL.Path != "/v1/sessions/status" {
 			return 404, nil
 		}
 		askedIP.Store(r.URL.Query().Get("ip"))
+		if window {
+			return 200, map[string]any{"active": false, "verification_window_seconds": 420}
+		}
 		if !online {
 			return 200, map[string]any{"active": false}
 		}
@@ -250,6 +253,21 @@ func TestTheCaptiveAPIAnswersForTheConnectingDevice(t *testing.T) {
 	if _, ok := got["x-android-use-custom-tabs"]; ok {
 		t.Fatal("custom tabs are only asked for while captive")
 	}
+
+	// A live temporary-access window (email-code verification): the device HAS limited connectivity, so it is
+	// not captive for the window's remaining time -- otherwise the phone keeps its mail app off the Wi-Fi.
+	online, window = false, true
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, tlsReq(http.MethodGet, tCustom, "/captive-portal/api"))
+	got = nil
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if got["captive"] != false || got["seconds-remaining"] != float64(420) {
+		t.Fatalf("verification window: %v", got)
+	}
+	if _, ok := got["x-android-use-custom-tabs"]; ok {
+		t.Fatal("custom tabs are only asked for while captive")
+	}
+	window = false
 
 	// scd unreachable: captive (the recoverable mistake).
 	h.scd = &http.Client{Transport: scdFunc(func(*http.Request) (int, any) { return 0, nil })}
