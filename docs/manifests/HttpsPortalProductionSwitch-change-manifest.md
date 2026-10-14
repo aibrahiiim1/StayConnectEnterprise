@@ -2,7 +2,7 @@
 
 - **Base commit:** `90730d38523bbdfda19203639a7fe9ca70d2826d`
 - **HEAD commit:** `249ee501`
-- **Provenance (generation HEAD = inventory_head):** `249ee501ca5e9a6694953dfe77db6ea6d1880711`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `11f0c1ee30dddb359f961c476dd33ee71c2f080d`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/https-production-switch`
 - **Remote branch:** `origin/delivery/https-production-switch`
 - **Changed files:** 39
@@ -21,16 +21,16 @@
 | `data-plane/internal/portaltls/testdata/letsencrypt-staging-intermediates.pem` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | A Let's Encrypt staging chain is named as such when the appliance refuses it; the runbook says the staging step ends there |
 | `docs/acceptance/HTTPS-Portal-Real-Device-Acceptance-Checklist.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Acceptance: the MacBook made no captive check at all (packet evidence); no OneGate defect, and how to confirm on the Mac |
 | `docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Evidence: the production certificate on PRE-LIVE, the staging proof, and unique test-device names per run |
-| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0231 corrects T0230's hand-typed time forward (79 s after its commit) |
-| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0231 corrects T0230's hand-typed time forward (79 s after its commit) |
-| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0231 corrects T0230's hand-typed time forward (79 s after its commit) |
-| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0231 corrects T0230's hand-typed time forward (79 s after its commit) |
-| `docs/manifests/HttpsPortalProductionSwitch-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | The export packs and the change manifest carry the T0231 state |
+| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0232 records the review finding fixed and PRE-LIVE redeployed |
+| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0232 records the review finding fixed and PRE-LIVE redeployed |
+| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0232 records the review finding fixed and PRE-LIVE redeployed |
+| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0232 records the review finding fixed and PRE-LIVE redeployed |
+| `docs/manifests/HttpsPortalProductionSwitch-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: T0232 records the review finding fixed and PRE-LIVE redeployed |
 | `docs/runbooks/ONEGATE_WORK_DNS_AND_CERTIFICATES.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | A Let's Encrypt staging chain is named as such when the appliance refuses it; the runbook says the staging step ends there |
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0231 state |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0231 state |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0231 state |
-| `exports/chatgpt/phase-evidence/GIT_STAT_5d52a3d0.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | The export packs and the change manifest carry the T0231 state |
+| `exports/chatgpt/phase-evidence/GIT_STAT_11f0c1ee.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_67ff2a50.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | The export packs and the change manifest carry the T0230 state |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0231 state |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0231 state |
@@ -38,17 +38,17 @@
 | `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0231 state |
 | `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0231 state |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0231 state |
-| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0231 corrects T0230's hand-typed time forward (79 s after its commit) |
+| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0232 records the review finding fixed and PRE-LIVE redeployed |
 | `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0231 state |
-| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0231 corrects T0230's hand-typed time forward (79 s after its commit) |
+| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0232 records the review finding fixed and PRE-LIVE redeployed |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0231 state |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0231 state |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0231 state |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0231 state |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0231 corrects T0230's hand-typed time forward (79 s after its commit) |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0232 records the review finding fixed and PRE-LIVE redeployed |
 | `governance/transitions/T0230.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0230 records the production certificate live on PRE-LIVE and the first real-device round |
 | `governance/transitions/T0231.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0231 corrects T0230's hand-typed time forward (79 s after its commit) |
-| `governance/transitions/T0232.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | (no commit subject in range) |
+| `governance/transitions/T0232.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0232 records the review finding fixed and PRE-LIVE redeployed |
 | `scripts/portal-https-signin-e2e-test.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Evidence: the production certificate on PRE-LIVE, the staging proof, and unique test-device names per run |
 | `scripts/portal-temporary-access-e2e-test.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | The temporary-access test captures the nft listing before searching it (pipefail + grep -q) |
 
@@ -60,19 +60,19 @@
  data-plane/cmd/scd/main.go                         |  21 ++++
  data-plane/internal/portaltls/portaltls.go         |  21 ++++
  .../internal/portaltls/staging_internal_test.go    |  31 +++++
- .../testdata/letsencrypt-staging-intermediates.pem |  63 ++++++++++
- ...TTPS-Portal-Real-Device-Acceptance-Checklist.md |  38 ++++++
+ .../testdata/letsencrypt-staging-intermediates.pem |  63 +++++++++++
+ ...TTPS-Portal-Real-Device-Acceptance-Checklist.md |  38 +++++++
  .../ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md       |  15 ++-
  .../StayConnect-IAM-Phase0-Contract.md             |   4 +-
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   4 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   4 +-
  docs/context/StayConnect-IAM-Handoff.md            |   4 +-
- .../HttpsPortalProductionSwitch-change-manifest.md | 128 +++++++++++++++++++++
+ .../HttpsPortalProductionSwitch-change-manifest.md | 125 +++++++++++++++++++++
  docs/runbooks/ONEGATE_WORK_DNS_AND_CERTIFICATES.md |  16 ++-
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 350584 -> 350645 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 156199 -> 156200 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44029 -> 44036 bytes
- .../chatgpt/phase-evidence/GIT_STAT_5d52a3d0.txt   |   4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 350584 -> 350640 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 156199 -> 156194 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44029 -> 44032 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_11f0c1ee.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_67ff2a50.txt   |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   4 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
@@ -90,26 +90,35 @@
  governance/project-state.json                      |  40 +++----
  governance/transitions/T0230.json                  |  47 ++++++++
  governance/transitions/T0231.json                  |  37 ++++++
- governance/transitions/T0232.json                  |  50 ++++++++
+ governance/transitions/T0232.json                  |  50 +++++++++
  scripts/portal-https-signin-e2e-test.sh            |  23 ++--
  scripts/portal-temporary-access-e2e-test.sh        |  65 +++++++++++
- 39 files changed, 674 insertions(+), 112 deletions(-)
+ 39 files changed, 671 insertions(+), 112 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-M  docs/architecture/StayConnect-IAM-Phase0-Contract.md
-M  docs/architecture/StayConnect-IAM-Phase1A-Plan.md
-M  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
-M  docs/context/StayConnect-IAM-Handoff.md
-M  exports/chatgpt/stayconnectenterprise/00-START-HERE.md
-M  exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md
-M  governance/project-state.json
-A  governance/transitions/T0232.json
+M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
+M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
+M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
+A  exports/chatgpt/phase-evidence/GIT_STAT_11f0c1ee.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_5d52a3d0.txt
+M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
+M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/MANIFEST.md
+M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md
+M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 11f0c1ee Governance: T0232 records the review finding fixed and PRE-LIVE redeployed
 HISTORICAL: 249ee501 The temporary-access test captures the nft listing before searching it (pipefail + grep -q)
 HISTORICAL: 21b77842 The captive API reports the temporary window's remaining data (RFC 8908 bytes-remaining) as well as its time
 HISTORICAL: 3103b686 The export packs and the change manifest carry the T0231 state
