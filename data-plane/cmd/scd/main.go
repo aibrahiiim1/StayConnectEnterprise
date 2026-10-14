@@ -522,14 +522,20 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 	// "not captive" for exactly that long (RFC 8908 `captive` = whether the client can reach the network), so the
 	// phone lets its mail app use the Wi-Fi instead of holding the network as captive -- which is what stranded
 	// the code on PRE-LIVE (2026-10-14). Same admission key as the kernel: the address, on a live, unexhausted grant.
+	// The window is limited by DATA as well as time, so the remaining bytes travel with it (RFC 8908
+	// bytes-remaining): a phone that exhausts the cap early must not keep believing it is online. used_bytes is
+	// reconciled from the kernel's quota object every 2 s (reconcileVerifyAccess), which also ends an exhausted
+	// window.
 	if !active && s.db != nil {
-		var left int64
-		if err := s.db.QueryRow(r.Context(), `SELECT GREATEST(0, EXTRACT(EPOCH FROM (expires_at - now()))::bigint)
+		var left, bytesLeft int64
+		if err := s.db.QueryRow(r.Context(), `SELECT GREATEST(0, EXTRACT(EPOCH FROM (expires_at - now()))::bigint),
+		             GREATEST(0, data_cap_bytes - used_bytes)
 		      FROM iam_v2.verification_access_grants
 		     WHERE tenant_id=$1 AND site_id=$2 AND ip=$3::inet AND ended_at IS NULL
 		       AND expires_at > now() AND used_bytes < data_cap_bytes
-		     ORDER BY started_at DESC LIMIT 1`, s.tenID, s.siteID, ip.String()).Scan(&left); err == nil && left > 0 {
+		     ORDER BY started_at DESC LIMIT 1`, s.tenID, s.siteID, ip.String()).Scan(&left, &bytesLeft); err == nil && left > 0 && bytesLeft > 0 {
 			out["verification_window_seconds"] = left
+			out["verification_window_bytes"] = bytesLeft
 		}
 	}
 	// PHASE 6 (DARK by default): a guest on an aggregate package needs both of their clocks. With the flag

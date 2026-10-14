@@ -210,7 +210,7 @@ func TestTheCaptiveAPIAnswersForTheConnectingDevice(t *testing.T) {
 		}
 		askedIP.Store(r.URL.Query().Get("ip"))
 		if window {
-			return 200, map[string]any{"active": false, "verification_window_seconds": 420}
+			return 200, map[string]any{"active": false, "verification_window_seconds": 420, "verification_window_bytes": 26214400}
 		}
 		if !online {
 			return 200, map[string]any{"active": false}
@@ -261,8 +261,8 @@ func TestTheCaptiveAPIAnswersForTheConnectingDevice(t *testing.T) {
 	srv.ServeHTTP(rec, tlsReq(http.MethodGet, tCustom, "/captive-portal/api"))
 	got = nil
 	_ = json.Unmarshal(rec.Body.Bytes(), &got)
-	if got["captive"] != false || got["seconds-remaining"] != float64(420) {
-		t.Fatalf("verification window: %v", got)
+	if got["captive"] != false || got["seconds-remaining"] != float64(420) || got["bytes-remaining"] != float64(26214400) {
+		t.Fatalf("verification window: time AND data remaining must be reported: %v", got)
 	}
 	if _, ok := got["x-android-use-custom-tabs"]; ok {
 		t.Fatal("custom tabs are only asked for while captive")

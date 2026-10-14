@@ -54,6 +54,7 @@ A=$(ip netns exec $N curl -s "$P/captive-portal/api")
 python3 - "$A" <<'EOF' && ok "captive API: NOT captive during the window, seconds-remaining set ($A)" || bad "captive API during the window: $A"
 import sys, json
 d = json.loads(sys.argv[1]); assert d["captive"] is False and 0 < d["seconds-remaining"] <= 3600 and "x-android-use-custom-tabs" not in d
+assert 0 < d["bytes-remaining"] <= 1 << 31, "bytes-remaining (RFC 8908) must accompany a data-capped window"
 EOF
 C=$(ip netns exec $N curl -s -o /dev/null -w '%{http_code}' -m 15 "https://$MAILHOST/")
 case "$C" in 2??|3??) ok "the mail service is reachable through the window (https://$MAILHOST/ -> $C)";; *) bad "mail service not reachable ($C)";; esac
