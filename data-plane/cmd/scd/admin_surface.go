@@ -55,7 +55,7 @@ const (
 // EVERY ENTRY WAS DERIVED FROM A CALLER, not from the route's name. The callers were enumerated across
 // cmd/portald, cmd/acctd, cmd/netd, cmd/pmsd and deploy/ before this list existed:
 //
-//	portald          commerce, sessions/{activate,authorize*,status}, auth/otp/issue, auth/social/start,
+//	portald          commerce, sessions/{activate,authorize*,status}, auth/otp/issue, auth/social/start, devices/*,
 //	                 tenant/{auth-methods,branding}, phase3/{access/status,auth/pms/*}, phase5/*, phase6/*
 //	acctd (root)     sessions/revoke -- quota enforcement revoking a live session
 //	netd (root)      health
@@ -89,6 +89,10 @@ var guestPrefixes = []string{
 	"/v1/phase3/auth/",
 	"/v1/phase5/",
 	"/v1/phase6/",
+	// A client's devices on their package (client_devices.go, 0118): portald lists them and releases or replaces
+	// one. Each acts only on the package proven by the requesting device (a live session on it, or that device's
+	// own fresh sign-in), through iam_v2.client_device_action, which records every attempt.
+	"/v1/devices/",
 	// The portal's HTTPS state (portal_tls.go): portald polls it to decide whether to redirect to HTTPS and which
 	// certificate to serve. It answers hostnames and a reason -- nothing secret, nothing that changes anything.
 	// Its siblings under /v1/portal/tls/ (kick, renew) are administrative and listed below.

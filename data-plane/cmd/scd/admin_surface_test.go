@@ -111,6 +111,9 @@ func TestTheGuestSurfaceIsExactlyWhatPortaldNeeds(t *testing.T) {
 		"/v1/phase5/poststay/convert",
 		"/v1/phase6/devices/list",
 		"/v1/phase6/devices/release",
+		"/v1/devices/list",
+		"/v1/devices/release",
+		"/v1/devices/replace",
 		"/v1/portal/tls-state",
 	} {
 		if classifyRoute(path) != guestRoute {

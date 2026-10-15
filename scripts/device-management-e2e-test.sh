@@ -106,9 +106,11 @@ for i in 2 3; do
   get $dev /devices/replace >/dev/null; r=$(post $dev /devices/replace --data-urlencode "device_id=$(firstopt $dev)")
   waiton $dev && ok "change $i of 3 today: online" || bad "change $i -> $r"
 done
-post $A2 /auth/credentials --data-urlencode "username=$USER" --data-urlencode "password=$UPW" >/dev/null; get $A2 /devices/replace >/dev/null
-says $A2 "today's limit" && ok "a 4th change today is refused with the daily-limit message" || bad "no daily limit"
-[ "$(online $A2)" != 204 ] && ok "and the device stays offline" || bad "4th change gave Internet"
+# After change 3 device 2 holds the place: device 1 asks for a 4th.
+post $A1 /auth/credentials --data-urlencode "username=$USER" --data-urlencode "password=$UPW" >/dev/null; get $A1 /devices/replace >/dev/null
+says $A1 "limit for changing devices" && ok "a 4th change today is refused with the daily-limit message" || bad "no daily limit"
+r=$(post $A1 /devices/replace --data-urlencode "device_id=$(devid $A2)")
+[ "$(online $A1)" != 204 ] && [ "$(online $A2)" = 204 ] && ok "and nothing moved: device 1 offline, device 2 online" || bad "4th change moved the place ($r)"
 
 echo "== B. $MULTI_N-device package (voucher): join, then replace at the limit"
 CODE=$(admin -d "{\"package_revision_id\":\"$MULTI_REV\",\"count\":1,\"note\":\"og-dm-$R4\"}" $ED/vouchers/issue | python3 -c 'import json,sys;d=json.load(sys.stdin);c=d.get("codes") or [v.get("code") for v in d.get("vouchers",[])];print(c[0] if c else "")')
@@ -133,7 +135,7 @@ others=0; for i in $(seq 1 $((MULTI_N - 1))); do [ "$(online ${B[$i]})" = 204 ] 
 [ "$(ENTOF "voucher_id='$VID'")" = "$EV" ] && ok "same entitlement, same window" || bad "the voucher's package changed"
 
 echo "== C. staff: find the device, prepare it for a new sign-in test"
-D=$(devid $A2)
+D=$(devid $A2)   # device 2 holds the place now and is online
 admin -o /tmp/dm-$R4.json -H "X-Device-Search: $USER" $ED/client-devices
 python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));sys.exit(0 if any(x["id"]==sys.argv[2] for x in d["data"]) else 1)' /tmp/dm-$R4.json "$D" \
   && ok "staff find the device by the account name" || bad "device not found by account"
