@@ -217,6 +217,10 @@ func (h *handler) httpFront(next http.Handler) http.Handler {
 		}
 		origin := "https://" + st.Canonical
 		if probePaths[r.URL.Path] {
+			// Answered here, before the router and its request log, so it is logged here: without this line a
+			// phone that checked the network and one that never did look the same in the journal, and "why did
+			// the sign-in sheet not open" cannot be answered from it. The address only -- no headers, no MAC.
+			slog.Info("captive probe redirected to the HTTPS portal", "path", r.URL.Path, "from", clientIPString(r))
 			http.Redirect(w, r, origin+"/", http.StatusFound)
 			return
 		}
@@ -471,4 +475,12 @@ func (h *handler) deviceOnline(ctx context.Context, ip net.IP) (bool, *int64) {
 		}
 	}
 	return true, nil
+}
+
+// clientIPString is the connection's address for a log line ("" when it cannot be read).
+func clientIPString(r *http.Request) string {
+	if ip := clientIP(r); ip != nil {
+		return ip.String()
+	}
+	return ""
 }
