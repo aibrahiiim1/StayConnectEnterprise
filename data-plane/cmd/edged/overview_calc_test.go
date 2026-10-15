@@ -551,3 +551,19 @@ func TestTheHandlerConsultsTheBlockKeys(t *testing.T) {
 		}
 	}
 }
+
+// A PACKAGE NOBODY CAN BUY BY CARD is raised, with the two currencies and what to change.
+func TestAttentionRaisesAPackageNobodyCanBuyByCard(t *testing.T) {
+	got := deriveAttention(attentionInput{CardUnsellable: []attentionPackage{
+		{Name: "OneDay", Currency: "USD", AccountCurrency: "GBP"},
+		{Name: "Week", Currency: "EUR", NoAccount: true},
+	}})
+	if len(got) != 2 || got[0].Severity != "warn" || got[0].Title != "OneDay cannot be bought by card" ||
+		!strings.Contains(got[0].Detail, "priced in USD") || !strings.Contains(got[0].Detail, "settles GBP") ||
+		got[0].Href != "/payment-methods" {
+		t.Fatalf("attention = %+v", got)
+	}
+	if !strings.Contains(got[1].Detail, "no active default card account") {
+		t.Fatalf("no account = %+v", got[1])
+	}
+}

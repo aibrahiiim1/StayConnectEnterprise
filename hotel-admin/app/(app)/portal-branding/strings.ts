@@ -271,6 +271,8 @@ export const PORTAL_STRINGS: PortalString[] = [
   { group: "Replacing a device", key: "rep.btn", english: "Use this device instead" },
   { group: "Replacing a device", key: "rep.unavailable", english: "Your devices can't be shown right now. Please sign in again." },
   { group: "Packages", key: "pkg.signout", english: "Not you? Sign out" },
+  { group: "Packages", key: "pkg.voucher.title", english: "Have a voucher code from the site team? Enter it here" },
+  { group: "Packages", key: "pkg.voucher.btn", english: "Use voucher" },
   { group: "Sign-in failed page", key: "errpage.title", english: "Sign-in didn't work" },
   { group: "Sign-in failed page", key: "errpage.social", english: "We couldn't finish signing you in with that account. Please try again, or choose another way to sign in.", module: "social_login" },
   { group: "Sign-in failed page", key: "errpage.back", english: "Back to sign-in" },

@@ -523,6 +523,9 @@ func (s *server) reportsOverview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	attIn := s.moduleScopedAttention(ctx, attentionInputFrom(out))
+	if can("payment-providers") {
+		attIn.CardUnsellable = s.packageSaleIssues(ctx)
+	}
 	if can("portal-https") {
 		if c, ok := s.portalHTTPSHealth(ctx); ok {
 			attIn.PortalHTTPS = &c
@@ -1481,4 +1484,47 @@ func twoDigit(i int) string {
 		return "0" + strconv.Itoa(i)
 	}
 	return strconv.Itoa(i)
+}
+
+// packageSaleIssues lists live packages sold by card that cannot be paid by card here, by the rule scd applies
+// when it lists packages (siteAcquisitionMethods): only the DEFAULT ACTIVE card account settles, in its own
+// currency, unless it is marked provider-converts. Raised only while card payment is in effect at this site.
+func (s *server) packageSaleIssues(ctx context.Context) []attentionPackage {
+	if s.db == nil || s.tenantID == "" || s.siteID == "" {
+		return nil
+	}
+	if rep, ok := s.moduleReport(ctx); !ok || !rep.Modules["card_payment"].Effective {
+		return nil
+	}
+	rows, err := s.db.Query(ctx, `
+	    WITH acct AS (
+	        SELECT upper(trim(COALESCE(a.currency,''))) AS cur,
+	               COALESCE((SELECT c.provider_converts FROM iam_v2.payment_account_conversion c WHERE c.account_id = a.id), false) AS conv
+	          FROM iam_v2.payment_provider_accounts a
+	         WHERE a.tenant_id = $1 AND a.site_id = $2 AND a.status = 'ACTIVE' AND a.is_default
+	         LIMIT 1)
+	    SELECT COALESCE(NULLIF(r.display->>'name',''), p.code), upper(trim(r.currency)),
+	           COALESCE((SELECT cur FROM acct), ''), COALESCE((SELECT conv FROM acct), false),
+	           NOT EXISTS (SELECT 1 FROM acct)
+	      FROM iam_v2.internet_packages p
+	      JOIN iam_v2.internet_package_revisions r ON r.id = p.current_revision_id
+	     WHERE p.tenant_id = $1 AND p.site_id = $2 AND p.active AND NOT p.is_system
+	       AND r.price_minor > 0 AND 'ONLINE_PAYMENT' = ANY(r.settlement_methods)
+	     ORDER BY 1`, s.tenantID, s.siteID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []attentionPackage
+	for rows.Next() {
+		var p attentionPackage
+		var converts bool
+		if rows.Scan(&p.Name, &p.Currency, &p.AccountCurrency, &converts, &p.NoAccount) != nil {
+			continue
+		}
+		if p.NoAccount || (!converts && p.AccountCurrency != "" && p.AccountCurrency != p.Currency) {
+			out = append(out, p)
+		}
+	}
+	return out
 }

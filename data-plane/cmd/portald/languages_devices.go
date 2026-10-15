@@ -18,6 +18,8 @@ var deviceStrings = map[string]map[string]string{
 		"rep.btn":            "Use this device instead",
 		"rep.unavailable":    "Your devices can't be shown right now. Please sign in again.",
 		"pkg.signout":        "Not you? Sign out",
+		"pkg.voucher.title":  "Have a voucher code from the site team? Enter it here",
+		"pkg.voucher.btn":    "Use voucher",
 	},
 	"ar": {
 		"dev.slots":          "{n} من {max} أجهزة قيد الاستخدام",
@@ -30,6 +32,8 @@ var deviceStrings = map[string]map[string]string{
 		"rep.btn":            "استخدم هذا الجهاز بدلًا منه",
 		"rep.unavailable":    "لا يمكن عرض أجهزتك الآن. يرجى تسجيل الدخول مرة أخرى.",
 		"pkg.signout":        "لست أنت؟ تسجيل الخروج",
+		"pkg.voucher.title":  "لديك رمز قسيمة من فريق الموقع؟ أدخله هنا",
+		"pkg.voucher.btn":    "استخدام القسيمة",
 	},
 	"de": {
 		"dev.slots":          "{n} von {max} Geräten in Verwendung",
@@ -42,6 +46,8 @@ var deviceStrings = map[string]map[string]string{
 		"rep.btn":            "Stattdessen dieses Gerät verwenden",
 		"rep.unavailable":    "Ihre Geräte können gerade nicht angezeigt werden. Bitte melden Sie sich erneut an.",
 		"pkg.signout":        "Nicht Sie? Abmelden",
+		"pkg.voucher.title":  "Haben Sie einen Gutscheincode vom Team vor Ort? Geben Sie ihn hier ein",
+		"pkg.voucher.btn":    "Gutschein verwenden",
 	},
 	"fr": {
 		"dev.slots":          "{n} appareils sur {max} utilisés",
@@ -54,6 +60,8 @@ var deviceStrings = map[string]map[string]string{
 		"rep.btn":            "Utiliser cet appareil à la place",
 		"rep.unavailable":    "Vos appareils ne peuvent pas être affichés pour le moment. Veuillez vous reconnecter.",
 		"pkg.signout":        "Ce n’est pas vous ? Se déconnecter",
+		"pkg.voucher.title":  "Vous avez un code de bon de l’équipe sur place ? Saisissez-le ici",
+		"pkg.voucher.btn":    "Utiliser le bon",
 	},
 	"it": {
 		"dev.slots":          "{n} dispositivi su {max} in uso",
@@ -66,6 +74,8 @@ var deviceStrings = map[string]map[string]string{
 		"rep.btn":            "Usa invece questo dispositivo",
 		"rep.unavailable":    "Non è possibile mostrare i tuoi dispositivi ora. Accedi di nuovo.",
 		"pkg.signout":        "Non sei tu? Esci",
+		"pkg.voucher.title":  "Hai un codice voucher dallo staff? Inseriscilo qui",
+		"pkg.voucher.btn":    "Usa il voucher",
 	},
 	"ru": {
 		"dev.slots":          "Используется устройств: {n} из {max}",
@@ -78,6 +88,8 @@ var deviceStrings = map[string]map[string]string{
 		"rep.btn":            "Использовать это устройство вместо него",
 		"rep.unavailable":    "Сейчас не удаётся показать ваши устройства. Пожалуйста, войдите снова.",
 		"pkg.signout":        "Не вы? Выйти",
+		"pkg.voucher.title":  "Есть код ваучера от персонала? Введите его здесь",
+		"pkg.voucher.btn":    "Использовать ваучер",
 	},
 }
 

@@ -608,6 +608,8 @@ type packagesView struct {
 	Identity string
 	// FreeUsed: a free package was withheld only because this Client already had it (contract §6.1).
 	FreeUsed bool
+	// VoucherCTA: the site takes vouchers, so the page offers the code field (a voucher is never in the list).
+	VoucherCTA bool
 	// Error is why the client's last choice did not go through, in their language, shown ABOVE the same
 	// choices: a refused acquisition sends the client back to package selection, never to the sign-in page.
 	Error string

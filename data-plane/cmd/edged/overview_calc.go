@@ -539,6 +539,15 @@ type attentionInput struct {
 	// PortalHTTPS is the portal_https check (portal_https_health.go), set only for a caller who may read
 	// portal-https. nil means not known or not permitted, and raises nothing.
 	PortalHTTPS *portalHTTPSCheck
+	// CardUnsellable: live packages sold by card that no client can actually pay by card (packageSaleIssues).
+	CardUnsellable []attentionPackage
+}
+
+// attentionPackage is a live package offered by card whose card sale cannot complete: no active default card
+// account, or one that settles another currency and does not convert.
+type attentionPackage struct {
+	Name, Currency, AccountCurrency string
+	NoAccount                       bool
 }
 
 var serviceLabels = map[string]string{
@@ -607,6 +616,23 @@ func deriveAttention(in attentionInput) []attentionItem {
 				Title: serviceLabel(s.Name) + " is recovering",
 				Href:  "/health", Action: "Open diagnostics"})
 		}
+	}
+	// A PACKAGE NOBODY CAN BUY BY CARD. The portal offers a priced package only by a method the client can
+	// complete; card is never converted, so a package in a currency the card account does not settle is simply
+	// not offered -- and a client with no voucher and no room is left with nothing (found on PRE-LIVE
+	// 2026-10-15: OneDay in USD, the card account in GBP). The operator is told, with what to fix.
+	for _, p := range in.CardUnsellable {
+		detail := "Clients cannot buy it by card, so without a voucher or a room sign-in they are offered nothing."
+		if p.NoAccount {
+			detail = "There is no active default card account. " + detail
+		} else {
+			detail = "It is priced in " + p.Currency + " but the default card account settles " + p.AccountCurrency +
+				" and does not convert. " + detail + " Price it in " + p.AccountCurrency +
+				", or use a card account that settles " + p.Currency + "."
+		}
+		add(attentionItem{ID: "package-card:" + p.Name, Severity: "warn",
+			Title:  p.Name + " cannot be bought by card",
+			Detail: detail, Href: "/payment-methods", Action: "Open payment methods"})
 	}
 	if in.KeaKnown && in.KeaConfigured && !in.KeaHealthy {
 		add(attentionItem{ID: "dhcp-unhealthy", Severity: "err",

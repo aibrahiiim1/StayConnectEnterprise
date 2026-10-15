@@ -89,3 +89,23 @@ func TestTheLandingPageContinuesAnUnfinishedJourneyAtPackageSelection(t *testing
 		t.Fatalf("no session: landing page: %d", rec.Code)
 	}
 }
+
+// NOTHING TO BUY IS NOT A SIGN-OUT. A client whose free allowance is spent and who has no package they can
+// complete stays on the package page, signed in, told why -- with the voucher code field when the site takes
+// vouchers, and Sign out -- instead of being dropped on the sign-in page under an error.
+func TestNothingToBuyStaysSignedInAndOffersAVoucher(t *testing.T) {
+	h := &handler{}
+	rec := httptest.NewRecorder()
+	h.renderPackages(rec, httptest.NewRequest(http.MethodGet, "/packages", nil), nil, "", "a•••@example.com", false,
+		"You've used your free access here, and no other package is available for you right now. Please contact the site team.")
+	body := rec.Body.String()
+	if !strings.Contains(body, "used your free access here") || !strings.Contains(body, `action="/logout"`) {
+		t.Fatalf("the reason and Sign out must be on the page: %s", body[:min(300, len(body))])
+	}
+	if strings.Contains(body, `name="username"`) || strings.Contains(body, `id="form-voucher"`) {
+		t.Fatal("the client is still signed in: no sign-in form")
+	}
+	if strings.Contains(body, `action="/auth/voucher"`) {
+		t.Fatal("no voucher field when the site's methods are unknown")
+	}
+}

@@ -1717,6 +1717,11 @@ const packagesHTML = guestHead + `
     <button class="choice" type="submit"><span class="c-text"><span class="c-name" dir="auto">{{.Name}}</span>{{if .Detail}}<span class="c-detail">{{.Detail}}</span>{{end}}<span class="c-detail c-price" dir="auto">{{.Price}} · {{index $.T .MethodKey}}</span></span>` + iconChevNext + `</button>
   </form>{{end}}
   </div>
+  {{if .VoucherCTA}}<form method="post" action="/auth/voucher" class="voucher-cta">
+    <label class="field-label" for="pkg-voucher">{{index .T "pkg.voucher.title"}}</label>
+    <input id="pkg-voucher" name="code" type="text" autocomplete="one-time-code" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="32" required>
+    <button class="btn btn--outline" type="submit">{{index .T "pkg.voucher.btn"}}</button>
+  </form>{{end}}
   <!-- A way back to the sign-in page: signing out ends this sign-in (main.go endPortalSignIn). -->
   <form method="post" action="/logout"><button class="link" type="submit">{{index .T "pkg.signout"}}</button></form>
 </div>` + guestFoot + `
