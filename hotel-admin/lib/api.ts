@@ -200,6 +200,30 @@ export type GuestAccount = {
   suspended?: boolean;
 };
 
+/** One account's management view: edged GET /guest-accounts/{id}/manage. */
+export type GuestAccountDevice = {
+  mac: string; status: "AUTHORIZED" | "DISCONNECTED" | string; online: boolean;
+  first_authorized?: string | null; last_authorized?: string | null;
+};
+export type GuestAccountPackage = {
+  id: string; status: string; terminal_reason?: string | null; package_name: string;
+  activated_at?: string | null; window_ends_at?: string | null; terminated_at?: string | null;
+  consumed_data_bytes: number; data_quota_bytes?: number | null; consumed_online_seconds: number;
+  max_devices?: number | null; devices: GuestAccountDevice[];
+};
+export type GuestAccountManage = {
+  account: GuestAccount;
+  entitlements: GuestAccountPackage[];
+  entitlements_total: number;
+  removed: boolean;
+  // What Remove does: "delete" (never used: the row goes) or "remove" (history kept, address freed).
+  removal: "delete" | "remove";
+};
+/** What DELETE /guest-accounts/{id} did. */
+export type GuestAccountRemoveResp = {
+  status: "deleted" | "removed"; history_kept?: boolean; disconnected_sessions?: number; disconnect_failures?: number;
+};
+
 /** Email accounts' terms (contract §6): edged GET/PUT /self-service-settings. Bounds come from the server. */
 export type SelfServiceSettings = {
   verification_required: boolean;

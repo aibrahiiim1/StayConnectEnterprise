@@ -125,6 +125,26 @@ that portald keeps in an HttpOnly cookie; it is the "recently authenticated" pro
 * Admin (edged): `GET/PUT /v1/admin/self-service-settings` via the definer functions; accounts list shows
   self-registered + verification state; `POST /v1/admin/accounts/{id}/resend-verification`.
 
+### 7.1 Staff management of an account (Client accounts → Manage)
+
+* `GET /edge/v1/guest-accounts/{id}/manage`: the account, its verification state, its ten most recent packages and
+  the devices on each (online, holding a slot, released).
+* **Remove** (`DELETE /edge/v1/guest-accounts/{id}`): an account that was never used is **deleted**. One with
+  packages or sign-ins is **removed**: its devices are disconnected, it is disabled, and its username moves to
+  `<username>.removed-<id8>.invalid` (RFC 2606 `.invalid`, so no mail is ever sent to it; scd retires its queued
+  emails). The address can register again at once, and every purchase, entitlement and session keeps pointing at
+  the account it belonged to. A removed account is listed only under the Removed filter; a live account cannot
+  take a username carrying the marker. Audited `guest_account.removed` / `guest_account.deleted`.
+* **Mark email verified** (`POST …/verify-email`): staff vouch for the address; restores normal status, package
+  untouched. Audited `guest_account.email_marked_verified`.
+* **New verification period** (`POST …/restart-verification`): deadline = now + the site's deadline setting, the
+  grace hour available again; lifts a suspension, package untouched. Audited `guest_account.verification_restarted`.
+* Not provided: releasing one device from a package so another can take its slot. The database primitive is
+  deliberately closed to service roles; a staff release needs its own scoped, audited definer function (a
+  migration and a Product Owner decision).
+* Removing an account does not reset the per-device registration cap or a free package's prior-purchase rule for
+  the device; both are abuse protections.
+
 ## 8. Verified on PRE-LIVE (2026-10-15) and what remains
 
 Migration 0117 applied on PRE-LIVE after a database backup (the email switch converted to `email_account`), Gate-P

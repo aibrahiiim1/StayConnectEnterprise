@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api, ApiError, GuestAccount, GuestAccountCreateResp,
   GuestAccountPasswordResp, type GuestAccountsPage as AccountsPageResp,
+  type GuestAccountManage, type GuestAccountRemoveResp,
 } from "@/lib/api";
+import { ManageAccountDialog } from "@/components/guest-accounts/manage-account";
 import { canWrite } from "@/lib/roles";
 import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
@@ -25,9 +27,9 @@ import { Switch, SkeletonRows } from "@/components/ui/misc";
 import { PasswordFormatCard } from "@/components/guest-accounts/password-format";
 import { OneTimeReveal, ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
-import { Plus, KeyRound, Eye, EyeOff, Pencil, Power, Users, Send } from "lucide-react";
+import { Plus, KeyRound, Eye, EyeOff, Pencil, Power, Users, Send, Settings2 } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
-import { verificationStatus } from "@/lib/account-verification";
+import { isRemovedAccount, verificationStatus } from "@/lib/account-verification";
 import { useOperatorRoles } from "@/lib/whoami-context";
 import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 
@@ -43,6 +45,7 @@ const STATUS_FILTERS: { value: string; label: string }[] = [
   { value: "", label: "All accounts" },
   { value: "enabled", label: "Can sign in" },
   { value: "disabled", label: "Disabled" },
+  { value: "removed", label: "Removed" },
 ];
 
 function weakPassword(pw: string): boolean {
@@ -82,6 +85,10 @@ export default function GuestAccountsPage() {
   // could not say how many devices were about to be cut off or that a disabled account is the reversible option.
   const [disconnecting, setDisconnecting] = useState<GuestAccount | null>(null);
   const [deleting, setDeleting] = useState<GuestAccount | null>(null);
+  // What Remove will do, when the Manage view has said (delete: never used; remove: history kept). Null from the
+  // row action, where the dialog describes both outcomes.
+  const [removal, setRemoval] = useState<GuestAccountManage["removal"] | null>(null);
+  const [managing, setManaging] = useState<GuestAccount | null>(null);
   const [actionErr, setActionErr] = useState<unknown>(null);
   // THE LIST HAS THREE OUTCOMES, NOT TWO. `rows === null` was doing double duty as "still loading" and "the
   // load failed", so a failed load rendered the error banner AND "Loading…" underneath it forever -- the
@@ -311,9 +318,15 @@ export default function GuestAccountsPage() {
     if (!deleting) return;
     setBusy(true); setActionErr(null);
     try {
-      await api.del(`/guest-accounts/${deleting.id}`);
-      toast.success(`The account "${deleting.username}" has been deleted.`);
+      const r = await api.del<GuestAccountRemoveResp>(`/guest-accounts/${deleting.id}`);
+      if (r?.status === "removed") {
+        toast.success(`The account "${deleting.username}" has been removed.`,
+          "Its history is kept, and the address can be used to register again.");
+      } else {
+        toast.success(`The account "${deleting.username}" has been deleted.`);
+      }
       setDeleting(null);
+      setManaging(null);
       load();
     } catch (e) { setActionErr(e); }
     finally { setBusy(false); }
@@ -356,7 +369,9 @@ export default function GuestAccountsPage() {
                 "Accounts can only be used while username-and-password sign-in is offered on the Client Portal.",
                 "A password is shown once, when it is set. It cannot be looked up again; if it is lost, set a new one.",
                 "Repeated failed sign-ins restrict the DEVICE that is guessing, not the account. See Client sign-in protection under Sign-in methods.",
-                "Disable an account to stop it being used for now; that can be reversed. Deleting cannot.",
+                "Disable an account to stop it being used for now; that can be reversed. Removing cannot.",
+                "Remove deletes an account that was never used. An account with packages or sign-ins is removed instead: its devices are disconnected, it can no longer sign in, its history is kept, and its email address or username can be used again.",
+                "Manage shows an account's verification state, its packages and the devices on each package. For a self-service account staff can mark the email verified or start a new verification period.",
                 "Accounts marked Self-service were opened by the client on the portal with their email address (Email accounts). Staff cannot set or show their password: the client resets it from the reset email. If the verification email did not arrive, use Resend verification email.",
               ]} />
             </HelpSection>
@@ -502,6 +517,7 @@ export default function GuestAccountsPage() {
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="font-mono text-sm font-medium">{a.username}</span>
                         {a.self_registered && <Badge tone="info">Self-service</Badge>}
+                        {isRemovedAccount(a) && <Badge tone="neutral">Removed</Badge>}
                       </div>
                       {a.display_name && (
                         <div className="text-caption text-muted-foreground">{a.display_name}</div>
@@ -532,6 +548,10 @@ export default function GuestAccountsPage() {
                     {mayWrite && (
                       <TD className="text-end">
                         <div className="flex flex-wrap justify-end gap-1">
+                          <Button size="sm" variant="ghost" onClick={() => setManaging(a)}>
+                            <Settings2 /> Manage
+                          </Button>
+                          {!isRemovedAccount(a) && (<>
                           <Button size="sm" variant="ghost" onClick={() => { setFormErr(null); setEditing(a); setPwFor(null); setShowNew(false); }}>
                             <Pencil /> Edit
                           </Button>
@@ -555,9 +575,10 @@ export default function GuestAccountsPage() {
                               <Power /> Disconnect
                             </Button>
                           )}
-                          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => { setActionErr(null); setDeleting(a); }}>
-                            Delete
+                          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => { setActionErr(null); setRemoval(null); setDeleting(a); }}>
+                            Remove
                           </Button>
+                          </>)}
                         </div>
                       </TD>
                     )}
@@ -648,25 +669,40 @@ export default function GuestAccountsPage() {
       <ConfirmDialog
         open={deleting !== null}
         onOpenChange={(v) => !v && setDeleting(null)}
-        title="Delete this client account?"
+        title={removal === "delete" ? "Delete this client account?" : "Remove this client account?"}
         description={
           deleting
-            ? `"${deleting.username}" will be removed permanently and anyone using it will be disconnected.`
+            ? removal === "delete"
+              ? `"${deleting.username}" was never used and will be deleted.`
+              : removal === "remove"
+                ? `"${deleting.username}" will be removed: its devices are disconnected and it can no longer sign in.`
+                : `"${deleting.username}" will be deleted if it was never used. If it has packages or sign-ins it is removed instead: its devices are disconnected and it can no longer sign in.`
             : undefined
         }
         consequences={
           deleting
             ? [
+                ...(removal !== "delete"
+                  ? ["Its packages, usage and sign-in history are kept. The email address or username is free to use again, for example to register once more."]
+                  : []),
                 "This cannot be undone.",
                 "If you only want to stop it being used for now, Disable it instead — that can be reversed.",
               ]
             : undefined
         }
-        confirmLabel="Delete permanently"
+        confirmLabel={removal === "delete" ? "Delete account" : "Remove account"}
         confirmVariant="danger"
         busy={busy}
         error={actionErr}
         onConfirm={onDelete}
+      />
+
+      <ManageAccountDialog
+        account={managing}
+        mayWrite={mayWrite}
+        onClose={() => setManaging(null)}
+        onChanged={() => void load()}
+        onRemove={(acc, how) => { setActionErr(null); setRemoval(how); setDeleting(acc); }}
       />
     </PageShell>
   );

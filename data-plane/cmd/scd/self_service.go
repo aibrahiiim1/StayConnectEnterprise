@@ -580,7 +580,7 @@ func (s *server) sendOneAccountEmail(ctx context.Context, key []byte) bool {
 		      JOIN iam_v2.guest_access_accounts a ON a.id = t.account_id
 		     WHERE t.tenant_id = $1 AND t.site_id = $2
 		       AND t.sent_at IS NULL AND t.used_at IS NULL AND t.superseded_at IS NULL
-		       AND t.expires_at > now() AND t.next_send_at <= now()
+		       AND t.expires_at > now() AND t.next_send_at <= now() AND a.enabled
 		     ORDER BY t.next_send_at
 		     LIMIT 1
 		     FOR UPDATE OF t SKIP LOCKED`, s.tenID, s.siteID).Scan(&id, &purpose, &attempts, &to, &deadline); err != nil {
@@ -647,9 +647,14 @@ func (s *server) sendDueAccountEmails(ctx context.Context) {
 	}
 	// A message still unsent when its link expires can never be sent: retire it, so the outbox index holds
 	// only rows that can still go and a long mail outage does not leave each poll skipping a growing backlog.
-	if _, err := s.db.Exec(ctx, `UPDATE iam_v2.account_email_tokens SET superseded_at = now()
-	     WHERE tenant_id = $1 AND site_id = $2
-	       AND sent_at IS NULL AND used_at IS NULL AND superseded_at IS NULL AND expires_at <= now()`,
+	// So is one for an account staff REMOVED (edged guest_accounts_manage.go: disabled, username moved to
+	// "<name>.removed-<id>.invalid"); a merely disabled account keeps its queue and is skipped until re-enabled.
+	if _, err := s.db.Exec(ctx, `UPDATE iam_v2.account_email_tokens t SET superseded_at = now()
+	     WHERE t.tenant_id = $1 AND t.site_id = $2
+	       AND t.sent_at IS NULL AND t.used_at IS NULL AND t.superseded_at IS NULL
+	       AND (t.expires_at <= now() OR EXISTS (
+	             SELECT 1 FROM iam_v2.guest_access_accounts a
+	              WHERE a.id = t.account_id AND NOT a.enabled AND lower(a.username) LIKE '%.removed-%.invalid'))`,
 		s.tenID, s.siteID); err != nil {
 		slog.Warn("email accounts: retiring expired unsent messages failed", "err", err)
 	}

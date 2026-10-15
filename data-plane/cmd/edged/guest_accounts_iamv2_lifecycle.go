@@ -197,11 +197,14 @@ const accountFrom = `FROM iam_v2.guest_access_accounts a
 	        JOIN iam_v2.entitlements e ON e.id = s.entitlement_id
 	       WHERE e.guest_account_id = a.id AND s.ended IS NULL) dev ON true`
 
-// accountFilter: $1 tenant, $2 site, $3 status (enabled|disabled), $4 search pattern.
+// accountFilter: $1 tenant, $2 site, $3 status (enabled|disabled|removed), $4 search pattern. A REMOVED
+// account (guest_accounts_manage.go) is listed only under its own filter: it can never sign in again, and
+// counting it among the disabled ones would read as an account staff could re-enable.
 const accountFilter = `WHERE a.tenant_id=$1 AND a.site_id=$2
-	  AND ($3::text IS NULL
+	  AND ($3::text IS NULL AND NOT ` + sqlRemoved + `
 	       OR ($3 = 'enabled'  AND a.enabled)
-	       OR ($3 = 'disabled' AND NOT a.enabled))
+	       OR ($3 = 'disabled' AND NOT a.enabled AND NOT ` + sqlRemoved + `)
+	       OR ($3 = 'removed'  AND ` + sqlRemoved + `))
 	  AND ($4::text IS NULL OR a.username ILIKE $4 OR a.display_name ILIKE $4)`
 
 func (s *server) listGuestAccountsIAMv2(w http.ResponseWriter, r *http.Request) {
@@ -217,13 +220,13 @@ func (s *server) listGuestAccountsIAMv2(w http.ResponseWriter, r *http.Request) 
 	var statusArg any
 	switch v := qv.Get("status"); v {
 	case "":
-	case "enabled", "disabled":
+	case "enabled", "disabled", "removed":
 		statusArg = v
 	default:
 		// "locked" is refused rather than quietly accepted and answered with an empty page: a filter that
 		// always matches nothing reads as "no account is locked out", which is a measurement this domain
 		// cannot make. Repeated-failure protection is per DEVICE (migration 0068).
-		jsonErr(w, http.StatusBadRequest, "bad_request", "status must be enabled or disabled")
+		jsonErr(w, http.StatusBadRequest, "bad_request", "status must be enabled, disabled or removed")
 		return
 	}
 	page, size := 1, accountsPageSizeDefault
@@ -763,22 +766,6 @@ func (s *server) disconnectGuestAccountSessionsIAMv2(w http.ResponseWriter, r *h
 		out["disconnect_failures"] = res.Failed
 	}
 	writeJSON(w, http.StatusOK, out)
-}
-
-func (s *server) deleteGuestAccountIAMv2(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	ctx, cancel := dbCtx(r)
-	defer cancel()
-	var username string
-	if err := s.db.QueryRow(ctx, `DELETE FROM iam_v2.guest_access_accounts
-	     WHERE id=$1 AND tenant_id=$2 AND site_id=$3 RETURNING username`,
-		id, s.tenantID, s.siteID).Scan(&username); err != nil {
-		jsonErr(w, http.StatusNotFound, "not_found", "account not found")
-		return
-	}
-	s.audit(r, "guest_account.deleted", "guest_account", id,
-		map[string]any{"username": username, "authority": "iam_v2"})
-	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted"})
 }
 
 // acctAuthority is REMOVED. It dispatched each guest-account route between a legacy handler and an IAM-v2

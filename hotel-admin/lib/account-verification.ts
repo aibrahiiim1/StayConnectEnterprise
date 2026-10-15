@@ -21,3 +21,9 @@ export function verificationStatus(a: GuestAccount, now = Date.now()): Verificat
   }
   return { label: "Email not verified", tone: "neutral" };
 }
+
+// A REMOVED account (edged guest_accounts_manage.go) is disabled and its username moved to
+// "<name>.removed-<id>.invalid", which frees the address while its history stays. It is listed only under Removed.
+export function isRemovedAccount(a: GuestAccount): boolean {
+  return !a.enabled && /\.removed-[0-9a-f]+\.invalid$/i.test(a.username);
+}
