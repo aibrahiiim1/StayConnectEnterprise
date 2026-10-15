@@ -50,7 +50,7 @@ the keys are unchanged, [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md)). Legen
 | guests | W | W | **W** | **W** | – | R | R |
 | pms-providers (+test/cache/health) | W | W | R | R | – | R | R |
 | auth-methods | W | W | R | R | – | R | R |
-| code-requests (list; W lets one device try again) | W | W | W | W | – | – | R |
+| code-requests (list) | R | R | R | R | – | – | R |
 | code-reveal (W reads a live code to its client) | W | W | W | – | – | – | – |
 | guest-device-self-service | W | W | R | R | – | R | R |
 | guest-signin-attempts (`View_Guest_SignIn_Attempts`) | W | R | **R** | **R** | – | – | R |
@@ -92,7 +92,7 @@ validate/apply/confirm flow, which needs `network` **W**.
   departure event, so replaying an old one is not something the product can do — and a write permission would
   promise a power it does not have.
 * `guest-signin-restrictions` — **W** releases ONE device's wait early, with a mandatory reason.
-* `code-requests` — **R** lists recent code requests and temporary-internet windows; **W** lets ONE device try again (its ended windows stop counting; nothing deleted, no access granted), with password and reason (2026-10-12).
+* `code-requests` — **R** lists recent SMS / WhatsApp code requests (2026-10-12). Read-only for every role since 2026-10-15: its only write, letting a device try again by clearing its temporary-internet windows, was removed with the email code and its temporary internet (Email + Password self-service contract §1).
 * `code-reveal` — **W** reads a LIVE one-time code to the client it was sent to, with password and reason. Separate from `code-requests` because it lets the desk vouch for an address the client did not prove (contract §6.7).
 
 The blast radii are not comparable. A release affects one device for the remainder of one wait; a policy
@@ -168,6 +168,15 @@ setting on does not deploy the capability, and while the gate is dark the
 client-facing routes do not exist at all. edged does not even mount this resource unless the
 build's Phase-6 admin flag is on, so the row above describes who may use the
 screen once it exists, not whether it exists.
+
+**Email accounts' terms** (`/edge/v1/self-service-settings`: verification deadline, suspension
+policy, reminder, resend limits, grace hour, registrations per device; [Email + Password
+self-service contract](architecture/ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md) §6) have no key of
+their own: the route is governed by **`auth-methods`**, read to see and write to change, because
+setting the terms of a sign-in method is the same decision as switching it on. A change also
+requires the operator's password (step-up) and a bounded reason, and is written to an append-only
+change log. On a client account, **Resend verification email** is a `guest-accounts` **W** action;
+staff cannot set or show the password of a self-service account (its owner resets it by email).
 
 License-state gates apply **on top of** roles: e.g. in Restricted state even
 site_admin cannot create GuestAccessPlans or voucher batches

@@ -1,21 +1,24 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
 
-// STAFF HELP FOR CODE REQUESTS (resources_code_requests.go): who may list, who may let a device try again, and
-// who may read a live code. Revealing a code is the stronger power, and it never follows from the other.
+// STAFF HELP FOR CODE REQUESTS (resources_code_requests.go): who may list, and who may read a live code.
+// Revealing a code is the stronger power, and it never follows from the list. The list is READ-only for every
+// role below site_admin: its only write, clearing a device's temporary-internet windows, went with the email code.
 func TestCodeRequests_RevealIsItsOwnPermission(t *testing.T) {
 	cases := []struct {
 		role                     string
-		list, clear, revealAllow bool
+		list, write, revealAllow bool
 	}{
 		{"site_admin", true, true, true},
-		{"hotel_it_manager", true, true, true},
-		{"front_office_operator", true, true, true},
-		{"guest_relations_operator", true, true, false},
+		{"hotel_it_manager", true, false, true},
+		{"front_office_operator", true, false, true},
+		{"guest_relations_operator", true, false, false},
 		{"site_viewer", true, false, false},
 		{"voucher_operator", false, false, false},
 		{"payments_operator", false, false, false},
@@ -25,12 +28,42 @@ func TestCodeRequests_RevealIsItsOwnPermission(t *testing.T) {
 		if got := permFor(roles, "code-requests", permRead); got != c.list {
 			t.Errorf("%s list: %v, want %v", c.role, got, c.list)
 		}
-		if got := permFor(roles, "code-requests", permWrite); got != c.clear {
-			t.Errorf("%s clear: %v, want %v", c.role, got, c.clear)
+		if got := permFor(roles, "code-requests", permWrite); got != c.write {
+			t.Errorf("%s write: %v, want %v", c.role, got, c.write)
 		}
 		if got := permFor(roles, "code-reveal", permWrite); got != c.revealAllow {
 			t.Errorf("%s reveal: %v, want %v", c.role, got, c.revealAllow)
 		}
+	}
+}
+
+// The "let them try again" route is gone with the temporary internet it cleared.
+func TestCodeRequests_ClearRouteIsRemoved(t *testing.T) {
+	s := &server{}
+	rec := httptest.NewRecorder()
+	s.codeRequestsRoutes().ServeHTTP(rec, withSession(httptest.NewRequest(http.MethodPost, "/clear",
+		strings.NewReader(`{"device_mac":"02:00:00:00:00:01","reason":"x","password":"y"}`)), "site_admin"))
+	if rec.Code != http.StatusNotFound && rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST /code-requests/clear still answers %d", rec.Code)
+	}
+}
+
+// The list asks scd under the new name and falls back to the former one only when scd does not know the new.
+func TestCodeRequests_ListFallsBackToTheFormerSCDRoute(t *testing.T) {
+	var paths []string
+	sock := fakeUnixService(t, func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		if r.URL.Path == scdCodeRequestsPath {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"requests":[]}`))
+	})
+	s := &server{scd: newSCDClient(sock)}
+	rec := httptest.NewRecorder()
+	s.codeRequestsRoutes().ServeHTTP(rec, withSession(httptest.NewRequest(http.MethodGet, "/?hours=24", nil), "site_admin"))
+	if rec.Code != http.StatusOK || len(paths) != 2 || paths[1] != scdCodeRequestsLegacyPath {
+		t.Fatalf("got %d, scd asked %v", rec.Code, paths)
 	}
 }
 

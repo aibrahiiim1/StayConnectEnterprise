@@ -412,6 +412,13 @@ func main() {
 			// PMS Interface surface below; keeping both meant two operator screens configuring one property
 			// management system, and the older one could start a competing connector. See resources_providers.go.
 			mountResource(r, s, "auth-methods", s.authMethodsRoutes)
+			// EMAIL ACCOUNTS' TERMS (contract §6, migration 0117): verification deadline, suspension, resend and
+			// grace. The same decision as switching the method on, so it is governed by the auth-methods key
+			// (read to see, write to change) rather than by a key of its own -- see self_service_settings.go.
+			r.Route("/self-service-settings", func(r chi.Router) {
+				r.Use(s.resourcePermission("auth-methods"))
+				r.Mount("/", s.selfServiceSettingsRoutes())
+			})
 			// Staff help for clients who asked for a code (contract §6.7): the list and "try again" on one key, reading a
 			// live code on its own key -- see resources_code_requests.go.
 			mountResource(r, s, "code-requests", s.codeRequestsRoutes)
