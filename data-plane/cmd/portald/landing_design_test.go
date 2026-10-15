@@ -118,13 +118,15 @@ func TestLandingIgnoresAForgedClientAddress(t *testing.T) {
 func TestLandingRendersEveryPanelItStillSupports(t *testing.T) {
 	// The two-group presentation is PRESENTATION. Grouping seven methods behind two tabs must not quietly
 	// drop any of them -- each panel is the same form it always was, and a hotel running vouchers, accounts,
-	// email, SMS, social, room sign-in or post-stay must still find its form in the page.
+	// email accounts (sign in, create, forgot password), SMS, social, room sign-in or post-stay must still find
+	// its form in the page.
 	html := renderLanding(t, "10.77.0.42", "aa:bb:cc:dd:ee:ff")
 	// Voucher and personal account now share one panel behind the "Use Personal Account" pill, as the
 	// reference design presents them -- so the claim is asserted on the FORMS, which is what actually carries
 	// a sign-in method, rather than on a panel id that the design legitimately changed.
 	for _, id := range []string{
-		"form-voucher", "form-credentials", "panel-email", "panel-sms", "panel-pms", "panel-social",
+		"form-voucher", "form-credentials", "panel-email", "form-acct-signin", "form-acct-create", "form-acct-forgot",
+		"panel-sms", "panel-pms", "panel-social",
 	} {
 		if !strings.Contains(html, id) {
 			t.Errorf("%s is no longer rendered; restyling the portal must not remove a sign-in method", id)
@@ -148,6 +150,8 @@ func TestLandingTagsEveryStringTheDesignerOffersToTranslate(t *testing.T) {
 	for _, key := range []string{
 		"pms.room", "account.pass", "account.user", "voucher.label",
 		"email.dest", "sms.dest", "otp.code",
+		"acct.forgot.link", "acct.create.link", "acct.signin.link", "acct.confirm", "acct.rule", "acct.create.btn",
+		"acct.forgot.lead", "acct.forgot.btn", "help.email.account",
 		"btn.submit", "btn.login", "btn.verify",
 		"info.device", "info.ip", "info.mac", "info.help",
 	} {

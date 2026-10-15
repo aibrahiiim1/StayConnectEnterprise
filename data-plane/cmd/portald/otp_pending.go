@@ -11,12 +11,15 @@ package main
 //
 //  1. THE PENDING CHALLENGE IS HELD BY THE PORTAL FOR THE DEVICE, keyed by the device's address, for the code's
 //     own lifetime. The landing page asks for it with the sign-in methods and opens straight on the code box
-//     ("We sent a code to a•••@example.com"), with Send again and Use a different address. Nothing here decides
-//     anything: verification still needs the challenge AND the code, from a device the kernel can place.
-//  2. THE EMAIL CARRIES A TAP-TO-CONNECT LINK into the phone's real browser, which the client can reach before
-//     sign-in (the portal is in the pre-auth allow set). The link opens a page with ONE button; the button
-//     POSTs the verification. The link is never verified on GET, so a mail scanner or a prefetcher that
-//     follows it spends nothing. The code in the link is the same secret the email already carries.
+//     ("We texted a code to +20•••1234"), with Use a different number. Nothing here decides anything:
+//     verification still needs the challenge AND the code, from a device the kernel can place.
+//  2. THE MESSAGE CAN CARRY A TAP-TO-CONNECT LINK into the phone's real browser, which the client can reach
+//     before sign-in (the portal is in the pre-auth allow set). The link opens a page with ONE button; the
+//     button POSTs the verification. The link is never verified on GET, so a scanner or a prefetcher that
+//     follows it spends nothing. The code in the link is the same secret the message already carries.
+//
+// The code is for SMS and WhatsApp only since the email code was replaced by email accounts
+// (account_handlers.go); the store and the link serve those two channels unchanged.
 
 import (
 	"bytes"
@@ -98,16 +101,9 @@ func pendingKey(r *http.Request) string {
 	return ip.String()
 }
 
-// maskDestination renders an address for the page without disclosing it: a•••@example.com, +20•••1234.
+// maskDestination renders a phone number for the page without disclosing it: +20•••1234.
 func maskDestination(channel, dest string) string {
 	dest = strings.TrimSpace(dest)
-	if channel == "email" {
-		at := strings.IndexByte(dest, '@')
-		if at <= 0 {
-			return "•••"
-		}
-		return strings.ToLower(dest[:1]) + "•••" + strings.ToLower(dest[at:])
-	}
 	if len(dest) <= 4 {
 		return "•••"
 	}
@@ -119,19 +115,6 @@ func maskDestination(channel, dest string) string {
 func (h *handler) authOTPForget(w http.ResponseWriter, r *http.Request) {
 	if h.pendingOTP != nil {
 		h.pendingOTP.clear(pendingKey(r))
-	}
-	// The temporary internet window the abandoned code opened ends with it (scd verify_access.go). The device is
-	// named by the kernel's answer for this connection, never by the client.
-	if ip := clientIP(r); ip != nil {
-		if mac, ok := h.deviceMAC(r.Context(), ip); ok {
-			body, _ := json.Marshal(map[string]string{"ip": ipString(ip), "mac": mac.String()})
-			if req, err := http.NewRequestWithContext(r.Context(), "POST", "http://unix/v1/auth/otp/temporary-access/cancel", bytes.NewReader(body)); err == nil {
-				req.Header.Set("Content-Type", "application/json")
-				if resp, err := h.scd.Do(req); err == nil {
-					resp.Body.Close()
-				}
-			}
-		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{"ok":true}`))

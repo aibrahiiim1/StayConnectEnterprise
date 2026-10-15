@@ -152,6 +152,13 @@ func (h *handler) tryIAMv2AuthMode(w http.ResponseWriter, r *http.Request, paylo
 			fail(guestLicenseRefusedMessage)
 		case activateNotEnforced:
 			fail("We could not bring your device online. Please try again in a moment.")
+		case activateVerification:
+			// An email account past its verification deadline: the page that says why, and what to do.
+			if asJSON {
+				next("/account/verification")
+			} else {
+				h.renderAccountPage(w, r, nil, true, accountNote{})
+			}
 		default:
 			fail("We could not connect your device.")
 		}
@@ -345,6 +352,9 @@ func (h *handler) acquirePackage(w http.ResponseWriter, r *http.Request) {
 	case activateNotEnforced:
 		h.backToPackages(w, r, "We could not bring your device online. Please try again in a moment.")
 		return
+	case activateVerification:
+		h.renderAccountPage(w, r, nil, true, accountNote{})
+		return
 	default:
 		h.backToPackages(w, r, "We could not connect your device.")
 		return
@@ -390,6 +400,9 @@ const (
 	activateLicense     = "LICENSE_REFUSED"
 	activateNotEnforced = "NOT_ENFORCED"
 	activateFailed      = "ACTIVATE_FAILED"
+	// activateVerification is an email account suspended for Internet until its address is verified (contract
+	// section 3): the entitlement is untouched, only this activation is refused.
+	activateVerification = "VERIFICATION_REQUIRED"
 )
 
 // activateEnforced turns a granted entitlement into a session for THIS device and reports success only when
@@ -446,6 +459,8 @@ func (h *handler) activateEnforced(r *http.Request, sess commerceSession, entitl
 			return "", activateDeviceLimit
 		case code == "LICENSE_CAPACITY_REACHED":
 			return "", activateCapacity
+		case code == "VERIFICATION_REQUIRED":
+			return "", activateVerification
 		case isLicenceRefusal(code):
 			return "", activateLicense
 		}

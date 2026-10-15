@@ -401,6 +401,14 @@ var serverMessageKeys = map[string]string{
 	"Please sign in again.":                                                                       "err.signin.again",
 	"We could not connect your device.":                                                           "err.connect",
 	"We could not bring your device online. Please try again in a moment.":                        "err.connect",
+	// The email account's refusals (account_handlers.go).
+	msgAcctEmpty:    "err.acct.empty",
+	msgAcctInvalid:  "err.acct.invalid",
+	msgAcctTaken:    "err.acct.taken",
+	msgAcctEmail:    "err.acct.email",
+	msgAcctWeak:     "err.acct.weak",
+	msgAcctMismatch: "err.acct.mismatch",
+	msgAcctLimit:    "err.acct.limit",
 }
 
 // serverMessageKey returns the key for a sentence a handler composed. The voucher refusal used to append
@@ -444,18 +452,20 @@ func localise(words map[string]string, msg string) localMessage {
 type landingView struct {
 	guestPage
 	Error, ErrorKey, ErrorEn string
-	// ErrorForm is the plain-HTML form the refusal answers ("voucher" or "account", from the route that
-	// rendered this page), so its fields can point at the message and the right form is the one showing.
+	// ErrorForm is the plain-HTML form the refusal answers ("voucher", "account" or "email", from the route
+	// that rendered this page), so its fields can point at the message and the right form is the one showing.
 	// ErrorInvalid is set when the refusal is about what was typed rather than about the network.
 	ErrorForm    string
 	ErrorInvalid bool
+	// EmailState is the Email panel's state on first paint: "signin" (the default), "create" or "forgot".
+	EmailState string
 	// What the guest typed, given back so a typo can be corrected rather than retyped. Never the password.
-	VoucherValue, UsernameValue string
-	ClientIP, ClientMAC         string
-	BrandName                   string // the hotel's name, or the neutral fallback in the guest's language
-	Help                        string
-	HasExtras                   bool
-	Terms                       template.URL // checked by ForGuests (CheckLinkURL)
+	VoucherValue, UsernameValue, EmailValue string
+	ClientIP, ClientMAC                     string
+	BrandName                               string // the hotel's name, or the neutral fallback in the guest's language
+	Help                                    string
+	HasExtras                               bool
+	Terms                                   template.URL // checked by ForGuests (CheckLinkURL)
 	// The shipped wording for the script, from languages.go -- the words the sign-in page can show, in every
 	// language, so a guest switching language needs no round trip. The after-sign-in pages' words are
 	// rendered by those pages and are not repeated here.
@@ -519,6 +529,7 @@ func newLandingView(r *http.Request, d map[string]any, nonce, errMsg, ip, mac st
 		Strings:      landingStringsJS(),
 		HotelWords:   template.JS("null"),
 		Configured:   template.JS("null"),
+		EmailState:   "signin",
 	}
 	if v.BrandName == "" {
 		v.BrandName = p.T["brand.fallback"]
@@ -532,9 +543,24 @@ func newLandingView(r *http.Request, d map[string]any, nonce, errMsg, ip, mac st
 		case "/auth/credentials":
 			v.ErrorForm = "account"
 			v.UsernameValue = capRunes(strings.TrimSpace(r.PostFormValue("username")), 64)
+		case "/auth/account/signin", "/auth/account/grace":
+			v.ErrorForm = "email"
+			v.EmailValue = capRunes(strings.TrimSpace(r.PostFormValue("email")), 254)
+		case "/auth/account/register":
+			v.ErrorForm, v.EmailState = "email", "create"
+			v.EmailValue = capRunes(strings.TrimSpace(r.PostFormValue("email")), 254)
+			// An address already registered is answered on Sign in, with the address filled in: the client's
+			// choices are to sign in or to reset the password, and both start there (contract section 5).
+			if msg.Key == "err.acct.taken" {
+				v.EmailState = "signin"
+			}
+		case "/auth/account/forgot":
+			v.ErrorForm, v.EmailState = "email", "forgot"
+			v.EmailValue = capRunes(strings.TrimSpace(r.PostFormValue("email")), 254)
 		}
 		switch msg.Key {
-		case "err.voucher.empty", "err.voucher.invalid", "err.account.empty", "err.account.invalid":
+		case "err.voucher.empty", "err.voucher.invalid", "err.account.empty", "err.account.invalid",
+			"err.acct.empty", "err.acct.invalid", "err.acct.email", "err.acct.weak", "err.acct.mismatch":
 			v.ErrorInvalid = true
 		}
 	}
@@ -557,6 +583,8 @@ func newLandingView(r *http.Request, d map[string]any, nonce, errMsg, ip, mac st
 
 type successView struct {
 	guestPage
+	// Reminder: an email account not verified yet -- the deadline, and Resend (account_handlers.go).
+	Reminder        *onlineReminder
 	SessionID       string
 	DurationSeconds int
 	HumanRemaining  string
@@ -707,10 +735,6 @@ type scdStatus struct {
 	TimeMode               string   `json:"time_mode"`
 	RemainingOnlineSeconds *float64 `json:"remaining_online_seconds"`
 	HardExpiry             string   `json:"hard_expiry"`
-	// VerificationWindowSeconds is set while the address holds a live temporary-access window (email-code
-	// verification) and no session: limited connectivity the captive API reports as not captive.
-	VerificationWindowSeconds *int64 `json:"verification_window_seconds"`
-	VerificationWindowBytes   *int64 `json:"verification_window_bytes"`
 }
 
 // onlinePageHref is the way back to "You're online": the page the guest came from, rebuilt from the two values

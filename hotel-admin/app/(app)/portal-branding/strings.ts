@@ -56,8 +56,8 @@ export const SHIPPED_LANGUAGES: { code: string; label: string; rtl?: boolean }[]
 export const isShippedLanguage = (code: string) => SHIPPED_LANGUAGES.some((l) => l.code === code);
 
 /** THE OPTIONAL MODULES A STRING CAN BELONG TO. A string tagged with one is wording for a part of the portal
- *  that exists only when that module is licensed here: room sign-in and post-stay (hospitality), a one-time
- *  code by email, text or WhatsApp, social sign-in, card payment, and charging to a room. The Languages editor
+ *  that exists only when that module is licensed here: room sign-in and post-stay (hospitality), email accounts
+ *  (the email module), a one-time code by text or WhatsApp, social sign-in, card payment, and charging to a room. The Languages editor
  *  lists it only then, so a site without hospitality is never asked to translate "Room Number".
  *
  *  Hiding is presentation only. A saved translation for a hidden string stays in the document and is saved
@@ -118,11 +118,25 @@ export const PORTAL_STRINGS: PortalString[] = [
   { group: "Email and SMS", key: "sms.dest", english: "Phone number", module: ["sms_otp", "whatsapp_otp"] },
   { group: "Email and SMS", key: "sms.hint", english: "Include the country code, for example +44 20 7946 0958", module: ["sms_otp", "whatsapp_otp"] },
   { group: "Email and SMS", key: "otp.code", english: "Verification code", module: OTP },
-  { group: "Email and SMS", key: "otp.sent.email", english: "We sent a 6-digit code to", module: "email_otp" },
   { group: "Email and SMS", key: "otp.sent.sms", english: "We texted a 6-digit code to", module: "sms_otp" },
   { group: "Email and SMS", key: "otp.sent.whatsapp", english: "We sent a 6-digit code on WhatsApp to", module: "whatsapp_otp" },
-  { group: "Email and SMS", key: "otp.retry.email", english: "Try a different email", module: "email_otp" },
   { group: "Email and SMS", key: "otp.retry.sms", english: "Use a different number", module: ["sms_otp", "whatsapp_otp"] },
+
+  { group: "Email account", key: "acct.forgot.link", english: "Forgot password?", module: "email_otp" },
+  { group: "Email account", key: "acct.create.link", english: "Create an account", module: "email_otp" },
+  { group: "Email account", key: "acct.signin.link", english: "Already have an account? Sign in", module: "email_otp" },
+  { group: "Email account", key: "acct.confirm", english: "Confirm password", module: "email_otp" },
+  { group: "Email account", key: "acct.rule", english: "At least 8 characters, and not your email address.", module: "email_otp" },
+  { group: "Email account", key: "acct.create.btn", english: "Create account", module: "email_otp" },
+  { group: "Email account", key: "acct.forgot.lead", english: "Enter your email address and we'll send you a link to choose a new password.", module: "email_otp" },
+  { group: "Email account", key: "acct.forgot.btn", english: "Send reset link", module: "email_otp" },
+  { group: "Messages", key: "err.acct.empty", english: "Please enter your email address and password.", module: "email_otp" },
+  { group: "Messages", key: "err.acct.invalid", english: "The email address or password is incorrect.", module: "email_otp" },
+  { group: "Messages", key: "err.acct.taken", english: "An account with this email address already exists. Sign in, or tap “Forgot password?” to choose a new password.", module: "email_otp" },
+  { group: "Messages", key: "err.acct.email", english: "Please enter a valid email address.", module: "email_otp" },
+  { group: "Messages", key: "err.acct.weak", english: "Choose a password of 8 to 128 characters that is not your email address or a single repeated character.", module: "email_otp" },
+  { group: "Messages", key: "err.acct.mismatch", english: "The two passwords do not match.", module: "email_otp" },
+  { group: "Messages", key: "err.acct.limit", english: "This device cannot create another account today. Sign in to an existing account, or contact the site team for assistance.", module: "email_otp" },
 
   { group: "Post-stay", key: "poststay.pin", english: "Post-stay PIN", module: "hospitality" },
   { group: "Post-stay", key: "poststay.hint", english: "The PIN you were given at checkout", module: "hospitality" },
@@ -179,13 +193,8 @@ export const PORTAL_STRINGS: PortalString[] = [
   { group: "Messages", key: "err.connect", english: "We could not bring your device online. Please try again in a moment." },
   { group: "Messages", key: "err.otp.send", english: "We couldn't send a code right now. Please try again, or choose another way to sign in.", module: OTP },
   { group: "Messages", key: "err.otp.delivery", english: "We couldn't send your code. Please try again or contact the site team.", module: OTP },
-  { group: "Sign-in", key: "otp.pending.hint", english: "You can open your mail app and come back: this box will still be here. Or tap the link in the email.", module: OTP },
-  { group: "Sign-in", key: "otp.temp.access", english: "Internet is open on this device for {m} minutes (up to {mb} MB) so you can read the code in any mail app.", module: OTP },
-  { group: "Sign-in", key: "otp.temp.wait", english: "Temporary internet is available again on this device in {m} minutes. Your code was sent; if it does not arrive, ask the front desk.", module: OTP },
-  { group: "Sign-in", key: "otp.temp.limit", english: "Temporary internet is not available again on this device today. Your code was sent; if it does not arrive, ask the front desk.", module: OTP },
-  { group: "Sign-in", key: "otp.again", english: "Send the code again", module: OTP },
   { group: "Sign-in", key: "link.title", english: "Connect to the Wi-Fi", module: OTP },
-  { group: "Sign-in", key: "link.lead", english: "You're almost online. Tap Connect to use the code from your email on this device.", module: OTP },
+  { group: "Sign-in", key: "link.lead", english: "You're almost online. Tap Connect to use the code from your message on this device.", module: OTP },
   { group: "Sign-in", key: "welcome.back", english: "Welcome back" },
   { group: "Sign-in", key: "welcome.connect", english: "Connect" },
   { group: "Sign-in", key: "welcome.notyou", english: "Not you? Sign in a different way" },
@@ -267,11 +276,37 @@ export const PORTAL_STRINGS: PortalString[] = [
   { group: "Help and tips", key: "help.poststay", english: "Already checked out? Enter the PIN you were given at checkout to reconnect.", module: "hospitality" },
   { group: "Help and tips", key: "help.voucher", english: "Type the code exactly as it is printed on your voucher, then tap Login." },
   { group: "Help and tips", key: "help.account", english: "Enter the username and password you were given. If a voucher field is showing, switch on “Use Personal Account” first." },
-  { group: "Help and tips", key: "help.email", english: "Enter your email address and tap Send code, then type the 6-digit code from the email. Check your spam folder if it does not arrive.", module: "email_otp" },
+  { group: "Help and tips", key: "help.email.account", english: "Sign in with your email address and password. New here? Tap “Create an account”, then open the link in the email we send you to verify the address. Forgot your password? Tap “Forgot password?” for a reset link.", module: "email_otp" },
   { group: "Help and tips", key: "help.sms", english: "Enter your phone number with the country code and tap Send code, then type the 6-digit code from the text message.", module: "sms_otp" },
   { group: "Help and tips", key: "help.whatsapp", english: "Enter your WhatsApp phone number with the country code and tap Send code, then type the 6-digit code from the WhatsApp message.", module: "whatsapp_otp" },
   { group: "Help and tips", key: "help.fail", english: "Something not working? Please contact the site team for assistance." },
   { group: "Sign-in page", key: "brand.by", english: "Wi-Fi by" },
+  { group: "Email account: links in the emails", key: "acct.forgot.title", english: "Reset your password", module: "email_otp" },
+  { group: "Email account: links in the emails", key: "acct.forgot.sent", english: "If an account exists for that email address, we've sent it a link to choose a new password. Open the link while connected to this Wi-Fi.", module: "email_otp" },
+  { group: "Email account: links in the emails", key: "acct.verify.title", english: "Verify your email address", module: "email_otp" },
+  { group: "Email account: links in the emails", key: "acct.verify.lead", english: "Tap the button to confirm this email address for your Wi-Fi account.", module: "email_otp" },
+  { group: "Email account: links in the emails", key: "acct.verify.btn", english: "Verify email", module: "email_otp" },
+  { group: "Email account: links in the emails", key: "acct.verified.title", english: "Email verified", module: "email_otp" },
+  { group: "Email account: links in the emails", key: "acct.verified", english: "Your email address is verified. Your Internet access continues as normal.", module: "email_otp" },
+  { group: "Email account: links in the emails", key: "acct.verify.expired", english: "This link has expired or has already been used. Sign in and ask for a new verification email.", module: "email_otp" },
+  { group: "Email account: links in the emails", key: "acct.reset.title", english: "Choose a new password", module: "email_otp" },
+  { group: "Email account: links in the emails", key: "acct.reset.new", english: "New password", module: "email_otp" },
+  { group: "Email account: links in the emails", key: "acct.reset.btn", english: "Save password", module: "email_otp" },
+  { group: "Email account: links in the emails", key: "acct.reset.done.title", english: "Password changed", module: "email_otp" },
+  { group: "Email account: links in the emails", key: "acct.reset.done", english: "Your password has been changed and your email address is verified. Sign in with your new password.", module: "email_otp" },
+  { group: "Email account: links in the emails", key: "acct.reset.expired", english: "This link has expired or has already been used. Tap “Forgot password?” on the sign-in page to ask for a new one.", module: "email_otp" },
+  { group: "Email account: links in the emails", key: "acct.continue", english: "Continue", module: "email_otp" },
+  { group: "Email account: verification required", key: "acct.hold.title", english: "Verify your email to continue", module: "email_otp" },
+  { group: "Email account: verification required", key: "acct.hold.lead", english: "Internet access is paused for this account because its email address has not been verified yet. Your package has not changed.", module: "email_otp" },
+  { group: "Email account: verification required", key: "acct.verify.how", english: "To verify, open the link in the email we sent you while this device is connected to this Wi-Fi.", module: "email_otp" },
+  { group: "Email account: verification required", key: "acct.resend", english: "Resend verification email", module: "email_otp" },
+  { group: "Email account: verification required", key: "acct.resent", english: "We've sent a new verification email. Open the link in it while connected to this Wi-Fi.", module: "email_otp" },
+  { group: "Email account: verification required", key: "acct.resend.wait", english: "Please wait {n} seconds before asking for another email.", module: "email_otp" },
+  { group: "Email account: verification required", key: "acct.resend.limit", english: "You've reached today's limit for verification emails. Please contact the site team for assistance.", module: "email_otp" },
+  { group: "Email account: verification required", key: "acct.grace", english: "Allow Internet for 1 More Hour", module: "email_otp" },
+  { group: "Email account: verification required", key: "acct.grace.lead", english: "Enter your password again to use the Internet for one more hour while you verify your email address.", module: "email_otp" },
+  { group: "Email account: verification required", key: "acct.grace.used", english: "The extra hour is not available for this account. Verify your email address to continue.", module: "email_otp" },
+  { group: "Email account: verification required", key: "acct.reminder", english: "Please verify your email address by {date}. Open the link we sent you while connected to this Wi-Fi.", module: "email_otp" },
 ];
 
 export const STRING_GROUPS = Array.from(new Set(PORTAL_STRINGS.map((s) => s.group)));

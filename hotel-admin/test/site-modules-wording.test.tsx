@@ -291,7 +291,7 @@ describe("Client activity on Internet packages", () => {
 describe("the portal preview's sign-in methods", () => {
   const DOC = {
     voucher: { enabled: true }, guest_account: { enabled: false }, open: { enabled: true },
-    pms: { enabled: true, mode: "room_lastname" }, email: { enabled: true }, sms: { enabled: true },
+    pms: { enabled: true, mode: "room_lastname" }, email_account: { enabled: true }, sms: { enabled: true },
     whatsapp: { enabled: true }, social: { google: { enabled: true }, apple: { enabled: false } },
     phase5_poststay: true, internet_packages_available: false,
   };

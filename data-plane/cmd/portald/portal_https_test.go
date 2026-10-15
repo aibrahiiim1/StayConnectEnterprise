@@ -203,7 +203,7 @@ func TestNoResponseEverCarriesHSTS(t *testing.T) {
 
 func TestTheCaptiveAPIAnswersForTheConnectingDevice(t *testing.T) {
 	var askedIP atomic.Value
-	online, window := false, false
+	online, window := false, false // window: an scd still sending the retired verification-window fields
 	h := httpsHandler(t, activeState, func(r *http.Request) (int, any) {
 		if r.URL.Path != "/v1/sessions/status" {
 			return 404, nil
@@ -254,18 +254,15 @@ func TestTheCaptiveAPIAnswersForTheConnectingDevice(t *testing.T) {
 		t.Fatal("custom tabs are only asked for while captive")
 	}
 
-	// A live temporary-access window (email-code verification): the device HAS limited connectivity, so it is
-	// not captive for the window's remaining time -- otherwise the phone keeps its mail app off the Wi-Fi.
+	// NO PRE-AUTH INTERNET EXISTS (self-service contract section 1). A device without a session is captive even
+	// if scd still sent the retired verification-window fields, and nothing "remaining" is reported for it.
 	online, window = false, true
 	rec = httptest.NewRecorder()
 	srv.ServeHTTP(rec, tlsReq(http.MethodGet, tCustom, "/captive-portal/api"))
 	got = nil
 	_ = json.Unmarshal(rec.Body.Bytes(), &got)
-	if got["captive"] != false || got["seconds-remaining"] != float64(420) || got["bytes-remaining"] != float64(26214400) {
-		t.Fatalf("verification window: time AND data remaining must be reported: %v", got)
-	}
-	if _, ok := got["x-android-use-custom-tabs"]; ok {
-		t.Fatal("custom tabs are only asked for while captive")
+	if got["captive"] != true || got["seconds-remaining"] != nil || got["bytes-remaining"] != nil {
+		t.Fatalf("no session is captive, whatever else scd says: %v", got)
 	}
 	window = false
 

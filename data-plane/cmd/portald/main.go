@@ -322,6 +322,13 @@ func (h *handler) authCredentials(w http.ResponseWriter, r *http.Request) {
 		h.landing(w, r, "Please enter your username and password.")
 		return
 	}
+	h.credentialsSignIn(w, r, username, password, false)
+}
+
+// credentialsSignIn is the account sign-in both forms share: the Personal account form (username) and the Email
+// panel (the address as the username, emailForm). scd decides which kind of account it is and whether that
+// method is on here; only the wording of a refusal differs between the two forms.
+func (h *handler) credentialsSignIn(w http.ResponseWriter, r *http.Request, username, password string, emailForm bool) {
 	ip := clientIP(r)
 	if ip == nil {
 		h.landing(w, r, "Unable to detect your device address.")
@@ -355,6 +362,9 @@ func (h *handler) authCredentials(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.Unmarshal(payload, &e)
 		msg := "Invalid username or password."
+		if emailForm {
+			msg = msgAcctInvalid
+		}
 		switch {
 		case e.Error == "LICENSE_CAPACITY_REACHED":
 			msg = guestCapacityMessage
@@ -366,6 +376,17 @@ func (h *handler) authCredentials(w http.ResponseWriter, r *http.Request) {
 			msg = guestLicenseRefusedMessage
 		}
 		h.landing(w, r, msg)
+		return
+	}
+	// AN ACCOUNT'S REPLY CARRIES ITS TOKEN AND STATE (account_handlers.go). The token is kept for Resend and the
+	// reminder; a suspended account authenticated but would be refused at activation, so it is shown the
+	// verification page instead of packages.
+	email := ""
+	if emailForm {
+		email = username
+	}
+	r, done := h.accountSignedIn(w, r, payload, email)
+	if done {
 		return
 	}
 	// IAM-v2 replies carry auth_context/device/guest_network and NO session: the guest has authenticated,
@@ -396,6 +417,8 @@ func (h *handler) success(w http.ResponseWriter, r *http.Request) {
 		HumanRemaining:  humanSpan(p.T, dur),
 		// Phase 2 DARK: the guest commerce panel renders only when the portal surface is ON.
 		CommerceEnabled: h.commerceCfg.PortalOn(),
+		// An email account not verified yet (and not suspended): a small reminder with its deadline and Resend.
+		Reminder: h.onlineReminderFor(r, p.T),
 	}
 	if v.CommerceEnabled {
 		v.CX = commerceWords(p.Lang)
@@ -513,8 +536,10 @@ func (h *handler) routes() http.Handler {
 	//
 	// If a real reverse proxy is ever introduced, the fix is not to re-add this line: it is to trust exactly
 	// that proxy's address and strip client-supplied forwarding headers at the edge.
-	// QUERY STRINGS ARE NEVER LOGGED. The email's tap-to-connect link carries the one-time code in its query
-	// (/connect?c=&k=), and the request log is the journal: the logged line keeps the path and drops the query.
+	// QUERY STRINGS ARE NEVER LOGGED. The tap-to-connect link carries the one-time code in its query
+	// (/connect?c=&k=), and an email account's verify and reset links carry their single-use token
+	// (/account/verify?t=, /account/reset?t=). The request log is the journal: the logged line keeps the path
+	// and drops the query.
 	// Handlers read r.URL, which is untouched.
 	r.Use(redactLoggedQuery)
 	r.Use(middleware.Logger)
@@ -526,11 +551,23 @@ func (h *handler) routes() http.Handler {
 	r.Get("/", h.index)
 	r.Post("/auth/voucher", h.authVoucher)
 	r.Post("/auth/credentials", h.authCredentials)
+	// Email accounts (account_handlers.go): create, sign in, forgot password; the verification page, Resend and
+	// the extra hour; and the two email links, whose GET only shows a button.
+	r.Post("/auth/account/register", h.accountRegister)
+	r.Post("/auth/account/signin", h.accountSignIn)
+	r.Post("/auth/account/forgot", h.accountForgot)
+	r.Post("/auth/account/resend", h.accountResend)
+	r.Post("/auth/account/grace", h.accountGrace)
+	r.Get("/account/verification", h.accountVerificationPage)
+	r.Get("/account/verify", h.accountVerifyPage)
+	r.Post("/account/verify", h.accountVerify)
+	r.Get("/account/reset", h.accountResetPage)
+	r.Post("/account/reset", h.accountReset)
 	// The remembered device: Connect, and Not-you (client_resume.go).
 	r.Post("/auth/resume", h.authResume)
 	r.Post("/auth/resume/forget", h.authResumeForget)
 	r.Post("/auth/otp/request", h.authOTPRequest)
-	// The pending code survives the captive browser (otp_pending.go): resend, forget, and the email's link.
+	// The pending code survives the captive browser (otp_pending.go): resend, forget, and the message's link.
 	r.Post("/auth/otp/resend", h.authOTPResend)
 	r.Post("/auth/otp/forget", h.authOTPForget)
 	r.Get("/connect", h.connectPage)

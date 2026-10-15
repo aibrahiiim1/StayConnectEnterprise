@@ -26,7 +26,7 @@ const (
 	MaxURLLength        = 2048       // https / appliance paths
 	MaxInlineImageBytes = 256 * 1024 // a data:image/… URI, from before uploads existed
 	MaxLanguages        = 16
-	MaxTranslationKeys  = 192
+	MaxTranslationKeys  = 256 // every key the portal ships (211 with email accounts), with room to grow
 	MaxTranslationText  = 500
 	MaxLanguageLabel    = 40
 	MaxFontStack        = 200
