@@ -68,8 +68,14 @@ func TestIntegration_AccountManage_DeleteUnusedRemoveUsedAndReregister(t *testin
 	}
 	before := readEntState(t, f, ent)
 	st, b = f.do(t, "DELETE", "/guest-accounts/"+acc, nil)
-	if st != 200 || b["status"] != "removed" || b["history_kept"] != true || b["disconnected_sessions"] != float64(1) {
+	if st != 200 || b["status"] != "removed" || b["history_kept"] != true || b["disconnected_sessions"] != float64(1) ||
+		b["places_released"] != float64(1) {
 		t.Fatalf("remove used = %d %v", st, b)
+	}
+	var placeStatus string
+	_ = f.pool.QueryRow(ctx, `SELECT ed.status FROM iam_v2.entitlement_devices ed WHERE ed.entitlement_id=$1::uuid`, ent).Scan(&placeStatus)
+	if placeStatus != "DISCONNECTED" {
+		t.Fatalf("a removed account's device keeps its place: %s", placeStatus)
 	}
 	var username string
 	var enabled bool

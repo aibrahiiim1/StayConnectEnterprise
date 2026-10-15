@@ -102,3 +102,20 @@ and `scripts/device-management-e2e-test.sh`. Not changed here and recorded as pr
 package should allow automatic slot recycling for long-idle devices; the room-sign-in (PMS Phase-3) path still
 answers the device limit with a sentence (it does not create a commerce session), so the replacement page is
 offered for account, email-account, voucher, code/social and open sign-ins.
+
+## 8. A client's device on the Wi-Fi: what can go wrong, and what the product does
+
+Investigated on PRE-LIVE 2026-10-15 with the Product Owner's iPhone, by packet capture and the portal's own logs.
+The appliance answered correctly at every step; each trap below is where a client could stop, and how the product
+now keeps them moving.
+
+| # | What the client experiences | Cause | What the product does |
+|---|---|---|---|
+| 1 | The sign-in sheet does not open again after they closed it, even after reconnecting | iOS/Android decide when to re-check a network. A phone that closed its sheet ("Cancel", "Use without Internet") may keep that verdict across quick reconnects and ask nothing (captured: three reconnects with DHCP, no captive-API request; a 5-second Wi-Fi off/on, then the API request and the sheet) | Every device on the guest network gets the captive-API URL by DHCP option 114 and the API answers `captive: true` until it signs in; every `http://` page redirects to the portal. Staff device actions now tell staff what to ask the client: turn Wi-Fi off and on, or open any `http://` site. The portal now logs the OS probes it answers, so "did the phone check?" is answerable from the journal. |
+| 2 | Typing an `https://` website before signing in just spins | Pre-sign-in HTTPS is dropped, never intercepted (no certificate spoofing); dropping, not resetting, is what makes desktop Chrome/Edge open their login tab | Unchanged by design. Client guidance is the `http://` site above. |
+| 3 | "Email or password incorrect" for an account that was removed | A removed account can no longer sign in; the answer stays generic so it never reveals which addresses have accounts | The refusal now says what to do: "New here, or was your account removed? Tap Create an account. Forgot your password? Tap Forgot password?" (all languages). Staff's Remove dialog says the client must register again. |
+| 4 | A new account on the same phone is not offered the free package | The free package is once per device (`PRIOR_PURCHASE also_by_device`), the protection against repeated free access | Unchanged by design. The package page says "You've used your free access here"; the staff device view says "Free package already used on this device". |
+| 5 | A device keeps holding a place on a package nobody can use | Removing an account left its devices' places on its live packages | Removing an account now frees its devices' places (the audited staff release; the package and its history stay). |
+| 6 | All places on a package are taken | One-entitlement device limit | The client chooses which of their devices this one replaces (§3), limited per day. |
+| 7 | Sign-out, then the portal shows the old account's packages | The ten-minute package-selection session outlived sign-out | Fixed: sign-out ends it. |
+| 8 | A phone appears as a new device | iOS/Android private Wi-Fi addresses change when the network is forgotten, or on rotation | A new address is a new device: it takes a free place or uses the replacement choice. Known limit: a client who changes their phone's address also looks like a new device to the once-per-device free package rule. |

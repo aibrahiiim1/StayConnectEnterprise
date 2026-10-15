@@ -131,7 +131,7 @@ export const PORTAL_STRINGS: PortalString[] = [
   { group: "Email account", key: "acct.forgot.lead", english: "Enter your email address and we'll send you a link to choose a new password.", module: "email_otp" },
   { group: "Email account", key: "acct.forgot.btn", english: "Send reset link", module: "email_otp" },
   { group: "Messages", key: "err.acct.empty", english: "Please enter your email address and password.", module: "email_otp" },
-  { group: "Messages", key: "err.acct.invalid", english: "The email address or password is incorrect.", module: "email_otp" },
+  { group: "Messages", key: "err.acct.invalid", english: "The email address or password is incorrect. New here, or was your account removed? Tap “Create an account”. Forgot your password? Tap “Forgot password?”.", module: "email_otp" },
   { group: "Messages", key: "err.acct.taken", english: "An account with this email address already exists. Sign in, or tap “Forgot password?” to choose a new password.", module: "email_otp" },
   { group: "Messages", key: "err.acct.email", english: "Please enter a valid email address.", module: "email_otp" },
   { group: "Messages", key: "err.acct.weak", english: "Choose a password of 8 to 128 characters that is not your email address or a single repeated character.", module: "email_otp" },

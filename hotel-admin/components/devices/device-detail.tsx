@@ -26,6 +26,11 @@ import { formatBytes, formatDate } from "@/lib/utils";
 
 type ActionKind = "disconnect" | "release" | "require-signin" | "prepare-test";
 
+// A PHONE THAT CLOSED ITS SIGN-IN SHEET MAY NOT REOPEN IT BY ITSELF. iOS and Android decide when to check a
+// network again; the appliance answers correctly whenever they ask (measured on PRE-LIVE 2026-10-15). Staff are
+// told what the client does, so the action is not mistaken for having failed.
+const PHONE_TIP = "The phone itself may not open the sign-in page again on its own if it was closed before: ask the client to turn Wi-Fi off for a few seconds and back on, or to open any website starting with http:// (for example http://neverssl.com).";
+
 const ACTIONS: Record<ActionKind, { title: string; does: string; keeps: string; confirm: string; reason: boolean }> = {
   disconnect: {
     title: "Disconnect this device",
@@ -42,13 +47,13 @@ const ACTIONS: Record<ActionKind, { title: string; does: string; keeps: string; 
   "require-signin": {
     title: "Require a fresh sign-in",
     does: "Disconnects the device and forgets its remembered sign-in, so its next visit shows the full sign-in page.",
-    keeps: "Its places and packages are unchanged.",
+    keeps: "Its places and packages are unchanged. " + PHONE_TIP,
     confirm: "Require sign-in", reason: true,
   },
   "prepare-test": {
     title: "Prepare for a new sign-in test",
     does: "Disconnects the device, frees every place it holds on a live package, and forgets its remembered sign-in — so it reaches the sign-in page as a new visitor would.",
-    keeps: "Nothing is deleted and no quota is reset. The device's package history stays, so a free package that may be taken once per device will still be refused on it.",
+    keeps: "Nothing is deleted and no quota is reset. The device's package history stays, so a free package that may be taken once per device will still be refused on it. " + PHONE_TIP,
     confirm: "Prepare device", reason: true,
   },
 };
@@ -96,8 +101,8 @@ export function DeviceDetailDialog({ deviceId, mayWrite, onClose, onChanged }: {
       const done: Record<ActionKind, string> = {
         disconnect: `${r.disconnected_sessions ?? 0} session(s) ended.`,
         release: "The place is free.",
-        "require-signin": "The device will see the sign-in page on its next visit.",
-        "prepare-test": `Ready: ${r.places_released ?? 0} place(s) freed, remembered sign-in forgotten.`,
+        "require-signin": "Done. Ask the client to turn Wi-Fi off and on, or open any http:// website, to see the sign-in page.",
+        "prepare-test": `Ready: ${r.places_released ?? 0} place(s) freed, remembered sign-in forgotten. Turn the device's Wi-Fi off and on, or open any http:// website.`,
       };
       toast.success(done[pending.kind]);
       setPending(null); setReason("");

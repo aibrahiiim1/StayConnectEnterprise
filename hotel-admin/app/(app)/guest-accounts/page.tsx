@@ -683,7 +683,7 @@ export default function GuestAccountsPage() {
           deleting
             ? [
                 ...(removal !== "delete"
-                  ? ["Its packages, usage and sign-in history are kept. The email address or username is free to use again, for example to register once more."]
+                  ? ["Its packages, usage and sign-in history are kept, and its devices' places on those packages are freed. The email address or username is free to use again: the client registers once more with “Create an account” — signing in with it no longer works."]
                   : []),
                 "This cannot be undone.",
                 "If you only want to stop it being used for now, Disable it instead — that can be reversed.",

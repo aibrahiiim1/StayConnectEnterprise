@@ -211,6 +211,15 @@ func (s *server) deleteGuestAccountIAMv2(w http.ResponseWriter, r *http.Request)
 		jsonErr(w, st, code, msg)
 		return
 	}
+	// ITS DEVICES' PLACES ARE FREED. Nobody can sign in to a removed account again, so a place one of its live
+	// packages holds is held for nothing -- and a device showing "Holds a place" on a package no one can use is
+	// exactly the confusion this removes. The places go through the audited staff release (0118); the package and
+	// its history stay.
+	opID, opLabel, ok := deviceActor(w, r)
+	if !ok {
+		return
+	}
+	released := s.releaseAccountPlaces(r, ctx, id, opID, opLabel)
 	note := "Removed by staff on " + time.Now().UTC().Format("2006-01-02") + "; the history of this account is kept."
 	tag, err := s.db.Exec(ctx, `UPDATE iam_v2.guest_access_accounts
 	       SET enabled = false, username = $4, grace_until = NULL,
@@ -222,9 +231,10 @@ func (s *server) deleteGuestAccountIAMv2(w http.ResponseWriter, r *http.Request)
 	}
 	s.audit(r, "guest_account.removed", "guest_account", id, map[string]any{
 		"username": username, "authority": "iam_v2", "history_kept": true,
-		"disconnected_sessions": res.Ended, "failed_sessions": res.Failed,
+		"disconnected_sessions": res.Ended, "failed_sessions": res.Failed, "places_released": released,
 	})
-	out := map[string]any{"status": "removed", "history_kept": true, "disconnected_sessions": res.Ended}
+	out := map[string]any{"status": "removed", "history_kept": true, "disconnected_sessions": res.Ended,
+		"places_released": released}
 	if res.Failed > 0 {
 		out["disconnect_failures"] = res.Failed
 	}
@@ -313,4 +323,32 @@ func (s *server) restartGuestAccountVerification(w http.ResponseWriter, r *http.
 		"username": username, "authority": "iam_v2", "deadline_hours": hours,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"status": "restarted", "verification_deadline": deadline})
+}
+
+// releaseAccountPlaces frees every place a device holds on the account's live packages (the account's sessions
+// are already ended). Returns how many were freed; one that cannot be freed is left as it is.
+func (s *server) releaseAccountPlaces(r *http.Request, ctx contextT, accountID, opID, opLabel string) int {
+	rows, err := s.db.Query(ctx, `SELECT ed.entitlement_id::text, ed.device_id::text
+	     FROM iam_v2.entitlement_devices ed JOIN iam_v2.entitlements e ON e.id = ed.entitlement_id
+	     WHERE e.tenant_id=$1 AND e.site_id=$2 AND e.guest_account_id=$3::uuid AND ed.status='AUTHORIZED'
+	       AND e.status IN ('ACTIVE','PENDING','SUSPENDED')`, s.tenantID, s.siteID, accountID)
+	if err != nil {
+		return 0
+	}
+	type place struct{ ent, dev string }
+	var all []place
+	for rows.Next() {
+		var p place
+		if rows.Scan(&p.ent, &p.dev) == nil {
+			all = append(all, p)
+		}
+	}
+	rows.Close()
+	n := 0
+	for _, p := range all {
+		if outcome, st, _, _ := s.releaseOne(r, ctx, p.dev, p.ent, opID, opLabel, "Account removed"); st == 0 && outcome == "OK" {
+			n++
+		}
+	}
+	return n
 }

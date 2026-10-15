@@ -44,7 +44,7 @@ const (
 // so localise() shows it in the guest's language (serverMessageKeys); a test pins the two together.
 const (
 	msgAcctEmpty    = "Please enter your email address and password."
-	msgAcctInvalid  = "The email address or password is incorrect."
+	msgAcctInvalid  = "The email address or password is incorrect. New here, or was your account removed? Tap “Create an account”. Forgot your password? Tap “Forgot password?”."
 	msgAcctTaken    = "An account with this email address already exists. Sign in, or tap “Forgot password?” to choose a new password."
 	msgAcctEmail    = "Please enter a valid email address."
 	msgAcctWeak     = "Choose a password of 8 to 128 characters that is not your email address or a single repeated character."
