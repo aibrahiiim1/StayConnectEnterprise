@@ -628,3 +628,29 @@ func TestIntegration_SelfServiceGrantsAsSvcScd(t *testing.T) {
 		}
 	}
 }
+
+// A MESSAGE THAT EXPIRED UNSENT IS RETIRED, never sent: a mail outage longer than a link's life must leave the
+// outbox holding only rows that can still go (the partial outbox index), not a backlog every poll skips.
+func TestIntegration_ExpiredUnsentMessageIsRetired(t *testing.T) {
+	f := newSSFixture(t)
+	ctx := context.Background()
+	email := "late." + randHex(3) + "@example.com"
+	if code, out := f.post(t, f.s.accountRegister, map[string]string{"email": email, "password": "a good password", "ip": f.ip(30), "mac": "02:17:00:02:" + randHex(1) + ":01"}); code != 200 {
+		t.Fatalf("register: %d %v", code, out)
+	}
+	var accountID string
+	_ = f.owner.QueryRow(ctx, `SELECT id::text FROM iam_v2.guest_access_accounts WHERE tenant_id=$1 AND username=$2`, f.tenant, email).Scan(&accountID)
+	f.ownerExec(t, `UPDATE iam_v2.account_email_tokens SET created_at = now() - interval '2 hours', expires_at = now() - interval '1 hour'
+	     WHERE account_id = $1::uuid AND sent_at IS NULL`, accountID)
+	before := len(f.mail.msgs)
+	f.s.sendDueAccountEmails(ctx)
+	if len(f.mail.msgs) != before {
+		t.Fatal("an expired link is never sent")
+	}
+	var pending, retired int
+	_ = f.owner.QueryRow(ctx, `SELECT count(*) FILTER (WHERE superseded_at IS NULL), count(*) FILTER (WHERE superseded_at IS NOT NULL)
+	     FROM iam_v2.account_email_tokens WHERE account_id = $1::uuid AND sent_at IS NULL`, accountID).Scan(&pending, &retired)
+	if pending != 0 || retired != 1 {
+		t.Fatalf("the expired unsent message is retired: pending=%d retired=%d", pending, retired)
+	}
+}

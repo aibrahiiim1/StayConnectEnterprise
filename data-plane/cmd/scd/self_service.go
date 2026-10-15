@@ -645,6 +645,14 @@ func (s *server) sendDueAccountEmails(ctx context.Context) {
 	if s.db == nil || s.tenID == "" {
 		return
 	}
+	// A message still unsent when its link expires can never be sent: retire it, so the outbox index holds
+	// only rows that can still go and a long mail outage does not leave each poll skipping a growing backlog.
+	if _, err := s.db.Exec(ctx, `UPDATE iam_v2.account_email_tokens SET superseded_at = now()
+	     WHERE tenant_id = $1 AND site_id = $2
+	       AND sent_at IS NULL AND used_at IS NULL AND superseded_at IS NULL AND expires_at <= now()`,
+		s.tenID, s.siteID); err != nil {
+		slog.Warn("email accounts: retiring expired unsent messages failed", "err", err)
+	}
 	key := s.selfServiceKey(accountEmailTokenDomain)
 	if key == nil {
 		return
