@@ -366,7 +366,26 @@ COMMENT ON FUNCTION iam_v2.staff_require_device_signin(uuid,uuid,uuid,uuid,text,
   'through enforcement). Slots and packages are untouched; recorded in device_slot_actions.';
 
 -- ---------------------------------------------------------------------------------------------------------
--- 5. Least privilege, mirrored in deploy/gatep/svc-device-management-grants.sql.
+-- 5. Ownership, declared rather than inherited from whoever applied this file (see 0089, 0117).
+-- ---------------------------------------------------------------------------------------------------------
+DO $own$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'iam_v2_owner') THEN
+    EXECUTE 'ALTER TABLE iam_v2.site_device_settings OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER TABLE iam_v2.device_settings_changes OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER TABLE iam_v2.device_slot_actions OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER FUNCTION iam_v2.device_settings_changes_append_only() OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER FUNCTION iam_v2.device_slot_actions_append_only() OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER FUNCTION iam_v2.device_settings_get(uuid,uuid) OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER FUNCTION iam_v2.device_settings_set(uuid,uuid,integer,text,text) OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER FUNCTION iam_v2.client_device_action(uuid,uuid,text,uuid,uuid,uuid) OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER FUNCTION iam_v2.staff_release_device_slot(uuid,uuid,uuid,uuid,uuid,text,text) OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER FUNCTION iam_v2.staff_require_device_signin(uuid,uuid,uuid,uuid,text,text) OWNER TO iam_v2_owner';
+  END IF;
+END $own$;
+
+-- ---------------------------------------------------------------------------------------------------------
+-- 6. Least privilege, mirrored in deploy/gatep/svc-device-management-grants.sql.
 -- ---------------------------------------------------------------------------------------------------------
 DO $g$
 BEGIN

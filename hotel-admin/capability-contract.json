@@ -15,6 +15,7 @@
       "/client-groups",
       "/commercial-packages",
       "/dashboard",
+      "/devices",
       "/guest-accounts",
       "/guest-signin-attempts",
       "/health",
@@ -111,6 +112,11 @@
       {
         "label": "Active sessions",
         "route": "/sessions",
+        "surface": "sessions"
+      },
+      {
+        "label": "Devices",
+        "route": "/devices",
         "surface": "sessions"
       },
       {

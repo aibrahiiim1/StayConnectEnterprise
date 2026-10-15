@@ -153,11 +153,9 @@ regression suites 18/18, 12/12, 15/15. Found and fixed during the run: a second 
 reached the database's own device-limit refusal and saw "could not bring your device online"; it is now answered
 as the device limit.
 
-**Device slots and sign-out (existing behaviour, unchanged).** An admitted device keeps its slot after it signs
-out; another device takes the slot only through the guest device release (Phase-6 device self-service, dark on
-PRE-LIVE). So on a 1-device package a client cannot move to a new device on their own; on a multi-device package
-they join. Whether sign-out should free the slot is a product decision (it trades convenience against sequential
-sharing of one package), not changed here.
+**Device slots and sign-out.** An admitted device keeps its place after it signs out (unchanged: otherwise one
+package could be passed around). Since migration 0118 a client at the limit replaces one of their devices on the
+portal, a limited number of times a day, and staff can release a place -- see ONEGATE_DEVICE_MANAGEMENT.md.
 
 Not yet verified on a real device: following the verification and reset links from a real mailbox, Chrome/Edge's
 login tab from an `https://` page, Windows.

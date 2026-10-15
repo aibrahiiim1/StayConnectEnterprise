@@ -110,3 +110,21 @@ person runs them.
 | F5 | (Operator, test account) set its deadline in the past; reconnect | Verification-required page with Resend and "Allow Internet for 1 More Hour" |
 | F6 | Laptop with Chrome or Edge, not signed in, open an `https://` site | Within about 30 s Chrome/Edge opens the login tab |
 | F7 | Windows laptop joins | Windows offers / opens the sign-in page |
+
+## G. Device limits, replacement and staff device actions (migration 0118, 2026-10-15)
+
+Automated on PRE-LIVE from guest-network devices with real enforcement: `scripts/device-management-e2e-test.sh`
+(a 1-device package: replace, the package unchanged, sign-out back to the sign-in page, the daily change limit;
+a multi-device voucher package: N devices on one entitlement, device N+1 replaces device 1 while the others stay
+online; staff find the device by account name and prepare it for a new sign-in test). Contract:
+docs/architecture/ONEGATE_DEVICE_MANAGEMENT.md. The rows below are NOT RUN until a person runs them.
+
+| # | Steps | Expected |
+|---|---|---|
+| G1 | Phone A takes a 1-device package; phone B signs in with the same account | B sees "Choose a device to replace" listing Device 1 |
+| G2 | On B, "Use this device instead" | B is online; A loses Internet within seconds; the package's time left is unchanged |
+| G3 | On A, sign in again, then "Not you? Sign out" | The sign-in page, not the packages |
+| G4 | Laptop + phone on a multi-device package; on the online page open "Your devices" | Both listed, "This device" named, places in use and changes left shown; removing the other disconnects it |
+| G5 | Staff: Admin Console -> Clients -> Devices, search the test account, Manage, "Prepare for a sign-in test" | The device is disconnected; reopening Wi-Fi on it shows the sign-in page |
+| G6 | The phone that already had the free package registers a new account | The free package is not offered (once per device); the device view says "Free package already used on this device" |
+| G7 | Staff: change "Device changes a client may make per day" to 1 with a reason; replace twice in a day | The second replacement is refused with the daily-limit message |

@@ -202,7 +202,7 @@ export type GuestAccount = {
 
 /** One account's management view: edged GET /guest-accounts/{id}/manage. */
 export type GuestAccountDevice = {
-  mac: string; status: "AUTHORIZED" | "DISCONNECTED" | string; online: boolean;
+  id: string; mac: string; status: "AUTHORIZED" | "DISCONNECTED" | string; online: boolean;
   first_authorized?: string | null; last_authorized?: string | null;
 };
 export type GuestAccountPackage = {
@@ -219,6 +219,31 @@ export type GuestAccountManage = {
   // What Remove does: "delete" (never used: the row goes) or "remove" (history kept, address freed).
   removal: "delete" | "remove";
 };
+/** Devices (edged /client-devices, migration 0118). */
+export type DevicePackage = {
+  entitlement_id: string; status: string; package_name: string; free: boolean;
+  subject_kind: "ACCOUNT" | "VOUCHER" | "ROOM" | "CLIENT" | "OPEN"; subject_label?: string; account_id?: string;
+  // AUTHORIZED: the device holds a place on the package. DISCONNECTED: its place was freed.
+  slot: "AUTHORIZED" | "DISCONNECTED" | string; slot_reason?: string;
+  first_authorized?: string | null; last_authorized?: string | null; window_ends_at?: string | null;
+  consumed_data_bytes: number; data_quota_bytes?: number | null; max_devices?: number | null; places_in_use: number;
+};
+export type ClientDeviceRow = {
+  id: string; mac: string; last_ip?: string; first_seen?: string | null; last_seen?: string | null;
+  online: boolean; online_ip?: string; current?: DevicePackage | null;
+};
+export type ClientDeviceDetail = {
+  device: ClientDeviceRow;
+  packages: DevicePackage[];
+  sessions: { id: string; started?: string | null; ended?: string | null; state: string; end_reason?: string;
+    method?: string; ip?: string; package_name?: string }[];
+  restriction: { restricted: boolean; until?: string | null; failures?: number | null };
+  remembered_signins: number;
+  free_packages_used: number;
+  actions: { acted_at: string; actor: "CLIENT" | "STAFF"; operator?: string; action: string; outcome: string; reason?: string }[];
+};
+export type DeviceSettings = { client_device_changes_per_day: number };
+
 /** What DELETE /guest-accounts/{id} did. */
 export type GuestAccountRemoveResp = {
   status: "deleted" | "removed"; history_kept?: boolean; disconnected_sessions?: number; disconnect_failures?: number;

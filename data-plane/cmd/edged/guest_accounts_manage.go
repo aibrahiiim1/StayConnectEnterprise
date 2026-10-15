@@ -20,9 +20,8 @@ package main
 // Mark verified and New verification period adjust a self-service account's verification state (contract
 // ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE §3). Neither touches an entitlement: verification only gates Internet.
 //
-// Releasing a device from a package (so another device can take its slot) is NOT here: the database's primitive
-// is deliberately unreachable by service roles (iam_v2_scratch/phase6_least_privilege.sh), and a staff release
-// needs its own scoped, audited definer function -- a schema decision of its own.
+// Releasing a device's place on a package is the Devices surface's (client_devices_admin.go, migration 0118):
+// each device listed here carries its id for it.
 
 import (
 	"fmt"
@@ -55,6 +54,7 @@ func isRemovedUsername(u string) bool {
 const sqlRemoved = `(NOT a.enabled AND lower(a.username) LIKE '%.removed-%.invalid')`
 
 type manageDevice struct {
+	ID              string     `json:"id"`
 	MAC             string     `json:"mac"`
 	Status          string     `json:"status"`
 	Online          bool       `json:"online"`
@@ -128,7 +128,7 @@ func (s *server) getGuestAccountManage(w http.ResponseWriter, r *http.Request) {
 	}
 	for i := range ents {
 		drows, err := s.db.Query(ctx, `
-		    SELECT d.mac::text, ed.status, ed.first_authorized, ed.last_authorized,
+		    SELECT d.id::text, d.mac::text, ed.status, ed.first_authorized, ed.last_authorized,
 		           EXISTS (SELECT 1 FROM iam_v2.sessions s
 		                    WHERE s.entitlement_id = ed.entitlement_id AND s.device_id = ed.device_id
 		                      AND s.ended IS NULL)
@@ -142,7 +142,7 @@ func (s *server) getGuestAccountManage(w http.ResponseWriter, r *http.Request) {
 		}
 		for drows.Next() {
 			var d manageDevice
-			if err := drows.Scan(&d.MAC, &d.Status, &d.FirstAuthorized, &d.LastAuthorized, &d.Online); err != nil {
+			if err := drows.Scan(&d.ID, &d.MAC, &d.Status, &d.FirstAuthorized, &d.LastAuthorized, &d.Online); err != nil {
 				drows.Close()
 				jsonErr(w, http.StatusInternalServerError, "internal", "could not read this account's devices")
 				return

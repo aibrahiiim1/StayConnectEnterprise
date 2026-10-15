@@ -298,3 +298,20 @@ show the portal: no portal can answer TLS for another site's name. A device whos
 (macOS managed or configured, VPN, some security suites) will not open the login window by itself. **Fallback:**
 opening any `http://` address, or the portal hostname, reaches the HTTPS portal; the Admin Console's network page
 and printed material should show the portal hostname.
+
+## 15. The HTTP fallback is not secure (recorded 2026-10-15)
+
+The Product Owner chose not to redesign the HTTP fallback at this stage: while HTTPS is not active (§4), the portal is
+served over plain HTTP on the guest network, as before. That is a security limitation, not a secure mode: anyone on
+the same guest network can observe or alter portal traffic on the fallback, including passwords typed into the
+Email-account and Personal-account forms. HTTPS active is the secure path; the fallback exists only to keep the
+portal reachable, and the administrator alert (`portal_https`) says when it is in force.
+
+**The portal health check measures portald itself (fixed 2026-10-15).** edged's check followed the HTTP listener's
+302 to `https://<canonical>/`, which from the appliance host reaches Caddy's :443 rather than portald (guests reach
+portald :8343 only through the guest-interface DNAT), and failed TLS there -- so "Client Portal is degraded" was shown
+continuously from the moment HTTPS went live (2026-10-14 14:48 UTC) while the portal served clients normally. The
+check no longer follows redirects, and while HTTPS is active it completes a verified TLS request to portald's own
+:8343 for the canonical hostname (system roots, hostname, validity), so a real certificate or listener failure is
+still reported.
+

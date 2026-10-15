@@ -19,6 +19,7 @@ import { useToast } from "@/components/ui/toast";
 import { BadgeCheck, RotateCcw, Send, Power, Trash2 } from "lucide-react";
 import { formatBytes, formatDate } from "@/lib/utils";
 import { verificationStatus } from "@/lib/account-verification";
+import { DeviceDetailDialog } from "@/components/devices/device-detail";
 
 const LIVE = new Set(["PENDING", "ACTIVE", "SUSPENDED"]);
 
@@ -51,6 +52,7 @@ export function ManageAccountDialog({ account, mayWrite, onClose, onChanged, onR
   const [data, setData] = useState<GuestAccountManage | null>(null);
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [device, setDevice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!account) return;
@@ -194,6 +196,7 @@ export function ManageAccountDialog({ account, mayWrite, onClose, onChanged, onR
                           <TH>Device</TH>
                           <TH>Slot</TH>
                           <TH className="hidden sm:table-cell">First used</TH>
+                          <TH><span className="sr-only">Actions</span></TH>
                         </TR>
                       </THead>
                       <TBody>
@@ -210,6 +213,9 @@ export function ManageAccountDialog({ account, mayWrite, onClose, onChanged, onR
                             <TD className="hidden text-sm text-muted-foreground sm:table-cell">
                               {d.first_authorized ? formatDate(d.first_authorized) : "—"}
                             </TD>
+                            <TD className="text-end">
+                              <Button size="sm" variant="ghost" onClick={() => setDevice(d.id)}>Device</Button>
+                            </TD>
                           </TR>
                         ))}
                       </TBody>
@@ -218,7 +224,8 @@ export function ManageAccountDialog({ account, mayWrite, onClose, onChanged, onR
                   {LIVE.has(e.status) && e.max_devices ? (
                     <p className="mt-1 text-caption text-muted-foreground">
                       This package allows {e.max_devices} device{e.max_devices === 1 ? "" : "s"}. A device keeps its
-                      slot after it signs out; another device can join only while a slot is free.
+                      place after it signs out. The client can replace a device on the portal; staff can release a
+                      place from the device&apos;s view.
                     </p>
                   ) : null}
                 </div>
@@ -232,6 +239,8 @@ export function ManageAccountDialog({ account, mayWrite, onClose, onChanged, onR
           </section>
         </DialogBody>
       </DialogContent>
+      <DeviceDetailDialog deviceId={device} mayWrite={mayWrite} onClose={() => setDevice(null)}
+        onChanged={() => { onChanged(); void load(); }} />
     </Dialog>
   );
 }
