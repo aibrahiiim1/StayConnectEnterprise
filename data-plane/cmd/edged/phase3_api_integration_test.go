@@ -244,6 +244,19 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 			// list, through the real router and role matrix.
 			mountResource(r, s, "audit", s.auditRoutes)
 			mountResource(r, s, "sessions", s.sessionsRoutes)
+			// Devices (0118), mounted exactly as main.go mounts them: under the sessions and auth-methods keys.
+			r.Route("/client-devices", func(r chi.Router) {
+				r.Use(s.resourcePermission("sessions"))
+				r.Mount("/", s.clientDevicesAdminRoutes())
+			})
+			r.Route("/self-service-settings", func(r chi.Router) {
+				r.Use(s.resourcePermission("auth-methods"))
+				r.Mount("/", s.selfServiceSettingsRoutes())
+			})
+			r.Route("/device-settings", func(r chi.Router) {
+				r.Use(s.resourcePermission("auth-methods"))
+				r.Mount("/", s.deviceSettingsRoutes())
+			})
 		})
 	})
 	f.srv = httptest.NewServer(r)

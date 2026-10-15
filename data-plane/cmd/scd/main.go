@@ -917,6 +917,10 @@ func main() {
 	// Entitlement -> session. Authentication and commerce both land in iam_v2; this is what turns the
 	// resulting entitlement into something the enforcement plane can act on.
 	r.Post("/v1/sessions/activate", s.activateIAMv2Session)
+	// A client's devices on their package: list, release, replace (client_devices.go, migration 0118).
+	r.Post("/v1/devices/list", s.clientDevicesList)
+	r.Post("/v1/devices/release", s.clientDevicesRelease)
+	r.Post("/v1/devices/replace", s.clientDevicesReplace)
 	r.Post("/v1/sessions/authorize", s.authorize)
 	// Open package selection: the anonymous access subject (open_access.go). A guest route, like authorize.
 	r.Post("/v1/sessions/authorize-open", s.authorizeOpen)

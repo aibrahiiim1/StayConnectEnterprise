@@ -136,14 +136,9 @@ func (h *handler) tryIAMv2AuthMode(w http.ResponseWriter, r *http.Request, paylo
 		case "":
 			next("/success?s=" + url.QueryEscape(sid))
 		case activateDeviceLimit:
-			switch reply.Method {
-			case "ACCOUNT":
-				fail("This account has reached its device limit. Disconnect another device and try again.")
-			case "VOUCHER":
-				fail("This voucher has reached its device limit. Disconnect another device and try again.")
-			default:
-				fail("Your access has reached its device limit. Disconnect another device and try again.")
-			}
+			// Every place on the package is taken: let the client choose which device this one replaces
+			// (device_pages.go), keeping this fresh sign-in as the proof.
+			h.toReplace(w, r, sess, token, asJSON)
 		case activateNoDevice:
 			fail("Your device isn't connected to this Wi-Fi network.")
 		case activateCapacity:
@@ -341,7 +336,7 @@ func (h *handler) acquirePackage(w http.ResponseWriter, r *http.Request) {
 		h.backToPackages(w, r, "Your device isn't connected to this Wi-Fi network.")
 		return
 	case activateDeviceLimit:
-		h.backToPackages(w, r, "This account has reached its device limit. Disconnect another device and try again.")
+		h.toReplace(w, r, sess, "", false)
 		return
 	case activateCapacity:
 		h.backToPackages(w, r, guestCapacityMessage)

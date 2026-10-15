@@ -63,14 +63,25 @@ func TestAlreadyEntitledSignInJoinsInsteadOfBuying(t *testing.T) {
 	}
 }
 
-func TestJoinOverTheDeviceLimitSaysSo(t *testing.T) {
+// A FULL DEVICE LIMIT LEADS TO THE CHOICE OF WHICH DEVICE TO REPLACE (device_pages.go), with this sign-in kept
+// for it -- not to a sentence with nothing to act on.
+func TestJoinOverTheDeviceLimitOffersReplacement(t *testing.T) {
 	var got map[string]any
 	h := joinBridge(t, http.StatusConflict, `{"error":"MAX_DEVICES_REACHED"}`, &got)
 	r := httptest.NewRequest("POST", "/auth/credentials", nil)
 	r.RemoteAddr = "192.168.77.31:40000"
 	w := httptest.NewRecorder()
 	h.tryIAMv2Auth(w, r, joinReply("ACCOUNT"))
-	if w.Header().Get("Location") != "" || !strings.Contains(w.Body.String(), "device limit") {
-		t.Fatalf("a full device limit must be refused with the device-limit message, got %d %q", w.Code, w.Header().Get("Location"))
+	if w.Header().Get("Location") != "/devices/replace" {
+		t.Fatalf("a full device limit must lead to the replacement choice, got %d %q", w.Code, w.Header().Get("Location"))
+	}
+	var tok string
+	for _, c := range w.Result().Cookies() {
+		if c.Name == commerceCookie {
+			tok = c.Value
+		}
+	}
+	if sess, ok := h.commerceSessions.get(tok); tok == "" || !ok || sess.authContextID != "ac-2" {
+		t.Fatal("the fresh sign-in must be kept for the replacement")
 	}
 }

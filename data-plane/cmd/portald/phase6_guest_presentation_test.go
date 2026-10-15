@@ -81,20 +81,23 @@ func TestGuestDevicePanelExposesNoMACOrInternalIdentity(t *testing.T) {
 	}
 }
 
-// An ONLINE device is visibly non-removable, and the guest is told what to do instead of being handed a
-// button that will refuse.
-func TestGuestDevicePanelMarksOnlineDevicesNonRemovable(t *testing.T) {
+// AN ONLINE DEVICE CAN BE DISCONNECTED AND REMOVED (0118): its confirmation says it goes offline now and the
+// package does not change; the device the page is open on is named and never offered for removal.
+func TestGuestDevicePanelExplainsOnlineRemovalAndThisDevice(t *testing.T) {
 	panel := devicesPanel(t, renderSuccess(t))
 	if !strings.Contains(panel, "d.removable") {
 		t.Fatal("the panel does not consult the removable flag at all")
 	}
-	// The words live in the dictionary (every language); the panel must use them.
 	en := builtinStrings["en"]
-	if !strings.Contains(panel, "t('dev.inuse')") || !strings.Contains(en["dev.inuse"], "can’t be removed") {
-		t.Fatal("an online device is not explained to the guest")
+	if !strings.Contains(panel, "'dev.confirm.online'") || !strings.Contains(en["dev.confirm.online"], "goes offline now") ||
+		!strings.Contains(en["dev.confirm.online"], "time and data stay the same") {
+		t.Fatal("removing an online device does not say it goes offline and that the package is unchanged")
 	}
-	if !strings.Contains(en["dev.inuse"], "Disconnect it from the Wi‑Fi first") {
-		t.Fatal("the guest is not told how to make the device removable")
+	if !strings.Contains(panel, "t('dev.this')") {
+		t.Fatal("the device the page is open on is not named")
+	}
+	if !strings.Contains(panel, "t('dev.slots')") || !strings.Contains(panel, "t('dev.changes')") {
+		t.Fatal("the panel does not show the package's places and the changes left today")
 	}
 	if !strings.Contains(panel, "t('dev.online')") || !strings.Contains(panel, "t('dev.offline')") ||
 		en["dev.online"] != "Connected now" || en["dev.offline"] != "Not connected" {
@@ -112,7 +115,7 @@ func TestGuestDeviceRemovalIsConfirmedAndItsResultIsClear(t *testing.T) {
 	// The release call is reachable only from the confirmation's own "Remove" button.
 	ask := panel[strings.Index(panel, "function ask("):]
 	ask = ask[:strings.Index(ask, "function load(")]
-	for _, want := range []string{"t('dev.confirm')", "t('dev.yes')", "t('dev.keep')", "release(id, btn, row)", "no.focus()", "'Escape'"} {
+	for _, want := range []string{"'dev.confirm'", "t('dev.yes')", "t('dev.keep')", "release(id, btn, row)", "no.focus()", "'Escape'"} {
 		if !strings.Contains(ask, want) {
 			t.Fatalf("the in-page confirmation is missing %q", want)
 		}
@@ -138,16 +141,18 @@ func TestGuestDeviceRemovalIsConfirmedAndItsResultIsClear(t *testing.T) {
 	}
 }
 
-// EVERY REFUSAL IS THE SAME SENTENCE. The API collapses "online", "not yours", "already gone", "throttled"
-// and "switched off" into one answer; a page that guessed between them would undo that.
+// EVERY REFUSAL IS THE SAME SENTENCE -- except today's limit for changing devices, which is a rule the client
+// must know (0118). The API collapses "not yours", "already gone" and "switched off" into one answer; a page that
+// guessed between them would undo that.
 func TestGuestDeviceRefusalSaysNothing(t *testing.T) {
 	panel := devicesPanel(t, renderSuccess(t))
 	if !strings.Contains(panel, "t('dev.refused')") ||
 		builtinStrings["en"]["dev.refused"] != "That didn’t work. Please try again in a moment." {
 		t.Fatal("the refusal message is missing")
 	}
-	if strings.Count(panel, "note.className='dv-err'") != 1 || strings.Count(panel, "t('dev.refused')") != 1 {
-		t.Fatal("there is more than one refusal message, so refusals are distinguishable")
+	if strings.Count(panel, "t('dev.refused')") != 1 || strings.Count(panel, "note.className='dv-err'") != 2 ||
+		!strings.Contains(panel, "res.code === 'limit_today'") {
+		t.Fatal("refusals other than today's limit must be one sentence, and today's limit its own")
 	}
 	// ...and in no language does the one refusal sentence explain itself.
 	for code, words := range builtinStrings {

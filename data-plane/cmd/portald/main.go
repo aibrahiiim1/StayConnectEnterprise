@@ -453,7 +453,28 @@ func (h *handler) logout(w http.ResponseWriter, r *http.Request) {
 		}
 		clearClientResumeCookie(w)
 	}
+	h.endPortalSignIn(w, r)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// endPortalSignIn forgets the portal's own record that this browser signed in: the package-selection session
+// (sc_commerce) and the account token (og_account).
+//
+// WITHOUT IT SIGN-OUT LEFT THE SIGN-IN BEHIND. The landing page continues an unfinished journey at package
+// selection while the commerce session is valid (index, ten minutes), so after a sign-in that ended without a
+// package -- refused at the device limit, a suspended account, a client who signed out from the package page --
+// every visit to the portal went straight back to the packages of the account just signed out of, and the
+// sign-in page could not be reached on that device until the session expired.
+func (h *handler) endPortalSignIn(w http.ResponseWriter, r *http.Request) {
+	if c, err := r.Cookie(commerceCookie); err == nil && c.Value != "" && h.commerceSessions != nil {
+		h.commerceSessions.delete(c.Value)
+	}
+	for _, name := range []string{commerceCookie, accountCookie} {
+		if _, err := r.Cookie(name); err == nil {
+			http.SetCookie(w, &http.Cookie{Name: name, Value: "", Path: "/", MaxAge: -1, HttpOnly: true,
+				SameSite: http.SameSiteLaxMode})
+		}
+	}
 }
 
 // status answers two different callers from the same scd lookup.
@@ -600,6 +621,9 @@ func (h *handler) routes() http.Handler {
 	// whether device management exists on this appliance.
 	r.Post("/devices/list", h.deviceList)
 	r.Post("/devices/release", h.deviceRelease)
+	// A package's devices are all in use: choose the one this device replaces (device_pages.go, 0118).
+	r.Get("/devices/replace", h.replacePage)
+	r.Post("/devices/replace", h.replaceDevice)
 	r.Get("/api/auth-methods", h.authMethods)
 	r.Get("/api/branding", h.branding)
 	// The shipped wording, so Hotel Admin can show an operator what a guest actually reads in Italian rather

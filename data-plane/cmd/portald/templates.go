@@ -1717,6 +1717,8 @@ const packagesHTML = guestHead + `
     <button class="choice" type="submit"><span class="c-text"><span class="c-name" dir="auto">{{.Name}}</span>{{if .Detail}}<span class="c-detail">{{.Detail}}</span>{{end}}<span class="c-detail c-price" dir="auto">{{.Price}} · {{index $.T .MethodKey}}</span></span>` + iconChevNext + `</button>
   </form>{{end}}
   </div>
+  <!-- A way back to the sign-in page: signing out ends this sign-in (main.go endPortalSignIn). -->
+  <form method="post" action="/logout"><button class="link" type="submit">{{index .T "pkg.signout"}}</button></form>
 </div>` + guestFoot + `
 </main>
 </div>` + guestScripts + `
@@ -2056,6 +2058,7 @@ const successHTML = guestHead + `
   <div id="devices" class="section" hidden>
     <h2>{{index .T "dev.title"}}</h2>
     <p class="lead">{{index .T "dev.lead"}}</p>
+    <p class="lead" id="dv-slots" hidden></p>
     <div id="dv-list"></div>
     <div id="dv-note" role="status" aria-live="polite"></div>
   </div>
@@ -2064,6 +2067,7 @@ const successHTML = guestHead + `
     var panel = document.getElementById('devices');
     var list  = document.getElementById('dv-list');
     var note  = document.getElementById('dv-note');
+    var slots = document.getElementById('dv-slots');
     var busy  = false;
     var ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="6.5" y="2.5" width="11" height="19" rx="2.2"/><path d="M11 18.3h2"/></svg>';
 
@@ -2083,14 +2087,20 @@ const successHTML = guestHead + `
     function refused(){ note.className='dv-err'; note.textContent=t('dev.refused'); }
     function clearNote(){ note.className=''; note.textContent=''; }
 
-    function render(devices){
+    function render(devices, res){
       list.innerHTML='';
+      // The package's places, and how many changes are left today (0: the limit is reached for today).
+      if(res && res.limit){
+        var line = fill(fill(t('dev.slots'), 'n', res.in_use || devices.length), 'max', res.limit);
+        line += ' · ' + (res.changes_left > 0 ? fill(t('dev.changes'), 'n', res.changes_left) : t('dev.changes.none'));
+        slots.textContent = line; slots.hidden = false;
+      }
       devices.forEach(function(d, i){
         var el = document.createElement('div'); el.className='dev';
         var icon = document.createElement('span'); icon.className='dev-icon'; icon.innerHTML = ICON;
         var text = document.createElement('div'); text.className='dev-text';
         var name = document.createElement('div'); name.className='name';
-        name.textContent = fill(t('dev.name'), 'n', i+1);
+        name.textContent = d.this ? t('dev.this') : fill(t('dev.name'), 'n', i+1);
         var meta = document.createElement('div'); meta.className='meta';
         var badge = document.createElement('span');
         badge.className = d.online ? 'badge badge--ok' : 'badge';
@@ -2107,14 +2117,16 @@ const successHTML = guestHead + `
           btn.className='btn btn--danger btn--sm';
           btn.textContent=t('dev.remove');
           btn.setAttribute('aria-label', fill(t('dev.name'), 'n', i+1) + ' — ' + t('dev.remove'));
-          btn.addEventListener('click', function(){ ask(el, d.id, btn, i+1); });
+          btn.addEventListener('click', function(){ ask(el, d.id, btn, i+1, d.online); });
           el.appendChild(btn);
         } else {
           // An online device is never removable, and saying so plainly is better than offering a button that
           // will refuse: the guest is told what to do instead.
           var why = document.createElement('div'); why.className='inuse';
-          why.textContent = d.online ? t('dev.inuse') : t('dev.cannot');
-          el.appendChild(why);
+          if(!d.this){
+            why.textContent = t('dev.cannot');
+            el.appendChild(why);
+          }
         }
         list.appendChild(el);
       });
@@ -2122,13 +2134,13 @@ const successHTML = guestHead + `
 
     // THE CONFIRMATION IS PART OF THE PAGE, not the browser's own dialog: it is in the guest's language, it
     // states the consequence, focus lands on the safe answer, and Escape keeps the device.
-    function ask(el, id, btn, n){
+    function ask(el, id, btn, n, online){
       if(busy) return;
       clearNote();
       var row = document.createElement('div'); row.className='confirm-row';
       row.setAttribute('role','group');
       var q = document.createElement('p'); q.id = 'dv-q-' + n;
-      q.textContent = fill(t('dev.confirm'), 'n', n);
+      q.textContent = fill(t(online ? 'dev.confirm.online' : 'dev.confirm'), 'n', n);
       row.setAttribute('aria-labelledby', q.id);
       var bar = document.createElement('div'); bar.className='row';
       var yes = document.createElement('button'); yes.type='button'; yes.className='btn btn--solid-danger btn--sm';
@@ -2155,7 +2167,7 @@ const successHTML = guestHead + `
             if(showPanel) panel.hidden = true;
             return;
           }
-          render(res.devices);
+          render(res.devices, res);
           panel.hidden = false;
         })
         .catch(function(){ if(showPanel) panel.hidden = true; });
@@ -2171,7 +2183,9 @@ const successHTML = guestHead + `
           busy = false;
           if(!res || !res.ok){
             if(row.parentNode) row.parentNode.removeChild(row);
-            btn.hidden = false; btn.disabled = false; refused(); return;
+            btn.hidden = false; btn.disabled = false;
+            if(res && res.code === 'limit_today'){ note.className='dv-err'; note.textContent=t('dev.changes.none'); return; }
+            refused(); return;
           }
           note.className='dv-done';
           note.textContent = t('dev.removed');

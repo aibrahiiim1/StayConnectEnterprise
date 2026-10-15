@@ -404,6 +404,18 @@ func main() {
 			// strong every generated password is.
 			mountResource(r, s, "account-password-settings", s.accountPasswordSettingsRoutes)
 			mountResource(r, s, "sessions", s.sessionsRoutes)
+			// DEVICES (client_devices_admin.go, migration 0118): find a device, see what it holds, disconnect it,
+			// release its place on a package, make it sign in afresh. The same live-access state the sessions key
+			// governs, so the same key; the daily client device-change limit is a configuration decision, so
+			// auth-methods, like the Email accounts terms.
+			r.Route("/client-devices", func(r chi.Router) {
+				r.Use(s.resourcePermission("sessions"))
+				r.Mount("/", s.clientDevicesAdminRoutes())
+			})
+			r.Route("/device-settings", func(r chi.Router) {
+				r.Use(s.resourcePermission("auth-methods"))
+				r.Mount("/", s.deviceSettingsRoutes())
+			})
 			// USAGE EXPLORER. Read-only investigation over durable accounting and session data; see
 			// resources_usage.go. Under the "sessions" role because it is the same live-access state that
 			// resource already governs, rather than a new row in the role matrix.

@@ -868,7 +868,7 @@ main.card { display: block; }
 <title>You&#39;re online</title>
 <script nonce="e2e-nonce">
   
-  var T = {"dev.ago":"{t} ago","dev.cannot":"This device can’t be removed right now.","dev.confirm":"Remove device {n}? It will lose its place, and can connect again at any time.","dev.inuse":"In use right now, so it can’t be removed. Disconnect it from the Wi‑Fi first.","dev.justnow":"just now","dev.keep":"Keep","dev.lastused":"Last used: {t}","dev.lead":"These are the devices using your internet access. Removing one frees its place for another device — nothing about your access changes, and the removed device can connect again at any time.","dev.name":"Device {n}","dev.offline":"Not connected","dev.online":"Connected now","dev.refused":"That didn’t work. Please try again in a moment.","dev.remove":"Remove this device","dev.removed":"That device has been removed and its place is free. It can connect again at any time.","dev.title":"Your devices","dev.yes":"Remove","tl.ends":"Your access ends on {date}, whether or not the time is used.","tl.left":"{t} of internet time left","tl.none":"No time","tl.note":"This counts down only while you are connected.","unit.d":"{n} d","unit.h":"{n} h","unit.mbps":"{n} Mbps","unit.min":"{n} min"};
+  var T = {"dev.ago":"{t} ago","dev.cannot":"This device can’t be removed right now.","dev.changes":"You can change devices {n} more times today.","dev.changes.none":"You've reached today's limit for changing devices. Please contact the site team for assistance.","dev.confirm":"Remove device {n}? It will lose its place, and can connect again at any time.","dev.confirm.online":"Disconnect device {n} and free its place? It goes offline now. Your time and data stay the same.","dev.inuse":"In use right now, so it can’t be removed. Disconnect it from the Wi‑Fi first.","dev.justnow":"just now","dev.keep":"Keep","dev.lastused":"Last used: {t}","dev.lead":"These are the devices using your internet access. Removing one frees its place for another device — nothing about your access changes, and the removed device can connect again at any time.","dev.name":"Device {n}","dev.offline":"Not connected","dev.online":"Connected now","dev.refused":"That didn’t work. Please try again in a moment.","dev.remove":"Remove this device","dev.removed":"That device has been removed and its place is free. It can connect again at any time.","dev.slots":"{n} of {max} devices in use","dev.this":"This device","dev.title":"Your devices","dev.yes":"Remove","tl.ends":"Your access ends on {date}, whether or not the time is used.","tl.left":"{t} of internet time left","tl.none":"No time","tl.note":"This counts down only while you are connected.","unit.d":"{n} d","unit.h":"{n} h","unit.mbps":"{n} Mbps","unit.min":"{n} min"};
   function t(k) { return T[k] || k; }
   function fill(s, k, v) { return String(s).split('{' + k + '}').join(String(v)); }
 </script>
@@ -1063,6 +1063,7 @@ main.card { display: block; }
   <div id="devices" class="section" hidden>
     <h2>Your devices</h2>
     <p class="lead">These are the devices using your internet access. Removing one frees its place for another device — nothing about your access changes, and the removed device can connect again at any time.</p>
+    <p class="lead" id="dv-slots" hidden></p>
     <div id="dv-list"></div>
     <div id="dv-note" role="status" aria-live="polite"></div>
   </div>
@@ -1071,6 +1072,7 @@ main.card { display: block; }
     var panel = document.getElementById('devices');
     var list  = document.getElementById('dv-list');
     var note  = document.getElementById('dv-note');
+    var slots = document.getElementById('dv-slots');
     var busy  = false;
     var ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="6.5" y="2.5" width="11" height="19" rx="2.2"/><path d="M11 18.3h2"/></svg>';
 
@@ -1090,14 +1092,20 @@ main.card { display: block; }
     function refused(){ note.className='dv-err'; note.textContent=t('dev.refused'); }
     function clearNote(){ note.className=''; note.textContent=''; }
 
-    function render(devices){
+    function render(devices, res){
       list.innerHTML='';
+      
+      if(res && res.limit){
+        var line = fill(fill(t('dev.slots'), 'n', res.in_use || devices.length), 'max', res.limit);
+        line += ' · ' + (res.changes_left > 0 ? fill(t('dev.changes'), 'n', res.changes_left) : t('dev.changes.none'));
+        slots.textContent = line; slots.hidden = false;
+      }
       devices.forEach(function(d, i){
         var el = document.createElement('div'); el.className='dev';
         var icon = document.createElement('span'); icon.className='dev-icon'; icon.innerHTML = ICON;
         var text = document.createElement('div'); text.className='dev-text';
         var name = document.createElement('div'); name.className='name';
-        name.textContent = fill(t('dev.name'), 'n', i+1);
+        name.textContent = d.this ? t('dev.this') : fill(t('dev.name'), 'n', i+1);
         var meta = document.createElement('div'); meta.className='meta';
         var badge = document.createElement('span');
         badge.className = d.online ? 'badge badge--ok' : 'badge';
@@ -1114,14 +1122,16 @@ main.card { display: block; }
           btn.className='btn btn--danger btn--sm';
           btn.textContent=t('dev.remove');
           btn.setAttribute('aria-label', fill(t('dev.name'), 'n', i+1) + ' — ' + t('dev.remove'));
-          btn.addEventListener('click', function(){ ask(el, d.id, btn, i+1); });
+          btn.addEventListener('click', function(){ ask(el, d.id, btn, i+1, d.online); });
           el.appendChild(btn);
         } else {
           
           
           var why = document.createElement('div'); why.className='inuse';
-          why.textContent = d.online ? t('dev.inuse') : t('dev.cannot');
-          el.appendChild(why);
+          if(!d.this){
+            why.textContent = t('dev.cannot');
+            el.appendChild(why);
+          }
         }
         list.appendChild(el);
       });
@@ -1129,13 +1139,13 @@ main.card { display: block; }
 
     
     
-    function ask(el, id, btn, n){
+    function ask(el, id, btn, n, online){
       if(busy) return;
       clearNote();
       var row = document.createElement('div'); row.className='confirm-row';
       row.setAttribute('role','group');
       var q = document.createElement('p'); q.id = 'dv-q-' + n;
-      q.textContent = fill(t('dev.confirm'), 'n', n);
+      q.textContent = fill(t(online ? 'dev.confirm.online' : 'dev.confirm'), 'n', n);
       row.setAttribute('aria-labelledby', q.id);
       var bar = document.createElement('div'); bar.className='row';
       var yes = document.createElement('button'); yes.type='button'; yes.className='btn btn--solid-danger btn--sm';
@@ -1162,7 +1172,7 @@ main.card { display: block; }
             if(showPanel) panel.hidden = true;
             return;
           }
-          render(res.devices);
+          render(res.devices, res);
           panel.hidden = false;
         })
         .catch(function(){ if(showPanel) panel.hidden = true; });
@@ -1178,7 +1188,9 @@ main.card { display: block; }
           busy = false;
           if(!res || !res.ok){
             if(row.parentNode) row.parentNode.removeChild(row);
-            btn.hidden = false; btn.disabled = false; refused(); return;
+            btn.hidden = false; btn.disabled = false;
+            if(res && res.code === 'limit_today'){ note.className='dv-err'; note.textContent=t('dev.changes.none'); return; }
+            refused(); return;
           }
           note.className='dv-done';
           note.textContent = t('dev.removed');
