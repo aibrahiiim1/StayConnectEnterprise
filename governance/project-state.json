@@ -462,7 +462,7 @@
     "rollback_rehearsal_occurred": true,
     "corrected_software_deployed": true,
     "deployed_head_on_appliance": "MIXED -- see deployed_runtime_services; there is no single deployed head",
-    "deployed_head_note": "PRE-LIVE 172.21.60.25, re-read live on 2026-10-15 after the self-service delivery (PR #216, T0234). THE APPLIANCE RUNS BINARIES FROM SEVERAL COMMITS and this field names none, because naming one would misdescribe the others. Per binary: netd 9bb29145; scd 2ebf75fa; edged 9bb29145; pmsd 6a403326; portald 9bb29145; acctd 99ba9f10; the helpers keybootstrap e9b72aab, sitemigrate and svc-run 29a6b21f. scd, edged, portald and netd come from branch delivery/email-accounts-self-service (PR #216), ahead of master on purpose under the standing PRE-LIVE deployment decision; every other commit is contained in master. All read out of the INSTALLED bytes with vcs.modified=false and -tags=stayconnect_production on the six services.",
+    "deployed_head_note": "PRE-LIVE 172.21.60.25, re-read live on 2026-10-15 after the self-service delivery (PR #216, T0235). THE APPLIANCE RUNS BINARIES FROM SEVERAL COMMITS and this field names none, because naming one would misdescribe the others. Per binary: netd 9bb29145; scd d01d13fc; edged 9bb29145; pmsd 6a403326; portald 9bb29145; acctd 99ba9f10; the helpers keybootstrap e9b72aab, sitemigrate and svc-run 29a6b21f. scd, edged, portald and netd come from branch delivery/email-accounts-self-service (PR #216), ahead of master on purpose under the standing PRE-LIVE deployment decision; every other commit is contained in master. All read out of the INSTALLED bytes with vcs.modified=false and -tags=stayconnect_production on the six services.",
     "live_increment9_revalidated": true,
     "live_increment9_revalidated_on": "2026-08-11",
     "live_increment9_revalidation_verdicts": {
@@ -925,9 +925,9 @@
     "pms_published_generation_note": "THREE DIFFERENT COUNTERS HAVE ALL BEEN ABBREVIATED 'gen' AND MUST NOT BE CONFLATED. pms_interface_runtime.published_resync_generation is the RESYNC generation, bumped once per resync cycle: 300, read passively 2026-09-16 after the T0149 deployment. pms_interface_runtime.runtime_generation is a monotonic runtime-row counter bumped on every state write, which is why it is orders of magnitude larger: 74452. pms_interface_revisions.revision_no is the pinned Interface REVISION: 3, unchanged. The move followed the pmsd restart the T0149 deployment caused: the connector reconnected and requested its own resync, publishing generation 299 over 464 records at 2026-09-16T14:04:36Z and reaching 300 on the next cycle. No operator command and no configuration change; resync_command_id is NULL. HISTORICAL (do not read as current): 282 belongs to the 2026-09-15 restart, 209 to the migration-0065 closure, and 206-208 to the 2026-09-08T11:45Z restart sequence.",
     "deployed_runtime_head": "MIXED -- see deployed_runtime_services; there is no single deployed head",
     "deployed_runtime_services": {
-      "_note": "Per service: sha256 of the installed binary, the commit its own bytes name, and the build tag. Read back from /opt/stayconnect/bin on PRE-LIVE 172.21.60.25 on 2026-10-15 after the self-service delivery (PR #216, T0234). The appliance carries no Go toolchain, so the Go build stamp was read directly out of the artifact.",
+      "_note": "Per service: sha256 of the installed binary, the commit its own bytes name, and the build tag. Read back from /opt/stayconnect/bin on PRE-LIVE 172.21.60.25 on 2026-10-15 after the self-service delivery and its review fix (PR #216, T0235). The appliance carries no Go toolchain, so the Go build stamp was read directly out of the artifact.",
       "netd": "686f4ce376f989410fd8f95f06e5e65a900a1aa38ec7ff7c9717ed415885d539  (9bb291453221, tags=stayconnect_production, vcs.modified=false)",
-      "scd": "a4ff2fda7fecb370dec12a14376f1bae620273243d5f9406c02fab075b30fed6  (2ebf75fa710a, tags=stayconnect_production, vcs.modified=false)",
+      "scd": "9906841a095a1c218dd599e41af580603bf07d9758937ece841a6976217f2893  (d01d13fcaeb8, tags=stayconnect_production, vcs.modified=false)",
       "edged": "433f5c6af7b2589af17c0ce8098032b1bd49392eeec43c94ca6e15f66e930637  (9bb291453221, tags=stayconnect_production, vcs.modified=false)",
       "pmsd": "b6ea2fc19ca25ba811c165a7a7e6c62b3d399bab95a96550e7f36ec9f0ddd87d  (6a403326ea42, tags=stayconnect_production, vcs.modified=false)",
       "portald": "12c146a3e9dc7ca9a498a593d08ffe1e668e061f675e719f28b484711abf3460  (9bb291453221, tags=stayconnect_production, vcs.modified=false)",
@@ -1277,7 +1277,7 @@
     "prelive_phase4_flag_posture": "PRE-LIVE 172.21.60.25 since 2026-09-30 (D47): scd runs STAYCONNECT_PHASE4_MASTER, _PAYMENT, _PAYMENT_PROVIDER, _POSTING, _FINANCIAL_REVIEW, _OUTBOX_WORKER and _PMS_TRANSMIT; pmsd runs _MASTER, _OUTBOX_WORKER and _PMS_TRANSMIT; edged runs _MASTER, _POSTING and _FINANCIAL_REVIEW. STAYCONNECT_PAYMENT_LIVE_ALLOWED is set nowhere. Real PMS postings ever: one (T0204, USD 1.00, PA OK). Payment-provider traffic ever: none.",
     "phase4_flags_off_scope": "phase4_flags_off records the DELIVERED REPOSITORY configuration (no file in the tree enables a Phase-4 flag; scripts/ci/phase4-dark-check.sh asserts it). It is not a statement about the PRE-LIVE environment, whose posture is recorded in prelive_phase4_flag_posture."
   },
-  "latest_transition_id": "T0234",
+  "latest_transition_id": "T0235",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1524,7 +1524,7 @@
     "hostname": "sce",
     "os": "Ubuntu 22.04.5 LTS",
     "initial_deployment_source_sha": "c72b49e958a408c468bfb2c5da97b21a4f383a7d",
-    "runtime_provenance": "MIXED, per binary. current_state_facts.deployed_runtime_services records the sha256 and the source commit of each installed binary, every one read back out of the installed bytes after installation, and deployed_head_on_appliance says MIXED rather than naming a head that would be false. Re-verified live on 2026-10-14 after the production-certificate round: netd 9bb29145; scd 2ebf75fa; edged 9bb29145; pmsd 6a403326; portald 9bb29145; acctd 99ba9f10; the helpers keybootstrap e9b72aab, sitemigrate and svc-run 29a6b21f. scd, edged, portald and netd belong to PR #216 (ahead of master on purpose); every other commit is contained in master. All six service binaries report -tags=stayconnect_production and vcs.modified=false.",
+    "runtime_provenance": "MIXED, per binary. current_state_facts.deployed_runtime_services records the sha256 and the source commit of each installed binary, every one read back out of the installed bytes after installation, and deployed_head_on_appliance says MIXED rather than naming a head that would be false. Re-verified live on 2026-10-14 after the production-certificate round: netd 9bb29145; scd d01d13fc; edged 9bb29145; pmsd 6a403326; portald 9bb29145; acctd 99ba9f10; the helpers keybootstrap e9b72aab, sitemigrate and svc-run 29a6b21f. scd, edged, portald and netd belong to PR #216 (ahead of master on purpose); every other commit is contained in master. All six service binaries report -tags=stayconnect_production and vcs.modified=false.",
     "first_bringup_fixes_commit_sha": "1c55d7f7a36547665457edb7ee2af1016b4ccdca",
     "first_bringup_fixes_commit_note": "IMMUTABLE HISTORICAL FACT: this is the commit that CONTAINS the first Fresh Production bring-up fixes (hypertable registration in the baseline, the pre-assignment 500s, the null bridge-members crash, the Kea message). It is NOT 'current master' and must never be updated to track master: a tracked file cannot hold the SHA of the commit that contains it without being stale the moment it is committed.",
     "redeploy_note": "A redeploy from the current repository head with deploy/scripts/provision-fresh-appliance.sh would make the whole appliance correspond to a single commit. It has not been done and is not authorized here. The head to redeploy from is read from git at the time, never stored here.",
@@ -1774,17 +1774,17 @@
   "current_delivery": {
     "kind": "EMAIL_ACCOUNTS_SELF_SERVICE_DEPLOYED_TO_PRE_LIVE",
     "decision": "D50 (2026-10-15): Email + Password self-service accounts replace the email one-time code; captive discovery improvements.",
-    "decision_note": "Deployed to PRE-LIVE for Product Owner testing (T0234). Not merged.",
+    "decision_note": "Deployed to PRE-LIVE for Product Owner testing (T0234); one automated-review finding fixed and scd redeployed (T0235). Not merged.",
     "manifest": "docs/manifests/EmailAccountsSelfService-change-manifest.md",
     "base": "87b32100ffb67fd5c59820aff00d727d4e189ff7",
     "base_note": "Master after PR #215 (T0233).",
-    "head": "d4dc9816",
-    "head_note": "The last content commit of PR #216 when T0234 was written. Governance commits follow it.",
-    "transition": "T0234",
-    "previous_delivery": "T0233",
+    "head": "d01d13fc",
+    "head_note": "The last content commit of PR #216 when T0235 was written. Governance commits follow it.",
+    "transition": "T0235",
+    "previous_delivery": "T0234",
     "pr": 216,
     "pr_state": "OPEN -- READY FOR PRODUCT OWNER TESTING; po-merge-approved NOT applied",
-    "note": "T0234. PRE-LIVE runs netd 9bb29145; scd 2ebf75fa; edged 9bb29145; pmsd 6a403326; portald 9bb29145; acctd 99ba9f10; keybootstrap e9b72aab; Admin Console release 20261015-074621 (9bb29145); migrations through 0117; Central ctrlapi and console 700a3564. Email accounts live on PRE-LIVE for Product Owner testing; Go-Live not authorised."
+    "note": "T0235. PRE-LIVE runs netd 9bb29145; scd d01d13fc; edged 9bb29145; pmsd 6a403326; portald 9bb29145; acctd 99ba9f10; keybootstrap e9b72aab; Admin Console release 20261015-074621 (9bb29145); migrations through 0117; Central ctrlapi and console 700a3564. Email accounts live on PRE-LIVE for Product Owner testing; Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
