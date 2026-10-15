@@ -51,7 +51,7 @@ post(){ local n=$1 path=$2; shift 2  # prints "<code> <location>"
 says(){ grep -qi "$2" /tmp/$1.html; }
 sidof(){ printf '%s' "$1" | sed -n 's/.*[?&]s=\([^&]*\).*/\1/p'; }
 ACC(){ $PSQL "SELECT $1 FROM iam_v2.guest_access_accounts WHERE lower(username)='$EMAIL'"; }
-ENT(){ $PSQL "SELECT id||'|'||status||'|'||window_ends_at FROM iam_v2.entitlements WHERE guest_account_id=(SELECT id FROM iam_v2.guest_access_accounts WHERE lower(username)='$EMAIL') ORDER BY activated_at DESC NULLS LAST LIMIT 1"; }
+ENT(){ $PSQL "SELECT id||'|'||status||'|'||coalesce(window_ends_at::text,'none') FROM iam_v2.entitlements WHERE guest_account_id=(SELECT id FROM iam_v2.guest_access_accounts WHERE lower(username)='$EMAIL') ORDER BY activated_at DESC NULLS LAST LIMIT 1"; }
 page(){ python3 -c 'import re,sys;t=open(sys.argv[1],encoding="utf-8",errors="replace").read();t=re.sub(r"<script.*?</script>|<style.*?</style>","",t,flags=re.S);print(re.sub(r"\s+"," ",re.sub(r"<[^>]+>"," ",t)).strip()[:400])' /tmp/$1.html; }
 
 echo "portal $P, free package ${FREE:0:8}"

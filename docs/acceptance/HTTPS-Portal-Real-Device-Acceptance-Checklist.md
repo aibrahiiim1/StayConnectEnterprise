@@ -30,7 +30,7 @@ until a person runs them.
 
 | # | Steps | Expected |
 |---|---|---|
-| B1 | Email code: request a code | The email has the code **and** a link starting `https://<hostname>/connect` |
+| B1 | *(superseded 2026-10-15: the email code was replaced by Email accounts, section F)* | — |
 | B2 | Enter the code | Signed in; internet works |
 | B3 | Tap the email link on the same phone | Signed in |
 | B4 | Voucher / account / room sign-in | Unchanged behaviour, over HTTPS |
@@ -91,3 +91,22 @@ Mac is managed (System Settings -> Privacy & Security -> Profiles) or has captiv
 (`defaults read /Library/Preferences/SystemConfiguration/com.apple.captive.control Active` prints 0). On a Mac
 whose detection is off, opening any `http://` site (as with neverssl.com) or the portal hostname reaches the
 HTTPS portal; that is the documented workaround. Result: NOT RUN.
+
+## F. Email accounts (self-service, 2026-10-15)
+
+Automated on PRE-LIVE from guest-network devices: `scripts/email-accounts-e2e-test.sh` 24/24 (register -> packages
+-> free package online; another device held to the package's device limit; the same device returns to the same
+entitlement, window unchanged; deadline -> suspended, entitlement untouched; resend wait; one grace hour with the
+password, then suspended again and no second hour; duplicate registration; forgot-password genericity; per-device
+registration cap; no posting or payment). Regression: 18/18, 12/12, 15/15. The rows below are NOT RUN until a
+person runs them.
+
+| # | Steps | Expected |
+|---|---|---|
+| F1 | Phone: Email -> Create account, then pick the free package | Online at once, no email wait |
+| F2 | Open the verification email ON the guest Wi-Fi, tap the link, press the button | "Email verified"; connection not interrupted |
+| F3 | Another phone: sign in with the same email and password | Joins the same access if the package allows 2+ devices; otherwise a clear device-limit message |
+| F4 | Forgot password: request, open the link on the guest Wi-Fi, set a new password | The new password works; the old one does not |
+| F5 | (Operator, test account) set its deadline in the past; reconnect | Verification-required page with Resend and "Allow Internet for 1 More Hour" |
+| F6 | Laptop with Chrome or Edge, not signed in, open an `https://` site | Within about 30 s Chrome/Edge opens the login tab |
+| F7 | Windows laptop joins | Windows offers / opens the sign-in page |

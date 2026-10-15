@@ -273,3 +273,28 @@ onegate.work is hosted at Cloudflare; the zone-scoped token is on Central (enter
 
 **Not yet verified** (needs the Product Owner): real iPhone/Android behaviour (checklist), and a real
 social-provider round trip (needs the hotel's own provider apps).
+
+## 14. Captive-portal discovery across operating systems (investigated 2026-10-14/15)
+
+What OneGate offers every device, and what each platform does with it. Sources: RFC 8908/8910/8952, Apple
+(support 101555, developer news q78sq5rv, support 102554), Android NetworkStack `NetworkMonitor` and the Custom
+Tabs page, Microsoft KB4494446 (NCSI), Chromium `captive_portal_tab_reloader.cc`, `ssl_error_handler.cc`.
+
+| Platform | Mechanism | OneGate | Verified |
+|---|---|---|---|
+| iOS / iPadOS 14+ | option 114 -> RFC 8908 API (TLS); also the `captive.apple.com` probe | option 114 by code; API on the public certificate; probe 302 to HTTPS | iPhone opened the sheet by itself (PRE-LIVE, 2026-10-14) |
+| Android 11+ | option 114 API is authoritative for "captive"; HTTP/HTTPS probes | API + `x-android-use-custom-tabs`; probes 302 | Android (A71) opened by itself |
+| macOS 11+ | as iOS | as iOS | a MacBook received option 114 and ran no captive check at all (packet capture): Mac-side configuration |
+| Windows 10/11 | NCSI probe `msftconnecttest.com/connecttest.txt`, then opens the browser at `/redirect`; no RFC 8910 use documented | probe 302 to HTTPS; `/redirect` reaches the portal | not yet on a real Windows device |
+| Desktop Chrome / Edge, a typed or bookmarked `https://` site | captive check only on ERR_CONNECTION_TIMED_OUT, ERR_SSL_PROTOCOL_ERROR, a certificate error, or its 30-s slow-TLS timer; a reset or refusal suppresses it | **pre-sign-in TCP 443 is now dropped silently (was reset)**, so Chrome/Edge run their check and open the login tab | kernel test: no RST, nothing leaves the WAN; real browser not yet |
+| Firefox | its own probe (`firefox-portal-detection.com`), "Open network login page" | probe 302 to HTTPS | seen on the MacBook (2026-10-14) |
+| Mobile Chrome, Safari | no browser-level captive detection; they rely on the OS | — | — |
+
+**Never done:** HTTPS interception, certificate spoofing, TLS downgrade, DNS hijacking of probe names (Android
+classes a probe name resolving to a private address as no-Internet), HSTS.
+
+**Unavoidable limits (documented):** an `https://` page typed into Safari or mobile Chrome before signing in cannot
+show the portal: no portal can answer TLS for another site's name. A device whose own captive detection is off
+(macOS managed or configured, VPN, some security suites) will not open the login window by itself. **Fallback:**
+opening any `http://` address, or the portal hostname, reaches the HTTPS portal; the Admin Console's network page
+and printed material should show the portal hostname.

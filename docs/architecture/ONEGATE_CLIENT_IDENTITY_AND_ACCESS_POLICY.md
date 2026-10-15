@@ -289,6 +289,8 @@ after the choice. `iamv2.SiteMethods.CardCurrencies` carries the active accounts
 
 ### 6.5 Reading the code without leaving the Wi-Fi (2026-10-11)
 
+> **SUPERSEDED 2026-10-15** for email: there is no email code to read any more. The email one-time code and the Temporary Internet window were removed by the self-service delivery ([ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md](ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md) §1). SMS and WhatsApp codes keep the shared code engine, the `/connect` link and staff help. Kept below as the record of what was built.
+
 A Client who asked for an email code has to open their mail app before they are online. **Sign-in methods →
 Reading the code** lists email services (`internal/mailreach`: Gmail / Google Workspace, Outlook / Hotmail /
 Live / Microsoft 365, Yahoo, iCloud, Proton, Zoho, AOL, GMX / WEB.DE, Yandex, Mail.ru) as switches, and takes
@@ -312,6 +314,8 @@ link page still verifies nothing on GET. A challenge issued before 0110 keeps th
 minutes it lives. MAC identifies the device only, never a person.
 
 ### 6.6 Temporary internet while reading the code (Product-Owner decision, 2026-10-11)
+
+> **SUPERSEDED 2026-10-15** for email: no pre-sign-in Internet is granted for any reason. The email one-time code and the Temporary Internet window were removed by the self-service delivery ([ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md](ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md) §1). SMS and WhatsApp codes keep the shared code engine, the `/connect` link and staff help. Kept below as the record of what was built.
 
 Mail-service allowlisting (§6.5) cannot be made safe (a mail service's addresses serve the provider's other
 services) and cannot cover every provider. So when an **email** code is issued **and sent**, the device that
@@ -358,6 +362,8 @@ is bounded, not eliminated. While a window is open the phone's captive check suc
 close; the client returns to the portal (the pending code box, §6.2) or taps the email link.
 
 ### 6.7 Staff help for a client who cannot get their code (Product-Owner decision, 2026-10-12; migration 0113)
+
+> **SUPERSEDED 2026-10-15** for email: staff help now applies to SMS and WhatsApp codes only; the temporary-access columns and the Clear action are gone. The email one-time code and the Temporary Internet window were removed by the self-service delivery ([ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md](ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md) §1). SMS and WhatsApp codes keep the shared code engine, the `/connect` link and staff help. Kept below as the record of what was built.
 
 **Sign-in methods → Code requests** lists the code requests of the last 24 hours: when, the address it was sent
 to, the device that asked, the code's state (waiting, signed in, expired, too many wrong tries) and the device's
@@ -610,6 +616,8 @@ every device before sign-in, and the per-device window already gives the device 
 applies only on a site that switches temporary internet off, with this exposure stated on the screen.
 
 ### 10.2 Residual risk: the code link travels over plain HTTP (stated 2026-10-12)
+
+> **SUPERSEDED 2026-10-15** for email: the email code link no longer exists; the SMS link is unchanged. The email one-time code and the Temporary Internet window were removed by the self-service delivery ([ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md](ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md) §1). SMS and WhatsApp codes keep the shared code engine, the `/connect` link and staff help. Kept below as the record of what was built.
 
 The email's *tap to connect* link is `http://<gateway>:8380/connect?c=<challenge>&k=<code>`. The portal has no
 publicly trusted certificate, so the link cannot be HTTPS without a separate certificate / Root-CA decision
