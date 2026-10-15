@@ -237,8 +237,11 @@ func (s *server) clientDeviceChange(w http.ResponseWriter, r *http.Request, acti
 	if action == "REPLACE" {
 		reason = endReasonDeviceReplaced
 	}
-	// Off the network first, by the operator-disconnect path: only sessions of THIS package on THAT device.
-	if proven && req.DeviceID != dev {
+	// Off the network first, by the operator-disconnect path: only sessions of THIS package on THAT device -- and
+	// only when the change can go through. A change the database will refuse (today's limit reached, or a place
+	// is free so nothing needs replacing) must leave the target exactly as it was, so those are checked here
+	// first; the function checks them again under the package lock, and records the attempt either way.
+	if proven && req.DeviceID != dev && s.clientChangeWouldProceed(ctx, ent, action) {
 		s.endTargetSessions(ctx, ent, req.DeviceID, reason)
 	}
 	var authCtx any
@@ -301,4 +304,27 @@ func (s *server) endTargetSessions(ctx context.Context, ent, device, reason stri
 			slog.Warn("client devices: could not end the target's session", "err", err)
 		}
 	}
+}
+
+// clientChangeWouldProceed is the pre-check before a target is taken offline: changes are left today, and (for a
+// replacement) every place on the package is taken. Any failure to read answers false -- nothing is disconnected,
+// and the database function decides.
+func (s *server) clientChangeWouldProceed(ctx context.Context, ent, action string) bool {
+	var allowed int
+	if err := s.db.QueryRow(ctx, `SELECT client_device_changes_per_day FROM iam_v2.device_settings_get($1::uuid,$2::uuid)`,
+		s.tenID, s.siteID).Scan(&allowed); err != nil || s.clientChangesLeft(ctx, ent, allowed) <= 0 {
+		return false
+	}
+	if action != "REPLACE" {
+		return true
+	}
+	var limit *int
+	var held int
+	if err := s.db.QueryRow(ctx, `SELECT spr.max_concurrent_devices,
+	     (SELECT count(*)::int FROM iam_v2.entitlement_devices x WHERE x.entitlement_id = e.id AND x.status = 'AUTHORIZED')
+	     FROM iam_v2.entitlements e JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
+	     WHERE e.id = $1::uuid`, ent).Scan(&limit, &held); err != nil || limit == nil {
+		return false
+	}
+	return held >= *limit
 }

@@ -110,7 +110,7 @@ done
 post $A1 /auth/credentials --data-urlencode "username=$USER" --data-urlencode "password=$UPW" >/dev/null; get $A1 /devices/replace >/dev/null
 says $A1 "limit for changing devices" && ok "a 4th change today is refused with the daily-limit message" || bad "no daily limit"
 r=$(post $A1 /devices/replace --data-urlencode "device_id=$(devid $A2)")
-[ "$(online $A1)" != 204 ] && [ "$(online $A2)" = 204 ] && ok "and nothing moved: device 1 offline, device 2 online" || bad "4th change moved the place ($r)"
+[ "$(online $A1)" != 204 ] && [ "$(online $A2)" = 204 ]   && [ "$($PSQL "SELECT count(*) FROM iam_v2.sessions WHERE device_id='$(devid $A2)' AND state='active'")" = 1 ]   && ok "and nothing moved: device 1 offline, device 2 still online with its session" || bad "4th change moved or disconnected ($r)"
 
 echo "== B. $MULTI_N-device package (voucher): join, then replace at the limit"
 CODE=$(admin -d "{\"package_revision_id\":\"$MULTI_REV\",\"count\":1,\"note\":\"og-dm-$R4\"}" $ED/vouchers/issue | python3 -c 'import json,sys;d=json.load(sys.stdin);c=d.get("codes") or [v.get("code") for v in d.get("vouchers",[])];print(c[0] if c else "")')

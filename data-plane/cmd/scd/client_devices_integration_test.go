@@ -182,8 +182,18 @@ func TestIntegration_ClientReplacesADeviceOnAOneDevicePackage(t *testing.T) {
 	if _, o := f.post(t, s.clientDevicesList, map[string]string{"ip": f.ip(40), "mac": mac1, "auth_context_id": back}); o["changes_left"] != float64(0) {
 		t.Fatalf("changes left after today's one change = %v", o["changes_left"])
 	}
+	// Device 2 is online on the package; a refused change must not disconnect it.
+	var s2 string
+	if err := f.owner.QueryRow(ctx, `INSERT INTO iam_v2.sessions (tenant_id, site_id, entitlement_id, device_id, ip, mac, state,
+	     credential_method, started, expires_at) VALUES ($1,$2,$3::uuid,$4::uuid,$5::inet,$6::macaddr,'active','ACCOUNT',now(), now()+interval '1 day')
+	     RETURNING id::text`, f.tenant, f.site, ent, d2, f.ip(41), mac2).Scan(&s2); err != nil {
+		t.Fatal(err)
+	}
 	if _, o := f.post(t, s.clientDevicesReplace, map[string]string{"ip": f.ip(40), "mac": mac1, "auth_context_id": back, "device_id": d2}); o["outcome"] != "LIMIT_TODAY" {
 		t.Fatalf("a second change today = %v", o)
+	}
+	if st, _ := f.sessionEnd(t, s2); st != "active" {
+		t.Fatal("a change refused for today's limit disconnected the target")
 	}
 	if st, open := f.binding(t, ent, d2); st != "AUTHORIZED" || open != 1 {
 		t.Fatal("a refused change must not move the place")
