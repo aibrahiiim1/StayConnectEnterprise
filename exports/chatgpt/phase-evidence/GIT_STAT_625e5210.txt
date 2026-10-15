@@ -1,4 +1,0 @@
-commit 625e5210b7462c6f766daaa41c056d7d232a6daf
-Date:   Thu Oct 15 11:11:22 2026 +0300
-
-    Governance: T0234 records the email-accounts delivery on PRE-LIVE (D50)
