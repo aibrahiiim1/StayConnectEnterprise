@@ -632,3 +632,55 @@ func TestReconcile_ExpiredElementsAreNotResurrected(t *testing.T) {
 		t.Fatal("an expired authorization was re-created by the converge")
 	}
 }
+
+// ---- 10. AN OLDER TABLE STILL HOLDING TEMPORARY VERIFICATION ACCESS ---------------------------------------------
+
+// The software before this one rendered verify_ipv4 (plus its quota/rate maps) and scd filled it with devices
+// waiting for an email code. The current render has none of it (ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE §1). Upgrading
+// such an appliance must remove the set, carry nothing of it -- not even into another set -- and still keep every
+// signed-in guest online.
+func TestReconcile_UpgradeDropsAPopulatedVerificationSetAndCarriesNothingOfIt(t *testing.T) {
+	k := newFakeKernel(t)
+	k.legacyJulyTable("br-g90|10.20.0.70")
+	k.sets["verify_ipv4"] = []string{"br-g90|10.20.0.71", "br-g90|10.20.0.72"}
+	k.timeouts["br-g90|10.20.0.71"], k.timeouts["br-g90|10.20.0.72"] = 300, 120
+	a := newTestApplier(t, k)
+
+	res := converge(t, a, "boot_reconcile")
+
+	if !res.Changed {
+		t.Fatal("a table carrying the retired verification set was left as-is")
+	}
+	if _, ok := k.sets["verify_ipv4"]; ok {
+		t.Fatal("verify_ipv4 survived the converge")
+	}
+	if res.Carried != 1 || !k.has("auth_ipv4", "br-g90|10.20.0.70") {
+		t.Fatalf("carried %d; want exactly the one signed-in guest, still authorized", res.Carried)
+	}
+	for set := range k.sets {
+		for _, ip := range []string{"10.20.0.71", "10.20.0.72"} {
+			if k.has(set, "br-g90|"+ip) || k.has(set, ip) {
+				t.Fatalf("a device that only held a verification window is in %s after the converge", set)
+			}
+		}
+	}
+	for _, c := range k.cmds {
+		if strings.Contains(c, "verify_") {
+			t.Fatalf("the converge touched the retired set: %s", c)
+		}
+	}
+	muts := k.mutations()
+	if len(muts) != 1 {
+		t.Fatalf("want one atomic nft -f, got %v", muts)
+	}
+	raw, err := os.ReadFile(strings.TrimPrefix(muts[0], "nft -f "))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "delete table inet stayconnect") {
+		t.Fatal("the applied script does not replace the table, so the old set would linger")
+	}
+	if strings.Contains(string(raw), "verify_") || strings.Contains(string(raw), "10.20.0.71") || strings.Contains(string(raw), "10.20.0.72") {
+		t.Fatalf("the applied script still names the verification set or its devices:\n%s", raw)
+	}
+}

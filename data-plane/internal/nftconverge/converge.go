@@ -69,7 +69,15 @@ type Outcome struct {
 // walled garden. All three hold runtime state rather than rendered structure. The garden was missing here, so
 // every structural re-render reset it to the three baseline addresses until scd's next minute -- a sign-in
 // through an identity provider or a card payment page in progress at that moment lost its way out.
-var AuthSets = []string{nft.AuthV4, nft.Phase3AuthV4, nft.GardenV4, nft.GardenTCP, nft.GardenUDP, nft.VerifyV4}
+//
+// ONLY SETS THE CURRENT RENDER DECLARES MAY BE LISTED HERE. A carried `add element` into a set the new table
+// does not have fails the whole `nft -f`, and the converge with it. That is also why the temporary
+// verification-access set (verify_ipv4, with its verify_quota/up/down maps and per-device quota and limit
+// objects) left this list when it left the render: an older table that still holds it, populated, converges by
+// the ordinary `delete table` + recreate, which removes the set, its maps and their objects, and nothing of
+// theirs is read or carried -- a device that held a verification window comes out of the converge with no
+// Internet, exactly as the contract (ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE §1) now requires.
+var AuthSets = []string{nft.AuthV4, nft.Phase3AuthV4, nft.GardenV4, nft.GardenTCP, nft.GardenUDP}
 
 // tableName is the single StayConnect nft table. It is named once so that no read path can drift from the
 // table the render actually replaces.

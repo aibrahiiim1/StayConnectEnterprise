@@ -92,6 +92,12 @@ type Topology struct {
 	// §2.1). That listener is reachable ONLY behind the portal address below -- traffic a guest addresses to
 	// PortalVIP -- and never behind a gateway: a guest's connection to any other host on 443 is still never
 	// redirected, because the appliance holds a certificate only for its own portal names.
+	//
+	// What a zero DOES render is a silent drop of an unauthenticated guest's outbound TCP 443 (render_nft.go),
+	// not a reset. Chromium opens its captive-portal login tab only after an HTTPS load times out, fails TLS,
+	// shows a certificate error or trips its 30-second slow-SSL timer (captive_portal_tab_reloader.cc); a reset
+	// cancels that check, so the reset this used to render hid the login tab from desktop Chrome and Edge users
+	// who opened an https:// site. HTTPS-Upgrades falls back to http:// on any network error, a timeout included.
 	PortalTLSPort int
 
 	// PortalVIP is the portal address: one RFC 1918 IPv4 /32 that exists only on the dummy interface
