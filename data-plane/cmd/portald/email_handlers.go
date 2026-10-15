@@ -63,11 +63,14 @@ func (h *handler) authMethods(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(payload)
 }
 
-// ---- /auth/otp/request (channel-agnostic: email | sms) ----------------------
+// ---- /auth/otp/request (sms | whatsapp) --------------------------------------
 
+// THE ONE-TIME CODE IS FOR PHONES ONLY. An email address signs in as an email account with a password
+// (account_handlers.go); the email code, and the temporary Internet it opened to read it, are gone (self-service
+// contract section 1).
 type otpReqIn struct {
-	Channel     string `json:"channel"`     // "email" | "sms" | "whatsapp"
-	Destination string `json:"destination"` // email or E.164-ish phone
+	Channel     string `json:"channel"`     // "sms" | "whatsapp"
+	Destination string `json:"destination"` // E.164-ish phone
 }
 
 func (h *handler) authOTPRequest(w http.ResponseWriter, r *http.Request) {
@@ -77,9 +80,9 @@ func (h *handler) authOTPRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch in.Channel {
-	case "email", "sms", "whatsapp":
+	case "sms", "whatsapp":
 	default:
-		jsonErr(w, 400, "channel must be email, sms or whatsapp")
+		jsonErr(w, 400, "channel must be sms or whatsapp")
 		return
 	}
 	ip := clientIP(r)
@@ -89,7 +92,7 @@ func (h *handler) authOTPRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	// THE CODE IS BOUND TO THIS DEVICE. The hardware address comes from the kernel's neighbour table, never from
 	// the client, resolved rather than only consulted (arp_resolve.go) -- the same guarantee every sign-in path
-	// gives. scd records it with the challenge, and the code (or the email's link) verifies from it alone.
+	// gives. scd records it with the challenge, and the code (or the message's link) verifies from it alone.
 	mac, ok := h.deviceMAC(r.Context(), ip)
 	if !ok {
 		jsonErr(w, 400, "device not on this Wi-Fi network")
@@ -100,7 +103,7 @@ func (h *handler) authOTPRequest(w http.ResponseWriter, r *http.Request) {
 		"destination": in.Destination,
 		"ip":          ipString(ip),
 		"mac":         mac.String(),
-		// The origin this device reached the portal by: the email's tap-to-connect link uses it.
+		// The origin this device reached the portal by: the message's tap-to-connect link uses it.
 		"portal_base": portalLinkBase(r),
 	})
 	req, _ := http.NewRequestWithContext(r.Context(), "POST",

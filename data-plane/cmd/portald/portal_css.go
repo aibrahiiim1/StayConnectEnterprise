@@ -930,5 +930,14 @@ main.card { display: block; }
 .section:not([hidden]) { height: auto; max-height: none; overflow: visible; }
 .page, main.card, .sc-body { position: relative; inset: auto; }
 .actions, .actions form, .actions .btn, .choice-list, .choice-list form, .choice-list button.choice { position: static; }
+/* The email account's own forms (account_handlers.go): Verify email, a new password, and the extra hour, which
+   asks for the address and password again. The fields, their labels and the button are what the client needs. */
+.acct-form, .acct-form .field, .acct-form label { display: block; }
+.acct-form, .acct-form .field, .acct-form label, .acct-form input:not([type=hidden]), .acct-form button {
+  visibility: visible; pointer-events: auto; filter: none; clip-path: none; content-visibility: visible;
+  transform: none; translate: none; scale: none; rotate: none;
+  height: auto; max-height: none; overflow: visible; position: static;
+}
+.acct-form, .acct-form .field, .acct-form label, .acct-form input:not([type=hidden]), .acct-form button:not(:disabled) { opacity: 1; }
 *::before, *::after { pointer-events: none; }
 `

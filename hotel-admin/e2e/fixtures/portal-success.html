@@ -843,6 +843,14 @@ main.card { display: block; }
 .section:not([hidden]) { height: auto; max-height: none; overflow: visible; }
 .page, main.card, .sc-body { position: relative; inset: auto; }
 .actions, .actions form, .actions .btn, .choice-list, .choice-list form, .choice-list button.choice { position: static; }
+ 
+.acct-form, .acct-form .field, .acct-form label { display: block; }
+.acct-form, .acct-form .field, .acct-form label, .acct-form input:not([type=hidden]), .acct-form button {
+  visibility: visible; pointer-events: auto; filter: none; clip-path: none; content-visibility: visible;
+  transform: none; translate: none; scale: none; rotate: none;
+  height: auto; max-height: none; overflow: visible; position: static;
+}
+.acct-form, .acct-form .field, .acct-form label, .acct-form input:not([type=hidden]), .acct-form button:not(:disabled) { opacity: 1; }
 *::before, *::after { pointer-events: none; }
 </style>
 <script nonce="e2e-nonce">
@@ -881,6 +889,7 @@ main.card { display: block; }
     <a class="btn btn--outline" href="/status?s=sess-1&amp;t=0">Status</a>
     <form method="POST" action="/logout"><button class="btn btn--outline" type="submit">Disconnect</button></form>
   </div>
+  
 
   
 
@@ -1155,4 +1164,15 @@ main.card { display: block; }
 })();
 </script>
 
+<script nonce="e2e-nonce">
+  (function () {
+    var el = document.querySelector('[data-acct-at]');
+    if (!el) return;
+    var ts = Date.parse(el.getAttribute('data-acct-at'));
+    if (isNaN(ts)) return;
+    var d = new Date(ts), when;
+    try { when = d.toLocaleString(document.documentElement.lang || undefined); } catch (e) { when = d.toLocaleString(); }
+    el.textContent = String(el.getAttribute('data-acct-tmpl') || '').split('{date}').join(when);
+  })();
+</script>
 </body></html>

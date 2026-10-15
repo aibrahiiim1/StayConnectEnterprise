@@ -17,7 +17,7 @@ func otpHandler(t *testing.T) (*handler, *[]map[string]string) {
 	var issued []map[string]string
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/tenant/auth-methods", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"email":{"enabled":true},"voucher":{"enabled":true}}`))
+		w.Write([]byte(`{"sms":{"enabled":true},"voucher":{"enabled":true}}`))
 	})
 	mux.HandleFunc("/v1/auth/otp/issue", func(w http.ResponseWriter, r *http.Request) {
 		var in map[string]string
@@ -55,7 +55,7 @@ func devReq(method, path, body string) *http.Request {
 func TestThePendingCodeIsHeldForTheDeviceAndReopensTheCodeBox(t *testing.T) {
 	h, issued := otpHandler(t)
 	rec := httptest.NewRecorder()
-	h.authOTPRequest(rec, devReq(http.MethodPost, "/auth/otp/request", `{"channel":"email","destination":"Ann@Example.com"}`))
+	h.authOTPRequest(rec, devReq(http.MethodPost, "/auth/otp/request", `{"channel":"sms","destination":"+201001234567"}`))
 	if rec.Code != 200 {
 		t.Fatalf("request: %d %s", rec.Code, rec.Body.String())
 	}
@@ -68,11 +68,11 @@ func TestThePendingCodeIsHeldForTheDeviceAndReopensTheCodeBox(t *testing.T) {
 	var cfg map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &cfg)
 	p, _ := cfg["pending_otp"].(map[string]any)
-	if p["challenge_id"] != "11111111-2222-4333-8444-555555555555" || p["channel"] != "email" || p["dest_masked"] != "a•••@example.com" {
+	if p["challenge_id"] != "11111111-2222-4333-8444-555555555555" || p["channel"] != "sms" || p["dest_masked"] != "+20•••4567" {
 		t.Fatalf("pending code must ride with the methods, masked: %v", cfg["pending_otp"])
 	}
-	if strings.Contains(rec.Body.String(), "ann@example.com") || strings.Contains(rec.Body.String(), "Ann@") {
-		t.Fatal("the address itself must never be echoed")
+	if strings.Contains(rec.Body.String(), "+201001234567") {
+		t.Fatal("the number itself must never be echoed")
 	}
 	// Another device sees nothing.
 	rec = httptest.NewRecorder()
@@ -85,7 +85,7 @@ func TestThePendingCodeIsHeldForTheDeviceAndReopensTheCodeBox(t *testing.T) {
 	// Send again: the stored address is reused, never echoed.
 	rec = httptest.NewRecorder()
 	h.authOTPResend(rec, devReq(http.MethodPost, "/auth/otp/resend", ""))
-	if rec.Code != 200 || len(*issued) != 2 || (*issued)[1]["destination"] != "Ann@Example.com" {
+	if rec.Code != 200 || len(*issued) != 2 || (*issued)[1]["destination"] != "+201001234567" {
 		t.Fatalf("send again must re-issue to the same address: %d %v", rec.Code, *issued)
 	}
 	// The verified code clears the pending state and starts the journey.
@@ -98,14 +98,28 @@ func TestThePendingCodeIsHeldForTheDeviceAndReopensTheCodeBox(t *testing.T) {
 		t.Fatal("a verified code must not be reopened")
 	}
 	// Use a different address: forgotten.
-	h.authOTPRequest(httptest.NewRecorder(), devReq(http.MethodPost, "/auth/otp/request", `{"channel":"email","destination":"x@example.com"}`))
+	h.authOTPRequest(httptest.NewRecorder(), devReq(http.MethodPost, "/auth/otp/request", `{"channel":"whatsapp","destination":"+201009999999"}`))
 	h.authOTPForget(httptest.NewRecorder(), devReq(http.MethodPost, "/auth/otp/forget", ""))
 	if _, ok := h.pendingOTP.get("10.20.0.50"); ok {
 		t.Fatal("forget must drop the pending code")
 	}
 }
 
-func TestTheEmailLinkOpensAPageAndOnlyTheButtonVerifies(t *testing.T) {
+// THE EMAIL CODE IS GONE (self-service contract section 1): an email address signs in as an email account, so
+// the code route refuses the channel before anything reaches scd -- no code, no pending box, no temporary access.
+func TestTheOneTimeCodeRefusesTheEmailChannel(t *testing.T) {
+	h, issued := otpHandler(t)
+	rec := httptest.NewRecorder()
+	h.authOTPRequest(rec, devReq(http.MethodPost, "/auth/otp/request", `{"channel":"email","destination":"ann@example.com"}`))
+	if rec.Code != http.StatusBadRequest || len(*issued) != 0 {
+		t.Fatalf("an email code must be refused at the portal: %d, %d issued", rec.Code, len(*issued))
+	}
+	if _, ok := h.pendingOTP.get("10.20.0.50"); ok {
+		t.Fatal("a refused request must leave nothing pending")
+	}
+}
+
+func TestTheMessageLinkOpensAPageAndOnlyTheButtonVerifies(t *testing.T) {
 	h, _ := otpHandler(t)
 	calls := 0
 	// GET must verify nothing: a mail scanner following the link spends no code.

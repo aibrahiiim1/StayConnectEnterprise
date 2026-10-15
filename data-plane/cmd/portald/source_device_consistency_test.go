@@ -87,7 +87,8 @@ func TestEverySignInPathResolvesTheSourceDeviceThroughOnePlace(t *testing.T) {
 func TestTheGuestPathsCallTheResolvingLookup(t *testing.T) {
 	want := map[string]int{
 		"acquisition.go":              2, // open/package access, and the purchase-status poll
-		"email_handlers.go":           2, // OTP code request (binds the code to the device, 0110) and verify
+		"account_handlers.go":         1, // every email-account route, through accountDevice
+		"email_handlers.go":           2, // SMS/WhatsApp code request (binds the code to the device, 0110) and verify
 		"iamv2_commerce_session.go":   1, // session activation (admitting a device to an entitlement)
 		"main.go":                     2, // voucher, client account
 		"phase5_poststay_handlers.go": 1, // post-stay PIN
