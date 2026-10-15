@@ -809,6 +809,18 @@
       "supersedes": "The email one-time code sign-in and the Temporary Internet window (decisions of 2026-10-11/12 recorded in ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md 6.5-6.7, 10.2) for email.",
       "does_not_authorize": "Go-Live; a change to the device-slot behaviour on sign-out; FULL CHECK runs (the mission excludes them).",
       "implementation": "Migration 0117, contract docs/architecture/ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md, PR #216 (T0234)."
+    },
+    {
+      "id": "D51",
+      "title": "CLIENT DEVICE MANAGEMENT (2026-10-15). A package's service plan sets how many devices share its one entitlement; a device keeps its place after signing out. A client at the limit replaces one of their devices on the portal (the freed place goes to the new device in one transaction; the package's time, data and owner unchanged), or releases another device from the online page, at most a bounded number of times per package per day (setting, default 3, hard bounds 1-10). Staff find any device, disconnect it, release its place on a package, require a fresh sign-in, or prepare it for a new sign-in test; nothing deletes history, resets a quota or re-opens a once-per-device free package. Migration 0118 approved for this scope.",
+      "decided_on": "2026-10-15",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-15",
+      "authorization_evidence": "The Product Owner's mission of 2026-10-15 continuing PR #216 (Client Device Management, captive re-authentication, the Client Portal health warning), which explicitly approved additive migration 0118 limited to device management.",
+      "does_not_authorize": "Go-Live; financial or PMS behaviour changes; a change to any package's device limit; redesigning the HTTP fallback (kept, recorded as not secure).",
+      "implementation": "Migration 0118, contract docs/architecture/ONEGATE_DEVICE_MANAGEMENT.md, PR #216 (T0236)."
     }
   ]
 }

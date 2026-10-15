@@ -1,0 +1,48 @@
+{
+  "transition_id": "T0236",
+  "seq": 236,
+  "timestamp": "2026-10-15T14:49:07+03:00",
+  "timestamp_derivation": "Computed from the workstation clock (UTC+3) when this receipt was written, before the commit that introduces it.",
+  "record_type": "DEVICE_MANAGEMENT_AND_PORTAL_HEALTH_DEPLOYED_TO_PRE_LIVE",
+  "authorisation": "D51 (2026-10-15), migration 0118 approved by the Product Owner for device management; the standing PRE-LIVE deployment decision.",
+  "delivery": {
+    "pull_request": 216,
+    "branch": "delivery/email-accounts-self-service",
+    "content_head": "d0aec3eb45bb2bcb7e5f0de06aa7bde14c7e3b0e",
+    "pr_state": "OPEN -- READY FOR PRODUCT OWNER TESTING; not merged"
+  },
+  "delivered": [
+    "Migration 0118: client_device_action (REPLACE/RELEASE), staff_release_device_slot, staff_require_device_signin, the daily client device-change setting with change log, the append-only device_slot_actions; least privilege mirrored in Gate-P; deauthorize_entitlement_device still unreachable by every runtime role.",
+    "Portal: Choose a device to replace at the device limit; the online page's Your devices on the new routes (places in use, changes left, This device); Sign out ends the portal's own sign-in; Not you? Sign out on the package and replacement pages.",
+    "Admin Console: Clients > Devices (search incl. offline devices, a device's packages and places, sessions, restrictions, remembered sign-in, free package used, actions; Disconnect, Release place, Require fresh sign-in, Prepare for a sign-in test); the daily setting; account Manage links each device.",
+    "Client Portal degraded warning: root cause was the health check following portald's 302 to the canonical HTTPS name, which from the host reaches Caddy :443 (no certificate for it). Fixed: no redirects; a verified TLS request to portald :8343 for the canonical name while HTTPS is active.",
+    "Diagnosed why a used test device could not reach the sign-in page: sign-out left the 10-minute package-selection session; no way out at the device limit; once-per-device free package (intended, unchanged); a stranded 1-device place from the removed email-code method."
+  ],
+  "verified_on_prelive": {
+    "device_management": "scripts/device-management-e2e-test.sh 35/35 (1-device replace with real nft enforcement, package unchanged, sign-out to the sign-in page, daily limit with the target left online when refused; 5-device voucher: 5 on one entitlement, the 6th replaces device 1, the other 4 stay online; staff search and prepare-for-test)",
+    "regression": "email accounts 24/24, portal-https 18/18, sign-in 12/12, social offering 15/15",
+    "health": "portald healthy: captive portal responding (http 302; https 200 for the canonical name); no attention items",
+    "not_verified": "real phones and laptops (acceptance checklist G1-G7)"
+  },
+  "incident": "During the first device test run the harness's namespace DHCP clients restarted the host's systemd-resolved past its start limit; the appliance's own DNS was down 11:32-11:43 UTC (guest DNS unaffected; licence stayed active). Restored; both harnesses now keep the resolver running.",
+  "deployment_provenance": "PRE-LIVE 172.21.60.25 read back on 2026-10-15: netd 9bb29145; scd 2a76af72; edged 4b8758f1; pmsd 6a403326; portald 4b8758f1; acctd 99ba9f10; keybootstrap e9b72aab; Admin Console release 20261015-112904 (4b8758f1, BUILD_ID kdititb0PtyENq47SMg88); schema 0118 (pre-deploy dump pre-0118-4b8758f1-20261015T112828Z.dump); DEPLOYED_BINARIES 6/6 OK. Central unchanged.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0235."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "head": "d0aec3eb",
+  "head_note": "The last CONTENT commit of PR #216 at the time of this receipt; governance commits follow it.",
+  "previous_delivery": "T0235",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
