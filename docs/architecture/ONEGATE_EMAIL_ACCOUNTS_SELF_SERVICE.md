@@ -124,3 +124,20 @@ that portald keeps in an HttpOnly cookie; it is the "recently authenticated" pro
   `VERIFICATION_REQUIRED`.
 * Admin (edged): `GET/PUT /v1/admin/self-service-settings` via the definer functions; accounts list shows
   self-registered + verification state; `POST /v1/admin/accounts/{id}/resend-verification`.
+
+## 8. Verified on PRE-LIVE (2026-10-15) and what remains
+
+Migration 0117 applied on PRE-LIVE after a database backup (the email switch converted to `email_account`), Gate-P
+grants reconciled. Guest-device test `scripts/email-accounts-e2e-test.sh` 24/24 (see the acceptance checklist §F);
+regression suites 18/18, 12/12, 15/15. Found and fixed during the run: a second device on a 1-device account
+reached the database's own device-limit refusal and saw "could not bring your device online"; it is now answered
+as the device limit.
+
+**Device slots and sign-out (existing behaviour, unchanged).** An admitted device keeps its slot after it signs
+out; another device takes the slot only through the guest device release (Phase-6 device self-service, dark on
+PRE-LIVE). So on a 1-device package a client cannot move to a new device on their own; on a multi-device package
+they join. Whether sign-out should free the slot is a product decision (it trades convenience against sequential
+sharing of one package), not changed here.
+
+Not yet verified on a real device: following the verification and reset links from a real mailbox, Chrome/Edge's
+login tab from an `https://` page, Windows.
