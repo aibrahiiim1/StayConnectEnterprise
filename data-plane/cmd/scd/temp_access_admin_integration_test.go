@@ -4,9 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
-	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -15,11 +15,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/sealbox"
-	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
 )
 
-// STAFF HELP AND THE RETRY WAIT AGAINST THE DATABASE (temp_access_admin.go, verify_access.go, migration 0113).
-// Needs PHASE3_TEST_DSN on a database with 0111 and 0113; skipped otherwise.
+// STAFF HELP FOR SMS / WHATSAPP CODES AGAINST THE DATABASE (temp_access_admin.go, migrations 0113/0114).
+// Needs PHASE3_TEST_DSN; skipped otherwise. The temporary-internet window and its "clear" are removed with the
+// email code, and so are their tests.
 
 func adminCall(t *testing.T, s *server, method, path, body string) (int, map[string]any) {
 	t.Helper()
@@ -33,65 +33,29 @@ func adminCall(t *testing.T, s *server, method, path, body string) (int, map[str
 	return w.Code, out
 }
 
-func TestIntegration_ADeviceWaitsBeforeAnotherWindowExceptAfterChangingAddress(t *testing.T) {
-	s, _, pool := verifyFixture(t, nil) // default wait: 30 minutes
-	ctx := context.Background()
-	mac, ip := "02:00:00:91:00:10", net.ParseIP("10.91.0.50")
-	if _, ok := s.grantVerifyAccess(ctx, mac, ip, "", "w1@example.com"); !ok {
-		t.Fatal("first window")
+func codeAdminFixture(t *testing.T) (*server, *pgxpool.Pool) {
+	t.Helper()
+	dsn := os.Getenv("PHASE3_TEST_DSN")
+	if dsn == "" {
+		t.Skip("PHASE3_TEST_DSN not set")
 	}
-	_, _ = pool.Exec(ctx, `UPDATE iam_v2.verification_access_grants SET ended_at=now(), end_reason='EXPIRED' WHERE tenant_id=$1 AND ended_at IS NULL`, s.tenID)
-	if _, ok, why := s.grantVerifyAccessDetail(ctx, mac, ip, "", "w1@example.com"); ok || why == nil || why.Reason != "device_retry_wait" || why.RetryAfterSeconds < 1790 || why.RetryAfterSeconds > 1801 {
-		t.Fatalf("a window that just expired must be followed by the wait, said to the client: ok=%v %+v", ok, why)
+	pool, err := pgxpool.New(context.Background(), dsn)
+	if err != nil {
+		t.Fatal(err)
 	}
-	// 31 minutes later the device may have another.
-	_, _ = pool.Exec(ctx, `UPDATE iam_v2.verification_access_grants SET started_at=started_at - interval '41 minutes', ended_at=now() - interval '31 minutes' WHERE tenant_id=$1`, s.tenID)
-	if _, ok := s.grantVerifyAccess(ctx, mac, ip, "", "w1@example.com"); !ok {
-		t.Fatal("after the wait the device gets another window")
-	}
-	// CHOOSING A DIFFERENT ADDRESS does not start the wait: a mistyped address is not punished.
-	s.endVerifyAccess(ctx, mac, "CANCELLED")
-	if _, ok := s.grantVerifyAccess(ctx, mac, ip, "", "w2@example.com"); !ok {
-		t.Fatal("a window ended by changing address must not start the wait")
-	}
-}
-
-func TestIntegration_ClearingLetsOneDeviceTryAgainAndKeepsTheRecord(t *testing.T) {
-	one, zero := 1, 0
-	s, _, pool := verifyFixture(t, &tenantcfg.TemporaryAccess{PerDeviceDaily: &one, RetryAfterMinutes: &zero})
-	ctx := context.Background()
-	mac, ip := "02:00:00:91:00:11", net.ParseIP("10.91.0.51")
-	if _, ok := s.grantVerifyAccess(ctx, mac, ip, "", "c1@example.com"); !ok {
-		t.Fatal("first window")
-	}
-	// A live window is never cleared.
-	if code, out := adminCall(t, s, http.MethodPost, "/v1/admin/temporary-access/clear", `{"device_mac":"`+mac+`","operator":"desk","reason":"t"}`); code != 200 || out["cleared_windows"].(float64) != 0 || out["window_live"] != true {
-		t.Fatalf("clearing must leave a live window alone: %d %v", code, out)
-	}
-	s.endVerifyAccess(ctx, mac, "EXPIRED")
-	if _, ok := s.grantVerifyAccess(ctx, mac, ip, "", "c1@example.com"); ok {
-		t.Fatal("the per-device limit must refuse a second window")
-	}
-	if code, _ := adminCall(t, s, http.MethodPost, "/v1/admin/temporary-access/clear", `{"device_mac":"`+mac+`","operator":""}`); code != 400 {
-		t.Fatal("clearing needs an operator")
-	}
-	code, out := adminCall(t, s, http.MethodPost, "/v1/admin/temporary-access/clear", `{"device_mac":"`+strings.ToUpper(mac)+`","operator":"desk:alice","reason":"no mail"}`)
-	if code != 200 || out["cleared_windows"].(float64) != 1 {
-		t.Fatalf("clear: %d %v", code, out)
-	}
-	if _, ok := s.grantVerifyAccess(ctx, mac, ip, "", "c1@example.com"); !ok {
-		t.Fatal("after clearing, the device may try again")
-	}
-	var rows, cleared int
-	var by string
-	_ = pool.QueryRow(ctx, `SELECT count(*), count(cleared_at), COALESCE(max(cleared_by),'') FROM iam_v2.verification_access_grants WHERE tenant_id=$1`, s.tenID).Scan(&rows, &cleared, &by)
-	if rows != 2 || cleared != 1 || by != "desk:alice" {
-		t.Fatalf("the cleared window stays on record, attributed: rows=%d cleared=%d by=%q", rows, cleared, by)
-	}
+	t.Cleanup(pool.Close)
+	const tenant, site = "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
+	// The shared integration tenant and site, created if this suite is the first to need them (auth_otps has a
+	// tenant foreign key). Idempotent, and never removed: other suites in the same database use them too.
+	_, _ = pool.Exec(context.Background(), `INSERT INTO public.tenants (id, slug, name) VALUES ($1::uuid, $2, 'integration')
+	     ON CONFLICT DO NOTHING`, tenant, tenant)
+	_, _ = pool.Exec(context.Background(), `INSERT INTO public.sites (id, tenant_id, code, name) VALUES ($2::uuid, $1::uuid, $3, 'integration')
+	     ON CONFLICT DO NOTHING`, tenant, site, site)
+	return &server{db: pool, tenID: tenant, siteID: site}, pool
 }
 
 func TestIntegration_ACodeCopyIsReadableOnlyWhileTheCodeIsLive(t *testing.T) {
-	s, _, pool := verifyFixture(t, nil)
+	s, pool := codeAdminFixture(t)
 	ctx := context.Background()
 	raw := make([]byte, 32)
 	_, _ = rand.Read(raw)
@@ -102,7 +66,7 @@ func TestIntegration_ACodeCopyIsReadableOnlyWhileTheCodeIsLive(t *testing.T) {
 	s.otpEscrowKey = k
 	var id string
 	if err := pool.QueryRow(ctx, `INSERT INTO public.auth_otps (tenant_id, channel, destination, code_hash, expires_at)
-	     VALUES ($1,'email','reveal-test@example.com','x', now() + interval '10 minutes') RETURNING id::text`, s.tenID).Scan(&id); err != nil {
+	     VALUES ($1,'sms','+201000000917','x', now() + interval '10 minutes') RETURNING id::text`, s.tenID).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -175,22 +139,22 @@ func mustTime(t *testing.T, pool *pgxpool.Pool, id string) time.Time {
 // AN EXISTING CLIENT'S CODE IS NEVER SHOWN (contract §6.7): a staff-shown code could not sign them in, and the list
 // says so, so the desk lets the device try again instead.
 func TestIntegration_AnExistingClientsCodeIsNeverShown(t *testing.T) {
-	s, _, pool := verifyFixture(t, nil)
+	s, pool := codeAdminFixture(t)
 	ctx := context.Background()
 	raw := make([]byte, 32)
 	_, _ = rand.Read(raw)
 	s.otpEscrowKey, _ = sealbox.NewKey(otpEscrowDomain, raw)
-	const addr = "existing-client-reveal@example.com"
+	const addr = "+201000000918"
 	var pid, id string
 	if err := pool.QueryRow(ctx, `INSERT INTO iam_v2.guest_principals (tenant_id) VALUES ($1) RETURNING id::text`, s.tenID).Scan(&pid); err != nil {
 		t.Skipf("cannot seed a principal here: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO iam_v2.guest_principal_identities (tenant_id, guest_principal_id, factor_type, factor_value_norm)
-	     VALUES ($1,$2::uuid,'EMAIL',$3)`, s.tenID, pid, addr); err != nil {
+	     VALUES ($1,$2::uuid,'PHONE',$3)`, s.tenID, pid, addr); err != nil {
 		t.Skipf("cannot seed an identity here: %v", err)
 	}
 	if err := pool.QueryRow(ctx, `INSERT INTO public.auth_otps (tenant_id, channel, destination, code_hash, expires_at)
-	     VALUES ($1,'email',$2,'x', now() + interval '10 minutes') RETURNING id::text`, s.tenID, "Existing-Client-Reveal@Example.com").Scan(&id); err != nil {
+	     VALUES ($1,'sms',$2,'x', now() + interval '10 minutes') RETURNING id::text`, s.tenID, addr).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {

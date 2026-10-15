@@ -168,7 +168,7 @@ func (s *server) revokeResumeByID(ctx context.Context, id string) {
 }
 
 // resumeMethodOffered reports whether the method family the credential was issued under is still switched on
-// and licensed here. A site that turned email codes off does not keep letting remembered devices in.
+// and licensed here. A site that turned its code methods off does not keep letting remembered devices in.
 func (s *server) resumeMethodOffered(ctx context.Context, method string) bool {
 	var cfg *tenantcfg.AuthMethods
 	var err error
@@ -184,7 +184,7 @@ func (s *server) resumeMethodOffered(ctx context.Context, method string) bool {
 	on := func(m *tenantcfg.AuthMethod) bool { return m != nil && m.Enabled }
 	switch method {
 	case string(iamv2.MethodOTP):
-		return on(cfg.Email) || on(cfg.SMS) || on(cfg.WhatsApp)
+		return on(cfg.SMS) || on(cfg.WhatsApp)
 	case string(iamv2.MethodSocial):
 		for _, m := range cfg.Social {
 			if on(m) {

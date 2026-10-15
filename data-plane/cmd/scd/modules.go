@@ -62,7 +62,7 @@ func (s *server) identitySwitches(ctx context.Context, tenantID string) (map[str
 	if cfg.WhatsApp != nil && cfg.WhatsApp.Enabled {
 		out[lic.ModuleWhatsAppOTP] = true
 	}
-	if cfg.Email != nil && cfg.Email.Enabled {
+	if cfg.EmailAccount != nil && cfg.EmailAccount.Enabled {
 		out[lic.ModuleEmailOTP] = true
 	}
 	for _, p := range cfg.Social {

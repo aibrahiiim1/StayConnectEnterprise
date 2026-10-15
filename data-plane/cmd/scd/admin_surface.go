@@ -79,6 +79,11 @@ var guestPrefixes = []string{
 	"/v1/sessions/revoke",
 	"/v1/auth/otp/",
 	"/v1/auth/social/",
+	// Email accounts (self_service_handlers.go): portald registers, signs in for grace, resends, verifies and
+	// resets. Each acts on one account the caller proves (a password, an account token bound to the device, or
+	// a single-use emailed token) or answers the same for everyone (forgot). The operator's resend is the
+	// separate /v1/admin/accounts/ route, under /v1/admin/.
+	"/v1/auth/account/",
 	"/v1/tenant/",
 	"/v1/phase3/access/",
 	"/v1/phase3/auth/",

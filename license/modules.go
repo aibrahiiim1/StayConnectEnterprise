@@ -23,6 +23,9 @@ const (
 	// own identity channel: it is never SMS, never derived from an SMS grant, and a legacy (v1-v3) licence
 	// cannot authorise it (legacyModules has no source for it).
 	ModuleWhatsAppOTP = "whatsapp_otp"
+	// ModuleEmailOTP is EMAIL SIGN-IN. The id is historical and stays (it is in every signed licence); since the
+	// Email accounts delivery (2026-10-15) it licenses self-registered email + password accounts, which replaced
+	// the email one-time code.
 	ModuleEmailOTP    = "email_otp"
 	ModuleSocialLogin = "social_login"
 	ModuleWhiteLabel  = "white_label"
@@ -43,7 +46,7 @@ var registry = []ModuleSpec{
 	{ID: ModuleRoomCharge, Label: "Room charge (PMS posting)", Requires: []string{ModuleHospitality, ModulePaidAccess}},
 	{ID: ModuleSMSOTP, Label: "SMS one-time code"},
 	{ID: ModuleWhatsAppOTP, Label: "WhatsApp one-time code"},
-	{ID: ModuleEmailOTP, Label: "Email one-time code"},
+	{ID: ModuleEmailOTP, Label: "Email accounts"},
 	{ID: ModuleSocialLogin, Label: "Social sign-in"},
 	{ID: ModuleWhiteLabel, Label: "White label"},
 	{ID: ModuleHA, Label: "High availability"},

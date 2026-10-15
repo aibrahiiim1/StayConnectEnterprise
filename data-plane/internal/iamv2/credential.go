@@ -10,11 +10,14 @@ import "strings"
 // records it: one short token, written on the auth context when it is minted and carried onto the session
 // opened from it (sessions.credential_method). It is a label, never a secret and never an identity.
 const (
-	CredentialEmailOTP     = "EMAIL_OTP"
-	CredentialSMSOTP       = "SMS_OTP"
-	CredentialWhatsAppOTP  = "WHATSAPP_OTP"
-	CredentialVoucher      = "VOUCHER"
-	CredentialAccount      = "ACCOUNT"
+	CredentialEmailOTP    = "EMAIL_OTP"
+	CredentialSMSOTP      = "SMS_OTP"
+	CredentialWhatsAppOTP = "WHATSAPP_OTP"
+	CredentialVoucher     = "VOUCHER"
+	CredentialAccount     = "ACCOUNT"
+	// CredentialEmailAccount is a self-registered Email account (the client chose the address and password on
+	// the portal), as distinct from a Personal account staff created (ACCOUNT). Both are the ACCOUNT subject.
+	CredentialEmailAccount = "EMAIL_ACCOUNT"
 	CredentialRoom         = "PMS"
 	CredentialOpen         = "OPEN"
 	credentialSocialPrefix = "SOCIAL_"

@@ -76,6 +76,10 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The Email accounts settings decide whether an unverified account past its deadline is suspended. Read before
+	// the transaction (cached); an unreadable read enforces the defaults, which are the strictest a site can have.
+	selfService := s.selfServiceSettingsOrDefault(ctx)
+
 	var sessionID string
 	var reused bool
 	err = pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
@@ -97,6 +101,15 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 		}
 		if status != "ACTIVE" {
 			return errEntitlementUnusable
+		}
+		// A SUSPENDED EMAIL ACCOUNT GETS NO SESSION (contract §3). Its entitlement is untouched -- the window keeps
+		// running on the wall clock and nothing is terminated -- but no device, the purchaser's or a joining one,
+		// is admitted on it until the address is verified or the client takes the grace hour. Checked inside the
+		// transaction, before the reconnect shortcut below, so a returning device is refused like a new one.
+		if suspended, err := s.entitlementAccountSuspended(ctx, tx, req.EntitlementID, selfService); err != nil {
+			return err
+		} else if suspended {
+			return errVerificationRequired
 		}
 
 		// THE DEVICE MUST BE THE ONE THAT ACQUIRED THIS ENTITLEMENT.
@@ -300,6 +313,11 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 				"error": "DEVICE_NOT_ON_ENTITLEMENT", "authority": "iam_v2"})
 			return
 		}
+		if errors.Is(err, errVerificationRequired) {
+			// Exactly this body: portald matches it to show the verify / resend / one-more-hour page.
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "VERIFICATION_REQUIRED"})
+			return
+		}
 		if errors.Is(err, errEntitlementUnusable) {
 			writeJSON(w, http.StatusForbidden, map[string]any{
 				"error": "ENTITLEMENT_UNUSABLE", "authority": "iam_v2"})
@@ -337,6 +355,10 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 }
 
 var errEntitlementUnusable = errors.New("entitlement not usable")
+
+// errVerificationRequired is returned when the entitlement's subject is a self-registered Email account that is
+// suspended for Internet: unverified past its deadline, with no grace running (self_service.go accountSuspended).
+var errVerificationRequired = errors.New("the account's email address must be verified")
 
 // errDeviceNotOnEntitlement is returned when the device did not acquire the entitlement it is activating.
 var errDeviceNotOnEntitlement = errors.New("device did not acquire this entitlement")

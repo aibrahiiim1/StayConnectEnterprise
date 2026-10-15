@@ -254,10 +254,11 @@ type server struct {
 	openAccess  *iamv2.OpenAccess
 	openLimiter *recoveryLimiter
 	// resumeKey / resumeLimiter: the remembered-device credential (client_resume.go); nil = not remembered.
-	// verifyK overrides the kernel surface of temporary verification access (tests); nil = s.nft.client.
-	verifyK       verifyKernel
+	// The Email accounts link and account-token keys are derived from resumeKey (self_service.go).
 	resumeKey     []byte
 	resumeLimiter *recoveryLimiter
+	// selfService is the Email accounts state: settings cache, outbox kick, loop ticks (self_service.go).
+	selfService selfServiceState
 	// notify: the live sender trio, swappable on reload (notify_admin.go); notifyKey seals sender secrets.
 	notify         notifySet
 	notifyFallback struct {
@@ -477,13 +478,7 @@ func (s *server) revoke(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "bad ip")
 		return
 	}
-	nc := s.resolveNetwork(r.Context(), ip)
-	if err := s.nft.Deny(r.Context(), nc.Bridge, ip); err != nil {
-		slog.Error("nft deny", "err", err)
-	}
-	if err := s.shp.DeleteSession(r.Context(), nc.Bridge, ip); err != nil {
-		slog.Warn("shape delete", "err", err)
-	}
+	s.denyAtGate(r.Context(), ip)
 	// Clamp to a reason the sessions_end_reason_check CHECK constraint allows, so a
 	// caller passing an unexpected reason ends the session cleanly instead of 500.
 	switch req.Reason {
@@ -498,6 +493,25 @@ func (s *server) revoke(w http.ResponseWriter, r *http.Request) {
 	}
 	s.met.SessionsClosed.WithLabelValues(req.Reason).Inc()
 	writeJSON(w, http.StatusOK, map[string]any{"status": "revoked"})
+}
+
+// denyAtGate is the kernel half of an operator disconnect: the address leaves the guest authorization set on its
+// ingress bridge and its shaping class goes. The session row is ended by the caller, with the caller's reason --
+// /v1/sessions/revoke by address, the Email accounts sweep and password reset by session (self_service.go).
+// Both kernel steps are best effort and logged: netd also converges the set from iam_v2.sessions, so an ended
+// session cannot stay admitted for longer than its next pass.
+func (s *server) denyAtGate(ctx context.Context, ip net.IP) {
+	nc := s.resolveNetwork(ctx, ip)
+	if s.nft != nil && s.nft.client != nil {
+		if err := s.nft.Deny(ctx, nc.Bridge, ip); err != nil {
+			slog.Error("nft deny", "err", err)
+		}
+	}
+	if s.shp != nil {
+		if err := s.shp.DeleteSession(ctx, nc.Bridge, ip); err != nil {
+			slog.Warn("shape delete", "err", err)
+		}
+	}
 }
 
 func (s *server) status(w http.ResponseWriter, r *http.Request) {
@@ -516,27 +530,6 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 		"ip":         ip.String(),
 		"session_id": id,
 		"active":     active,
-	}
-	// A LIVE TEMPORARY-ACCESS WINDOW (email-code verification) is real, limited connectivity: the kernel admits
-	// this address (verify_ipv4) for the window's remaining time and data. The captive-portal API reports it as
-	// "not captive" for exactly that long (RFC 8908 `captive` = whether the client can reach the network), so the
-	// phone lets its mail app use the Wi-Fi instead of holding the network as captive -- which is what stranded
-	// the code on PRE-LIVE (2026-10-14). Same admission key as the kernel: the address, on a live, unexhausted grant.
-	// The window is limited by DATA as well as time, so the remaining bytes travel with it (RFC 8908
-	// bytes-remaining): a phone that exhausts the cap early must not keep believing it is online. used_bytes is
-	// reconciled from the kernel's quota object every 2 s (reconcileVerifyAccess), which also ends an exhausted
-	// window.
-	if !active && s.db != nil {
-		var left, bytesLeft int64
-		if err := s.db.QueryRow(r.Context(), `SELECT GREATEST(0, EXTRACT(EPOCH FROM (expires_at - now()))::bigint),
-		             GREATEST(0, data_cap_bytes - used_bytes)
-		      FROM iam_v2.verification_access_grants
-		     WHERE tenant_id=$1 AND site_id=$2 AND ip=$3::inet AND ended_at IS NULL
-		       AND expires_at > now() AND used_bytes < data_cap_bytes
-		     ORDER BY started_at DESC LIMIT 1`, s.tenID, s.siteID, ip.String()).Scan(&left, &bytesLeft); err == nil && left > 0 && bytesLeft > 0 {
-			out["verification_window_seconds"] = left
-			out["verification_window_bytes"] = bytesLeft
-		}
 	}
 	// PHASE 6 (DARK by default): a guest on an aggregate package needs both of their clocks. With the flag
 	// off nothing is queried and nothing is added, so this endpoint answers byte-for-byte as it did before.
@@ -882,6 +875,9 @@ func main() {
 	// Console is live without a restart. Sealed secrets are preferred; plaintext rows still work.
 	s.notifyFallback.mail, s.notifyFallback.sms, s.notifyFallback.whatsapp = s.mail, s.sms, s.whatsapp
 	s.loadNotify(rootCtx)
+	// Email accounts: loop cadences (SCD_SELF_SERVICE_SEND_TICK / _SWEEP_TICK) and the outbox kick, before any
+	// route can register an account.
+	s.initSelfService(os.Getenv)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -929,7 +925,17 @@ func main() {
 	r.Post("/v1/sessions/revoke", s.revoke)
 	r.Get("/v1/sessions/status", s.status)
 	r.Post("/v1/auth/otp/issue", s.otpIssue)
-	r.Post("/v1/auth/otp/temporary-access/cancel", s.cancelVerifyAccess)
+	// Email accounts (self_service_handlers.go): register, status, resend, grace, verify, forgot, reset -- guest
+	// routes portald calls -- and the operator's resend, which edged proxies after its own permission check.
+	// Registered here, not in a helper, so admin_surface_test.go reads and classifies every one of them.
+	r.Post("/v1/auth/account/register", s.accountRegister)
+	r.Post("/v1/auth/account/status", s.accountStatus)
+	r.Post("/v1/auth/account/resend", s.accountResend)
+	r.Post("/v1/auth/account/grace", s.accountGrace)
+	r.Post("/v1/auth/account/verify", s.accountVerify)
+	r.Post("/v1/auth/account/forgot", s.accountForgot)
+	r.Post("/v1/auth/account/reset", s.accountReset)
+	r.Post("/v1/admin/accounts/{id}/resend-verification", s.adminAccountResendVerification)
 	r.Post("/v1/auth/social/start", s.socialStart)
 	r.Post("/v1/sessions/authorize-social", s.authorizeSocial)
 	// The remembered device (client_resume.go): peek for the Welcome-back line, Connect, and sign-out.
@@ -1129,8 +1135,13 @@ func main() {
 	// Edge-first refactor: walled-garden rules from the (site) DB are now
 	// actually enforced — reconciled into the nft walled_garden_ip set.
 	go s.gardenReconcileLoop(rootCtx)
-	// Temporary verification windows: restore after a restart, meter, end what is due (verify_access.go).
-	go s.verifyAccessLoop(rootCtx)
+	// Email accounts: the emailed-link outbox and the verification sweep (suspension, reminders) (self_service.go).
+	// The temporary verification window loop that ran here is REMOVED with the email code it served; the pruning
+	// of SMS / WhatsApp code copies it also did now runs in gardenReconcileLoop.
+	if !awaiting {
+		go s.selfServiceSendLoop(rootCtx)
+		go s.selfServiceSweepLoop(rootCtx)
+	}
 	go s.cardReconcileLoop(rootCtx)
 	go s.postingLoop(rootCtx, s.initPostingWorker(rootCtx))
 	// Periodic safety-net reload: Hotel Admin changes reload immediately through /v1/admin/pms/reload, and a

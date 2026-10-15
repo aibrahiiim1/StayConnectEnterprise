@@ -16,8 +16,12 @@ import (
 // the same way the portal reads it, at the moment a guest tries to sign in.
 const (
 	guestMethodVoucher = "voucher"
+	// guestMethodAccount is staff-created Personal accounts (auth_methods.guest_account).
 	guestMethodAccount = "account"
-	guestMethodPMS     = "pms"
+	// guestMethodEmailAccount is self-registered Email accounts (auth_methods.email_account): registration,
+	// their sign-in, grace, resend and forgot-password (self_service_handlers.go).
+	guestMethodEmailAccount = "email_account"
+	guestMethodPMS          = "pms"
 )
 
 // methodSwitchOn is the decision itself: absent means off, exactly as the portal's tab logic treats it.
@@ -30,27 +34,35 @@ func methodSwitchOn(cfg *tenantcfg.AuthMethods, method string) bool {
 		return cfg.Voucher != nil && cfg.Voucher.Enabled
 	case guestMethodAccount:
 		return cfg.GuestAccount != nil && cfg.GuestAccount.Enabled
+	case guestMethodEmailAccount:
+		return cfg.EmailAccount != nil && cfg.EmailAccount.Enabled
 	case guestMethodPMS:
 		return cfg.PMS != nil && cfg.PMS.Enabled
 	}
 	return false
 }
 
-// guestMethodEnabled reads the switches (with the licence applied, as the portal's listing does). An
-// unreadable record FAILS CLOSED: the portal cannot draw any tab from it either, and a sign-in method the
-// hotel may have disabled is not something to guess about.
-func (s *server) guestMethodEnabled(ctx context.Context, method string) bool {
+// guestMethodSwitches reads the switches with the licence applied, as the portal's listing does. ok=false when
+// the record is unreadable -- callers FAIL CLOSED: the portal cannot draw any tab from it either, and a sign-in
+// method the hotel may have disabled is not something to guess about.
+func (s *server) guestMethodSwitches(ctx context.Context) (*tenantcfg.AuthMethods, bool) {
 	load := s.methodSwitches
 	if load == nil {
 		load = func(ctx context.Context) (*tenantcfg.AuthMethods, error) { return tenantcfg.Load(ctx, s.db, s.tenID) }
 	}
 	cfg, err := load(ctx)
 	if err != nil {
-		slog.Error("guest method switch unreadable; refusing sign-in", "method", method, "err", err)
-		return false
+		slog.Error("guest method switch unreadable; refusing sign-in", "err", err)
+		return nil, false
 	}
 	s.applyLicenseToMethods(cfg)
-	return methodSwitchOn(cfg, method)
+	return cfg, true
+}
+
+// guestMethodEnabled answers one switch (unreadable = off).
+func (s *server) guestMethodEnabled(ctx context.Context, method string) bool {
+	cfg, ok := s.guestMethodSwitches(ctx)
+	return ok && methodSwitchOn(cfg, method)
 }
 
 // refuseDisabledMethod answers a sign-in for a switched-off method. It is checked before any throttle charge
