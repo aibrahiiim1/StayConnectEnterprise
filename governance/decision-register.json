@@ -796,6 +796,19 @@
       "supersedes": "The earlier recorded position that the portal carries no certificate or PKI (render_nft_no_tls_portal_test.go), for the portal address only: arbitrary guest 443 is still never intercepted. The documentation address 192.0.2.1 considered in review is replaced by a private RFC 1918 portal address.",
       "does_not_authorize": "Go-Live; deployment to any appliance other than PRE-LIVE; domain transfer; purchases; destructive operations.",
       "implementation": "PR #212, recorded by T0225: Central migration 0050, appliance migration 0116, contract docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md."
+    },
+    {
+      "id": "D50",
+      "title": "EMAIL + PASSWORD SELF-SERVICE ACCOUNTS REPLACE THE EMAIL ONE-TIME CODE (2026-10-15). Clients register with email and password (locally, offline-capable), go straight to the site's packages, and sign in with email and password; accounts are site-specific; another device continues the account's entitlement within the package's device rules. Email verification by single-use link, default deadline 24 h; after it an unverified account's Internet is suspended (the entitlement untouched) until verified; one 60-minute grace per account by default, requiring the password; resend; administrator settings with bounds. The email one-time code and the OTP Temporary Internet are removed; SMS/WhatsApp codes and other methods remain.",
+      "decided_on": "2026-10-15",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-15",
+      "authorization_evidence": "The Product Owner's 'Complete Self-Service Authentication Redesign & Captive Portal Improvements' mission of 2026-10-15, and the explicit approval of additive migration 0117 the same day.",
+      "supersedes": "The email one-time code sign-in and the Temporary Internet window (decisions of 2026-10-11/12 recorded in ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md 6.5-6.7, 10.2) for email.",
+      "does_not_authorize": "Go-Live; a change to the device-slot behaviour on sign-out; FULL CHECK runs (the mission excludes them).",
+      "implementation": "Migration 0117, contract docs/architecture/ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md, PR #216 (T0234)."
     }
   ]
 }

@@ -1,0 +1,46 @@
+{
+  "transition_id": "T0234",
+  "seq": 234,
+  "timestamp": "2026-10-15T11:09:04+03:00",
+  "timestamp_derivation": "Computed from the workstation clock (UTC+3) when this receipt was written, before the commit that introduces it.",
+  "record_type": "EMAIL_ACCOUNTS_SELF_SERVICE_AND_CAPTIVE_DISCOVERY_DEPLOYED_TO_PRE_LIVE",
+  "authorisation": "D50 (2026-10-15) and the Product Owner's approval of migration 0117; the standing PRE-LIVE deployment decision.",
+  "delivery": {
+    "pull_request": 216,
+    "branch": "delivery/email-accounts-self-service",
+    "content_head": "d4dc981620ec0069678c12319af39ced929287ba",
+    "pr_state": "OPEN -- READY FOR PRODUCT OWNER TESTING; not merged"
+  },
+  "delivered": [
+    "Email + Password self-service accounts (register, sign in, verification link, deadline, suspension of Internet only, one-time grace hour with the password, resend, forgot/reset with takeover protection), bounded site settings with change log; migration 0117.",
+    "Removed: the email one-time code, the OTP Temporary Internet window (scd, netd verify sets, captive-API window), the mail allowlist, the temporary-access admin surfaces; SMS/WhatsApp codes, staff help for them, Personal accounts, vouchers, room, social and payments kept.",
+    "Captive discovery: pre-sign-in TCP 443 is dropped silently instead of reset, so desktop Chrome/Edge run their captive check (Chromium source); per-platform findings and limits documented.",
+    "Fixed during PRE-LIVE testing: a second device on a 1-device account was shown 'could not bring your device online'; it is now the device-limit answer."
+  ],
+  "verified_on_prelive": {
+    "email_accounts": "scripts/email-accounts-e2e-test.sh 24/24",
+    "regression": "portal-https 18/18, sign-in 12/12, social offering 15/15",
+    "captive": "a pre-sign-in https:// connection times out (no reset); probes 302 to the HTTPS portal; kernel suite 33/33 in CI-equivalent container",
+    "not_verified": "real-mailbox verification and reset links, Chrome/Edge login tab, Windows, real phones (acceptance checklist F)"
+  },
+  "deployment_provenance": "PRE-LIVE 172.21.60.25 read back on 2026-10-15: netd 9bb29145; scd 2ebf75fa; edged 9bb29145; pmsd 6a403326; portald 9bb29145; acctd 99ba9f10; keybootstrap e9b72aab; Admin Console release 20261015-074621 (9bb29145, BUILD_ID 1qbYRzPOAiPehOk7O5oiF); schema 0117; DEPLOYED_BINARIES 6/6 OK. Central unchanged.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0233."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "head": "d4dc9816",
+  "head_note": "The last CONTENT commit of PR #216 at the time of this receipt; governance commits follow it.",
+  "previous_delivery": "T0233",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
