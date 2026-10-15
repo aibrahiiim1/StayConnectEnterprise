@@ -94,11 +94,13 @@ export function methodLabel(method?: string | null): string {
     USERNAME_PASSWORD: "Username and password",
     // The credential labels scd records on the session (iamv2/credential.go): the channel or provider the
     // client actually used, which is what "Signed in with" means to an operator.
-    EMAIL_OTP: "Emailed code",
+    // The email one-time code is replaced by Email accounts (self-service contract §1); sessions that used it stay
+    // readable.
+    EMAIL_OTP: "Email code (former)",
     SMS_OTP: "Texted code",
     WHATSAPP_OTP: "WhatsApp code",
     // A code a staff member showed the client (contract §6.7): the desk vouched for the address.
-    EMAIL_OTP_ASSISTED: "Emailed code, shown by staff",
+    EMAIL_OTP_ASSISTED: "Email code, shown by staff (former)",
     SMS_OTP_ASSISTED: "Texted code, shown by staff",
     WHATSAPP_OTP_ASSISTED: "WhatsApp code, shown by staff",
     SOCIAL: "Social login",

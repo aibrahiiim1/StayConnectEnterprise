@@ -144,9 +144,12 @@ describe("a read-only role is offered no write control", () => {
     expect(voucher).toHaveAttribute("aria-checked", "true");
     fireEvent.click(voucher);
     await waitFor(() => expect(put).toHaveBeenCalledWith("/auth-methods", { voucher: { enabled: false } }));
-    // Email and SMS cannot be switched on until a sender exists, and say so.
-    expect(screen.getByRole("switch", { name: "Email code" })).toBeDisabled();
-    expect(screen.getAllByText(/not available until/i).length).toBeGreaterThanOrEqual(2);
+    // SMS cannot be switched on until a sender exists, and says so. Email accounts can: registration does not wait
+    // for the mail server, but the missing sender is stated, because no verification email could be sent.
+    expect(screen.getByRole("switch", { name: "SMS code" })).toBeDisabled();
+    expect(screen.getAllByText(/not available until/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByRole("switch", { name: "Email accounts" })).not.toBeDisabled();
+    expect(screen.getByText(/no email sender is switched on/i)).toBeInTheDocument();
   });
 
   it("Guest sign-in protection: an out-of-range value blocks Save and says the range", async () => {

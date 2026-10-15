@@ -29,6 +29,7 @@ import { api, ListResp, Whoami } from "@/lib/api";
 import { canRead, canWrite } from "@/lib/roles";
 import { GuestSignInProtectionCard } from "@/components/guest-signin-protection";
 import { CodeRequestsCard } from "@/components/code-requests";
+import { EmailAccountsSettingsCard } from "@/components/email-accounts-settings";
 import { roomSignInImpaired, useRoomSignInReadiness } from "@/components/room-sign-in-readiness";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -47,41 +48,20 @@ import { Ticket, Hotel, KeyRound, Mail, MessageSquare, Users, ArrowUpRight, LogI
 // The auth_methods document. Only the keys this screen owns are typed; everything else is preserved
 // untouched by the server's merge, so an unknown future method cannot be deleted by saving here.
 type Method = { enabled?: boolean };
-// THE EMAIL CODE'S TEMPORARY INTERNET WINDOW (contract §6.6): every field an operational setting with a default,
-// unit and bounds -- the same table edged validates against (tenantcfg.TemporaryAccessBounds).
-type TemporaryAccess = {
-  enabled?: boolean; minutes?: number; down_kbps?: number; up_kbps?: number; data_mb?: number;
-  per_device_daily?: number; per_destination_daily?: number; max_concurrent?: number; retry_after_minutes?: number;
-};
-type EmailMethod = Method & { temporary_access?: TemporaryAccess };
-const TEMP_ACCESS_FIELDS: { key: Exclude<keyof TemporaryAccess, "enabled">; label: string; unit: string; def: number; min: number; max: number; explanation: string }[] = [
-  { key: "minutes", label: "How long", unit: "minutes", def: 10, min: 1, max: 30, explanation: "How long the device may use the internet after the code is sent. Independent of how long the code stays valid." },
-  { key: "down_kbps", label: "Download speed", unit: "kbps", def: 2000, min: 128, max: 20000, explanation: "Enough to open a mailbox, not to stream." },
-  { key: "up_kbps", label: "Upload speed", unit: "kbps", def: 1000, min: 64, max: 10000, explanation: "Upload limit during the window." },
-  { key: "data_mb", label: "Data allowance", unit: "MB", def: 25, min: 1, max: 200, explanation: "Upload and download combined. The window ends when it is used." },
-  { key: "per_device_daily", label: "Windows per device", unit: "per 24 hours", def: 3, min: 1, max: 10, explanation: "Asking again while a window is open reuses it; this limits new windows for the same device." },
-  { key: "per_destination_daily", label: "Windows per email address", unit: "per 24 hours", def: 3, min: 1, max: 10, explanation: "Limits windows for the same address, whatever device asks — so changing devices does not reset it." },
-  { key: "retry_after_minutes", label: "Wait before another window", unit: "minutes", def: 30, min: 0, max: 1440, explanation: "If a client still has no code when the window ends, their device may have another after this long. Changing to a different address does not start it. 0 = straight away (the daily limits still apply)." },
-  { key: "max_concurrent", label: "Open windows at once", unit: "devices", def: 50, min: 1, max: 500, explanation: "The most devices on a window at the same time across the site." },
-];
 type PMSMethod = { enabled?: boolean; mode?: string; provider?: string; template_id?: string };
 // THE CLIENT JOURNEY (ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md §2.3, §6.2): which method the portal leads
 // with, and how long a device that has verified a code or an identity provider is remembered.
-type PrimaryMethod = "" | "pms" | "email" | "sms" | "whatsapp" | "guest_account" | "voucher";
-type PortalJourney = {
-  primary_method?: PrimaryMethod; remember_device_days?: number;
-  // The email services a device may reach before sign-in to read its code (presets by id, plus the site's
-  // own host names). They open the walled garden only while the Email code method is on.
-  mail_providers?: string[]; mail_domains?: string[];
-};
-type MailProvider = { id: string; name: string; domains: string[] };
+type PrimaryMethod = "" | "pms" | "email_account" | "sms" | "whatsapp" | "guest_account" | "voucher";
+type PortalJourney = { primary_method?: PrimaryMethod; remember_device_days?: number };
 type AuthMethods = {
   voucher?: Method;
   guest_account?: Method;
   // Open package selection: the client picks an Internet package without any credential (Free or Card
   // payment). The access is held by an anonymous access subject, never by the device's MAC address.
   open?: Method;
-  email?: EmailMethod;
+  // EMAIL ACCOUNTS (self-service contract §1): the client registers with an email address and a password and
+  // signs in with them. Replaces the email one-time code ("email"), whose key no longer exists.
+  email_account?: Method;
   sms?: Method;
   whatsapp?: Method;
   social?: Record<string, Method>;
@@ -95,7 +75,7 @@ const REMEMBER_DAYS_MIN = 0;
 const REMEMBER_DAYS_MAX = 365;
 
 const PRIMARY_LABELS: Record<Exclude<PrimaryMethod, "">, string> = {
-  pms: "Room sign-in", email: "Email code", sms: "SMS code", whatsapp: "WhatsApp code",
+  pms: "Room sign-in", email_account: "Email account", sms: "SMS code", whatsapp: "WhatsApp code",
   guest_account: "Client account", voucher: "Voucher code",
 };
 
@@ -124,6 +104,7 @@ export default function SignInMethodsPage() {
   // absent. Unknown module state hides every optional method (fail closed).
   const caps = useCapabilities();
   const hospitality = moduleLicensed(caps, "hospitality");
+  // The email_otp module now means "Email accounts" (self-service contract §1).
   const emailMod = moduleLicensed(caps, "email_otp");
   const smsMod = moduleLicensed(caps, "sms_otp");
   const whatsappMod = moduleLicensed(caps, "whatsapp_otp");
@@ -205,7 +186,7 @@ export default function SignInMethodsPage() {
                 <><strong>Client account</strong> — a username and password issued to the client, managed under Client accounts.</>,
                 <><strong>Choose a package without signing in</strong> — the client chooses a package with no credential. Only packages the client can actually get are listed. A client who returns later resumes the same access with the recovery code shown after they connect.</>,
                 ...(hospitality ? [<><strong>Room sign-in</strong> — the client enters their room number and one detail from their booking. OneGate checks it against the property management system for the network they are on; the client never chooses a system, and no booking details are shown back to them. Which detail is asked for is set in Room sign-in, and which system a network uses in PMS routing — both under Hotel.</>] : []),
-                ...(emailMod ? [<><strong>Email code</strong> — the client receives a one-time code by email. Available once an email sender exists and is switched on under Delivery.</>] : []),
+                ...(emailMod ? [<><strong>Email accounts</strong> — the client registers with their email address and a password, and signs in with them on any device. They are online straight away and confirm the address from an email within the time set under <em>Email accounts: verification and limits</em>. Verification and password-reset emails need an email sender under Delivery.</>] : []),
                 ...(smsMod ? [<><strong>SMS code</strong> — the client receives a one-time code by text message. Available once a text-message sender exists and is switched on under Delivery.</>] : []),
                 ...(whatsappMod ? [<><strong>WhatsApp code</strong> — the client receives a one-time code on WhatsApp. Available once a WhatsApp sender exists and is switched on under Delivery.</>] : []),
                 ...(socialMod ? [<><strong>Identity providers</strong> — the client signs in with an existing Google, Apple, Facebook or Microsoft account. Each provider is offered individually, because each needs its own credentials; providers are set up under Identity providers.</>] : []),
@@ -337,14 +318,16 @@ export default function SignInMethodsPage() {
         {emailMod && (
         <MethodCard
           icon={<Mail />}
-          title="Email code"
-          description="The client receives a one-time code by email."
-          enabled={!!cfg.email?.enabled}
-          busy={busy === "Email code"}
+          title="Email accounts"
+          description="The client registers with their email address and a password, then signs in with them."
+          enabled={!!cfg.email_account?.enabled}
+          busy={busy === "Email accounts"}
           writable={writable}
-          onToggle={(v) => save({ email: { ...(cfg.email ?? {}), enabled: v } }, "Email code")}
-          ready={emailReady}
-          notReadyReason="Not available until an email sender exists and is switched on, so codes cannot be sent yet."
+          onToggle={(v) => save({ email_account: { ...(cfg.email_account ?? {}), enabled: v } }, "Email accounts")}
+          // Registration does not wait for the mail server, so a missing sender does not block the switch; it is
+          // said plainly, because without one no verification email is ever sent.
+          warning={emailReady ? undefined
+            : "No email sender is switched on under Delivery, so verification and password-reset emails cannot be sent."}
           manageHref="/notifications"
           manageLabel="Delivery"
         />
@@ -435,28 +418,11 @@ export default function SignInMethodsPage() {
         )}
       </div>
 
-      {emailMod && (
-        <TemporaryAccessCard
-          cfg={cfg}
-          writable={writable}
-          busy={busy === "Temporary internet"}
-          onSave={(ta) => save({ email: { ...(cfg.email ?? {}), temporary_access: ta } }, "Temporary internet")}
-        />
-      )}
+      {/* EMAIL ACCOUNTS' TERMS (self-service contract §6): verification deadline, suspension, resend, grace. */}
+      {emailMod && <EmailAccountsSettingsCard canEdit={writable} />}
 
-      {/* CODE REQUESTS: staff help for a client who cannot get their code (contract §6.7). */}
-      {emailMod && roles !== null && canRead("code-requests", roles) && <CodeRequestsCard roles={roles} />}
-
-      {/* READING THE CODE. A client who asked for an email code has to open their mail app before they have
-          internet; the services switched on here are reachable through the walled garden while Email code is on. */}
-      {emailMod && (
-        <MailReachCard
-          cfg={cfg}
-          writable={writable}
-          busy={busy === "Email services"}
-          onSave={(portal) => save({ portal }, "Email services")}
-        />
-      )}
+      {/* CODE REQUESTS: staff help for a client who cannot get their SMS or WhatsApp code (contract §6.7). */}
+      {(smsMod || whatsappMod) && roles !== null && canRead("code-requests", roles) && <CodeRequestsCard roles={roles} />}
 
       {/* THE JOURNEY. Which method leads, and whether a device is remembered, are decided once the methods
           themselves are chosen -- so the card follows the grid rather than leading it. */}
@@ -495,13 +461,13 @@ function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
   // Follow a save (or a refused one that re-read the server): the inputs show what the appliance holds.
   useEffect(() => { setPrimary(storedPrimary); setDays(String(storedDays)); }, [storedPrimary, storedDays]);
 
-  // Only a method that is switched on can lead: offering "Email code" first while it is off would show a form
+  // Only a method that is switched on can lead: offering "Email account" first while it is off would show a form
   // the client cannot use. A stored choice that has since been switched off is still listed, named as such,
   // so the operator can see why the portal fell back to the automatic order.
   const enabledMethods = useMemo(() => {
     const on: Exclude<PrimaryMethod, "">[] = [];
     if (hospitality && cfg.pms?.enabled) on.push("pms");
-    if (cfg.email?.enabled) on.push("email");
+    if (cfg.email_account?.enabled) on.push("email_account");
     if (cfg.sms?.enabled) on.push("sms");
     if (cfg.whatsapp?.enabled) on.push("whatsapp");
     if (cfg.guest_account?.enabled) on.push("guest_account");
@@ -530,8 +496,8 @@ function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
           onSubmit={(e) => {
             e.preventDefault();
             if (!daysValid || !writable) return;
-            // The whole `portal` key is replaced by the server's per-key merge, so the email services chosen
-            // on the card above travel with this save rather than being dropped by it.
+            // The whole `portal` key is replaced by the server's per-key merge, so anything else stored under
+            // it travels with this save rather than being dropped by it.
             onSave({ ...stored, primary_method: primary, remember_device_days: n });
           }}
         >
@@ -568,194 +534,6 @@ function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
             </div>
           )}
         </form>
-      </CardBody>
-    </Card>
-  );
-}
-
-// TemporaryAccessCard — the internet window an issued email code opens for the requesting device, so the client
-// can read the code in ANY mail app. Saved with the email method (the server replaces the key whole, so the
-// email switch travels with it). Bounds are checked here and again by edged.
-function TemporaryAccessCard({ cfg, writable, busy, onSave }: {
-  cfg: AuthMethods; writable: boolean; busy: boolean; onSave: (ta: TemporaryAccess) => void;
-}) {
-  const stored = cfg.email?.temporary_access ?? {};
-  const storedOn = stored.enabled ?? true;
-  const initial = () => Object.fromEntries(TEMP_ACCESS_FIELDS.map((f) => [f.key, String(stored[f.key] ?? f.def)])) as Record<string, string>;
-  const [on, setOn] = useState(storedOn);
-  const [vals, setVals] = useState<Record<string, string>>(initial);
-  const storedKey = JSON.stringify(stored);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { setOn(storedOn); setVals(initial()); }, [storedKey]);
-  const bad = TEMP_ACCESS_FIELDS.find((f) => {
-    const n = Number(vals[f.key]);
-    return vals[f.key].trim() === "" || !Number.isInteger(n) || n < f.min || n > f.max;
-  });
-  const dirty = on !== storedOn || TEMP_ACCESS_FIELDS.some((f) => Number(vals[f.key]) !== (stored[f.key] ?? f.def));
-  return (
-    <Card>
-      <CardHeader className="items-start">
-        <div className="min-w-0 space-y-1">
-          <CardTitle className="flex items-center gap-2 [&_svg]:size-4"><Mail aria-hidden /> Temporary internet while reading the code</CardTitle>
-          <CardDescription>
-            When an email code is sent, the device that asked may use the internet for a short, metered window, so the
-            client can read the code in any mail app without mobile data. It ends when the client signs in, when the
-            time or data runs out, or when they choose a different address. It is not a package and changes no
-            client&apos;s access.
-          </CardDescription>
-        </div>
-        {writable && <Switch checked={on} disabled={busy} onCheckedChange={setOn} label="Temporary internet while reading the code" />}
-      </CardHeader>
-      <CardBody>
-        <form className="grid gap-4 md:grid-cols-2" onSubmit={(e) => {
-          e.preventDefault();
-          if (bad || !writable) return;
-          const ta: TemporaryAccess = { enabled: on };
-          for (const f of TEMP_ACCESS_FIELDS) (ta as Record<string, number | boolean>)[f.key] = Number(vals[f.key]);
-          onSave(ta);
-        }}>
-          {TEMP_ACCESS_FIELDS.map((f) => (
-            <SettingField key={f.key} label={f.label} value={vals[f.key]} onChange={(v) => setVals((x) => ({ ...x, [f.key]: v }))}
-              unit={f.unit} min={f.min} max={f.max} defaultValue={f.def} readOnly={!writable || busy || !on} explanation={f.explanation} />
-          ))}
-          {writable && (
-            <div className="flex items-center gap-3 md:col-span-2">
-              <Button type="submit" disabled={!dirty || !!bad || busy}>{busy ? "Saving…" : "Save temporary internet"}</Button>
-              {dirty && !busy && <span className="text-xs text-muted-foreground">Not saved yet.</span>}
-            </div>
-          )}
-        </form>
-      </CardBody>
-    </Card>
-  );
-}
-
-// MailReachCard — which email services a device may reach BEFORE sign-in, so a client can open their mail app
-// and read the code without leaving the Wi-Fi for mobile data. Presets come from the appliance (one list, in
-// internal/mailreach); the site adds host names for a service the presets do not know.
-//
-// Saved as the one `portal` key together with the journey settings it already holds: the server replaces the
-// key whole, so the stored primary method and remember-days are spread back in rather than dropped.
-function MailReachCard({ cfg, writable, busy, onSave }: {
-  cfg: AuthMethods; writable: boolean; busy: boolean; onSave: (portal: PortalJourney) => void;
-}) {
-  const stored = cfg.portal ?? {};
-  const storedProviders = useMemo(() => stored.mail_providers ?? [], [stored.mail_providers]);
-  const storedDomains = useMemo(() => stored.mail_domains ?? [], [stored.mail_domains]);
-  const [presets, setPresets] = useState<MailProvider[] | null>(null);
-  const [chosen, setChosen] = useState<string[]>(storedProviders);
-  const [custom, setCustom] = useState(storedDomains.join("\n"));
-  const [showHosts, setShowHosts] = useState<string | null>(null);
-  useEffect(() => { setChosen(storedProviders); setCustom(storedDomains.join("\n")); }, [storedProviders, storedDomains]);
-  useEffect(() => {
-    api.get<ListResp<MailProvider>>("/auth-methods/mail-providers").then((r) => setPresets(r.data ?? [])).catch(() => setPresets([]));
-  }, []);
-
-  const customList = useMemo(
-    () => Array.from(new Set(custom.split(/[\n,;\s]+/).map((d) => d.trim().toLowerCase()).filter(Boolean))),
-    [custom],
-  );
-  const hostOK = (h: string) => /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/.test(h) && !/\d$/.test(h) && !h.includes("*");
-  const badHost = customList.find((h) => !hostOK(h));
-  const dirty = JSON.stringify([...chosen].sort()) !== JSON.stringify([...storedProviders].sort())
-    || JSON.stringify(customList) !== JSON.stringify(storedDomains);
-  const emailOn = !!cfg.email?.enabled;
-  // Not applied while temporary internet is on (contract §6.6, §10.1): it would open the services behind the mail
-  // provider's addresses to every device that has not signed in, and the per-device window already does the job.
-  const tempOn = cfg.email?.temporary_access?.enabled ?? true;
-
-  return (
-    <Card>
-      <CardHeader className="items-start">
-        <div className="min-w-0 space-y-1">
-          <CardTitle className="flex items-center gap-2 [&_svg]:size-4"><Mail aria-hidden /> Reading the code: email services reachable before sign-in</CardTitle>
-          <CardDescription>
-            A client who asked for an email code opens their mail app before they are online. The services ticked here
-            can be reached without signing in, so the code can arrive on the Wi-Fi itself — a client without mobile
-            data is otherwise stuck.
-          </CardDescription>
-          {tempOn && (
-            <p className="text-sm font-medium" role="note">
-              Not applied while <em>Temporary internet while reading the code</em> is on: the device that asked for a code
-              already has the internet for a short time, and opening mail services to every device would also open the
-              provider&apos;s other services (video, search, storage) before sign-in.
-            </p>
-          )}
-        </div>
-      </CardHeader>
-      <CardBody className="space-y-4">
-        {!emailOn && (
-          <p className="text-xs text-muted-foreground" role="status">
-            Applies only while <strong>Email code</strong> is switched on; nothing is opened while it is off.
-          </p>
-        )}
-        {presets === null ? (
-          <Skeleton className="h-24" />
-        ) : (
-          <ul className="grid gap-2 sm:grid-cols-2">
-            {presets.map((p) => {
-              const on = chosen.includes(p.id);
-              return (
-                <li key={p.id} className="flex items-center justify-between gap-3 rounded-md border border-border px-3.5 py-2.5">
-                  <label className={cn("flex items-center gap-2.5 text-sm", writable && "cursor-pointer")}>
-                    <input
-                      type="checkbox"
-                      className="size-4 accent-primary"
-                      checked={on}
-                      disabled={!writable || busy}
-                      onChange={(e) => setChosen((c) => (e.target.checked ? [...c, p.id] : c.filter((x) => x !== p.id)))}
-                    />
-                    <span>{p.name}</span>
-                  </label>
-                  <button
-                    type="button"
-                    className="text-xs text-primary underline-offset-4 hover:underline"
-                    onClick={() => setShowHosts(showHosts === p.id ? null : p.id)}
-                    aria-expanded={showHosts === p.id}
-                  >
-                    {p.domains.length} hosts
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        {showHosts && presets && (
-          <p className="rounded-md border border-border bg-surface/60 p-3 font-mono text-2xs text-muted-foreground break-words">
-            {presets.find((p) => p.id === showHosts)?.domains.join("  ")}
-          </p>
-        )}
-        <Field
-          label="Other email services (host names)"
-          hint="One host name per line, for a service not listed above — for example mail.example.com and login.example.com. Host names only: no wildcards, addresses or paths. Up to 50."
-        >
-          <textarea
-            className="min-h-24 w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-sm"
-            value={custom}
-            readOnly={!writable || busy}
-            onChange={(e) => setCustom(e.target.value)}
-            placeholder={"mail.example.com\nlogin.example.com"}
-            aria-label="Other email services (host names)"
-          />
-        </Field>
-        {badHost && <p className="text-xs text-destructive" role="alert">&ldquo;{badHost}&rdquo; is not a valid host name.</p>}
-        {writable && (
-          <div className="flex items-center gap-3">
-            <Button
-              type="button"
-              disabled={!dirty || !!badHost || busy}
-              onClick={() => onSave({ ...stored, mail_providers: chosen, mail_domains: customList })}
-            >
-              {busy ? "Saving…" : "Save email services"}
-            </Button>
-            {dirty && !busy && <span className="text-xs text-muted-foreground">Not saved yet.</span>}
-          </div>
-        )}
-        <p className="text-xs text-muted-foreground">
-          Each service is opened at the host names its apps and webmail are known to use. Services change their
-          hosts from time to time; add what changed under &ldquo;Other email services&rdquo;. Everything else stays
-          closed until the client signs in.
-        </p>
       </CardBody>
     </Card>
   );
@@ -800,11 +578,14 @@ function MethodSwitch({ label, enabled, busy, writable, disabled, onChange }: {
 // switch is disabled — presenting a working switch for something that cannot deliver a code is how an
 // operator turns a method on and only finds out at the front desk.
 function MethodCard({
-  icon, title, description, enabled, busy, writable, onToggle, ready = true, notReadyReason, manageHref, manageLabel,
+  icon, title, description, enabled, busy, writable, onToggle, ready = true, notReadyReason, warning, manageHref, manageLabel,
 }: {
   icon: React.ReactNode; title: string; description: string;
   enabled: boolean; busy: boolean; writable: boolean; onToggle: (v: boolean) => void;
-  ready?: boolean; notReadyReason?: string; manageHref?: string; manageLabel?: string;
+  ready?: boolean; notReadyReason?: string;
+  /** A condition worth saying that does NOT block the switch. */
+  warning?: string;
+  manageHref?: string; manageLabel?: string;
 }) {
   return (
     <Card className={cn("flex flex-col", !ready && "bg-surface/60")}>
@@ -820,6 +601,7 @@ function MethodCard({
       <CardBody className="flex flex-1 flex-col gap-2 pt-0">
         <p className="text-sm text-muted-foreground">{description}</p>
         {!ready && notReadyReason && <p className="text-xs text-warning-subtle-foreground">{notReadyReason}</p>}
+        {ready && warning && <p className="text-xs text-warning-subtle-foreground" role="status">{warning}</p>}
         {manageHref && (
           <Link
             href={manageHref}
