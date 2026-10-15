@@ -388,6 +388,20 @@ func (s *server) patchGuestAccountIAMv2(w http.ResponseWriter, r *http.Request) 
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
+	// A SELF-SERVICE ACCOUNT'S USERNAME IS THE CLIENT'S EMAIL ADDRESS (contract ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE
+	// §2, §5): renaming it would move the account -- and every entitlement it owns -- to an address its owner never
+	// proved, and send the next reset link there. Staff may enable, disable, annotate or set validity; never rename.
+	if in.Username != nil {
+		var selfReg bool
+		var current string
+		if err := s.db.QueryRow(ctx, `SELECT self_registered, username FROM iam_v2.guest_access_accounts
+		     WHERE id=$1 AND tenant_id=$2 AND site_id=$3`, id, s.tenantID, s.siteID).Scan(&selfReg, &current); err == nil &&
+			selfReg && !strings.EqualFold(current, *in.Username) {
+			jsonErr(w, http.StatusForbidden, "self_service_account",
+				"a self-service account's username is the client's email address and cannot be changed by staff")
+			return
+		}
+	}
 	// COALESCE keeps every omitted field at its current value, so a partial PATCH cannot blank a column.
 	var a iamv2Account
 	err := scanIAMv2Account(s.db.QueryRow(ctx, `

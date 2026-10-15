@@ -96,6 +96,7 @@ export function methodLabel(method?: string | null): string {
     // client actually used, which is what "Signed in with" means to an operator.
     // The email one-time code is replaced by Email accounts (self-service contract §1); sessions that used it stay
     // readable.
+    EMAIL_ACCOUNT: "Email and password",
     EMAIL_OTP: "Email code (former)",
     SMS_OTP: "Texted code",
     WHATSAPP_OTP: "WhatsApp code",
