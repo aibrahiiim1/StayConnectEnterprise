@@ -87,7 +87,10 @@ func forwardChain(t *testing.T, out string) string {
 	return rest
 }
 
-func TestWithNoTLSPortalNothingRedirectsTo443AndTheRefusalIsPrompt(t *testing.T) {
+// unauthenticated443Drop is the one rule that decides an unsigned-in guest's outbound HTTPS.
+const unauthenticated443Drop = `iifname @guest_interfaces oifname "ens160" tcp dport 443 drop comment "no TLS portal: unanswered, so browsers run their captive check"`
+
+func TestWithNoTLSPortalNothingRedirectsTo443AndItGoesUnanswered(t *testing.T) {
 	out := renderWith(t, 0)
 
 	if strings.Contains(out, "tcp dport 443 dnat") {
@@ -97,17 +100,38 @@ func TestWithNoTLSPortalNothingRedirectsTo443AndTheRefusalIsPrompt(t *testing.T)
 	if !strings.Contains(out, "tcp dport 80  dnat ip to 192.168.77.1:8380") {
 		t.Fatal("the HTTP captive redirect was lost; captive-portal detection depends on it")
 	}
-	// A silent drop would leave the guest's browser spinning for half a minute. The reset is what keeps the
-	// failure immediate, which is also what prompts the OS to fall back to its captive probe.
-	if !strings.Contains(out, `tcp dport 443 reject with tcp reset`) {
-		t.Error("an unauthenticated HTTPS attempt is silently dropped; it should be refused promptly")
+	// A RESET HIDES THE LOGIN TAB. Chromium's captive-portal tab reloader runs its check only after an HTTPS load
+	// times out, fails TLS or trips the slow-SSL timer; a reset or refusal cancels it. So the unauthenticated 443
+	// is dropped silently, and nothing anywhere in the ruleset answers it.
+	fwd := forwardChain(t, out)
+	if !strings.Contains(fwd, unauthenticated443Drop) {
+		t.Error("an unauthenticated HTTPS attempt is not silently dropped")
 	}
-	// ...and the refusal must come after the accepts, or it would refuse authorized guests too.
-	rejectAt := strings.Index(out, "tcp dport 443 reject with tcp reset")
-	authAt := strings.Index(out, `ip saddr @auth_ipv4 accept comment "authenticated guests"`)
-	gardenAt := strings.Index(out, "ip daddr @walled_garden_ip accept")
-	if rejectAt < authAt || rejectAt < gardenAt {
-		t.Error("the 443 refusal is ordered before an accept, so it would refuse an authorized guest")
+	if strings.Contains(out, "reject") || strings.Contains(out, "tcp reset") {
+		t.Error("the ruleset answers an unauthenticated connection with a reject/reset; Chrome then never opens its login tab")
+	}
+	// ...and the drop must come after every accept, or it would cut off authorized guests and the garden too.
+	// It is the forward chain's LAST rule: nothing after it could re-open 443.
+	dropAt := strings.Index(fwd, unauthenticated443Drop)
+	for _, accept := range []string{
+		`ip saddr @auth_ipv4 accept comment "authenticated guests"`,
+		`ip saddr @phase3_auth_ipv4 accept comment "phase-3 authorized guests"`,
+		"ip daddr @walled_garden_ip accept",
+		"ip daddr . tcp dport @walled_garden_tcp accept",
+		"ip daddr . udp dport @walled_garden_udp accept",
+	} {
+		if i := strings.Index(fwd, accept); i < 0 || i > dropAt {
+			t.Errorf("the 443 drop is ordered before %q, so it would cut off an allowed flow", accept)
+		}
+	}
+	if rest := strings.TrimSpace(fwd[dropAt+len(unauthenticated443Drop):]); rest != "}" {
+		t.Errorf("rules follow the 443 drop in the forward chain: %q", rest)
+	}
+	// UDP 443 (QUIC) is left to the policy drop, as before: no rule accepts or answers it.
+	for _, line := range strings.Split(fwd, "\n") {
+		if strings.Contains(line, "udp dport 443") {
+			t.Errorf("a forward rule names UDP 443; QUIC must stay with the policy drop: %s", strings.TrimSpace(line))
+		}
 	}
 	// The dead port is no longer opened on the input chain either.
 	if strings.Contains(out, "tcp dport { 8380, 8343 }") || strings.Contains(out, "8343") {
@@ -126,14 +150,14 @@ func TestAnApplianceThatDOESServeATLSPortalIsUnchanged(t *testing.T) {
 	if !strings.Contains(out, "tcp dport { 8380, 8343 } accept") {
 		t.Error("an appliance with a TLS portal no longer opens the port")
 	}
-	if strings.Contains(out, "tcp dport 443 reject with tcp reset") {
-		t.Error("an appliance with a working TLS portal should redirect, not refuse")
+	if strings.Contains(out, "tcp dport 443 drop") || strings.Contains(out, "reject") {
+		t.Error("an appliance with a working TLS portal should redirect, not drop or refuse")
 	}
 }
 
 func TestArbitrary443IsStillNeverInterceptedWithAPortalAddress(t *testing.T) {
 	// The same guarantees as above, with the portal address in the render. The only 443 redirect is the one bound
-	// to `ip daddr <portal address>`; no gateway redirect exists; the prompt refusal of everything else stays.
+	// to `ip daddr <portal address>`; no gateway redirect exists; the silent drop of everything else stays.
 	topo := DefaultTopology()
 	topo.PortalVIP = "10.255.255.1"
 	nets := []GuestNetwork{{
@@ -152,10 +176,10 @@ func TestArbitrary443IsStillNeverInterceptedWithAPortalAddress(t *testing.T) {
 	if strings.Contains(out, "dnat ip to 192.168.77.1:8343") || strings.Contains(out, "192.168.77.1 tcp dport { 8380, 8343 }") {
 		t.Error("the gateway serves the TLS port; it must exist only behind the portal address")
 	}
-	if !strings.Contains(out, `tcp dport 443 reject with tcp reset`) {
-		t.Error("the prompt refusal of unauthenticated HTTPS was lost when a portal address was added")
-	}
 	fwd := forwardChain(t, out)
+	if !strings.Contains(fwd, unauthenticated443Drop) || strings.Contains(out, "reject") {
+		t.Error("the silent drop of unauthenticated HTTPS was lost (or became a refusal) when a portal address was added")
+	}
 	for _, forbidden := range []string{"tcp dport 443 accept", "tcp dport 443 counter accept"} {
 		if strings.Contains(fwd, forbidden) {
 			t.Errorf("unauthenticated guest HTTPS is ACCEPTED (%q)", forbidden)

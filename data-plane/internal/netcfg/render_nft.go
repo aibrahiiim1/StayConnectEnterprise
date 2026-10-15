@@ -128,15 +128,6 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	b.WriteString("\tset walled_garden_ip {\n\t\ttype ipv4_addr\n\t\tflags interval\n\t\tauto-merge\n\t}\n\n")
 	fmt.Fprintf(&b, "\tset walled_garden_tcp {\n\t\ttype ipv4_addr . inet_service\n\t\tflags interval\n\t\tcomment \"pre-auth (address, TCP port) pairs; scd reconciles\"\n\t\telements = { %s }\n\t}\n\n", baselinePairs())
 	fmt.Fprintf(&b, "\tset walled_garden_udp {\n\t\ttype ipv4_addr . inet_service\n\t\tflags interval\n\t\tcomment \"pre-auth (address, UDP port) pairs; scd reconciles\"\n\t\telements = { %s }\n\t}\n\n", baselinePairs())
-	// TEMPORARY VERIFICATION ACCESS (scd verify_access.go). While a device waits for an email code it may reach
-	// the internet for a short, metered window: admission is a timed (bridge, address) element -- the kernel
-	// ends it at expiry by itself -- and each admitted address has its own quota object (combined bytes, both
-	// directions) and two rate-limit objects (up, down). scd creates and removes the objects; the sets and maps
-	// are structure and start empty. Separate from every entitlement set: nothing here is access a client bought.
-	b.WriteString("\tset verify_ipv4 {\n\t\ttype ifname . ipv4_addr\n\t\tflags timeout\n\t\tcomment \"temporary verification access: (ingress bridge, IP); scd-owned\"\n\t}\n\n")
-	b.WriteString("\tmap verify_quota {\n\t\ttype ipv4_addr : quota\n\t\tcomment \"per-device verification data cap; scd-owned\"\n\t}\n\n")
-	b.WriteString("\tmap verify_up {\n\t\ttype ipv4_addr : limit\n\t\tcomment \"per-device verification upload rate; scd-owned\"\n\t}\n\n")
-	b.WriteString("\tmap verify_down {\n\t\ttype ipv4_addr : limit\n\t\tcomment \"per-device verification download rate; scd-owned\"\n\t}\n\n")
 	// PRE-AUTHENTICATION DNS IS RATE-LIMITED PER DEVICE. A device that has not signed in may resolve names (the
 	// captive-portal probe needs it) but not tunnel through the resolver: 20 queries a second, burst 40, per
 	// address, to the gateway resolver and to the public resolvers in the garden alike. Authenticated devices
@@ -275,19 +266,6 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 		fmt.Fprintf(&b, "\t\tip daddr %s drop comment \"portal address is never routed\"\n", vip)
 		fmt.Fprintf(&b, "\t\tip saddr %s drop comment \"portal address is never routed (source)\"\n", vip)
 	}
-	// TEMPORARY VERIFICATION ACCESS IS METERED BEFORE THE ESTABLISHED ACCEPT, so every packet of the window --
-	// new or established, either direction -- is counted against the device's quota and policed against its
-	// rates. A rule here only ever DROPS (over quota, over rate); admission is the verify_ipv4 accept below.
-	b.WriteString("\t\toifname @guest_interfaces ip daddr @verify_quota quota name ip daddr map @verify_quota drop comment \"verification data cap (down)\"\n")
-	b.WriteString("\t\toifname @guest_interfaces ip daddr @verify_down limit name ip daddr map @verify_down drop comment \"verification rate (down)\"\n")
-	b.WriteString("\t\tiifname @guest_interfaces ip saddr @verify_quota quota name ip saddr map @verify_quota drop comment \"verification data cap (up)\"\n")
-	b.WriteString("\t\tiifname @guest_interfaces ip saddr @verify_up limit name ip saddr map @verify_up drop comment \"verification rate (up)\"\n")
-	// A CLOSED WINDOW'S FLOWS END WITH IT. A flow the window admitted carries a conntrack mark (set at the admit
-	// below); once the device no longer holds a live window -- cap reached, expired, cancelled, verified -- its
-	// meters are removed, and without this a download already in progress would carry on through the
-	// established accept, unmetered. Membership of verify_quota is the "window is live" test.
-	b.WriteString("\t\tct mark 0x56455249 iifname @guest_interfaces ip saddr != @verify_quota drop comment \"closed verification window: its flows end (up)\"\n")
-	b.WriteString("\t\tct mark 0x56455249 oifname @guest_interfaces ip daddr != @verify_quota drop comment \"closed verification window: its flows end (down)\"\n")
 	// Pre-authentication DNS straight to a public resolver, rate-limited exactly like DNS to the gateway and for
 	// the same reason placed before the established accept; authenticated devices are exempt.
 	fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" meta l4proto { tcp, udp } th dport 53 iifname . ip saddr != @auth_ipv4 iifname . ip saddr != @phase3_auth_ipv4 update @dns_preauth_rl { ip saddr limit rate over 20/second burst 40 packets } counter name \"dns_preauth_limited\" drop comment \"pre-auth DNS rate limit\"\n", topo.WANInterface)
@@ -310,26 +288,36 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @auth_ipv4 accept comment \"authenticated guests\"\n", topo.WANInterface)
 	// The Phase-3 gate. While the set is empty this rule can never match, so a dark appliance is unaffected.
 	fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @phase3_auth_ipv4 accept comment \"phase-3 authorized guests\"\n", topo.WANInterface)
-	// Temporary verification access: the internet, never the appliance's other networks (the management and
-	// client-to-client drops above have already run), for as long as the kernel keeps the timed element.
-	fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @verify_ipv4 ct mark set 0x56455249 accept comment \"temporary verification access\"\n", topo.WANInterface)
 	// walled-garden pre-auth -> WAN for any guest interface: every port to an address-only element, and exactly
 	// the named port to a port-restricted one.
 	fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" ip daddr @walled_garden_ip accept\n", topo.WANInterface)
 	fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" ip daddr . tcp dport @walled_garden_tcp accept\n", topo.WANInterface)
 	fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" ip daddr . udp dport @walled_garden_udp accept\n", topo.WANInterface)
-	// AN UNAUTHENTICATED HTTPS ATTEMPT FAILS FAST, AND ON PURPOSE.
+	// AN UNAUTHENTICATED HTTPS ATTEMPT GOES UNANSWERED, AND ON PURPOSE.
 	//
-	// With no TLS portal there is no redirect, and the chain's policy would simply DROP these packets. A drop
-	// is silent: the guest's browser retransmits and spins for half a minute before giving up, which is a
-	// worse experience than the closed-port reset they got when the DNAT pointed at a phantom listener.
+	// With no TLS portal there is no redirect for a guest's HTTPS to another host: the appliance holds a
+	// certificate for its own portal names and nobody else's, and intercepting or impersonating TLS is ruled
+	// out. So the packet is dropped -- never redirected, never accepted, never sent out of the WAN.
 	//
-	// So the refusal is explicit. The guest learns immediately that this connection will not be served, which
-	// is also what prompts an operating system to fall back to its captive-portal probe -- the HTTP path that
-	// actually works. This rule sits AFTER both authorized-guest accepts and the walled garden, so it can
-	// only ever match a guest who has not signed in.
+	// THIS USED TO BE `reject with tcp reset`, on the reasoning that failing fast prompts the browser to fall
+	// back to its captive-portal check. For desktop Chrome and Edge it does the opposite. Chromium's
+	// CaptivePortalTabReloader (components/captive_portal/content/captive_portal_tab_reloader.cc) starts a
+	// captive-portal check -- and then opens its login tab -- only when an HTTPS load fails with
+	// ERR_CONNECTION_TIMED_OUT, ERR_SSL_PROTOCOL_ERROR or a certificate error, or when its 30-second slow-SSL
+	// timer fires on a load still in progress. A reset or a refusal returns the reloader to its idle state and
+	// NO check runs: a guest who opened an https:// site got a bare error page and never saw the login tab.
+	//
+	// A silent drop leaves the SYN unanswered, so the load either reaches the slow-SSL timer or times out, and
+	// both run Chrome's check -- which probes over plain HTTP and is answered by the port-80 captive redirect.
+	// HTTPS-Upgrades still works too: a navigation Chrome upgraded to https:// falls back to http:// after its
+	// fallback delay on ANY network error, a timeout included, and that http:// load is redirected the same way.
+	// UDP 443 (QUIC) is not touched here: the chain's policy drops it, as before, and browsers fall back to TCP.
+	//
+	// It stays an explicit rule rather than being left to the policy, because it is a decision. It sits AFTER
+	// both authorized-guest accepts and the walled garden, so it can only ever match a guest who has not
+	// signed in.
 	if topo.PortalTLSPort == 0 {
-		fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" tcp dport 443 reject with tcp reset comment \"no TLS portal: refuse promptly rather than hang\"\n", topo.WANInterface)
+		fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" tcp dport 443 drop comment \"no TLS portal: unanswered, so browsers run their captive check\"\n", topo.WANInterface)
 	}
 	b.WriteString("\t}\n\n")
 
@@ -363,7 +351,7 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 		// A guest authorized in EITHER set must not be captive-redirected. Omitting the Phase-3 exclusion
 		// would leave an authorized Phase-3 guest's web traffic DNAT'd to the portal — internet "granted"
 		// but every page still the login screen.
-		fmt.Fprintf(&b, "\t\tiifname \"%s\" iifname . ip saddr != @auth_ipv4 iifname . ip saddr != @phase3_auth_ipv4 iifname . ip saddr != @verify_ipv4 ip daddr != @walled_garden_ip tcp dport 80  dnat ip to %s:%d\n",
+		fmt.Fprintf(&b, "\t\tiifname \"%s\" iifname . ip saddr != @auth_ipv4 iifname . ip saddr != @phase3_auth_ipv4 ip daddr != @walled_garden_ip tcp dport 80  dnat ip to %s:%d\n",
 			br, gw, topo.PortalHTTPPort)
 		// PORT 443 IS REDIRECTED ONLY IF THERE IS SOMETHING TO REDIRECT IT TO.
 		//
@@ -372,7 +360,7 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 		// with a reset, which at least failed quickly -- but the firewall was describing a captive TLS portal
 		// that does not exist, and the next person to read the ruleset would reasonably believe it did.
 		if topo.PortalTLSPort > 0 {
-			fmt.Fprintf(&b, "\t\tiifname \"%s\" iifname . ip saddr != @auth_ipv4 iifname . ip saddr != @phase3_auth_ipv4 iifname . ip saddr != @verify_ipv4 ip daddr != @walled_garden_ip tcp dport 443 dnat ip to %s:%d\n",
+			fmt.Fprintf(&b, "\t\tiifname \"%s\" iifname . ip saddr != @auth_ipv4 iifname . ip saddr != @phase3_auth_ipv4 ip daddr != @walled_garden_ip tcp dport 443 dnat ip to %s:%d\n",
 				br, gw, topo.PortalTLSPort)
 		}
 	}
