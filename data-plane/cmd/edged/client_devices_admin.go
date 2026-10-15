@@ -189,6 +189,12 @@ func (s *server) listClientDevices(w http.ResponseWriter, r *http.Request) {
 	const size = 50
 	ctx, cancel := dbCtx(r)
 	defer cancel()
+	// What is connected NOW comes first: signed in, then on the Wi-Fi, then the rest by when they last signed in.
+	leases := s.activeLeases(ctx)
+	onWiFi := make([]string, 0, len(leases))
+	for m := range leases {
+		onWiFi = append(onWiFi, m)
+	}
 	rows, err := s.db.Query(ctx, `
 	    SELECT d.id::text, d.mac::text, COALESCE(host(d.last_ip),''), d.first_seen, d.last_seen,
 	           live.ip IS NOT NULL, COALESCE(live.ip,'')
@@ -202,8 +208,8 @@ func (s *server) listClientDevices(w http.ResponseWriter, r *http.Request) {
 	                         JOIN iam_v2.entitlements e ON e.id = ed.entitlement_id
 	                         JOIN iam_v2.guest_access_accounts ga ON ga.id = e.guest_account_id
 	                        WHERE ed.device_id = d.id AND lower(ga.username) LIKE $3))
-	     ORDER BY d.last_seen DESC NULLS LAST, d.id
-	     LIMIT $4 OFFSET $5`, s.tenantID, s.siteID, search, size+1, (page-1)*size)
+	     ORDER BY (live.ip IS NOT NULL) DESC, (lower(d.mac::text) = ANY($6::text[])) DESC, d.last_seen DESC NULLS LAST, d.id
+	     LIMIT $4 OFFSET $5`, s.tenantID, s.siteID, search, size+1, (page-1)*size, onWiFi)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "devices could not be listed")
 		return
@@ -226,7 +232,6 @@ func (s *server) listClientDevices(w http.ResponseWriter, r *http.Request) {
 	// ON THE WI-FI NOW. Every listed device learns whether it holds a lease; and on the first page, a device that
 	// is on the Wi-Fi but has never signed in (no record yet) is listed first, so "I connected my phone and
 	// cannot find it" has an answer.
-	leases := s.activeLeases(ctx)
 	for i := range out {
 		out[i].withLease(leases)
 	}
