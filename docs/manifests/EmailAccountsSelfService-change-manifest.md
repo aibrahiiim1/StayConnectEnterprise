@@ -2,7 +2,7 @@
 
 - **Base commit:** `87b32100ffb67fd5c59820aff00d727d4e189ff7`
 - **HEAD commit:** `d0aec3eb45bb2bcb7e5f0de06aa7bde14c7e3b0e`
-- **Provenance (generation HEAD = inventory_head):** `d0aec3eb45bb2bcb7e5f0de06aa7bde14c7e3b0e`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `2c06b811d55f00fdc23ca7368101ee5fee14d837`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/email-accounts-self-service`
 - **Remote branch:** `origin/delivery/email-accounts-self-service`
 - **Changed files:** 183
@@ -125,16 +125,16 @@
 | `docs/architecture/ONEGATE_DEVICE_MANAGEMENT.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Devices in the Admin Console (search, a device's packages and places, disconnect, release a place, fresh sign-in, prepare for a test, the daily change setting); 0118 declares its ownership; baseline through 0118; device-management contract, acceptance section G, the HTTP fallback limitation and the health-check fix recorded |
 | `docs/architecture/ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Devices in the Admin Console (search, a device's packages and places, disconnect, release a place, fresh sign-in, prepare for a test, the daily change setting); 0118 declares its ownership; baseline through 0118; device-management contract, acceptance section G, the HTTP fallback limitation and the health-check fix recorded |
 | `docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Devices in the Admin Console (search, a device's packages and places, disconnect, release a place, fresh sign-in, prepare for a test, the daily change setting); 0118 declares its ownership; baseline through 0118; device-management contract, acceptance section G, the HTTP fallback limitation and the health-check fix recorded |
-| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0235 records the review finding fixed and scd redeployed on PRE-LIVE |
-| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0235 records the review finding fixed and scd redeployed on PRE-LIVE |
-| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0235 records the review finding fixed and scd redeployed on PRE-LIVE |
-| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0235 records the review finding fixed and scd redeployed on PRE-LIVE |
-| `docs/manifests/EmailAccountsSelfService-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | The export packs and the change manifest carry the T0235 state |
+| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0236 records device management and the portal health fix on PRE-LIVE (D51, migration 0118) |
+| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0236 records device management and the portal health fix on PRE-LIVE (D51, migration 0118) |
+| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0236 records device management and the portal health fix on PRE-LIVE (D51, migration 0118) |
+| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0236 records device management and the portal health fix on PRE-LIVE (D51, migration 0118) |
+| `docs/manifests/EmailAccountsSelfService-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: T0236 records device management and the portal health fix on PRE-LIVE (D51, migration 0118) |
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0235 state |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0235 state |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0235 state |
 | `exports/chatgpt/phase-evidence/GIT_STAT_1c2ad2cc.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | The export packs and the change manifest carry the T0234 state |
-| `exports/chatgpt/phase-evidence/GIT_STAT_a9c7adf3.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | The export packs and the change manifest carry the T0235 state |
+| `exports/chatgpt/phase-evidence/GIT_STAT_2c06b811.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0235 state |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0235 state |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0234 state |
@@ -142,18 +142,18 @@
 | `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0235 state |
 | `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0235 state |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0235 state |
-| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0235 records the review finding fixed and scd redeployed on PRE-LIVE |
+| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0236 records device management and the portal health fix on PRE-LIVE (D51, migration 0118) |
 | `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0235 state |
-| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0235 records the review finding fixed and scd redeployed on PRE-LIVE |
+| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0236 records device management and the portal health fix on PRE-LIVE (D51, migration 0118) |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0235 state |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0235 state |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0235 state |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs and the change manifest carry the T0235 state |
-| `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0234 records the email-accounts delivery on PRE-LIVE (D50) |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0235 records the review finding fixed and scd redeployed on PRE-LIVE |
+| `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0236 records device management and the portal health fix on PRE-LIVE (D51, migration 0118) |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0236 records device management and the portal health fix on PRE-LIVE (D51, migration 0118) |
 | `governance/transitions/T0234.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0234 records the email-accounts delivery on PRE-LIVE (D50) |
 | `governance/transitions/T0235.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0235 records the review finding fixed and scd redeployed on PRE-LIVE |
-| `governance/transitions/T0236.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | (no commit subject in range) |
+| `governance/transitions/T0236.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0236 records device management and the portal health fix on PRE-LIVE (D51, migration 0118) |
 | `hotel-admin/app/(app)/devices/page.tsx` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Devices in the Admin Console (search, a device's packages and places, disconnect, release a place, fresh sign-in, prepare for a test, the daily change setting); 0118 declares its ownership; baseline through 0118; device-management contract, acceptance section G, the HTTP fallback limitation and the health-check fix recorded |
 | `hotel-admin/app/(app)/guest-accounts/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Client accounts: Manage shows verification, packages and devices; Remove deletes an unused account and retires one with history, freeing its email; staff can mark an email verified or start a new verification period |
 | `hotel-admin/app/(app)/portal-branding/preview.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Portal: Email + Password self-service accounts replace the email one-time code |
@@ -315,15 +315,15 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |    6 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |    6 +-
  docs/context/StayConnect-IAM-Handoff.md            |    6 +-
- .../EmailAccountsSelfService-change-manifest.md    |  429 ++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 350642 -> 350650 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 156175 -> 156724 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 44035 -> 44041 bytes
+ .../EmailAccountsSelfService-change-manifest.md    |  438 ++++++++
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 350642 -> 350715 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 156175 -> 157162 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 44035 -> 44051 bytes
  .../chatgpt/phase-evidence/GIT_STAT_1c2ad2cc.txt   |    4 -
- .../chatgpt/phase-evidence/GIT_STAT_a9c7adf3.txt   |    4 +
+ .../chatgpt/phase-evidence/GIT_STAT_2c06b811.txt   |    4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |    6 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |    6 +-
- .../governance/decision-register.json              |   13 +
+ .../governance/decision-register.json              |   25 +
  exports/chatgpt/phase1b-planning/MANIFEST.md       |    2 +-
  .../chatgpt/phase1b-planning/PACK_SHA256SUMS.txt   |    6 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   16 +-
@@ -381,25 +381,34 @@
  scripts/portal-temporary-access-e2e-test.sh        |   65 --
  scripts/prod-privilege-integration.sh              |    2 +-
  scripts/sitedb-dev.sh                              |    2 +-
- 183 files changed, 14900 insertions(+), 3303 deletions(-)
+ 183 files changed, 14921 insertions(+), 3303 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-M  docs/architecture/StayConnect-IAM-Phase0-Contract.md
-M  docs/architecture/StayConnect-IAM-Phase1A-Plan.md
-M  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
-M  docs/context/StayConnect-IAM-Handoff.md
 M  docs/manifests/EmailAccountsSelfService-change-manifest.md
-M  exports/chatgpt/stayconnectenterprise/00-START-HERE.md
-M  exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md
-M  governance/decision-register.json
-M  governance/project-state.json
-A  governance/transitions/T0236.json
+M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
+M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
+M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
+A  exports/chatgpt/phase-evidence/GIT_STAT_2c06b811.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_a9c7adf3.txt
+M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
+M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
+M  exports/chatgpt/phase-evidence/governance/decision-register.json
+M  exports/chatgpt/phase1b-planning/MANIFEST.md
+M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md
+M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 2c06b811 Governance: T0236 records device management and the portal health fix on PRE-LIVE (D51, migration 0118)
 HISTORICAL: d0aec3eb Test harnesses keep the appliance's own resolver running (dhclient's exit hook restarts it per namespace client); the email-accounts test expects the replacement choice at the device limit
 HISTORICAL: 2a76af72 A device change the database will refuse leaves the target online: scd pre-checks today's limit and a free place before disconnecting it
 HISTORICAL: 300c0b5a scd admits portald to the client device routes (the socket's guest surface); the harness reads the right holder at each step

@@ -1,4 +1,0 @@
-commit a9c7adf3e5fa25faa7c4ddd18d2e3dcbc985e9d1
-Date:   Thu Oct 15 11:29:14 2026 +0300
-
-    Governance: T0235 records the review finding fixed and scd redeployed on PRE-LIVE
