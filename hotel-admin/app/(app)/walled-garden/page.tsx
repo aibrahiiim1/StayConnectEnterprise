@@ -145,13 +145,6 @@ export default function WalledGardenPage() {
                 ]}
               />
             </HelpSection>
-            <HelpSection title="Email services for the one-time code">
-              <p>
-                The email services a client may open to read their code — Gmail, Outlook, Yahoo and others — are not
-                written here one host at a time. Switch them on under <strong>Sign-in methods → Reading the code</strong>,
-                which opens each service&apos;s host names while the Email code method is on.
-              </p>
-            </HelpSection>
           </>
         }
         actions={writable && <Button onClick={openNew}><Plus /> Add rule</Button>}

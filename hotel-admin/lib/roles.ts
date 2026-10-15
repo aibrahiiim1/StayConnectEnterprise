@@ -43,8 +43,8 @@ type Matrix = Record<string, Record<string, Perm>>;
 // 403s on click.
 const MATRIX: Matrix = {
   hotel_it_manager: {
-    // Code requests (contract §6.7): list and let a device try again; code-reveal reads a live code.
-    "code-requests": "write", "code-reveal": "write",
+    // Code requests (contract §6.7): the SMS / WhatsApp list, read-only; code-reveal reads a live code.
+    "code-requests": "read", "code-reveal": "write",
     // Guest sign-in attempts. Two keys, mirroring edged exactly: the list, and the credential comparison.
     // "View_Guest_SignIn_Attempts" and "View_Guest_SignIn_Credentials" are the same two permissions under
     // the names the Product Owner uses.
@@ -94,8 +94,8 @@ const MATRIX: Matrix = {
     reports: "read", backups: "read", license: "read", diagnostics: "write",
   },
   front_office_operator: {
-    // Code requests (contract §6.7): list and let a device try again; code-reveal reads a live code.
-    "code-requests": "write", "code-reveal": "write",
+    // Code requests (contract §6.7): the SMS / WhatsApp list, read-only; code-reveal reads a live code.
+    "code-requests": "read", "code-reveal": "write",
     // The reception desk: the role this screen was asked for, and the one that needs the comparison.
     "guest-signin-attempts": "read", "guest-signin-credentials": "read",
     // The desk RELEASES and does not re-tune: the restricted guest is standing there now, but making
@@ -118,8 +118,8 @@ const MATRIX: Matrix = {
     "auth-methods": "read", "walled-garden": "read", "client-groups": "read", reports: "read", audit: "read", license: "read", backups: "read", diagnostics: "read",
   },
   guest_relations_operator: {
-    // Code requests (contract §6.7): list and let a device try again; code-reveal reads a live code.
-    "code-requests": "write",
+    // Code requests (contract §6.7): the SMS / WhatsApp list, read-only; code-reveal reads a live code.
+    "code-requests": "read",
     "guest-signin-attempts": "read", "guest-signin-credentials": "read",
     "guest-signin-restrictions": "write", "guest-signin-protection": "read",
     "guest-device-self-service": "read",
@@ -154,7 +154,7 @@ const MATRIX: Matrix = {
     vouchers: "read",
   },
   site_viewer: {
-    // Code requests (contract §6.7): list and let a device try again; code-reveal reads a live code.
+    // Code requests (contract §6.7): the SMS / WhatsApp list, read-only; code-reveal reads a live code.
     "code-requests": "read",
     // The list only. A read-only observer has no reason to hold thirty days of what guests typed, so the
     // credentials key is absent here rather than merely unused — and edged enforces that, not this file.

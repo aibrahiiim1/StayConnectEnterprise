@@ -31,6 +31,8 @@ func (s *server) guestAccountsRoutes() http.Handler {
 	r.Patch("/{id}", s.patchGuestAccountIAMv2)
 	r.Post("/{id}/set-password", s.setGuestAccountPasswordIAMv2)
 	r.Post("/{id}/disconnect", s.disconnectGuestAccountSessionsIAMv2)
+	// Self-service email accounts (contract §7): ask scd to send the verification email again.
+	r.Post("/{id}/resend-verification", s.resendGuestAccountVerification)
 	r.Delete("/{id}", s.deleteGuestAccountIAMv2)
 	return r
 }

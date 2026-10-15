@@ -138,8 +138,8 @@ func TestAuthMethodsRefuseSwitchingOnAnUnlicensedMethod(t *testing.T) {
 	if code, _ := s.authMethodModuleRefusal(ctx, on("pms", `{"enabled":false}`)); code != 0 {
 		t.Fatalf("switching it off must always work: got %d", code)
 	}
-	if code, _ := s.authMethodModuleRefusal(ctx, on("email", `{"enabled":true}`)); code != http.StatusConflict {
-		t.Fatalf("email without email_otp: got %d", code)
+	if code, _ := s.authMethodModuleRefusal(ctx, on("email_account", `{"enabled":true}`)); code != http.StatusConflict {
+		t.Fatalf("Email accounts without the email_otp module: got %d", code)
 	}
 	if code, _ := s.authMethodModuleRefusal(ctx, on("social", `{"google":{"enabled":true}}`)); code != 0 {
 		t.Fatalf("social with social_login licensed: got %d", code)

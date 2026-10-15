@@ -186,9 +186,9 @@ const (
 // calling the API directly give the same answer.
 var rolePerms = map[string]map[string]perm{
 	"hotel_it_manager": {
-		// Code requests (contract §6.7): the list of recent code requests and temporary-internet windows; WRITE
-		// clears one device's window history so it may try again. code-reveal reads a LIVE code to the client.
-		"code-requests": permWrite, "code-reveal": permWrite,
+		// Code requests (contract §6.7): the list of recent SMS / WhatsApp code requests. READ only: the WRITE that
+		// cleared a device's temporary-internet windows went with the email code. code-reveal reads a LIVE code.
+		"code-requests": permRead, "code-reveal": permWrite,
 		"guest-accounts": permWrite,
 		"sessions":       permWrite,
 		// The Usage Explorer only ever READS durable accounting; there is no write to grant.
@@ -274,9 +274,9 @@ var rolePerms = map[string]map[string]perm{
 		// one already in a guest's hand.
 	},
 	"front_office_operator": {
-		// Code requests (contract §6.7): the list of recent code requests and temporary-internet windows; WRITE
-		// clears one device's window history so it may try again. code-reveal reads a LIVE code to the client.
-		"code-requests": permWrite, "code-reveal": permWrite,
+		// Code requests (contract §6.7): the list of recent SMS / WhatsApp code requests. READ only: the WRITE that
+		// cleared a device's temporary-internet windows went with the email code. code-reveal reads a LIVE code.
+		"code-requests": permRead, "code-reveal": permWrite,
 		// THE RECEPTION DESK, and the role this feature was asked for. They already hold the guest's room,
 		// stay and access credentials; the comparison panel is how they answer the guest standing in front
 		// of them instead of asking that guest to try again while somebody watches a log.
@@ -319,9 +319,9 @@ var rolePerms = map[string]map[string]perm{
 		"voucher-code-settings": permRead, "account-password-settings": permRead,
 	},
 	"guest_relations_operator": {
-		// Code requests (contract §6.7): the list of recent code requests and temporary-internet windows; WRITE
-		// clears one device's window history so it may try again. code-reveal reads a LIVE code to the client.
-		"code-requests": permWrite,
+		// Code requests (contract §6.7): the list of recent SMS / WhatsApp code requests. READ only: the WRITE that
+		// cleared a device's temporary-internet windows went with the email code. code-reveal reads a LIVE code.
+		"code-requests": permRead,
 		// Same desk, same conversation with the guest, same need.
 		"guest-signin-attempts": permRead, "guest-signin-credentials": permRead,
 		"guest-signin-restrictions": permWrite, "guest-signin-protection": permRead,
@@ -371,8 +371,8 @@ var rolePerms = map[string]map[string]perm{
 		"vouchers": permRead,
 	},
 	"site_viewer": {
-		// Code requests (contract §6.7): the list of recent code requests and temporary-internet windows; WRITE
-		// clears one device's window history so it may try again. code-reveal reads a LIVE code to the client.
+		// Code requests (contract §6.7): the list of recent SMS / WhatsApp code requests. READ only: the WRITE that
+		// cleared a device's temporary-internet windows went with the email code. code-reveal reads a LIVE code.
 		"code-requests": permRead,
 		// THE ATTEMPTS LIST, AND NOT THE CREDENTIALS. A viewer may see that sign-in is failing and for which
 		// rooms — the same class of operational evidence they already read everywhere else. What a read-only

@@ -13,9 +13,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-
-	"github.com/stayconnect/enterprise/data-plane/internal/mailreach"
-	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
 )
 
 // Site-wide settings + the read-mostly resources: auth-methods, walled
@@ -129,37 +126,9 @@ func (s *server) authMethodsRoutes() http.Handler {
 			changed = append(changed, k)
 		}
 		sort.Strings(changed)
-		detail := map[string]any{"methods_changed": changed}
-		// An operational setting's change is audited with its values (old and new), as the settings policy
-		// requires; the temporary verification window is one. Nothing secret lives in it.
-		if rawEmail, ok := patch["email"]; ok {
-			var now, was struct {
-				TemporaryAccess json.RawMessage `json:"temporary_access"`
-			}
-			_ = json.Unmarshal(rawEmail, &now)
-			var cur map[string]json.RawMessage
-			if json.Unmarshal(currentRaw, &cur) == nil {
-				_ = json.Unmarshal(cur["email"], &was)
-			}
-			if len(now.TemporaryAccess) > 0 && string(now.TemporaryAccess) != string(was.TemporaryAccess) {
-				detail["temporary_access"] = map[string]any{"old": json.RawMessage(orNull(was.TemporaryAccess)), "new": now.TemporaryAccess}
-			}
-		}
-		s.audit(req, "auth_methods.updated", "tenant", s.tenantID, detail)
-		// The email services reachable before sign-in follow the Email switch and the portal's mail list, so
-		// the walled garden is re-read at once rather than on its next minute.
-		if _, ok := patch["portal"]; ok {
-			s.pokeSCD(req, "/v1/admin/walled-garden/reload")
-		} else if _, ok := patch["email"]; ok {
-			s.pokeSCD(req, "/v1/admin/walled-garden/reload")
-		}
+		s.audit(req, "auth_methods.updated", "tenant", s.tenantID, map[string]any{"methods_changed": changed})
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(out)
-	})
-	// The email-service presets the Admin Console offers (id, name and the host names each opens), so the
-	// screen never carries its own copy of the list.
-	r.Get("/mail-providers", func(w http.ResponseWriter, _ *http.Request) {
-		writeList(w, mailreach.Providers)
 	})
 	return r
 }
@@ -169,55 +138,30 @@ func (s *server) authMethodsRoutes() http.Handler {
 func validateAuthMethodsPatch(patch map[string]json.RawMessage) error {
 	if rawPortal, ok := patch["portal"]; ok {
 		var p struct {
-			PrimaryMethod      *string  `json:"primary_method"`
-			RememberDeviceDays *int     `json:"remember_device_days"`
-			MailProviders      []string `json:"mail_providers"`
-			MailDomains        []string `json:"mail_domains"`
+			PrimaryMethod      *string `json:"primary_method"`
+			RememberDeviceDays *int    `json:"remember_device_days"`
 		}
 		if err := json.Unmarshal(rawPortal, &p); err != nil {
 			return errors.New("portal must be an object")
 		}
 		if p.PrimaryMethod != nil && *p.PrimaryMethod != "" && !portalPrimaryMethods[*p.PrimaryMethod] {
-			return errors.New("portal.primary_method must be pms, email, sms, whatsapp, guest_account or voucher")
+			return errors.New("portal.primary_method must be pms, email_account, sms, whatsapp, guest_account or voucher")
 		}
 		if p.RememberDeviceDays != nil && (*p.RememberDeviceDays < 0 || *p.RememberDeviceDays > 365) {
 			return errors.New("portal.remember_device_days must be between 0 (never) and 365")
 		}
-		// The email services reachable before sign-in: known presets, and host names only (no wildcards, no
-		// addresses, no bare suffixes), bounded -- every entry is reachable by a device that has signed in to
-		// nothing, so the list is kept to what a mail app actually contacts.
-		if bad, ok := mailreach.Validate(p.MailProviders, p.MailDomains); !ok {
-			if bad == "too many" {
-				return fmt.Errorf("portal.mail_domains may hold at most %d host names", mailreach.MaxCustomDomains)
-			}
-			return fmt.Errorf("portal.mail_providers / mail_domains: %q is not a known email service or a valid host name", bad)
-		}
 	}
-	// The email code's temporary verification window (contract §6.6): every value is an operational setting
-	// with a default and bounds (tenantcfg.TemporaryAccessBounds), refused here rather than silently clamped.
-	if rawEmail, ok := patch["email"]; ok {
-		var e struct {
-			TemporaryAccess map[string]json.RawMessage `json:"temporary_access"`
+	// EMAIL ACCOUNTS (contract §1) replace the email one-time code. The old key is refused rather than stored: a
+	// stale screen writing "email" back would store a method nothing serves any more.
+	if _, ok := patch["email"]; ok {
+		return errors.New("email (Email code) has been replaced by email_account (Email accounts)")
+	}
+	if raw, ok := patch["email_account"]; ok {
+		var m struct {
+			Enabled *bool `json:"enabled"`
 		}
-		if err := json.Unmarshal(rawEmail, &e); err != nil {
-			return errors.New("email must be an object")
-		}
-		for k, v := range e.TemporaryAccess {
-			if k == "enabled" {
-				var on bool
-				if json.Unmarshal(v, &on) != nil {
-					return errors.New("email.temporary_access.enabled must be true or false")
-				}
-				continue
-			}
-			b, known := tenantcfg.TemporaryAccessBounds[k]
-			if !known {
-				return fmt.Errorf("email.temporary_access.%s is not a setting", k)
-			}
-			var n int
-			if json.Unmarshal(v, &n) != nil || n < b.Min || n > b.Max {
-				return fmt.Errorf("email.temporary_access.%s must be a whole number from %d to %d", k, b.Min, b.Max)
-			}
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return errors.New("email_account must be an object with enabled true or false")
 		}
 	}
 	rawPMS, ok := patch["pms"]
@@ -246,7 +190,7 @@ func validateAuthMethodsPatch(patch map[string]json.RawMessage) error {
 }
 
 // portalPrimaryMethods are the methods that may lead the landing page (contract §6.2).
-var portalPrimaryMethods = map[string]bool{"pms": true, "email": true, "sms": true, "whatsapp": true, "guest_account": true, "voucher": true}
+var portalPrimaryMethods = map[string]bool{"pms": true, "email_account": true, "sms": true, "whatsapp": true, "guest_account": true, "voucher": true}
 
 // ----- walled garden ---------------------------------------------------------------
 
@@ -717,11 +661,13 @@ func (s *server) pokeSCD(req *http.Request, path string) {
 
 // authMethodModules names the licence module behind each optional sign-in method.
 var authMethodModules = map[string]struct{ module, label string }{
-	"pms":      {"hospitality", "Room sign-in"},
-	"email":    {"email_otp", "Email code"},
-	"sms":      {"sms_otp", "SMS code"},
-	"whatsapp": {"whatsapp_otp", "WhatsApp code"},
-	"social":   {"social_login", "Social login"},
+	"pms": {"hospitality", "Room sign-in"},
+	// The email_otp module now means "Email accounts" (contract §1): the module that licensed the email code
+	// licenses the email account that replaced it.
+	"email_account": {"email_otp", "Email accounts"},
+	"sms":           {"sms_otp", "SMS code"},
+	"whatsapp":      {"whatsapp_otp", "WhatsApp code"},
+	"social":        {"social_login", "Social login"},
 }
 
 // authMethodModuleRefusal returns (status, message) when the patch switches ON a method whose module is not
@@ -767,12 +713,4 @@ func turnsOn(key string, raw json.RawMessage) bool {
 		Enabled bool `json:"enabled"`
 	}
 	return json.Unmarshal(raw, &m) == nil && m.Enabled
-}
-
-// orNull is raw JSON, or the JSON null when there is none.
-func orNull(raw json.RawMessage) []byte {
-	if len(raw) == 0 {
-		return []byte("null")
-	}
-	return raw
 }

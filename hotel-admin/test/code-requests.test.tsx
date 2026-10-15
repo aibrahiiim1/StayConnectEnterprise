@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
-// CODE REQUESTS (contract §6.7): staff see recent code requests and the device's temporary internet; "Let them
-// try again" and "Show code" each take a reason and the password; a role without code-reveal never sees the
-// reveal button; the code is shown only after the reveal succeeds.
+// CODE REQUESTS (contract §6.7): staff see recent SMS / WhatsApp code requests; "Show code" takes a reason and the
+// password; a role without code-reveal never sees it; the code is shown only after the reveal succeeds. The email
+// code's temporary internet and "Let them try again" are gone (self-service contract §1).
 
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 (globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverStub;
@@ -14,36 +14,26 @@ vi.mock("@/lib/api", async (orig) => {
 });
 
 import { api } from "@/lib/api";
-import { CodeRequestsCard, windowSummary, type CodeRequest, type CodeRequestsResp } from "@/components/code-requests";
+import { CodeRequestsCard, type CodeRequest, type CodeRequestsResp } from "@/components/code-requests";
 
 const g = api.get as unknown as ReturnType<typeof vi.fn>;
 const post = api.post as unknown as ReturnType<typeof vi.fn>;
-const limits = { per_device_daily: 3, per_destination_daily: 3, retry_after_minutes: 30, max_concurrent: 50 };
 const pending: CodeRequest = {
-  challenge_id: "0b6d7c1e-2f3a-4b5c-8d9e-0f1a2b3c4d5e", channel: "email", destination: "guest@example.com",
+  challenge_id: "0b6d7c1e-2f3a-4b5c-8d9e-0f1a2b3c4d5e", channel: "sms", destination: "+201001234567",
   issued_at: "2026-10-12T08:00:00Z", expires_at: "2026-10-12T08:10:00Z", attempts: 0, max_attempts: 5, state: "PENDING",
-  device_mac: "02:00:00:00:00:01", code_available: true, device_windows_24h: 1, retry_wait_seconds: 1500,
-  window: { started_at: "2026-10-12T07:40:00Z", expires_at: "2026-10-12T07:50:00Z", ended_at: "2026-10-12T07:50:00Z", end_reason: "EXPIRED", used_bytes: 1048576, data_cap_bytes: 26214400, live: false },
+  device_mac: "02:00:00:00:00:01", code_available: true,
 };
-const resp: CodeRequestsResp = { requests: [pending], limits, code_copy_available: true };
+const resp: CodeRequestsResp = { requests: [pending], code_copy_available: true };
 
 beforeEach(() => { vi.clearAllMocks(); g.mockResolvedValue(resp); });
 
 describe("Code requests", () => {
-  it("summarises the window, the wait and the limit", () => {
-    expect(windowSummary(pending, limits)).toBe("Window ended (time ran out) · 1.05 MB used · next window in 25 min");
-    expect(windowSummary({ ...pending, retry_wait_seconds: 0, device_windows_24h: 3 }, limits)).toContain("daily limit reached (3/3)");
-  });
-
-  it("lets the desk clear one device with a reason and the password", async () => {
-    post.mockResolvedValue({ cleared_windows: 1 });
+  it("lists the request with its channel and offers no temporary-internet action", async () => {
     render(<CodeRequestsCard roles={["front_office_operator"]} />);
-    fireEvent.click(await screen.findByRole("button", { name: /let them try again/i }));
-    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "mail never came" } });
-    fireEvent.change(screen.getByLabelText("Confirm your password"), { target: { value: "pw" } });
-    const confirm = screen.getAllByRole("button", { name: /let them try again/i }).pop()!;
-    fireEvent.click(confirm);
-    await waitFor(() => expect(post).toHaveBeenCalledWith("/code-requests/clear", { device_mac: "02:00:00:00:00:01", reason: "mail never came", password: "pw" }));
+    await screen.findByText("+201001234567");
+    expect(screen.getByText(/SMS · 02:00:00:00:00:01/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /let them try again/i })).toBeNull();
+    expect(screen.queryByText(/temporary internet/i)).toBeNull();
   });
 
   it("shows a live code only after the reveal succeeds", async () => {
@@ -61,21 +51,18 @@ describe("Code requests", () => {
   it("never offers to show an existing client's code, and says why", async () => {
     g.mockResolvedValue({ ...resp, requests: [{ ...pending, code_available: false, existing_client: true }] });
     render(<CodeRequestsCard roles={["front_office_operator"]} />);
-    await screen.findByText("guest@example.com");
+    await screen.findByText("+201001234567");
     expect(screen.queryByRole("button", { name: /show code/i })).toBeNull();
     expect(screen.getByText(/existing client/i)).toBeTruthy();
-    expect(screen.getByRole("button", { name: /let them try again/i })).toBeTruthy();
   });
 
-  it("never offers the reveal to a role without code-reveal, nor any action to a viewer", async () => {
+  it("never offers the reveal to a role without code-reveal", async () => {
     const { unmount } = render(<CodeRequestsCard roles={["guest_relations_operator"]} />);
-    await screen.findByText("guest@example.com");
+    await screen.findByText("+201001234567");
     expect(screen.queryByRole("button", { name: /show code/i })).toBeNull();
-    expect(screen.getByRole("button", { name: /let them try again/i })).toBeTruthy();
     unmount();
     render(<CodeRequestsCard roles={["site_viewer"]} />);
-    await screen.findByText("guest@example.com");
+    await screen.findByText("+201001234567");
     expect(screen.queryByRole("button", { name: /show code/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: /let them try again/i })).toBeNull();
   });
 });

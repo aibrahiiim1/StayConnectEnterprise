@@ -98,7 +98,7 @@ const SECTIONS: Section[] = [
   {
     title: "Clients",
     items: [
-      { href: "/guest-accounts", label: "Client accounts",  icon: KeyRound, resource: "guest-accounts", keywords: "username password login credentials voucher guest accounts" },
+      { href: "/guest-accounts", label: "Client accounts",  icon: KeyRound, resource: "guest-accounts", keywords: "username password login credentials voucher guest accounts self-service email verification resend" },
       { href: "/sessions",       label: "Active sessions", icon: Monitor,  resource: "sessions", keywords: "online now devices connected who is on wifi disconnect guests" },
       { href: "/usage",          label: "Usage explorer",  icon: ChartColumn, resource: "usage", keywords: "data used quota dispute how much room device mac gigabytes consumption investigate guests" },
       { href: "/guest-device-self-service", label: "Client devices", icon: Smartphone, resource: "guest-device-self-service", keywords: "phone laptop remove device guest devices" },
@@ -114,7 +114,7 @@ const SECTIONS: Section[] = [
     items: [
       // Sign-in methods leads the group: which ways a client may prove who they are is the first thing an
       // operator sets up on the portal, and it was previously not settable anywhere in the product.
-      { href: "/sign-in-methods",  label: "Sign-in methods", icon: LogIn,    resource: "auth-methods", keywords: "room number voucher otp sms email social primary method remember device client portal guest portal" },
+      { href: "/sign-in-methods",  label: "Sign-in methods", icon: LogIn,    resource: "auth-methods", keywords: "room number voucher otp sms email account register verification suspend grace social primary method remember device client portal guest portal" },
       // Groups are core, not module-owned: an email-domain group needs no identity-provider module.
       { href: "/client-groups",    label: "Client groups",   icon: UsersRound, resource: "client-groups", keywords: "employees partners organisation domain microsoft google workspace vip group audience client portal" },
       { href: "/social-providers", label: "Identity providers", icon: AtSign, resource: "social-providers", modules: ["social_login"], keywords: "google apple facebook microsoft oauth social login client portal guest portal" },

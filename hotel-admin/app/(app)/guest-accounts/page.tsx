@@ -25,8 +25,9 @@ import { Switch, SkeletonRows } from "@/components/ui/misc";
 import { PasswordFormatCard } from "@/components/guest-accounts/password-format";
 import { OneTimeReveal, ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
-import { Plus, KeyRound, Eye, EyeOff, Pencil, Power, Users } from "lucide-react";
+import { Plus, KeyRound, Eye, EyeOff, Pencil, Power, Users, Send } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
+import { verificationStatus } from "@/lib/account-verification";
 import { useOperatorRoles } from "@/lib/whoami-context";
 import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 
@@ -284,6 +285,28 @@ export default function GuestAccountsPage() {
     finally { setBusy(false); }
   }
 
+  // RESEND THE VERIFICATION EMAIL (self-service contract §7). scd owns the outbox and the limits, so a refusal is
+  // its words: a wait, the daily limit, or -- on an appliance whose sign-in service cannot do it yet -- that.
+  const [resending, setResending] = useState<string | null>(null);
+  async function onResend(a: GuestAccount) {
+    setResending(a.id);
+    try {
+      await api.post(`/guest-accounts/${a.id}/resend-verification`);
+      toast.success(`Verification email queued for ${a.username}.`, "It is sent as soon as the mail server accepts it.");
+    } catch (e: any) {
+      const wait = e instanceof ApiError ? Number(e.body?.retry_after_seconds) : NaN;
+      if (e instanceof ApiError && e.code === "resend_wait" && wait > 0) {
+        toast.error("Too soon to send another email.", `Try again in ${wait} second${wait === 1 ? "" : "s"}.`);
+      } else if (e instanceof ApiError && e.code === "resend_limit") {
+        toast.error("The daily limit of verification emails is reached.", "The client can try again tomorrow.");
+      } else if (e instanceof ApiError && e.code === "resend_unavailable") {
+        toast.error("Verification emails cannot be resent from here yet.", e.body?.message ?? e.message);
+      } else {
+        toast.error("The verification email was not queued.", e instanceof ApiError ? (e.body?.message ?? e.message) : (e?.message ?? undefined));
+      }
+    } finally { setResending(null); }
+  }
+
   async function onDelete() {
     if (!deleting) return;
     setBusy(true); setActionErr(null);
@@ -334,6 +357,7 @@ export default function GuestAccountsPage() {
                 "A password is shown once, when it is set. It cannot be looked up again; if it is lost, set a new one.",
                 "Repeated failed sign-ins restrict the DEVICE that is guessing, not the account. See Client sign-in protection under Sign-in methods.",
                 "Disable an account to stop it being used for now; that can be reversed. Deleting cannot.",
+                "Accounts marked Self-service were opened by the client on the portal with their email address (Email accounts). Staff cannot set or show their password: the client resets it from the reset email. If the verification email did not arrive, use Resend verification email.",
               ]} />
             </HelpSection>
           </>
@@ -471,10 +495,14 @@ export default function GuestAccountsPage() {
               {filtered.map((a) => {
                 const cap = a.max_devices;
                 const atCap = cap ? (a.active_devices ?? 0) >= cap : false;
+                const verification = verificationStatus(a);
                 return (
                   <TR key={a.id}>
                     <TD>
-                      <div className="font-mono text-sm font-medium">{a.username}</div>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="font-mono text-sm font-medium">{a.username}</span>
+                        {a.self_registered && <Badge tone="info">Self-service</Badge>}
+                      </div>
                       {a.display_name && (
                         <div className="text-caption text-muted-foreground">{a.display_name}</div>
                       )}
@@ -488,6 +516,11 @@ export default function GuestAccountsPage() {
                       <Badge tone={a.enabled ? "ok" : "err"} dot>
                         {a.enabled ? "Can sign in" : "Disabled"}
                       </Badge>
+                      {verification && (
+                        <div className="mt-1">
+                          <Badge tone={verification.tone}>{verification.label}</Badge>
+                        </div>
+                      )}
                     </TD>
                     <TD className="hidden text-sm text-muted-foreground md:table-cell">
                       {a.valid_until ? formatRelative(a.valid_until) : "No end date"}
@@ -502,9 +535,18 @@ export default function GuestAccountsPage() {
                           <Button size="sm" variant="ghost" onClick={() => { setFormErr(null); setEditing(a); setPwFor(null); setShowNew(false); }}>
                             <Pencil /> Edit
                           </Button>
-                          <Button size="sm" variant="ghost" onClick={() => { setFormErr(null); setPwFor(a); setEditing(null); setShowNew(false); }}>
-                            <KeyRound /> Password
-                          </Button>
+                          {/* A self-service account's password is the client's, recovered only by the reset email
+                              (contract §5): staff are not offered to set or show it. */}
+                          {!a.self_registered && (
+                            <Button size="sm" variant="ghost" onClick={() => { setFormErr(null); setPwFor(a); setEditing(null); setShowNew(false); }}>
+                              <KeyRound /> Password
+                            </Button>
+                          )}
+                          {a.self_registered && !a.email_verified && (
+                            <Button size="sm" variant="ghost" disabled={resending === a.id} onClick={() => void onResend(a)}>
+                              <Send /> {resending === a.id ? "Sending…" : "Resend verification email"}
+                            </Button>
+                          )}
                           <Button size="sm" variant="ghost" onClick={() => onToggle(a)}>
                             {a.enabled ? "Disable" : "Enable"}
                           </Button>

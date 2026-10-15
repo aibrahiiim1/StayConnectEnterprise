@@ -67,7 +67,7 @@ describe("identifySession", () => {
   it("describes an email/social sign-in by the method, since no identity is readable", () => {
     const id = identifySession({ ...base, subject_kind: "guest", credential_method: "EMAIL_OTP" });
     expect(id.title).toBe("Client sign-in");
-    expect(id.subtitle).toBe("Emailed code");
+    expect(id.subtitle).toBe("Email code (former)");
   });
 
   // A row whose entitlement could not be read is the case that MUST degrade honestly: the MAC is all there is,

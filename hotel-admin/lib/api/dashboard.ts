@@ -383,7 +383,7 @@ const METHODS: Record<string, string> = {
   PMS: "Room number",
   VOUCHER: "Voucher",
   ACCOUNT: "Client account",
-  EMAIL_OTP: "Emailed code",
+  EMAIL_OTP: "Email code (former)",
   SMS_OTP: "Texted code",
   WHATSAPP_OTP: "WhatsApp code",
   SOCIAL_GOOGLE: "Google",
