@@ -38,13 +38,19 @@ cleanup(){
   $PSQL "DELETE FROM iam_v2.guest_access_accounts WHERE lower(username) LIKE 'og-cap-$R4-%@example.invalid'" >/dev/null 2>&1
   for n in "${NS[@]:-}"; do [ -n "$n" ] || continue
     ip netns exec $n dhclient -r -lf /var/lib/dhcp/dhclient-$n.leases -pf /run/dhclient-$n.pid ${n}c >/dev/null 2>&1
-    ip netns del $n 2>/dev/null; ip link del ${n}a 2>/dev/null; rm -rf /etc/netns/$n /var/lib/dhcp/dhclient-$n.leases /tmp/$n.*; done; }
+    ip netns del $n 2>/dev/null; ip link del ${n}a 2>/dev/null; rm -rf /etc/netns/$n /var/lib/dhcp/dhclient-$n.leases /tmp/$n.*; done
+  resolver_guard; }
 trap cleanup EXIT
 client(){ local n=$1; NS+=("$n"); ip link add ${n}a type veth peer name ${n}c; ip link set ${n}a master "$GB"; ip link set ${n}a up
   ip netns add $n; ip link set ${n}c netns $n; ip netns exec $n ip link set lo up; ip netns exec $n ip link set ${n}c up
   mkdir -p /etc/netns/$n; echo "nameserver $GW" > /etc/netns/$n/resolv.conf
   sleep 1; ip netns exec $n timeout 25 dhclient -1 -lf /var/lib/dhcp/dhclient-$n.leases -pf /run/dhclient-$n.pid ${n}c >/dev/null 2>&1
-  ip netns exec $n ping -c1 -W2 "$GW" >/dev/null 2>&1; }
+  ip netns exec $n ping -c1 -W2 "$GW" >/dev/null 2>&1; resolver_guard; }
+# THE HOST'S RESOLVER. dhclient's exit hook (/etc/dhcp/dhclient-exit-hooks.d/resolved) restarts the HOST's
+# systemd-resolved even for a client in a namespace, and a handful of test clients in quick succession hit its start
+# limit -- leaving the appliance itself without DNS (mail, Central) until something restarts it. Measured on PRE-LIVE
+# 2026-10-15. Every client start and the cleanup put it back.
+resolver_guard(){ systemctl reset-failed systemd-resolved >/dev/null 2>&1; systemctl is-active -q systemd-resolved || systemctl start systemd-resolved >/dev/null 2>&1; }
 online(){ ip netns exec $1 curl -s -o /dev/null -w '%{http_code}' -m 8 "$PROBE"; }
 post(){ local n=$1 path=$2; shift 2  # prints "<code> <location>"
   ip netns exec $n curl -s "${CAOPT[@]}" -o /tmp/$n.html -c /tmp/$n.jar -b /tmp/$n.jar -w '%{http_code} %{redirect_url}' -X POST "$@" "$P$path"; }
@@ -76,7 +82,9 @@ client $D2
 r=$(post $D2 /auth/account/signin --data-urlencode "email=$EMAIL" --data-urlencode "password=$PW")
 MAXD=$($PSQL "SELECT s.max_concurrent_devices FROM iam_v2.entitlements e JOIN iam_v2.internet_package_revisions r ON r.id=e.package_revision_id JOIN iam_v2.service_plan_revisions s ON s.id=r.service_plan_revision_id WHERE e.id='${E1%%|*}'")
 if [ "$MAXD" = 1 ]; then
-  says $D2 "device limit" && [ "$(online $D2)" != 204 ] && ok "a 1-device package: device 2 gets the device-limit answer, stays captive" || { bad "device 2 on a 1-device package -> $r"; page $D2; }
+  # Since 0118 the device-limit answer is the choice of which device to replace (device-management-e2e-test.sh).
+  case "$r" in 30[23]*/devices/replace*) [ "$(online $D2)" != 204 ] && ok "a 1-device package: device 2 is offered the replacement choice, stays captive" || bad "device 2 online at the limit";;
+    *) bad "device 2 on a 1-device package -> $r"; page $D2;; esac
 else
   S2=$(sidof "$r"); [ -n "$S2" ] && [ "$(ENT | cut -d'|' -f1)" = "${E1%%|*}" ] && [ "$(online $D2)" = 204 ] && ok "device 2 joins the same entitlement ($MAXD devices)" || { bad "device 2 join -> $r"; page $D2; }
 fi

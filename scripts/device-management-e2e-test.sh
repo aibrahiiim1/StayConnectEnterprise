@@ -49,13 +49,19 @@ cleanup(){
   for n in "${NS[@]:-}"; do [ -n "$n" ] || continue
     ip netns exec $n dhclient -r -lf /var/lib/dhcp/dhclient-$n.leases -pf /run/dhclient-$n.pid ${n}c >/dev/null 2>&1
     ip netns del $n 2>/dev/null; ip link del ${n}a 2>/dev/null; rm -rf /etc/netns/$n /var/lib/dhcp/dhclient-$n.leases /tmp/$n.*; done
+  resolver_guard
   rm -f $JAR; }
 trap cleanup EXIT
 client(){ local n=$1; NS+=("$n"); ip link add ${n}a type veth peer name ${n}c; ip link set ${n}a master "$GB"; ip link set ${n}a up
   ip netns add $n; ip link set ${n}c netns $n; ip netns exec $n ip link set lo up; ip netns exec $n ip link set ${n}c up
   mkdir -p /etc/netns/$n; echo "nameserver $GW" > /etc/netns/$n/resolv.conf
   sleep 1; ip netns exec $n timeout 25 dhclient -1 -lf /var/lib/dhcp/dhclient-$n.leases -pf /run/dhclient-$n.pid ${n}c >/dev/null 2>&1
-  ip netns exec $n ping -c1 -W2 "$GW" >/dev/null 2>&1; }
+  ip netns exec $n ping -c1 -W2 "$GW" >/dev/null 2>&1; resolver_guard; }
+# THE HOST'S RESOLVER. dhclient's exit hook (/etc/dhcp/dhclient-exit-hooks.d/resolved) restarts the HOST's
+# systemd-resolved even for a client in a namespace, and a handful of test clients in quick succession hit its start
+# limit -- leaving the appliance itself without DNS (mail, Central) until something restarts it. Measured on PRE-LIVE
+# 2026-10-15. Every client start and the cleanup put it back.
+resolver_guard(){ systemctl reset-failed systemd-resolved >/dev/null 2>&1; systemctl is-active -q systemd-resolved || systemctl start systemd-resolved >/dev/null 2>&1; }
 online(){ ip netns exec $1 curl -s -o /dev/null -w '%{http_code}' -m 8 "$PROBE"; }
 waiton(){ for _ in $(seq 1 10); do [ "$(online $1)" = 204 ] && return 0; sleep 2; done; return 1; }
 waitoff(){ for _ in $(seq 1 10); do [ "$(online $1)" != 204 ] && return 0; sleep 2; done; return 1; }
