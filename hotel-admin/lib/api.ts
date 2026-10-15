@@ -231,6 +231,9 @@ export type DevicePackage = {
 export type ClientDeviceRow = {
   id: string; mac: string; last_ip?: string; first_seen?: string | null; last_seen?: string | null;
   online: boolean; online_ip?: string; current?: DevicePackage | null;
+  // On the Wi-Fi right now (an active DHCP lease), whether or not it has signed in. A row with an empty id is a
+  // device on the Wi-Fi that has never signed in.
+  on_network?: boolean; lease_ip?: string; hostname?: string; lease_expires?: string | null;
 };
 export type ClientDeviceDetail = {
   device: ClientDeviceRow;

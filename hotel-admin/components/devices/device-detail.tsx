@@ -126,7 +126,17 @@ export function DeviceDetailDialog({ deviceId, mayWrite, onClose, onChanged }: {
           {!data && !err ? <SkeletonRows rows={3} /> : data && (
             <>
               <section className="flex flex-wrap items-center gap-1.5">
-                <Badge tone={data.device.online ? "ok" : "neutral"} dot>{data.device.online ? "Online now" : "Offline"}</Badge>
+                {data.device.online
+                  ? <Badge tone="ok" dot>Online</Badge>
+                  : data.device.on_network
+                    ? <Badge tone="warn" dot>On the Wi-Fi, not signed in</Badge>
+                    : <Badge tone="neutral" dot>Not connected</Badge>}
+                {data.device.on_network && (
+                  <span className="text-caption text-muted-foreground">
+                    {data.device.lease_ip}{data.device.hostname ? ` (${data.device.hostname})` : ""}
+                    {data.device.lease_expires ? `, address held until ${formatDate(data.device.lease_expires)}` : ""}
+                  </span>
+                )}
                 {data.restriction.restricted && (
                   <Badge tone="err">Sign-in restricted until {data.restriction.until ? formatDate(data.restriction.until) : "—"}</Badge>
                 )}

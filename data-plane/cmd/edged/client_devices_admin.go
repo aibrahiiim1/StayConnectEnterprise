@@ -25,8 +25,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -56,14 +58,77 @@ type devicePackage struct {
 }
 
 type deviceRow struct {
+	// ID is empty for a device that is on the Wi-Fi but has never signed in: it has a DHCP lease and no device
+	// record yet (records are created at sign-in).
 	ID        string         `json:"id"`
 	MAC       string         `json:"mac"`
 	LastIP    string         `json:"last_ip,omitempty"`
 	FirstSeen *time.Time     `json:"first_seen,omitempty"`
 	LastSeen  *time.Time     `json:"last_seen,omitempty"`
-	Online    bool           `json:"online"`
+	Online    bool           `json:"online"` // signed in: a live Internet session
 	OnlineIP  string         `json:"online_ip,omitempty"`
 	Current   *devicePackage `json:"current,omitempty"`
+	// OnNetwork: the device holds an active DHCP lease right now -- it is on the Wi-Fi, signed in or not.
+	OnNetwork    bool       `json:"on_network"`
+	LeaseIP      string     `json:"lease_ip,omitempty"`
+	Hostname     string     `json:"hostname,omitempty"`
+	LeaseExpires *time.Time `json:"lease_expires,omitempty"`
+}
+
+// deviceLease is one active DHCP lease, from netd's /v1/leases (Kea's lease view).
+type deviceLease struct {
+	IP       string
+	Hostname string
+	Expires  time.Time
+}
+
+// activeLeases maps a hardware address (lower case) to its active lease. ON THE WI-FI IS NOT THE SAME AS SIGNED
+// IN: a device holds a lease from the moment it joins, and a session only once it signs in. The Devices screen
+// used to know only the second, so a phone sitting on the Wi-Fi at the portal read as "Offline" and a phone that
+// had never signed in was not listed at all. nil when netd cannot be asked (the screen still answers).
+func (s *server) activeLeases(ctx context.Context) map[string]deviceLease {
+	if s.netd == nil {
+		return nil
+	}
+	st, raw, err := s.netd.call(ctx, http.MethodGet, "/v1/leases", nil)
+	if err != nil || st != http.StatusOK {
+		return nil
+	}
+	return parseActiveLeases(raw, time.Now())
+}
+
+// parseActiveLeases keeps the leases that are assigned (Kea state 0) and not yet expired, by hardware address.
+func parseActiveLeases(raw []byte, now time.Time) map[string]deviceLease {
+	var v struct {
+		Leases []struct {
+			IP       string `json:"ip-address"`
+			MAC      string `json:"hw-address"`
+			Hostname string `json:"hostname"`
+			State    int    `json:"state"`
+			CLTT     int64  `json:"cltt"`
+			Valid    int64  `json:"valid-lft"`
+		} `json:"leases"`
+	}
+	if json.Unmarshal(raw, &v) != nil {
+		return nil
+	}
+	out := map[string]deviceLease{}
+	for _, l := range v.Leases {
+		exp := time.Unix(l.CLTT+l.Valid, 0)
+		if l.State != 0 || l.MAC == "" || !exp.After(now) { // 0 = default (assigned); declined/expired are not "on"
+			continue
+		}
+		out[strings.ToLower(l.MAC)] = deviceLease{IP: l.IP, Hostname: l.Hostname, Expires: exp}
+	}
+	return out
+}
+
+func (d *deviceRow) withLease(leases map[string]deviceLease) {
+	if l, ok := leases[strings.ToLower(d.MAC)]; ok {
+		d.OnNetwork, d.LeaseIP, d.Hostname = true, l.IP, l.Hostname
+		exp := l.Expires
+		d.LeaseExpires = &exp
+	}
 }
 
 // devicePackageSelect projects one binding of a device with its package and subject. $1 tenant, $2 site.
@@ -107,7 +172,8 @@ func (s *server) listClientDevices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var search any
-	if v := headerSearchText(r, deviceSearchHeader); v != "" {
+	needle := strings.ToLower(headerSearchText(r, deviceSearchHeader))
+	if v := needle; v != "" {
 		if len([]rune(v)) > 100 {
 			jsonErr(w, http.StatusBadRequest, "bad_request", "search is limited to 100 characters")
 			return
@@ -157,8 +223,50 @@ func (s *server) listClientDevices(w http.ResponseWriter, r *http.Request) {
 	if more {
 		out = out[:size]
 	}
+	// ON THE WI-FI NOW. Every listed device learns whether it holds a lease; and on the first page, a device that
+	// is on the Wi-Fi but has never signed in (no record yet) is listed first, so "I connected my phone and
+	// cannot find it" has an answer.
+	leases := s.activeLeases(ctx)
+	for i := range out {
+		out[i].withLease(leases)
+	}
+	if page == 1 && len(leases) > 0 {
+		macs := make([]string, 0, len(leases))
+		for m := range leases {
+			macs = append(macs, m)
+		}
+		known := map[string]bool{}
+		if krows, err := s.db.Query(ctx, `SELECT lower(mac::text) FROM iam_v2.devices
+		     WHERE tenant_id=$1 AND site_id=$2 AND mac = ANY($3::macaddr[])`, s.tenantID, s.siteID, macs); err == nil {
+			for krows.Next() {
+				var m string
+				if krows.Scan(&m) == nil {
+					known[m] = true
+				}
+			}
+			krows.Close()
+		}
+		var fresh []deviceRow
+		for m, l := range leases {
+			if known[m] {
+				continue
+			}
+			if needle != "" && !strings.Contains(m, needle) && !strings.Contains(l.IP, needle) &&
+				!strings.Contains(strings.ToLower(l.Hostname), needle) {
+				continue
+			}
+			d := deviceRow{MAC: m}
+			d.withLease(leases)
+			fresh = append(fresh, d)
+		}
+		sort.Slice(fresh, func(i, j int) bool { return fresh[i].LeaseIP < fresh[j].LeaseIP })
+		out = append(fresh, out...)
+	}
 	// The package each device holds now (or held last), one query per row on a page of at most 50.
 	for i := range out {
+		if out[i].ID == "" {
+			continue
+		}
 		var p devicePackage
 		if err := scanDevicePackage(s.db.QueryRow(ctx, devicePackageSelect+`
 		       AND ed.device_id = $3::uuid
@@ -276,6 +384,7 @@ func (s *server) getClientDevice(w http.ResponseWriter, r *http.Request) {
 		}
 		arows.Close()
 	}
+	d.withLease(s.activeLeases(ctx))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"device": d, "packages": pkgs, "sessions": sessions, "restriction": restriction,
 		"remembered_signins": remembered, "free_packages_used": freeUsed, "actions": actions,

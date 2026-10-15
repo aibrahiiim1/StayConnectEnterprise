@@ -24,6 +24,14 @@ import { Smartphone, Settings2 } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
 import { DeviceDetailDialog } from "@/components/devices/device-detail";
 
+// THREE STATES, NOT TWO. "Online" is signed in with a live Internet session. A device can be on the Wi-Fi --
+// holding a DHCP lease, sitting at the sign-in page -- without that, and used to read as "Offline".
+function DeviceStatus({ r }: { r: ClientDeviceRow }) {
+  if (r.online) return <Badge tone="ok" dot>Online</Badge>;
+  if (r.on_network) return <Badge tone="warn" dot>On the Wi-Fi, not signed in</Badge>;
+  return <Badge tone="neutral" dot>Not connected</Badge>;
+}
+
 function holder(r: ClientDeviceRow): string {
   const p = r.current;
   if (!p) return "—";
@@ -85,6 +93,7 @@ export default function DevicesPage() {
             </HelpSection>
             <HelpSection title="What each action does">
               <HelpList items={[
+                "Online: signed in, with Internet. On the Wi-Fi, not signed in: the device has an address from the Wi-Fi and is at the sign-in page (or has not opened it). Not connected: neither.",
                 "Disconnect ends the device's sessions. It keeps its places and can sign in again.",
                 "Release place frees the device's place on one package, so another device can join. The package's time, data and owner do not change.",
                 "Require fresh sign-in forgets the device's remembered sign-in, so it sees the full sign-in page.",
@@ -122,13 +131,22 @@ export default function DevicesPage() {
             </THead>
             <TBody>
               {rows.map((r) => (
-                <TR key={r.id}>
+                <TR key={r.id || r.mac}>
                   <TD>
                     <div className="font-mono text-sm">{r.mac}</div>
-                    {(r.online_ip || r.last_ip) && <div className="text-caption text-muted-foreground">{r.online_ip || r.last_ip}</div>}
+                    <div className="text-caption text-muted-foreground">
+                      {[r.hostname, r.online_ip || r.lease_ip || r.last_ip].filter(Boolean).join(" · ")}
+                    </div>
+                    {/* The package on narrow screens, where its column is hidden. */}
+                    {r.current && (
+                      <div className="text-caption text-muted-foreground md:hidden">
+                        {r.current.package_name || "Package"} · {holder(r)}
+                      </div>
+                    )}
                   </TD>
                   <TD>
-                    <Badge tone={r.online ? "ok" : "neutral"} dot>{r.online ? "Online" : "Offline"}</Badge>
+                    <DeviceStatus r={r} />
+                    {!r.id && <div className="mt-1 text-caption text-muted-foreground">Has not signed in yet</div>}
                     {r.current && (
                       <div className="mt-1">
                         <Badge tone={r.current.slot === "AUTHORIZED" ? "info" : "neutral"}>
@@ -143,7 +161,7 @@ export default function DevicesPage() {
                   <TD className="hidden text-sm md:table-cell">{holder(r)}</TD>
                   <TD className="hidden text-sm text-muted-foreground lg:table-cell">{r.last_seen ? formatRelative(r.last_seen) : "—"}</TD>
                   <TD className="text-end">
-                    <Button size="sm" variant="ghost" onClick={() => setOpen(r.id)}><Settings2 /> Manage</Button>
+                    {r.id && <Button size="sm" variant="ghost" onClick={() => setOpen(r.id)}><Settings2 /> Manage</Button>}
                   </TD>
                 </TR>
               ))}
