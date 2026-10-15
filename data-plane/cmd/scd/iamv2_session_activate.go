@@ -237,11 +237,22 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 
 		// DEVICE LIMIT, enforced against the PINNED plan revision, counted inside the same transaction that
 		// inserts. Counting outside it is the classic way two simultaneous logins both see "one slot left".
+		//
+		// THE COUNT IS WHAT THE DATABASE COUNTS: the devices holding an OPEN authorization on the entitlement
+		// (entitlement_device_authorizations, which authorize_entitlement_device enforces), plus any live session's
+		// device. An admitted device keeps its slot after it signs out -- moving the slot to another device is the
+		// throttled guest release (p6_guest_release_device) -- so counting only live sessions let a second device
+		// through this check and into the database's own refusal, which surfaced as an internal error instead of
+		// the device-limit answer (PRE-LIVE, 2026-10-15). This device's own open authorization never counts against it.
 		var inUse int
 		if err := tx.QueryRow(ctx, `
-		    SELECT count(DISTINCT device_id) FROM iam_v2.sessions
-		     WHERE entitlement_id=$1 AND ended IS NULL AND state IN ('active','PENDING_ENFORCEMENT')`,
-			req.EntitlementID).Scan(&inUse); err != nil {
+		    SELECT count(*) FROM (
+		      SELECT device_id FROM iam_v2.entitlement_device_authorizations
+		       WHERE entitlement_id=$1 AND deauthorized_at IS NULL AND device_id <> $2::uuid
+		      UNION
+		      SELECT device_id FROM iam_v2.sessions
+		       WHERE entitlement_id=$1 AND ended IS NULL AND state IN ('active','PENDING_ENFORCEMENT') AND device_id <> $2::uuid
+		    ) d`, req.EntitlementID, req.DeviceID).Scan(&inUse); err != nil {
 			return err
 		}
 		if inUse >= maxDevices {
@@ -255,6 +266,10 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 		// admitted survives sessions coming and going.
 		if _, err := tx.Exec(ctx, `SELECT iam_v2.authorize_entitlement_device($1,$2,now())`,
 			req.EntitlementID, req.DeviceID); err != nil {
+			// The database's own limit (under its row lock) is authoritative; answer it as the limit it is.
+			if strings.Contains(err.Error(), "MAX_DEVICES_REACHED") {
+				return &maxDevicesError{Limit: maxDevices, Current: maxDevices}
+			}
 			return err
 		}
 
