@@ -1,0 +1,71 @@
+{
+  "transition_id": "T0238",
+  "seq": 238,
+  "timestamp": "2026-10-17T02:03:02+03:00",
+  "timestamp_derivation": "Written after GitHub merged PR #216 (ba23c7ac, committer date 2026-10-16T23:33:07+03:00) and PR #217 (d9e23dff, committer date 2026-10-17T02:01:10+03:00) and before the commit that introduces this receipt.",
+  "record_type": "EMAIL_ACCOUNTS_AND_AUDIT_REMEDIATION_MERGED_TO_MASTER",
+  "authorisation": "The Product Owner's 'Full Remediation Mission' of 2026-10-16 (D52), which authorised the protected merges; po-merge-authorization succeeded on each tested head. It did NOT authorise Go-Live.",
+  "merge": {
+    "pull_request": 217,
+    "merge_commit": "d9e23dff6685f1b98c3c0be70aa64ec718ce15f9",
+    "merged_at": "2026-10-16T23:01:10Z",
+    "parents": [
+      "ba23c7acde46381d21b1a51b3ac4b015f0dc40cb",
+      "9fed1b302ad2ab458e6ed92eb7b8427a69eb7973"
+    ],
+    "tested_head": "9fed1b302ad2ab458e6ed92eb7b8427a69eb7973",
+    "tree_equality": "the merge commit's tree equals the tested head's tree (b09a03aea7c853a23fcae4c86f29b816e71d8bcc): the merge introduced no content",
+    "full_check_on_tested_head": "PASS -- governance 38974878030, phase3-full-software-gate 38974880949, phase4-financial-core-gate 38974883148, phase5-post-stay-transfer-gate 38974885366",
+    "after_recorded_head": "Commits after T0237's recorded head dc32a52c are test, CI and manifest changes plus two deploy-script review fixes: install-service-units.sh creates the stayconnect-scd group on upgrade, and stayconnect-backup-cleanup ages backup sets by their stamp (installed on PRE-LIVE, sha256 24b247bb). No service binary or Admin Console change."
+  },
+  "merges": [
+    {
+      "pull_request": 216,
+      "merge_commit": "ba23c7acde46381d21b1a51b3ac4b015f0dc40cb",
+      "merged_at": "2026-10-16T20:33:07Z",
+      "parents": [
+        "87b32100ffb67fd5c59820aff00d727d4e189ff7",
+        "9963b66927f4a21fedca113cac3278c47bd17cbb"
+      ],
+      "tested_head": "9963b66927f4a21fedca113cac3278c47bd17cbb",
+      "tree_equality": "the merge commit's tree equals the tested head's tree (f974a0313cb884af1e89324a69d286e8f7c114d7): the merge introduced no content",
+      "records": "D50, D51; T0234-T0236. Content after T0236's recorded head d0aec3eb (bac652d7..9963b669: device listing order and Wi-Fi presence, captive-probe logging, sign-in refusal wording, the nothing-to-buy page) is contained in the remediation build deployed under T0237."
+    },
+    {
+      "pull_request": 217,
+      "merge_commit": "d9e23dff6685f1b98c3c0be70aa64ec718ce15f9",
+      "merged_at": "2026-10-16T23:01:10Z",
+      "parents": [
+        "ba23c7acde46381d21b1a51b3ac4b015f0dc40cb",
+        "9fed1b302ad2ab458e6ed92eb7b8427a69eb7973"
+      ],
+      "tested_head": "9fed1b302ad2ab458e6ed92eb7b8427a69eb7973",
+      "tree_equality": "equal to the tested head's tree (b09a03ae): no content introduced",
+      "records": "D52-D63; T0237. FULL CHECK PASS on the tested head."
+    }
+  ],
+  "deployment_provenance": "PRE-LIVE 172.21.60.25 re-read on 2026-10-17 and unchanged by the merges: scd, edged, pmsd, portald, netd and acctd dc32a52c (DEPLOYED_BINARIES 6/6 OK); keybootstrap e9b72aab; sitemigrate and svc-run 29a6b21f; Admin Console release 20261016-163909 (dc32a52c); schema 0126. /opt/stayconnect/bin/stayconnect-backup-cleanup sha256 24b247bb (byte-identical to deploy/scripts/stayconnect-backup-cleanup.sh at the tested head 9fed1b30). Central runs 832f58b1. Every one of these commits is now contained in master.",
+  "outstanding": "Real phones (Safari/Chrome) on the guest Wi-Fi are not yet verified for the remediation build.",
+  "cleanup": "The merged branches delivery/email-accounts-self-service (tip 9963b669) and delivery/audit-remediation (tip 9fed1b30) can be deleted after this record merges, together with the branch that carries it.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0237."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "d9e23dff6685f1b98c3c0be70aa64ec718ce15f9",
+  "base_note": "Master after the merge of PR #217; this record's lineage is built on it.",
+  "head": "d9e23dff",
+  "head_note": "No content commit: governance only. The merged round's last content commit is 9fed1b30.",
+  "previous_delivery": "T0237",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
