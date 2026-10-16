@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0125, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0126, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -7474,6 +7474,8 @@ DECLARE
   v_ceiling   timestamptz;  -- the last instant that is billable at all
   v_billable  timestamptz;  -- the last instant this tick may charge (observation bound)
   v_charge    numeric;
+  v_whole     bigint;       -- the whole seconds this session is charged this tick (0126)
+  v_through   timestamptz;  -- where this session's watermark ends after this tick (0126)
   v_remaining numeric;
   -- The billable intervals of this tick, one pair per contributing session. They are what the crossing is
   -- computed from: a rate that changes at every boundary cannot be derived from a count alone.
@@ -7598,17 +7600,38 @@ BEGIN
         CONTINUE;
       END IF;
 
-      -- The watermark advances to the CEILING: the skipped remainder has been recorded, and leaving the
-      -- watermark short of it would charge it on the next tick after all.
+      -- WHOLE SECONDS ONLY, AND THE REMAINDER CARRIES (0126). The budget and the entitlement counter are whole
+      -- seconds. This used to floor each tick's charge but still move the watermark to the ceiling, so the
+      -- fraction was discarded every tick: with acctd's 1 s tick a slightly short tick charged nothing, and a
+      -- 90 s allowance lasted about 180 s of wall time (measured on PRE-LIVE). Now the watermark advances only
+      -- by what was charged; the fraction is charged on a later tick. When the observation bound skipped time
+      -- (recorded in online_time_skipped_intervals), the watermark still jumps to the ceiling, losing at most
+      -- one sub-second remainder per skipped gap.
+      v_whole := FLOOR(v_charge)::bigint;
+      IF v_billable < v_ceiling THEN
+        v_through := v_ceiling;
+      ELSE
+        v_through := v_base + make_interval(secs => v_whole);
+      END IF;
+      IF v_whole <= 0 THEN
+        IF v_through > v_base THEN   -- only a skipped gap moves an uncharged watermark
+          UPDATE iam_v2.session_online_watermarks
+             SET accounted_through = v_through, updated_at = now()
+           WHERE session_id = s.id;
+        END IF;
+        CONTINUE;
+      END IF;
+      v_billable := v_base + make_interval(secs => v_whole);
+
       INSERT INTO iam_v2.session_online_watermarks
         (tenant_id, site_id, session_id, accounted_through, accounted_seconds)
-      VALUES (p_tenant, p_site, s.id, v_ceiling, FLOOR(v_charge)::bigint)
+      VALUES (p_tenant, p_site, s.id, v_through, v_whole)
       ON CONFLICT (session_id) DO UPDATE
         SET accounted_through = EXCLUDED.accounted_through,
             accounted_seconds = iam_v2.session_online_watermarks.accounted_seconds + EXCLUDED.accounted_seconds,
             updated_at = now();
 
-      v_charged := v_charged + v_charge;
+      v_charged := v_charged + v_whole;
       v_starts  := v_starts || v_base;
       v_ends    := v_ends || v_billable;
     END LOOP;
