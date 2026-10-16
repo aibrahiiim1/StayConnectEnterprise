@@ -22,6 +22,10 @@ func withSession(ctx context.Context, s *Session) context.Context {
 	return context.WithValue(ctx, authCtxKey, s)
 }
 
+// ContextWithSession attaches a session the way RequireAuth does. For callers that drive a handler without
+// the HTTP middleware in front of it (tests, internal jobs).
+func ContextWithSession(ctx context.Context, s *Session) context.Context { return withSession(ctx, s) }
+
 // RequireAuth extracts the sc_session cookie and attaches the Session to
 // the request context. Unauthenticated requests get 401.
 func RequireAuth(store *SessionStore) func(http.Handler) http.Handler {
