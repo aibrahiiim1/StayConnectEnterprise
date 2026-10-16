@@ -133,9 +133,14 @@ What clients are offered on the portal, and what those packages are doing for cl
   and **Hotel (PMS stay)**, the Hotel group holding the conditions that only mean something for a PMS stay:
   nights staying, room type, rate plan, VIP guest, travel agent and which PMS the stay came from; travel agents are
   chosen from a searchable list of the agents the PMS has named on stays, several at once, and a name not yet seen
-  can still be added — a name with a comma stays one agent), and advanced options (offer from/until,
-  speed steps). Saving records a new permanent version; clients already online keep the terms they connected
-  under. Packages are free to the client.
+  can still be added — a name with a comma stays one agent), and advanced options (offer from/until). Saving
+  records a new permanent version; clients already online keep the terms they connected under. Packages are
+  free to the client.
+- **Speed steps are not offered.** They were shown to clients and never applied — a client always gets the speed,
+  device limit and allowances of the package's **service plan** — so a package carries one plain step. A package
+  saved earlier with speed steps shows *Speed steps are not applied* and a **Remove speed steps** button; it
+  cannot be saved until they are removed. To sell different speeds, give each speed its own service plan and
+  package.
 - **Disable** ("Stop offering it") — **reason + password confirmation**. Clients stop being offered it at
   once; anyone online keeps their access; it can be enabled again at any time. **Enable** needs no dialog.
 - **Delete** (from the side sheet) — first checks whether anything still refers to the package. If so, the
@@ -154,11 +159,21 @@ The technical service that packages hand out.
   package*; filter and search; table Plan, Speed, Devices, Time, Data, Used by. A side sheet shows what the
   service plan grants, the packages using it and its saved versions.
 - **Add plan / Edit** (dialog): Plan code (fixed), Display name, Download and Upload speed (Mbps; empty =
-  unlimited), Devices at once, **When the device limit is reached** (*Refuse the new device*, *Disconnect
-  the oldest device*, *Ask an operator to approve*), Total time allowance (hours or days), Data allowance
-  (GB), Disconnect after inactivity (minutes), Maximum single session (hours), **How the speed is shared**
-  (per device or shared across the client's devices) and **How time is counted** (currently only *Validity
-  window — time runs from purchase*). Saving creates a new version.
+  unlimited), Devices at once, **When the device limit is reached** (*Refuse the new device*, or *Disconnect
+  the oldest device* — the client's earliest device is disconnected and its place given to the new one; this
+  is recorded), Total time allowance (hours or days), Data allowance (GB), Disconnect after inactivity
+  (minutes), Maximum single session (hours), **How the speed is shared** (per device or shared across the
+  client's devices) and **How time is counted** (currently only *Validity window — time runs from purchase*).
+  Saving creates a new version. *Ask an operator to approve* is not offered and cannot be saved: there is no
+  approval workflow (plans saved with it earlier still show it, marked *not available*).
+- **What the limits do (enforced by the appliance):**
+  - **Total time allowance** is time *online*, added up across the client's devices (two devices online for an
+    hour use two hours). Access ends when it runs out, or when the package's duration ends if that is first.
+    The portal's *time left* counts down the same allowance.
+  - **Disconnect after inactivity** ends a device's connection after that long with no traffic. The package is
+    not used up: the device signs in again and carries on.
+  - **Maximum single session** ends a connection that long after it started; the device can sign in again
+    straight away.
 - **After saving:** an **"Apply these settings to packages?"** card lists the packages using the service plan with a
   checkbox each; **Apply to selected packages** or **Not now**. Only future clients are affected; nobody's
   access changes mid-session. The same card is offered later for packages still on older settings.
@@ -720,6 +735,11 @@ A complete copy of the site's data, taken nightly and on demand.
   **Restore** (verified backups only).
 - **Restore** — a dialog listing what is replaced and the six steps the appliance takes, **typed backup name +
   password confirmation**. Progress is shown until it finishes, then a *Last restore* card.
+- **Usage detail kept for** (Site admin; password + reason): how long the appliance keeps the detailed traffic
+  samples behind each session. Default **Unlimited** — nothing is removed. With a number of days (30 to 3650),
+  detail older than that is removed once an hour, only for sessions that have ended and packages that have
+  finished; totals per package and session are always kept. Every change and every removal is recorded and the
+  last removal is shown.
 - **Storage and retention** (collapsed): disk used, backups kept, nightly sweep time and how long things are
   kept; changing them needs **password confirmation**.
 - **Who can change it:** Site admin. **Read-only:** Site IT manager, Client services, Client relations, Site

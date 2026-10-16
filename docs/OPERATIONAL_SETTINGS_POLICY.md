@@ -86,7 +86,10 @@ implementation of every row in the table above:
 * Sign-in methods (`auth_methods`) — which methods the portal offers.
 * Checkout grace (`iam_v2.site_checkout_grace_config`) — how long after checkout a guest may still sign in.
 * Guest device self-service — whether guests may remove their own devices.
-* Access plans — duration, data cap, device limits.
+* Access plans — duration, data cap, device limits, time allowance, inactivity disconnect, maximum session
+  (all enforced since migration 0122).
+* Accounting-detail retention (`iam_v2.site_accounting_retention`, 0122) — how long per-sample usage detail is
+  kept; default unlimited (nothing purged), 30-3650 days, reason + password, change log and purge-run record.
 * Portal branding, walled garden, notification and social providers.
 
 When you add the next one, add it to this list.
