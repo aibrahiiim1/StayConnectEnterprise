@@ -13,8 +13,8 @@ import (
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 var (
-	validAuthMethods  = map[string]bool{"VOUCHER": true, "ACCOUNT": true, "OTP": true, "SOCIAL": true, "OPEN": true}
-	validSubjectKinds = map[string]bool{"VOUCHER": true, "ACCOUNT": true, "PRINCIPAL": true, "ANONYMOUS": true}
+	validAuthMethods  = map[string]bool{"VOUCHER": true, "ACCOUNT": true, "OTP": true, "SOCIAL": true, "OPEN": true, "PMS": true}
+	validSubjectKinds = map[string]bool{"VOUCHER": true, "ACCOUNT": true, "PRINCIPAL": true, "ANONYMOUS": true, "STAY": true}
 	ruleAllowedFields = map[string]map[string]bool{
 		RuleDateWindow:    {"from": true, "until": true},
 		RuleAuthMethod:    {"methods": true},
@@ -50,7 +50,11 @@ func validatePMSRule(t string, v map[string]any) error {
 	case RuleRatePlan:
 		return requireNonEmptyStrings(v, "rate_plans", bad)
 	case RulePMSInterface:
-		return requireNonEmptyStrings(v, "pms_interface_ids", bad)
+		// Interface ids, not free text: a typo used to publish a rule that matched no stay, ever.
+		if _, err := normalizedUUIDList(v["pms_interface_ids"]); err != nil {
+			return bad("PMS_INTERFACE pms_interface_ids must be a non-empty list of PMS connection ids")
+		}
+		return nil
 	case RuleVIP:
 		if _, ok := v["is_vip"].(bool); !ok {
 			return bad("VIP rule requires is_vip as a boolean")
@@ -270,3 +274,39 @@ func ValidateGrantTier(t GrantTier) error {
 }
 
 var _ = time.Now
+
+// VoucherBlocker names why a package revision can never be redeemed by a voucher, or "" when it can.
+//
+// A voucher subject carries no stay, no client group and its own auth method and kind, so some packages it is
+// pinned to can never pass their own rules: the card is printed, handed to a guest and refused at the portal.
+// Issue asks this first (O-26, O-4), so the operator hears it before printing, not the guest after.
+func VoucherBlocker(dataAllocationMode string, rules []EligibilityRule) string {
+	if strings.EqualFold(strings.TrimSpace(dataAllocationMode), AllocPerStayNight) {
+		return "This package's data allowance is set per night of the stay, which only a guest who signed in " +
+			"with their room has. A voucher has no stay, so vouchers cannot be issued for it."
+	}
+	for _, r := range rules {
+		t := strings.ToUpper(strings.TrimSpace(r.Type))
+		switch {
+		case IsPMSRuleType(t):
+			return "This package has a hotel condition (" + t + ") that needs a guest's stay. A voucher has no " +
+				"stay, so a voucher for it could never be used."
+		case t == RuleClientGroup:
+			if pub, _ := r.Value["public"].(bool); !pub {
+				return "This package is offered only to certain client groups. A voucher client is in no group, " +
+					"so a voucher for it could never be used. Include public clients in its audience first."
+			}
+		case t == RuleAuthMethod:
+			if !stringSet(r.Value["methods"])["VOUCHER"] {
+				return "This package is limited to sign-in methods that do not include Voucher, so a voucher " +
+					"for it could never be used."
+			}
+		case t == RuleSubjectKind:
+			if !stringSet(r.Value["kinds"])["VOUCHER"] {
+				return "This package is limited to kinds of client that do not include voucher clients, so a " +
+					"voucher for it could never be used."
+			}
+		}
+	}
+	return ""
+}

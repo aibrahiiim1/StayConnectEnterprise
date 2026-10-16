@@ -44,6 +44,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/stayconnect/enterprise/data-plane/internal/codegen"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/localkeys"
@@ -183,6 +184,16 @@ func (s *server) issueVouchersIAMv2(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, werr.Error())
 		return
 	}
+	// A CARD THAT COULD NEVER BE REDEEMED IS NOT ISSUED. The issuance gate (0095) checks the package is
+	// active, current and acquirable by Voucher; it cannot see that the package's own rules exclude every
+	// voucher client (a group-only audience, a hotel condition) or that its allowance is computed per stay night.
+	if why, rerr := s.voucherRevisionBlocker(r.Context(), in.PackageRevisionID); rerr != nil {
+		httpErr(w, http.StatusServiceUnavailable, "the package's conditions could not be read; vouchers were not issued")
+		return
+	} else if why != "" {
+		httpErr(w, http.StatusConflict, why)
+		return
+	}
 	// THE FORMAT COMES FROM THE SITE SETTING, and a site that has never opened the screen gets the defaults
 	// the column carries. A read failure is fatal on purpose: see voucherCodeFormatFor.
 	format, ferr := s.voucherCodeFormatFor(r.Context())
@@ -296,6 +307,47 @@ func (s *server) issueVouchersIAMv2(w http.ResponseWriter, r *http.Request) {
 		"package_revision_id": in.PackageRevisionID,
 		"codes":               codes,
 	})
+}
+
+// voucherRevisionBlocker reads one revision's allocation mode and eligibility rules and asks
+// iamv2.VoucherBlocker whether a voucher for it could ever be redeemed. An unknown revision is left to the
+// issuance gate, which answers it in its own words.
+func (s *server) voucherRevisionBlocker(ctx context.Context, revID string) (string, error) {
+	if !validRequestID(revID) { // the canonical-UUID shape check
+		return "That is not a package version id.", nil
+	}
+	var mode string
+	err := s.db.QueryRow(ctx, `SELECT COALESCE(data_allocation_policy->>'mode','FIXED')
+		  FROM iam_v2.internet_package_revisions WHERE tenant_id=$1 AND site_id=$2 AND id=$3`,
+		s.tenID, s.siteID, revID).Scan(&mode)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	rows, err := s.db.Query(ctx, `SELECT rule_type, rule_value FROM iam_v2.package_eligibility_rules
+		 WHERE package_revision_id=$1`, revID)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	var rules []iamv2.EligibilityRule
+	for rows.Next() {
+		var ru iamv2.EligibilityRule
+		var raw []byte
+		if err := rows.Scan(&ru.Type, &raw); err != nil {
+			return "", err
+		}
+		if len(raw) > 0 {
+			_ = json.Unmarshal(raw, &ru.Value)
+		}
+		rules = append(rules, ru)
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	return iamv2.VoucherBlocker(mode, rules), nil
 }
 
 // parseRedemptionWindow validates the optional validity window and returns the two column values.

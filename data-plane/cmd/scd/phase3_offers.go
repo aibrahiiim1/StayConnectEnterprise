@@ -125,7 +125,10 @@ func (p *phase3Auth) networkLineage(ctx context.Context, guestNetworkID string) 
 // verified guest in a correctly configured room was then told "verified, but no eligible package", while the
 // voucher, client-account, OTP, social and open paths — which read the same id back off the Auth Context —
 // offered that package normally. The network must decide the same thing whoever the guest proved they are.
-func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID, guestNetworkID string, now time.Time) ([]offerDecision, error) {
+//
+// deviceID is the appliance's own device row for the requesting MAC (device(), phase3_auth.go). It is what the
+// purchase-history limit counts against, beside the stay (see stayPriorPurchase).
+func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID, guestNetworkID, deviceID string, now time.Time) ([]offerDecision, error) {
 	evidence, err := p.stayEvidenceFor(ctx, stayID)
 	if err != nil {
 		return nil, err
@@ -141,7 +144,7 @@ func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID, guestNe
 	subject := iamv2.EligibilitySubject{
 		Now:                 now,
 		AuthMethod:          iamv2.Method("PMS"),
-		Kind:                iamv2.SubjectKind("PRINCIPAL"),
+		Kind:                iamv2.SubjectStay,
 		GuestNetworkID:      guestNetworkID,
 		GuestNetworkLineage: lineage,
 		Stay:                evidence,
@@ -221,7 +224,25 @@ func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID, guestNe
 		if err != nil {
 			return nil, err
 		}
-		if ok, _ := iamv2.EvaluatePackageEligible(rules, subject); !ok {
+		// PURCHASE HISTORY (PRIOR_PURCHASE), like every other client (Product-Owner decision D-J): evaluated
+		// per stay and per device. It used to be evaluated against a subject that never carried any history,
+		// so "once per client" meant nothing to a room guest and "requires an earlier purchase" offered nothing.
+		pkgSubject := subject
+		evalRules := rules
+		if pol := iamv2.PriorPurchasePolicyOf(rules, d.PriceMinor); pol.Present {
+			prior, joins, herr := p.stayPriorPurchase(ctx, stayID, deviceID, d, pol)
+			if herr != nil {
+				return nil, herr
+			}
+			pkgSubject.HasPriorPurchaseOfPackage = prior
+			if joins {
+				// Choosing the package behind the stay's LIVE access is not a second acquisition: the grant joins
+				// that entitlement (a second device of the room). The free-access limit is about acquisitions,
+				// so it must not lock the room's other devices out of the access the stay already holds.
+				evalRules = withoutForbidsPrior(rules)
+			}
+		}
+		if ok, _ := iamv2.EvaluatePackageEligible(evalRules, pkgSubject); !ok {
 			continue
 		}
 		tiers, err := p.grantTiers(ctx, d.PackageRevisionID)
@@ -229,7 +250,7 @@ func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID, guestNe
 			return nil, err
 		}
 		if len(tiers) > 0 {
-			tier, matched := iamv2.FirstMatchTier(tiers, subject)
+			tier, matched := iamv2.FirstMatchTier(tiers, pkgSubject)
 			if !matched {
 				// The package is eligible but no tier matches this Stay, so there is nothing to grant. That
 				// is not an offer; offering it would produce a Quote the grant could not honour.
@@ -248,6 +269,60 @@ func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID, guestNe
 		out = append(out, d)
 	}
 	return out, nil
+}
+
+// stayPriorPurchaseSQL answers, for one package (any revision -- the history is keyed on the package, as for
+// every other client, contract §5), whether this STAY has had it and, when the policy counts devices, whether
+// this DEVICE has had it under any identity; and whether the stay holds live access of the offered revision
+// right now (the join case). The window is measured from the grant, a pending grant counting as now -- the
+// same reading iamv2's HasPriorPurchase uses for the other clients.
+const stayPriorPurchaseSQL = `
+	SELECT EXISTS (SELECT 1 FROM iam_v2.entitlements e
+	                 JOIN iam_v2.internet_package_revisions r ON r.id = e.package_revision_id
+	                WHERE e.tenant_id=$1 AND e.site_id=$2 AND r.package_id=$3::uuid AND e.stay_id=$4::uuid
+	                  AND ($6::timestamptz IS NULL OR COALESCE(e.activated_at, now()) >= $6::timestamptz))
+	    OR ($7 AND $5::uuid IS NOT NULL AND EXISTS (
+	           SELECT 1 FROM iam_v2.entitlements e
+	             JOIN iam_v2.internet_package_revisions r ON r.id = e.package_revision_id
+	             JOIN iam_v2.purchases pu     ON pu.id = e.purchase_id
+	             JOIN iam_v2.auth_contexts ac ON ac.id = pu.auth_context_id
+	            WHERE e.tenant_id=$1 AND e.site_id=$2 AND r.package_id=$3::uuid AND ac.device_id=$5::uuid
+	              AND ($6::timestamptz IS NULL OR COALESCE(e.activated_at, now()) >= $6::timestamptz))),
+	       EXISTS (SELECT 1 FROM iam_v2.entitlements e
+	                WHERE e.tenant_id=$1 AND e.site_id=$2 AND e.stay_id=$4::uuid AND e.package_revision_id=$8::uuid
+	                  AND e.status='ACTIVE' AND (e.window_ends_at IS NULL OR e.window_ends_at > now()))`
+
+// stayPriorPurchase reports (prior, joinsLiveAccess). Any error is returned: an unreadable history must not
+// become "no history", which would hand out a limited package again.
+func (p *phase3Auth) stayPriorPurchase(ctx context.Context, stayID, deviceID string, d offerDecision,
+	pol iamv2.PriorPurchasePolicy) (bool, bool, error) {
+	var since *time.Time
+	if pol.WithinHours > 0 {
+		s := time.Now().Add(-time.Duration(pol.WithinHours) * time.Hour)
+		since = &s
+	}
+	var dev *string
+	if strings.TrimSpace(deviceID) != "" {
+		dev = &deviceID
+	}
+	var prior, joins bool
+	err := p.srv.db.QueryRow(ctx, stayPriorPurchaseSQL, p.srv.tenID, p.srv.siteID, d.PackageID, stayID, dev, since,
+		pol.AlsoByDevice, d.PackageRevisionID).Scan(&prior, &joins)
+	return prior, joins, err
+}
+
+// withoutForbidsPrior drops the free-access limit (PRIOR_PURCHASE forbids_prior) from a rule list.
+func withoutForbidsPrior(rules []iamv2.EligibilityRule) []iamv2.EligibilityRule {
+	out := make([]iamv2.EligibilityRule, 0, len(rules))
+	for _, r := range rules {
+		if strings.EqualFold(strings.TrimSpace(r.Type), iamv2.RulePriorPurchase) {
+			if b, _ := r.Value["forbids_prior"].(bool); b {
+				continue
+			}
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 func (p *phase3Auth) eligibilityRules(ctx context.Context, packageRevID string) ([]iamv2.EligibilityRule, error) {

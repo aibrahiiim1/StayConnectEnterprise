@@ -1054,6 +1054,7 @@ func (s *server) forwardPackagesOnto(ctx context.Context, oldID, newID string, d
 			Renewable:           cur.Renewable,
 			MaxPurchasesPerStay: cur.MaxPurchasesPerStay,
 			DryRun:              dryRun,
+			PriorDurationPolicy: cur.DurationPolicy,
 		}
 		if cur.CurrencyExponent != nil {
 			spec.CurrencyExponent = *cur.CurrencyExponent

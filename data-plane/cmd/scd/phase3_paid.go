@@ -10,7 +10,8 @@ package main
 //	              IN_HOUSE and posting_allowed (it has a reservation number and no posting block); it has no
 //	              unresolved room charge; every freshness axis is green. The charge targets the reservation
 //	              (RN + G#), never a folio (Phase-0 Amendment A1).
-//	Card payment  card_payment effective (provider ready).
+//	Card payment  card_payment effective (provider ready) and the package currency acceptable to the default
+//	              account (iamv2.SiteMethods.CardApplicable: settled in it, or converted by its provider).
 //
 // Choosing one consumes the verified auth context and writes quote, purchase (AWAITING_SETTLEMENT) and a
 // REQUIRED settlement in ONE transaction; for a room charge the posting is created in that same transaction by
@@ -53,7 +54,11 @@ func (p *phase3Auth) stayMethods(ctx context.Context, stayID, ifaceID string, d 
 		p.roomChargeApplicable(ctx, stayID, ifaceID, d) {
 		out = append(out, iamv2.AcquireRoomCharge)
 	}
-	if site.Card && containsString(d.SettlementMethods, iamv2.AcquireCard) {
+	// The card currency, through the same rule every other path uses (iamv2.SiteMethods.CardApplicable). It was
+	// missing here: a room guest was offered card for a USD package on a GBP account that does not convert,
+	// choosing it consumed the verified context and committed the purchase AWAITING_SETTLEMENT, and then the
+	// payment gate refused the intent -- the guest saw a failure and the package stayed hidden for the stay.
+	if site.Card && containsString(d.SettlementMethods, iamv2.AcquireCard) && site.CardApplicable(d.Currency) {
 		out = append(out, iamv2.AcquireCard)
 	}
 	return out

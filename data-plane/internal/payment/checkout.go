@@ -261,6 +261,28 @@ RETURNING id::text, amount_minor, currency, currency_exponent`,
 	}
 }
 
+// FailUnstartedPurchases fails, through the audited definer (migration 0121), every card purchase still
+// AWAITING_SETTLEMENT whose settlement never got a payment transaction and is older than the checkout expiry
+// plus the reconcile grace. Such a purchase cannot be paid -- nothing exists at any provider -- and it held the
+// stay's one purchase of that package, so the package stayed hidden for the rest of the stay. A purchase with a
+// payment transaction is never touched: the reconciler and the provider own it.
+func (e *CheckoutEngine) FailUnstartedPurchases(ctx context.Context, tenantID, siteID string) (int, error) {
+	if e.Outcome == nil {
+		return 0, nil
+	}
+	s := e.Settings(ctx, tenantID, siteID)
+	age := int((s.Expiry + s.ReconcileGrace) / time.Second)
+	if age < 600 {
+		age = 600 // the definer's floor: never sooner than ten minutes
+	}
+	var n int
+	if err := e.Outcome.QueryRow(ctx, `SELECT iam_v2.p4_fail_unstarted_card_purchases($1,$2,$3)`,
+		tenantID, siteID, age).Scan(&n); err != nil {
+		return 0, classify(err)
+	}
+	return n, nil
+}
+
 // applyOutcome records a provider-verified outcome through the OUTCOME credential only.
 func (e *CheckoutEngine) applyOutcome(ctx context.Context, clientRef, eventID, eventType, status, providerTxnRef, reason string) error {
 	// Only the ledger's allowed evidence keys (p4_callback_evidence_safe); how the outcome was learned goes in

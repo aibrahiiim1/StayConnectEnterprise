@@ -73,24 +73,36 @@ type SiteMethods struct {
 	PaidAccess bool
 	Card       bool
 	RoomCharge bool
-	// CardCurrencies are the settlement currencies of the site's ACTIVE payment accounts. A card payment is
-	// never converted (migration 0018/0096 refuse a mismatch at confirm), so a package priced in a currency no
-	// account settles must not be OFFERED by card: the client would choose it and be refused a step later --
-	// what the Product Owner hit on PRE-LIVE with a GBP test account and a USD package. Empty means "unknown",
-	// which offers nothing by card.
+	// CardCurrencies holds the settlement currency of the site's DEFAULT active payment account -- the one a
+	// checkout uses (p4_resolve_payment_account_v2). The client always pays in the package currency
+	// (presentment); unless the account converts (below), a package in another currency would be chosen and
+	// then refused by the payment identity gate (PAYMENT_ACCOUNT_CURRENCY) a step later -- what the Product
+	// Owner hit on PRE-LIVE with a GBP test account and a USD package. Empty means "unknown", which offers
+	// nothing by card.
 	CardCurrencies []string
-	// CardAccepts, when set, answers for a presentment currency the provider converts from (an account marked
-	// provider-converts, migration 0112). nil = no conversion: only CardCurrencies.
+	// CardAccepts, when set, answers for a presentment currency the provider converts from: the default
+	// account is marked provider-converts and its provider converts (migration 0112; approved policy
+	// 2026-10-11 -- a provider-converts Stripe account settles in its own currency at the provider's rate).
+	// nil = no conversion: only CardCurrencies.
 	CardAccepts func(currency string) bool
 }
 
-// cardSettles reports whether some active account settles in cur.
-func (s SiteMethods) cardSettles(cur string) bool {
-	if s.CardAccepts != nil && s.CardAccepts(strings.ToUpper(strings.TrimSpace(cur))) {
+// CardApplicable is THE card-currency applicability rule. A package priced in cur may be offered, quoted,
+// chosen and confirmed by card only when the default account settles cur, or its provider converts cur.
+// Every path asks this one function -- the non-room listing and quote (applicableMethods), the confirm
+// (revalidateQuote) and the Room sign-in offer and choice (scd stayMethods) -- so no path offers what the
+// payment gate would refuse after the purchase had been written (contract ONEGATE_MODULES_AND_ACQUISITION.md:
+// every gate is re-checked when the quote is created and when it is confirmed).
+func (s SiteMethods) CardApplicable(cur string) bool {
+	cur = strings.ToUpper(strings.TrimSpace(cur))
+	if cur == "" {
+		return false
+	}
+	if s.CardAccepts != nil && s.CardAccepts(cur) {
 		return true
 	}
 	for _, c := range s.CardCurrencies {
-		if strings.EqualFold(strings.TrimSpace(c), strings.TrimSpace(cur)) {
+		if strings.EqualFold(strings.TrimSpace(c), cur) {
 			return true
 		}
 	}
@@ -124,6 +136,13 @@ func hasMethod(methods []string, m string) bool {
 // offered only its own printed revision, by Voucher.
 func applicableMethods(pkg PackageRevisionRow, ac AuthContextRow, site SiteMethods) []string {
 	var out []string
+	// A PER-NIGHT DATA ALLOWANCE NEEDS A STAY. The allowance is computed from the stay's nights at grant time
+	// (staygrant). No client on this path carries a stay -- CreateQuote refuses a stay-bound context -- so such
+	// a package is neither offered nor quoted here, not even to a voucher (whose issue is refused for it as
+	// well). Granting it would hand out the plan's flat quota, or unlimited data, under a package sold per night.
+	if pkg.DataAllocationMode == AllocPerStayNight {
+		return nil
+	}
 	if ac.Subject.Kind == SubjectVoucher {
 		return []string{AcquireVoucher}
 	}
@@ -139,7 +158,7 @@ func applicableMethods(pkg PackageRevisionRow, ac AuthContextRow, site SiteMetho
 	if !site.PaidAccess {
 		return nil
 	}
-	if site.Card && hasMethod(pkg.SettlementMethods, AcquireCard) && site.cardSettles(pkg.Currency) {
+	if site.Card && hasMethod(pkg.SettlementMethods, AcquireCard) && site.CardApplicable(pkg.Currency) {
 		out = append(out, AcquireCard)
 	}
 	return out

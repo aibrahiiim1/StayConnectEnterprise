@@ -21,6 +21,9 @@ const (
 	SubjectVoucher   SubjectKind = "VOUCHER"
 	SubjectAccount   SubjectKind = "ACCOUNT"
 	SubjectPrincipal SubjectKind = "PRINCIPAL" // OTP / SOCIAL
+	// SubjectStay is a client who proved a stay by Room sign-in. It is its own kind: room guests used to be
+	// evaluated as PRINCIPAL, so a SUBJECT_KIND rule written for email/phone/social sign-ins also matched them.
+	SubjectStay SubjectKind = "STAY"
 )
 
 // EligibilitySubject is what a rule or tier condition may test.
@@ -322,6 +325,21 @@ func PriorPurchasePolicyOf(rules []EligibilityRule, priceMinor int64) PriorPurch
 		return p
 	}
 	return PriorPurchasePolicy{}
+}
+
+// ForSubject adapts the policy to the subject redeeming it.
+//
+// A VOUCHER IS ITS OWN ALLOWANCE. Each card is a separate prepaid credential, burned by its redemption; the
+// device switch exists to stop a Client taking a second FREE allowance by signing in again with another email
+// on the same phone (contract §5). Applied to a voucher it did the opposite of its purpose: the default every
+// new free package starts with ("once per client", device counted) refused a guest's SECOND voucher on the same
+// phone, because the first card's grant was in the device's history. The voucher's own history still counts --
+// a card is redeemed once -- and the rule still binds every other subject exactly as before.
+func (p PriorPurchasePolicy) ForSubject(k SubjectKind) PriorPurchasePolicy {
+	if k == SubjectVoucher {
+		p.AlsoByDevice = false
+	}
+	return p
 }
 
 // parseTimeField returns (time, present, valid). A field that is absent/empty is (_, false, _). A field
