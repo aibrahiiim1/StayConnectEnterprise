@@ -237,21 +237,21 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
               className="grid items-end gap-3 sm:grid-cols-[1fr_auto_1fr_auto]"
               onSubmit={(e) => { e.preventDefault(); void runPreview(); }}
             >
-              <Field label="From stay" hint="The stay reference on the PMS the guest is leaving.">
+              <Field label="From stay" hint="The reservation number on the PMS the guest is leaving (a stay id also works).">
                 <Input
                   value={fromStay}
                   onChange={(e) => { setFromStay(e.target.value); setPreview(null); }}
-                  placeholder="Stay on the origin PMS"
+                  placeholder="Reservation number"
                   className="font-mono"
                   autoComplete="off"
                 />
               </Field>
               <ArrowRight className="mb-9 hidden size-4 text-muted-foreground sm:block rtl:rotate-180" aria-hidden />
-              <Field label="To stay" hint="The stay reference on the PMS the guest is moving to.">
+              <Field label="To stay" hint="The reservation number on the PMS the guest is moving to (a stay id also works).">
                 <Input
                   value={toStay}
                   onChange={(e) => { setToStay(e.target.value); setPreview(null); }}
-                  placeholder="Stay on the destination PMS"
+                  placeholder="Reservation number"
                   className="font-mono"
                   autoComplete="off"
                 />

@@ -275,7 +275,10 @@ type ResetRequest struct {
 	Profile      string
 	Operator     string
 	Reason       string
-	ValidFor     time.Duration
+	// ValidFor, when positive, ALSO moves the profile's validity to now+ValidFor. Zero keeps the validity
+	// window exactly as it was: a reset rotates the credential and nothing else unless the operator asks
+	// (audit H-17 -- the console said a reset changes only the PIN while it silently restarted the window).
+	ValidFor time.Duration
 }
 
 // Reset mints a NEW generation for an existing profile and returns the new plaintext once. It does not
@@ -284,7 +287,7 @@ func (s *Store) Reset(ctx context.Context, req ResetRequest) (Issued, error) {
 	if strings.TrimSpace(req.Operator) == "" || strings.TrimSpace(req.Reason) == "" {
 		return Issued{}, ErrNotEligible
 	}
-	if req.ValidFor <= 0 || req.ValidFor > 30*24*time.Hour {
+	if req.ValidFor < 0 || req.ValidFor > 30*24*time.Hour {
 		return Issued{}, ErrNotEligible
 	}
 	tx, err := s.pool.Begin(ctx)
@@ -306,7 +309,8 @@ func (s *Store) Reset(ctx context.Context, req ResetRequest) (Issued, error) {
 	var expires time.Time
 	err = tx.QueryRow(ctx, `UPDATE iam_v2.post_stay_profiles
 		SET pin_hash=$4, pin_generation=pin_generation+1, pin_set_at=now(), pin_revealed_at=now(),
-		    valid_until=now() + make_interval(secs => $5)
+		    valid_until=CASE WHEN $5::double precision > 0 THEN now() + make_interval(secs => $5)
+		                     ELSE valid_until END
 		WHERE tenant_id=$1 AND site_id=$2 AND id=$3 AND status='ACTIVE'
 		RETURNING valid_until`,
 		req.Tenant, req.Site, req.Profile, hash, req.ValidFor.Seconds()).Scan(&expires)

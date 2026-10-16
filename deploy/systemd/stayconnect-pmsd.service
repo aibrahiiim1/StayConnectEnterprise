@@ -6,18 +6,29 @@ Description=StayConnect PMS Connector Daemon (pmsd) — dedicated read-only PMS 
 # no readiness gate; netd, which connects during startup, is the one that did.
 After=network-online.target docker.service
 Wants=network-online.target docker.service
-# Bounded restart window: a genuine crash is retried a few times, then the unit backs off instead of
-# storming. A clean flags-OFF exit is success (Restart=on-failure below), so DARK never restart-loops.
-StartLimitIntervalSec=300
-StartLimitBurst=5
+# NEVER GIVE UP (audit B-12). This was StartLimitIntervalSec=300 / StartLimitBurst=5: five failed starts in
+# five minutes -- exactly what a slow cold boot produces while the site DB container initialises -- and systemd
+# left pmsd down for good, so room sign-in kept working from the mirror while nothing kept the mirror current
+# and no room charge could be sent. Every other appliance daemon (scd, netd, edged, acctd, portald) runs with
+# StartLimitIntervalSec=0; pmsd now does too. A clean flags-OFF exit is still success (Restart=on-failure
+# below), so a DARK appliance does not restart-loop. NOTE (appliance_systemd_restart_trap): with the limiter
+# off, `systemctl restart` of a unit that keeps failing never returns -- operate it with stop / reset-failed /
+# start --no-block.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 EnvironmentFile=/etc/stayconnect/pmsd.env
+# Wait for the site DB first, as scd and netd do (deploy/scripts/wait-for-site-db.sh always exits 0, so it can
+# only shorten a crash-loop, never wedge a boot). The + prefix runs the gate with full privileges: the probe is
+# `docker exec ... pg_isready`, which the unprivileged stayconnect-pmsd user may not run -- without + it would
+# wait out its whole timeout on every start.
+ExecStartPre=+/opt/stayconnect/bin/wait-for-site-db.sh
 ExecStart=/opt/stayconnect/bin/pmsd
-# on-failure (NOT always): a clean exit (flags OFF / graceful SIGTERM) must not trigger a restart storm.
+# on-failure (NOT always): a clean exit (flags OFF / graceful SIGTERM) must not trigger a restart storm. A failure
+# is retried every 10 s for as long as it takes (no start limit above).
 Restart=on-failure
-RestartSec=5
+RestartSec=10
 TimeoutStopSec=15
 
 # --- least privilege: pmsd needs no root, no capabilities (outbound TCP to the PMS + DB only) ---

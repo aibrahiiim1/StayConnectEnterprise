@@ -228,6 +228,12 @@ var rolePerms = map[string]map[string]perm{
 		// and clearing operational alerts are manager actions; stays/events/resolutions are read evidence.
 		"pms-stays": permRead, "pms-events": permRead, "pms-resolutions": permRead,
 		"checkout-grace": permWrite, "operational-alerts": permWrite,
+		// Answering a PMS message that waits for review (acknowledge, link to a stay) and the review-expiry
+		// setting: the integration owner's decision, each under password step-up (audit H-15 / D-D).
+		"pms-event-decisions": permWrite,
+		// The room-credential tuple on Stays and PMS activity -- guest names and reservation numbers, which
+		// together with the room are what a guest signs in with (audit H-7). A field-level key, not a route.
+		"pms-stay-identity": permRead,
 		// The interface itself: publishing a Revision and rotating a credential are the two actions this
 		// role exists for. Routing and source conflicts are read-only everywhere — the first is a network
 		// topology decision made where the networks are configured, the second is evidence, not a control.
@@ -311,6 +317,8 @@ var rolePerms = map[string]map[string]perm{
 		"usage": permRead,
 		// Phase 3 (DARK): front desk reads stays/events and triages alerts, but never edits the grace policy.
 		"pms-stays": permRead, "pms-events": permRead, "operational-alerts": permWrite, "checkout-grace": permRead,
+		// The desk identifies the guest in front of it by name and reservation, so it sees them (H-7).
+		"pms-stay-identity": permRead,
 		// Read-only on the integration: the front desk needs to see whether the PMS is reachable before
 		// telling a guest to try again, but must not be able to publish or rotate anything.
 		"pms-interfaces": permRead, "pms-routing": permRead, "pms-source-conflicts": permRead,
@@ -348,6 +356,9 @@ var rolePerms = map[string]map[string]perm{
 		"guest-signin-restrictions": permWrite, "guest-signin-protection": permRead,
 		"guest-accounts": permWrite, "sessions": permWrite, "usage": permRead,
 		"pms-stays": permRead, "pms-events": permRead, "operational-alerts": permWrite, "checkout-grace": permRead,
+		// Same desk, same guest in front of it: this role already reads guest-signin-credentials (what the guest
+		// typed, names included), so hiding the names on Stays would protect nothing (H-7).
+		"pms-stay-identity": permRead,
 		// Read-only on the integration: the front desk needs to see whether the PMS is reachable before
 		// telling a guest to try again, but must not be able to publish or rotate anything.
 		"pms-interfaces": permRead, "pms-routing": permRead, "pms-source-conflicts": permRead,
@@ -414,7 +425,9 @@ var rolePerms = map[string]map[string]perm{
 		// Portal HTTPS state is operational evidence of the same kind as the network it sits under.
 		"portal-https":        permRead,
 		"commercial-packages": permRead,
-		// Phase 3 (DARK): a viewer sees the evidence and never acts on it.
+		// Phase 3 (DARK): a viewer sees the evidence and never acts on it. NOT pms-stay-identity: a viewer sees
+		// rooms, statuses and access, never the guest names and reservation numbers that, with the room, are
+		// the room sign-in credential (audit H-7) -- the same line drawn at guest-signin-credentials.
 		"pms-stays": permRead, "pms-events": permRead, "pms-resolutions": permRead,
 		// The reconciliation backlog is evidence of the same kind. A viewer reads it and acts on none of it.
 		"pms-reconciliation": permRead,

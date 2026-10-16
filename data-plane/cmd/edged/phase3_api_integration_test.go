@@ -215,6 +215,10 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 			mountResource(r, s, "pms-financial-onboarding", s.pmsFinancialOnboardingRoutes)
 			mountResource(r, s, "pms-routing", s.pmsRoutingRoutes)
 			mountResource(r, s, "pms-source-conflicts", s.pmsSourceConflictsRoutes)
+			// Review decisions and roster reconciliation (audit remediation H-5, H-13, H-15).
+			mountResource(r, s, "pms-event-decisions", s.pmsEventDecisionsRoutes)
+			mountResource(r, s, "pms-roster-reconciliation", s.rosterReconciliationRoutes)
+			mountResource(r, s, "stay-transfers", s.stayTransfersRoutes)
 			// Guest sign-in attempts, both halves. Mounted here so the list, the detail and the credential
 			// proxy are all exercised through the real router, the real role matrix and a real database.
 			mountResource(r, s, "guest-signin-attempts", s.signInAttemptsRoutes)

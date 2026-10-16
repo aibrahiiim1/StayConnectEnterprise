@@ -253,7 +253,7 @@ export function AddConnectionWizard({
                   {provider.kind === PROTEL_KIND && (
                     <Callout tone="neutral" title="Fixed for this connection">
                       <ul className="list-disc space-y-0.5 pl-4 text-xs">
-                        <li>Read-only — OneGate never writes to the PMS.</li>
+                        <li>OneGate reads the guest list from the PMS. The only thing it ever sends is a room charge, and only once room charge is approved for this connection.</li>
                         <li>No credential required — the link needs none.</li>
                         <li>
                           Charging a room through the PMS stays off until a site administrator approves the
@@ -384,7 +384,7 @@ function DoneView({
         <ol className="list-decimal space-y-1 pl-5 text-muted-foreground">
           <li>Publish the draft configuration — this makes it the one the connection uses.</li>
           <li>Activate the connection — the appliance connects to {provider.label} and loads the guest list.</li>
-          <li>Point at least one client network at it on the PMS routing screen.</li>
+          <li>Point at least one client network at it on the PMS routing screen — a site administrator does this; it decides which property&rsquo;s guests are checked on which network.</li>
         </ol>
         <p className="text-muted-foreground">Both steps ask for your password.</p>
       </div>

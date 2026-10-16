@@ -92,6 +92,8 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
   const [password, setPassword] = useState("");
   const [reason, setReason] = useState("");
   const [confirmWord, setConfirmWord] = useState("");
+  // A reset changes the PIN only. Restarting the validity is a separate, explicit choice (audit H-17).
+  const [extendValidity, setExtendValidity] = useState(false);
   const [revealed, setRevealed] = useState<Revealed | null>(null);
   const [detail, setDetail] = useState<Profile | null>(null);
 
@@ -137,6 +139,7 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
       const res = await api.post<{ pin?: string; valid_until?: string }>(path, {
         password,
         reason: reason.trim(),
+        ...(dialog.kind === "reset" && extendValidity ? { extend_validity: true } : {}),
       });
       if (dialog.kind === "reset" && res.pin) {
         setRevealed({ profileId: dialog.row.id, pin: res.pin, validUntil: res.valid_until ?? "" });
@@ -320,7 +323,7 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
         description={
           dialog?.kind === "revoke"
             ? `Room ${dialog.row.normalized_room_number ?? "—"} · reservation ${dialog.row.external_reservation_id}`
-            : "A new PIN replaces the old one immediately. The guest keeps their post-stay access; only the secret changes. The new PIN is shown once, on this screen."
+            : "A new PIN replaces the old one immediately. The guest keeps their post-stay access and its validity; only the secret changes. The new PIN is shown once, on this screen."
         }
         size="sm"
         submitLabel={dialog?.kind === "revoke" ? "End access permanently" : "Reset PIN"}
@@ -339,6 +342,15 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
               "If the guest only lost their PIN, reset it instead.",
             ]}
           />
+        )}
+        {dialog?.kind === "reset" && (
+          <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" checked={extendValidity} onChange={(e) => setExtendValidity(e.target.checked)} />
+            <span>
+              Also restart the validity: the new PIN works for 24 hours from now. Leave this off to keep it valid
+              until {formatDate(dialog.row.valid_until)}.
+            </span>
+          </label>
         )}
         <Field label="Reason" required hint="Recorded in the activity log. At least 4 characters.">
           <Input

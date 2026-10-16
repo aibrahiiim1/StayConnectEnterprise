@@ -317,7 +317,8 @@ describe("the connection sheet", () => {
     await userEvent.click(await screen.findByRole("tab", { name: "Actions" }));
     await userEvent.click(await screen.findByRole("button", { name: "Activate" }));
     const dialog = await screen.findByRole("dialog", { name: /Activate this connection/ });
-    expect(dialog.textContent).toMatch(/Nothing is written to the PMS/);
+    // Room charge is the one thing the appliance sends to the PMS, and only when approved (audit H-9).
+    expect(dialog.textContent).toMatch(/Nothing is sent to the PMS except approved room charges/);
     await userEvent.type(within(dialog).getByLabelText(/Confirm your password/), "pw");
     await userEvent.click(within(dialog).getByRole("button", { name: "Activate" }));
 

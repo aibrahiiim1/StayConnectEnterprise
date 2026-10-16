@@ -442,8 +442,13 @@ and have no buttons, on purpose:
   stay, rooms with several stays, and stays past their departure date. The PMS resolves these, not this
   screen. Visible to Site admin, Site IT manager, Client services, Client relations, Site viewer.
 - **Roster reconciliation** — `/roster-reconciliation`: the automatic process that keeps the guest list
-  identical to the PMS — what blocks it, what the next run will do, and past runs. Visible to Site admin,
-  Site IT manager, Client services.
+  identical to the PMS — what blocks it, what the last run decided, and past runs. A stay the complete roster
+  no longer lists is checked out exactly like a PMS departure: its internet access ends (or moves to the
+  departure grace package) and its devices are disconnected. Opening the page changes nothing; **Run dry run**
+  (Site admin, Site IT manager) records what a run would do now without closing any stay. **When a roster is
+  trusted** (smallest roster acted on, most stays per run, rooms a sweep may miss, sweeps remembered) is
+  changed by Site admin and Site IT manager with a reason and their password; every change is versioned and in
+  the activity log. Visible to Site admin, Site IT manager, Client services, Client relations.
 
 ### Room sign-in — `/room-sign-in`
 What a guest types besides the room number when signing in with a room. It sits under Hotel because its
@@ -488,10 +493,19 @@ changed in the PMS.
 Every message the PMS sent (check-ins, check-outs, stay changes) and whether the guest list was updated from
 it. Answers "has Wi-Fi seen that check-in yet?"
 
-- **Shows:** live status; tiles *Last message*, *Applied*, *Needs a decision*, *Not matched to a stay*;
-  search and a filter by result; table About (room and guest), What happened, Result, times, and **Details**
-  (including the PMS's own message identifier to quote to the PMS vendor). Read-only.
-- **Who can see it:** Site admin, Site IT manager, Client services, Client relations, Site viewer.
+- **Shows:** live status; tiles *Last message*, *Applied*, *Needs a decision* (messages in review that carry
+  no decision yet), *Not matched to a stay*; search and a filter by result; table About (room and guest), What
+  happened, Result, times, and **Details** (including the PMS's own message identifier to quote to the PMS
+  vendor).
+- **Decisions (Site admin, Site IT manager):** in a waiting message's Details, **Acknowledge** (it needs no
+  action) or **Link to a stay** (chosen from the stays it can still be matched to: the same reservation, or for
+  a message without one, a stay that was in that room when it arrived). Both ask for a reason and the
+  password, are recorded in the activity log, and change no stay or internet access. **Automatic expiry of
+  waiting messages** — off by default; when switched on, a message that arrives after that moment and waits
+  longer than the set number of days (1–365, default 30) is recorded as expired. Messages already waiting are
+  never expired by it.
+- **Who can see it:** Site admin, Site IT manager, Client services, Client relations, Site viewer. A Site
+  viewer sees rooms and results but not guest names or reservation numbers (also on Stays).
 
 ### Guest sign-in checks — `/pms-resolutions`
 (Formerly *Client sign-in checks*.)

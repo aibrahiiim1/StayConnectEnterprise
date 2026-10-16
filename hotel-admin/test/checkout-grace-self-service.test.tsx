@@ -122,8 +122,8 @@ describe("an operator authors the hotel's checkout grace policy", () => {
     setField("Upload speed (Mbps)", "3");
     setField("Data allowance (MB)", "750");
     setField("Device limit", "2");
-    setField("Stay rules after checkout", "2");
-    fireEvent.change(screen.getByLabelText("Stay rules after checkout unit"), { target: { value: "h" } });
+    // No eligibility field (audit H-19): the converter never read it.
+    expect(screen.queryByLabelText("Stay rules after checkout")).toBeNull();
 
     await toReview();
     await confirmAndPublish();
@@ -138,7 +138,8 @@ describe("an operator authors the hotel's checkout grace policy", () => {
     expect(body.grace_data_quota_bytes).toBe(750 * 1024 * 1024);
     expect(body.grace_device_limit).toBe(2);
     expect(body.grace_device_limit_policy).toBe("REJECT_NEW_DEVICE");
-    expect(body.eligibility_window_seconds).toBe(2 * 3600);
+    // Carried unchanged (the schema default for a first policy), never set by the operator.
+    expect(body.eligibility_window_seconds).toBe(86400);
     // No package revision is sent at all: the server derives it.
     expect(body.grace_package_revision_id).toBeUndefined();
     // Optimistic concurrency and step-up travel with it.
@@ -174,8 +175,6 @@ describe("an operator authors the hotel's checkout grace policy", () => {
     expect((screen.getByLabelText("Grace time unit") as HTMLSelectElement).value).toBe("min");
     expect((screen.getByLabelText("Download speed (Mbps)") as HTMLInputElement).value).toBe("10");
     expect((screen.getByLabelText("Data allowance (MB)") as HTMLInputElement).value).toBe("1024");
-    expect((screen.getByLabelText("Stay rules after checkout") as HTMLInputElement).value).toBe("2");
-    expect((screen.getByLabelText("Stay rules after checkout unit") as HTMLSelectElement).value).toBe("h");
 
     setField("Grace time", "20");
     await toReview();

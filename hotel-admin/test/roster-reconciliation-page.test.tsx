@@ -20,10 +20,17 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const get = vi.fn();
 const put = vi.fn();
+const post = vi.fn();
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
-  return { ...actual, api: { get: (...a: any[]) => get(...a), put: (...a: any[]) => put(...a) } };
+  return {
+    ...actual,
+    api: {
+      get: (...a: any[]) => get(...a), put: (...a: any[]) => put(...a), post: (...a: any[]) => post(...a),
+    },
+  };
 });
+let roles: string[] = [];
 
 const STATE = {
   blockers: [
@@ -55,7 +62,9 @@ const STATE = {
     is_default: true,
   },
   generation: 261,
-  preview: {
+  last_run_mode: "APPLY",
+  last_run_at: "2026-10-15T08:00:00Z",
+  last_run: {
     outcome: "COMPLETED",
     roster_size: 477,
     mirror_in_house: 477,
@@ -72,8 +81,11 @@ const STATE = {
 beforeEach(() => {
   get.mockReset();
   put.mockReset();
+  post.mockReset();
+  roles = [];
   get.mockImplementation((path: string) =>
-    path.endsWith("/runs") ? Promise.resolve({ runs: [] }) : Promise.resolve(STATE),
+    path === "/auth/whoami" ? Promise.resolve({ roles })
+      : path.endsWith("/runs") ? Promise.resolve({ runs: [] }) : Promise.resolve(STATE),
   );
 });
 
@@ -86,7 +98,7 @@ async function renderPage() {
 describe("roster reconciliation offers no state-changing action", () => {
   it("has no control that closes stays and none that answers snapshot cases", async () => {
     await renderPage();
-    await waitFor(() => expect(screen.getByText(/what the next automatic run will do/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/what the last run decided/i)).toBeTruthy());
 
     // The two repair buttons that used to be here. Matched loosely on purpose: any button whose label
     // offers to close stays or answer cases is the thing being forbidden, whatever the wording.
@@ -138,7 +150,49 @@ describe("roster reconciliation offers no state-changing action", () => {
     await waitFor(() => expect(screen.getAllByText(/happens on its own/i).length).toBeGreaterThan(0));
     // The explanation of what the page is for lives behind the page's lightbulb.
     fireEvent.click(screen.getByRole("button", { name: "Tips: Roster reconciliation" }));
-    expect(await screen.findByText(/nothing on this page to press/i)).toBeTruthy();
+    expect(await screen.findByText(/no queue to work through/i)).toBeTruthy();
+  });
+
+  // AUDIT H-13: opening the page used to run a dry run, which writes a run row. It must write nothing.
+  it("opening the page runs nothing", async () => {
+    await renderPage();
+    await waitFor(() => expect(screen.getByText(/what the last run decided/i)).toBeTruthy());
+    expect(post).not.toHaveBeenCalled();
+    expect(put).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /run dry run/i })).toBeNull();
+  });
+
+  it("the integration owner can run a dry run explicitly", async () => {
+    roles = ["hotel_it_manager"];
+    post.mockResolvedValue({ ...STATE.last_run, absent_from_roster: 3 });
+    await renderPage();
+    const btn = await screen.findByRole("button", { name: /run dry run/i });
+    fireEvent.click(btn);
+    await waitFor(() => expect(post).toHaveBeenCalledWith("/pms-roster-reconciliation/preview",
+      expect.objectContaining({ pms_interface_id: "iface-1" })));
+    expect(await screen.findByText(/what a run would do now/i)).toBeTruthy();
+  });
+
+  // AUDIT H-5: the settings carry the version on screen, a reason and the password.
+  it("changing the trust settings sends the version, a reason and the password", async () => {
+    roles = ["hotel_it_manager"];
+    put.mockResolvedValue({ config_version: 1 });
+    await renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Change" }));
+    fireEvent.change(screen.getByLabelText(/smallest roster acted on/i), { target: { value: "40" } });
+    fireEvent.change(screen.getByLabelText(/^reason/i), { target: { value: "smaller property" } });
+    fireEvent.change(screen.getByLabelText(/confirm your password/i), { target: { value: "pw" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(put).toHaveBeenCalledWith("/pms-roster-reconciliation/settings", expect.objectContaining({
+      expected_config_version: 0, roster_trust_min: 40, reason: "smaller property", password: "pw",
+    })));
+  });
+
+  it("a read-only role sees the settings and cannot change them", async () => {
+    roles = ["front_office_operator"];
+    await renderPage();
+    await waitFor(() => expect(screen.getByText(/when a roster is trusted/i)).toBeTruthy());
+    expect(screen.queryByRole("button", { name: "Change" })).toBeNull();
   });
 
 });

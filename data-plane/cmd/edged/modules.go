@@ -33,6 +33,7 @@ import (
 var surfaceModules = map[string][]string{
 	"pms-stays":                 {lic.ModuleHospitality},
 	"pms-events":                {lic.ModuleHospitality},
+	"pms-event-decisions":       {lic.ModuleHospitality},
 	"pms-resolutions":           {lic.ModuleHospitality},
 	"guest-signin-attempts":     {lic.ModuleHospitality},
 	"guest-signin-credentials":  {lic.ModuleHospitality},
@@ -69,6 +70,7 @@ var surfaceModules = map[string][]string{
 var historySurfaces = map[string]bool{
 	"pms-stays":                 true,
 	"pms-events":                true,
+	"pms-event-decisions":       true,
 	"pms-resolutions":           true,
 	"guest-signin-attempts":     true,
 	"guest-signin-credentials":  true,

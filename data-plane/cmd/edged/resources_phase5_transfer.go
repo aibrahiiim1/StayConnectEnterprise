@@ -21,8 +21,11 @@ package main
 // is.
 
 import (
+	"context"
 	"errors"
+	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -77,7 +80,8 @@ func (s *server) listTransferReviewSignals(w http.ResponseWriter, r *http.Reques
 		 ORDER BY count(*) DESC
 		 LIMIT 200`, s.tenantID, s.siteID)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "query_failed", err.Error())
+		slog.Error("stay transfer: review signals unreadable", "err", err)
+		jsonErr(w, http.StatusInternalServerError, "query_failed", "the review signals could not be read")
 		return
 	}
 	defer rows.Close()
@@ -85,7 +89,7 @@ func (s *server) listTransferReviewSignals(w http.ResponseWriter, r *http.Reques
 	for rows.Next() {
 		var v reviewSignal
 		if err := rows.Scan(&v.ResolvedAt, &v.OutcomeCode, &v.NetworkID, &v.Count); err != nil {
-			jsonErr(w, http.StatusInternalServerError, "scan_failed", err.Error())
+			jsonErr(w, http.StatusInternalServerError, "scan_failed", "the review signals could not be read")
 			return
 		}
 		out = append(out, v)
@@ -115,6 +119,7 @@ type transferRow struct {
 }
 
 func (s *server) listStayTransfers(w http.ResponseWriter, r *http.Request) {
+	identity := canSeeStayIdentity(r)
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	rows, err := s.db.Query(ctx, `
@@ -128,7 +133,8 @@ func (s *server) listStayTransfers(w http.ResponseWriter, r *http.Request) {
 		 ORDER BY et.created_at DESC
 		 LIMIT 200`, s.tenantID, s.siteID)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "query_failed", err.Error())
+		slog.Error("stay transfer: lineage unreadable", "err", err)
+		jsonErr(w, http.StatusInternalServerError, "query_failed", "the transfers could not be read")
 		return
 	}
 	defer rows.Close()
@@ -137,8 +143,11 @@ func (s *server) listStayTransfers(w http.ResponseWriter, r *http.Request) {
 		var v transferRow
 		if err := rows.Scan(&v.ID, &v.FromStay, &v.FromReservation, &v.FromRoom,
 			&v.ToStay, &v.ToReservation, &v.ToRoom, &v.Actor, &v.CreatedAt); err != nil {
-			jsonErr(w, http.StatusInternalServerError, "scan_failed", err.Error())
+			jsonErr(w, http.StatusInternalServerError, "scan_failed", "the transfers could not be read")
 			return
+		}
+		if !identity {
+			v.FromReservation, v.ToReservation = "", "" // audit H-7: a viewer sees rooms, not reservation numbers
 		}
 		out = append(out, v)
 	}
@@ -147,9 +156,105 @@ func (s *server) listStayTransfers(w http.ResponseWriter, r *http.Request) {
 
 // ---- preview + execute -----------------------------------------------------
 
+// THE OPERATOR NAMES A STAY THE WAY THE PMS DOES (audit H-18).
+//
+// The screen asked for "the PMS reference" while the API took only a stay uuid, so typing the reservation
+// number the front desk actually has produced a uuid cast error and a raw 500. Each side is now either a stay
+// id or a PMS reservation number. A reservation number is resolved among this property's stays -- IN_HOUSE
+// first, because both ends of a transfer must be in house -- optionally narrowed to one PMS connection; if it
+// still names more than one stay the request is refused as ambiguous and nothing is guessed.
 type transferPreviewReq struct {
-	FromStayID string `json:"from_stay_id"`
-	ToStayID   string `json:"to_stay_id"`
+	FromStayID      string `json:"from_stay_id"`
+	ToStayID        string `json:"to_stay_id"`
+	FromInterfaceID string `json:"from_pms_interface_id"`
+	ToInterfaceID   string `json:"to_pms_interface_id"`
+}
+
+var errStayRefNotFound = errors.New("no stay on this property has that reference")
+var errStayRefAmbiguous = errors.New("that reference names more than one stay; choose the PMS connection")
+
+// resolveStayRef turns a stay id or a PMS reservation number into a stay id.
+func (s *server) resolveStayRef(ctx context.Context, ref, iface string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	iface = strings.TrimSpace(iface)
+	if ref == "" {
+		return "", errStayRefNotFound
+	}
+	if iface != "" && !uuidRe.MatchString(iface) {
+		return "", errStayRefNotFound
+	}
+	var ifaceArg any
+	if iface != "" {
+		ifaceArg = iface
+	}
+	if uuidRe.MatchString(ref) {
+		// A stay id goes to the transfer rules unchanged: they re-verify it inside the transaction and answer
+		// a missing destination as the conflict it is (destination_missing).
+		return ref, nil
+	}
+	rows, err := s.db.Query(ctx, `SELECT id::text FROM iam_v2.stays
+		WHERE tenant_id=$1 AND site_id=$2 AND btrim(external_reservation_id)=$3
+		  AND ($4::uuid IS NULL OR pms_interface_id=$4::uuid)
+		ORDER BY (status='IN_HOUSE') DESC
+		LIMIT 3`, s.tenantID, s.siteID, ref, ifaceArg)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	var ids []string
+	var inHouse int
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return "", err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	if len(ids) == 0 {
+		return "", errStayRefNotFound
+	}
+	if len(ids) == 1 {
+		return ids[0], nil
+	}
+	// More than one stay carries the reservation number (two connections, or a reused number). Prefer the
+	// single IN_HOUSE one; anything else is ambiguous.
+	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.stays
+		WHERE tenant_id=$1 AND site_id=$2 AND btrim(external_reservation_id)=$3 AND status='IN_HOUSE'
+		  AND ($4::uuid IS NULL OR pms_interface_id=$4::uuid)`, s.tenantID, s.siteID, ref, ifaceArg).Scan(&inHouse)
+	if inHouse == 1 {
+		return ids[0], nil
+	}
+	return "", errStayRefAmbiguous
+}
+
+// resolveTransferPair resolves both ends, answering the operator for a reference that cannot be resolved.
+func (s *server) resolveTransferPair(ctx context.Context, w http.ResponseWriter, from, fromIface, to, toIface string) (string, string, bool) {
+	fromID, err := s.resolveStayRef(ctx, from, fromIface)
+	if err != nil {
+		stayRefErr(w, "from", err)
+		return "", "", false
+	}
+	toID, err := s.resolveStayRef(ctx, to, toIface)
+	if err != nil {
+		stayRefErr(w, "to", err)
+		return "", "", false
+	}
+	return fromID, toID, true
+}
+
+func stayRefErr(w http.ResponseWriter, side string, err error) {
+	switch {
+	case errors.Is(err, errStayRefNotFound):
+		jsonErr(w, http.StatusNotFound, side+"_stay_not_found", "the "+side+" stay: "+err.Error())
+	case errors.Is(err, errStayRefAmbiguous):
+		jsonErr(w, http.StatusConflict, side+"_stay_ambiguous", "the "+side+" stay: "+err.Error())
+	default:
+		slog.Error("stay transfer: reference lookup failed", "err", err)
+		jsonErr(w, http.StatusInternalServerError, "internal", "the stays could not be looked up")
+	}
 }
 
 func (s *server) previewStayTransfer(w http.ResponseWriter, r *http.Request) {
@@ -158,23 +263,29 @@ func (s *server) previewStayTransfer(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "invalid", "malformed request")
 		return
 	}
-	if in.FromStayID == "" || in.ToStayID == "" {
+	if strings.TrimSpace(in.FromStayID) == "" || strings.TrimSpace(in.ToStayID) == "" {
 		jsonErr(w, http.StatusBadRequest, "invalid", "both stays are required")
 		return
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	p, err := transfer.New(s.db).PreviewTransfer(ctx, s.tenantID, s.siteID, in.FromStayID, in.ToStayID)
+	fromID, toID, ok := s.resolveTransferPair(ctx, w, in.FromStayID, in.FromInterfaceID, in.ToStayID, in.ToInterfaceID)
+	if !ok {
+		return
+	}
+	p, err := transfer.New(s.db).PreviewTransfer(ctx, s.tenantID, s.siteID, fromID, toID)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "preview_failed", err.Error())
+		transferOpErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, p)
 }
 
 type transferExecuteReq struct {
-	FromStayID string `json:"from_stay_id"`
-	ToStayID   string `json:"to_stay_id"`
+	FromStayID      string `json:"from_stay_id"`
+	ToStayID        string `json:"to_stay_id"`
+	FromInterfaceID string `json:"from_pms_interface_id"`
+	ToInterfaceID   string `json:"to_pms_interface_id"`
 	// Password is the step-up. There is no actor field: the operator comes from the SESSION.
 	Password string `json:"password"`
 	Reason   string `json:"reason"`
@@ -186,7 +297,7 @@ func (s *server) executeStayTransfer(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "invalid", "malformed request")
 		return
 	}
-	if in.FromStayID == "" || in.ToStayID == "" {
+	if strings.TrimSpace(in.FromStayID) == "" || strings.TrimSpace(in.ToStayID) == "" {
 		jsonErr(w, http.StatusBadRequest, "invalid", "both stays are required")
 		return
 	}
@@ -201,6 +312,11 @@ func (s *server) executeStayTransfer(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
+	fromID, toID, ok := s.resolveTransferPair(ctx, w, in.FromStayID, in.FromInterfaceID, in.ToStayID, in.ToInterfaceID)
+	if !ok {
+		return
+	}
+	in.FromStayID, in.ToStayID = fromID, toID
 	out, err := transfer.New(s.db).Execute(ctx, transfer.Request{
 		Tenant: s.tenantID, Site: s.siteID,
 		FromStay: in.FromStayID, ToStay: in.ToStayID,
@@ -247,6 +363,8 @@ func transferOpErr(w http.ResponseWriter, err error) {
 	case errors.Is(err, transfer.ErrNoGracePackage):
 		jsonErr(w, http.StatusConflict, "no_landing_package", err.Error())
 	default:
-		jsonErr(w, http.StatusInternalServerError, "transfer_failed", err.Error())
+		// Logged with the cause; the operator is not shown a database message (audit H-22).
+		slog.Error("stay transfer failed", "err", err)
+		jsonErr(w, http.StatusInternalServerError, "transfer_failed", "the transfer could not be completed")
 	}
 }

@@ -472,6 +472,9 @@ func main() {
 			if s.pmsCfg.AdminOn() {
 				mountResource(r, s, "pms-stays", s.pmsStaysRoutes)
 				mountResource(r, s, "pms-events", s.pmsEventsRoutes)
+				// Decisions on PMS messages waiting for review (acknowledge / link to a stay) and the review
+				// expiry setting. Its own key: reading the activity log and answering it are different powers.
+				mountResource(r, s, "pms-event-decisions", s.pmsEventDecisionsRoutes)
 				mountResource(r, s, "pms-resolutions", s.pmsResolutionsRoutes)
 				// GUEST SIGN-IN ATTEMPTS. Two resources, because the second permission is a real boundary and not a
 				// flag: the credential values hang off their OWN key, so a caller holding only the list permission is

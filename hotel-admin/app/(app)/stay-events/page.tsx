@@ -36,6 +36,9 @@ import { Pagination, SearchInput } from "@/components/ui/data";
 import { LiveStatus, refreshingClass } from "@/components/ui/patterns";
 import { cn, formatRelative, formatDate } from "@/lib/utils";
 import { Inbox, Send } from "lucide-react";
+import { useOperatorRoles } from "@/lib/whoami-context";
+import { canWrite } from "@/lib/roles";
+import { DECISION_WORDS, ReviewDecisionActions, ReviewExpirySettingCard } from "@/components/phase3/review-decisions";
 
 // THE STATUS, IN CONSEQUENCES. Each one says what it means for the guest list, because that is what an operator
 // is deciding about. The raw token stays available on the detail panel.
@@ -87,7 +90,8 @@ const FILTERS: { value: string; label: string }[] = [
   { value: "", label: "Everything" },
   { value: "APPLIED", label: "Applied to the guest list" },
   { value: "PENDING", label: "Waiting to be applied" },
-  { value: "MANUAL_REVIEW", label: "Needs a decision" },
+  { value: "UNDECIDED", label: "Needs a decision" },
+  { value: "MANUAL_REVIEW", label: "Placed in review (decided or not)" },
   { value: "SKIPPED_DUPLICATE", label: "Duplicates" },
   { value: "REJECTED", label: "Rejected" },
 ];
@@ -98,6 +102,7 @@ type StayEventsResp = PagedFields & {
     applied?: number;
     pending?: number;
     manual_review?: number;
+    undecided?: number;
     rejected?: number;
     unmatched?: number;
     newest_received_at?: string;
@@ -118,7 +123,13 @@ export default function StayEventsPage() {
   // PAGED AND SEARCHED ON THE SERVER. The list used to be the newest 200 messages, searched and counted in the
   // browser -- on a busy feed, the last few minutes. The search (a room, a reservation, a guest's name) goes in a
   // header, never the URL, because edged logs request lines. A new filter or search starts at the first page.
-  const path = status ? "/pms-events?processing_status=" + encodeURIComponent(status) : "/pms-events";
+  // "Needs a decision" is the messages in review that carry NO decision yet (audit H-15) -- not every message
+  // ever placed in review, which counted thousands already answered.
+  const path = status === "UNDECIDED"
+    ? "/pms-events?undecided=true"
+    : status ? "/pms-events?processing_status=" + encodeURIComponent(status) : "/pms-events";
+  const roles = useOperatorRoles();
+  const canDecide = roles ? canWrite("pms-event-decisions", roles) : false;
   const needle = query.trim();
   const headers = useMemo(
     () => (needle ? { "X-Pms-Event-Search": encodeURIComponent(needle) } : undefined),
@@ -136,7 +147,7 @@ export default function StayEventsPage() {
   const counts = {
     applied: sum?.applied ?? 0,
     waiting: sum?.pending ?? 0,
-    review: sum?.manual_review ?? 0,
+    review: sum?.undecided ?? sum?.manual_review ?? 0,
     rejected: sum?.rejected ?? 0,
     unmatched: sum?.unmatched ?? 0,
   };
@@ -213,11 +224,14 @@ export default function StayEventsPage() {
         />
       </div>
 
-      {counts.review > 0 && status !== "MANUAL_REVIEW" && (
+      {canDecide && <ReviewExpirySettingCard />}
+
+      {counts.review > 0 && status !== "UNDECIDED" && (
         <Callout tone="warning" title={`${counts.review} message${counts.review === 1 ? "" : "s"} need a decision`}>
           These could not be applied without guessing, so the appliance stopped. Until they are resolved the guest
-          list may not reflect what the front desk has done.{" "}
-          <Button variant="link" size="xs" className="h-auto p-0 font-medium" onClick={() => setStatus("MANUAL_REVIEW")}>
+          list may not reflect what the front desk has done.
+          {canDecide ? " Open one to acknowledge it or link it to a stay." : " The site admin or IT manager decides them."}{" "}
+          <Button variant="link" size="xs" className="h-auto p-0 font-medium" onClick={() => setStatus("UNDECIDED")}>
             Show only those
           </Button>
         </Callout>
@@ -279,11 +293,15 @@ export default function StayEventsPage() {
               </THead>
               <TBody>
                 {rows.map((e) => {
-                  const st = STATUS_WORDS[e.processing_status] ?? {
+                  const base = STATUS_WORDS[e.processing_status] ?? {
                     label: e.processing_status.replace(/_/g, " ").toLowerCase(),
                     tone: "default" as const,
                     meaning: "",
                   };
+                  // A review message with a decision no longer "needs" one.
+                  const st = e.processing_status === "MANUAL_REVIEW" && e.decided
+                    ? { ...base, label: DECISION_WORDS[e.decision ?? ""] ?? "Decided", tone: "default" as const }
+                    : base;
                   return (
                     <TR key={e.id}>
                       <TD>
@@ -298,9 +316,11 @@ export default function StayEventsPage() {
                           <>
                             <div className="text-sm text-muted-foreground">Not matched to a stay</div>
                             <div className="text-2xs text-muted-foreground">
-                              {e.external_reservation_id
-                                ? `Reservation ${e.external_reservation_id}`
-                                : "No room or reservation recognised"}
+                              {e.external_reservation_id ?? e.message_reservation
+                                ? `Reservation ${e.external_reservation_id ?? e.message_reservation}`
+                                : e.message_room
+                                  ? `Names room ${e.message_room}`
+                                  : e.identity_hidden ? "Reservation not shown to your role" : "No room or reservation recognised"}
                             </div>
                           </>
                         )}
@@ -365,12 +385,21 @@ export default function StayEventsPage() {
               title={(STATUS_WORDS[detail.processing_status] ?? { label: detail.processing_status }).label}
             >
               {(STATUS_WORDS[detail.processing_status] ?? { meaning: "" }).meaning}
+              {detail.processing_status === "MANUAL_REVIEW" && detail.decided && (
+                <> Decided: {DECISION_WORDS[detail.decision ?? ""] ?? detail.decision}.</>
+              )}
             </Callout>
+            {detail.processing_status === "MANUAL_REVIEW" && !detail.decided && canDecide && (
+              <ReviewDecisionActions
+                eventId={detail.id}
+                onDecided={() => { setDetail(null); void list.reload(); }}
+              />
+            )}
             <DList
               items={[
                 { label: "Room", value: detail.room ?? "Not matched" },
-                { label: "Guest", value: detail.primary_guest ?? "—" },
-                { label: "Reservation", value: detail.external_reservation_id ?? "—" },
+                { label: "Guest", value: detail.identity_hidden ? "Not shown to your role" : detail.primary_guest ?? "—" },
+                { label: "Reservation", value: detail.identity_hidden ? "Not shown to your role" : detail.external_reservation_id ?? detail.message_reservation ?? "—" },
                 { label: "Stay status", value: detail.stay_status?.replace(/_/g, " ").toLowerCase() ?? "—" },
                 { label: "PMS connection", value: detail.pms_interface_label || "—" },
                 { label: "Message type", value: `${typeWords(detail.event_type)} (${detail.event_type})` },
@@ -382,7 +411,9 @@ export default function StayEventsPage() {
                   span: true,
                   // Kept, and kept here rather than in the table: this is the string to quote when raising a
                   // message with the PMS vendor, and it is useful for nothing else.
-                  value: <MonoId value={detail.external_event_identity} head={24} title="PMS message id" />,
+                  value: detail.external_event_identity
+                    ? <MonoId value={detail.external_event_identity} head={24} title="PMS message id" />
+                    : "Not shown to your role",
                 },
                 { label: "Event id", value: <MonoId value={detail.id} title="Event" /> },
               ]}

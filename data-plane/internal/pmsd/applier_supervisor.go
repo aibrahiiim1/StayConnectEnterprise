@@ -75,8 +75,14 @@ func runApplierSupervisorObserved(ctx context.Context, a Assignment, repo Repo, 
 		}
 		want := make(map[string]struct{}, len(ifaces))
 		for _, i := range ifaces {
+			// The listing also carries DRAINING interfaces that still have room charges to finish (their
+			// connector keeps the link for that). Stay events are applied for ACTIVE interfaces only, as before.
+			if i.LifecycleState != "" && i.LifecycleState != "ACTIVE" {
+				continue
+			}
 			want[i.ID] = struct{}{}
 		}
+		expireDueReviews(ctx, a, repo, deps)
 
 		mu.Lock()
 		defer mu.Unlock()
