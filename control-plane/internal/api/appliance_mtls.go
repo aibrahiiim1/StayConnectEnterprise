@@ -44,6 +44,8 @@ func ApplianceMTLSRouter(db *pgxpool.Pool, rdb *redis.Client, replay *appliancea
 	// These endpoints carry BOTH a verified client certificate AND a signed request
 	// JWT whose issuer must equal the cert's bound appliance_id.
 	r.Group(func(r chi.Router) {
+		// Per client address, before authentication (see the :443 router).
+		r.Use(RateLimit(rdb, "appliance-mtls", 240, time.Minute))
 		r.Use(auth.RequireAppliance(db, replay))
 		r.Use(mtlsCertBinding(db))
 

@@ -49,6 +49,9 @@ const (
 	loginPerMinute    = 20
 	reauthPerMinute   = 20
 	registerPerMinute = 30
+	// appliancePerMinute bounds the signed appliance routes (hello, licence, CSR, certificate, offline
+	// reconcile) per client address.
+	appliancePerMinute = 240
 )
 
 // NewRouter serves exactly the §6 contract: /v1/auth/*, the appliance endpoints under /v1/appliance* and
@@ -118,6 +121,10 @@ func NewRouter(d Deps) http.Handler {
 		// assignment channel (/appliance/assignment, /ack, /assignment-registry) is mTLS-only and is served
 		// by api.ApplianceMTLSRouter, never here.
 		r.Group(func(r chi.Router) {
+			// Limited BEFORE authentication, so unauthenticated callers cannot use these routes to make Central
+			// look up appliances and write audit rows as fast as they can send. A healthy appliance calls a few
+			// times a minute; the limit leaves room for several appliances behind one address.
+			r.Use(limit("appliance", appliancePerMinute))
 			r.Use(auth.RequireAppliance(d.DB, replayCache))
 			r.Get("/appliance/hello", identityBase.HelloHandler)
 			r.Post("/appliance/offline-reconcile", identityBase.OfflineReconcile)

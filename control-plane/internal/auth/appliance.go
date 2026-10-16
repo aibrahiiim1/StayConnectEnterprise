@@ -15,6 +15,7 @@ import (
 
 	"github.com/stayconnect/enterprise/control-plane/internal/applianceauth"
 	"github.com/stayconnect/enterprise/control-plane/internal/clientip"
+	"github.com/stayconnect/enterprise/control-plane/internal/ratebudget"
 )
 
 // maxSignedBody bounds how much request body we buffer to hash for signature
@@ -136,12 +137,26 @@ func RequireAppliance(db *pgxpool.Pool, cache *applianceauth.ReplayCache) func(h
 	}
 }
 
-// applianceAuthFail records a failed appliance authentication to audit_log.
+// applianceAuthFailures bounds how many failed appliance authentications are written: these routes are
+// reachable by anyone, and every failure used to insert an audit row. Per client address 5 a minute, 300 a
+// minute overall; what is suppressed is recorded as one appliance.auth_failures_suppressed row.
+var applianceAuthFailures = ratebudget.New(5, 300, time.Minute)
+
+// applianceAuthFail records a failed appliance authentication to audit_log, within applianceAuthFailures.
 // Written directly (not via internal/audit) to avoid an auth→audit import
 // cycle. Never fails the request path.
 func applianceAuthFail(ctx context.Context, db *pgxpool.Pool, r *http.Request, applianceID, reason string) {
 	wctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
+	ok, suppressed := applianceAuthFailures.Allow(clientip.From(r))
+	if suppressed > 0 {
+		_, _ = db.Exec(wctx, `INSERT INTO audit_log (ts, actor_type, action, payload)
+            VALUES (now(), 'system', 'appliance.auth_failures_suppressed', jsonb_build_object('count', $1::int, 'window_seconds', 60))`,
+			suppressed)
+	}
+	if !ok {
+		return
+	}
 	_, _ = db.Exec(wctx, `
         INSERT INTO audit_log (ts, actor_type, actor_id, action, target_type, target_id, ip, user_agent, payload)
         VALUES (now(), 'appliance', NULLIF($1,''), 'appliance.auth_failed', 'appliance', NULLIF($1,''),
