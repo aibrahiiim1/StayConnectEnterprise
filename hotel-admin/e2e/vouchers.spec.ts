@@ -94,7 +94,14 @@ test("issuing shows the codes once and prints only the cards", async ({ page, ba
   await dlg.getByRole("button", { name: "Next" }).click();
   await dlg.getByLabel(/How many cards/).fill("3");
   await dlg.getByRole("button", { name: "Review", exact: true }).click();
-  await dlg.getByRole("button", { name: "Issue 3 vouchers" }).click();
+  // Issuing a batch is step-up: the button stays unavailable until the operator's password is typed (O-21),
+  // and the password travels with the issue request.
+  const issueBtn = dlg.getByRole("button", { name: "Issue 3 vouchers" });
+  await expect(issueBtn).toBeDisabled();
+  await dlg.locator('input[type="password"]').fill("operatorpw");
+  const issueReq = page.waitForRequest((r) => r.url().endsWith("/vouchers/issue") && r.method() === "POST");
+  await issueBtn.click();
+  expect((await issueReq).postDataJSON()).toMatchObject({ package_revision_id: PKG, count: 3, password: "operatorpw" });
 
   await expect(page.getByTestId("held-code")).toHaveCount(3);
   await page.getByRole("button", { name: /Print cards/ }).click();

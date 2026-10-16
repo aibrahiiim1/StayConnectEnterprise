@@ -71,5 +71,10 @@ test("the /usage?stay=<id> deep link still opens the stay", async ({ page, baseU
   await page.goto(`/usage?stay=${STAY}`);
   await expect(page.getByText("Devices used during this stay")).toBeVisible();
   await expect(page.getByText(/Main PMS · reservation BK-88213/)).toBeVisible();
-  expect(requested).toContain(`/usage/sources/stay/${STAY}`);
+  // The stay is fetched by its id; the request now also carries the period window the header shows (C-8).
+  const stayReq = requested.find((r) => r.startsWith(`/usage/sources/stay/${STAY}`));
+  expect(stayReq).toBeTruthy();
+  const q = new URLSearchParams(stayReq!.split("?")[1] ?? "");
+  expect(q.get("from")).toBeTruthy();
+  expect(q.get("to")).toBeTruthy();
 });
