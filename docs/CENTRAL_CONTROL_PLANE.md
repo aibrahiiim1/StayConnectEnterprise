@@ -66,7 +66,10 @@ The console never derives a state itself; ctrlapi returns these three fields on 
 30 s): `connected` (≤ 5 min), `recently_seen` (≤ 24 h), `offline` (> 24 h), `never`.
 
 **`license`** — from the appliance's latest licence: `none`, `active`, `expiring` (≤ 30 days left), `grace` (past
-`valid_until`, inside `grace_period_days`), `expired`, `suspended`, `revoked`.
+`valid_until`, inside `grace_period_days`), `expired`, `suspended`, `revoked`. `grace_period_days = 0` means **no
+grace**: the licence stops admitting new clients the second after `valid_until` (on the appliance too; v1/v2 licences,
+which never carried a grace period, keep using `offline_grace_days`). A licence must name its concurrent-client cap
+(1 or more); a licence with no cap is issued only with `unlimited_online_guests: true`.
 
 The stored lifecycle is reduced to identity only: `pending_approval`, `assigned`, `revoked`, `decommissioned`
 (migration 0046). Licence state is **never** written into the appliance lifecycle: suspending or revoking a licence
@@ -88,7 +91,16 @@ power on ──► appliance registers itself (signed, hardware-bound, no token)
 ```
 
 * **Registration** is automatic and token-less: the appliance signs its registration with its hardware-bound identity
-  key and retries until Central answers. Enrollment tokens no longer exist.
+  key and retries until Central answers. Enrollment tokens no longer exist. A registration is single-use (replay cache).
+* **A new identity key on a waiting appliance** (the box was factory-reset before activation) is adopted only when the
+  presented hardware fingerprint equals the one Central recorded for that row. Anything else — another fingerprint,
+  none, or no recorded fingerprint — is refused `403 identity_replacement_refused`, raises one
+  `identity_replacement_refused` security alert (repeats within 24 h fold into it), and is audited; an accepted
+  replacement is audited `appliance.identity_replaced` and the old key is retired. The way out for a genuine box is
+  to delete the waiting record; it then registers as new.
+* **A retired appliance that registers again** (factory reset, new key) becomes a **new appliance row**. The retired row
+  keeps its customer, licence history, audit trail and alerts; none of it is shown on the new row
+  (`appliance.registered_after_retirement`). `appliances.serial` is unique only among live rows (migration 0051).
 * **Activate** (one step, `waiting` only) picks the customer and site (either may be created inline) and the licence
   terms, signs the assignment and issues the licence in one transaction. The certificate is auto-issued when the
   appliance's CSR arrives.
@@ -114,15 +126,24 @@ power on ──► appliance registers itself (signed, hardware-bound, no token)
   Factory-reset it before activating it for a different customer."*). Activation for the same customer (a
   breakglass identity reset, a recovery) is allowed. An appliance whose database holds **more than one**
   customer, or cannot read it, does not register at all until it is factory-reset.
-* **Retire** is two-phase: the licence is revoked at once; a signed terminal (decommissioned) assignment is issued;
+* **Retire** (from `activated` or `activating`) is two-phase and starts in ONE transaction — licence revocation, portal
+  hostname release and the signed terminal assignment commit together or not at all, so a failure leaves the
+  appliance unchanged. The licence is revoked at once; a signed terminal (decommissioned) assignment is issued;
   the appliance collects it, stands down and sends a signed acknowledgement; only then are its credentials revoked
-  and it becomes `retired`. An **emergency** retire (also "retire now" while already retiring) revokes the
+  and it becomes `retired`. An acknowledgement is accepted only while a retirement is pending. An **emergency** retire (also "retire now" while already retiring) revokes the
   credentials immediately and marks the identity revoked without waiting.
 * **Replace hardware** marks an appliance for replacement; it keeps working and licensed. Activating the new
   appliance at the same site revokes the old appliance's licence and retires it through the same acknowledged
   two-phase retirement: its credentials stay valid until it confirms (or until an emergency retire).
 * **Advanced** (appliance page, collapsed): reissue certificate, rebind WAN MAC after a NIC change (keeps the licence
   terms), mark for replacement.
+* **Deleting a site** is refused while a licence issued for it is revoked and the appliance has not yet received the
+  revocation (`licenses.revocation_delivered_at`, set when its authenticated licence fetch carried it): the row is
+  the only place an undelivered revocation lives.
+* **Offline licence files** carry a signed licence that stays valid until it expires (up to a year). Revoking the
+  licence in Central reaches an appliance that is ONLINE through the revoked-id list, which it keeps, so a revoked
+  licence's file installs as revoked there. An appliance that never comes online again cannot be told; the signed
+  format has no revocation of its own. Issue offline files with the shortest validity that works.
 * **Delete** removes a `waiting` or `retired` appliance's record (typed serial). Audit history is kept; its open
   security alerts are closed. A retired appliance's identity key is remembered: that key can never register or be
   imported again (`403`/`409 identity_retired`) — the box must be factory-reset first.
@@ -146,7 +167,13 @@ tokens with replay protection, and after activation mutual TLS; assignment signi
 key registry; the root CA key stays offline; every write is audited; licence and activation writes need a platform
 role and a recent password re-entry (step-up), and so does every change to a Central sign-in (Team members and
 customer users: create, role, status, password, delete); login and re-authentication are rate-limited per client
-address. A retired appliance's identity key is recorded (`retired_appliance_identities`, migration 0047) and refused
+address, and failed attempts are audited within a budget (5 per address, 300 overall, per minute). Every console
+request re-reads its operator: disabling, demoting, removing or re-passwording someone ends their open sessions at
+their next request, and a sign-in lasts at most `central_security_settings.operator_session_max_hours` (default 24,
+1–168, System → Team, audited) however active it is. In production ctrlapi refuses to start with the operator
+listener on every interface (unless `CTRLAPI_ALLOW_PUBLIC_LISTEN=true`) or with `CTRLAPI_COOKIE_SECURE=false`;
+console writes from a foreign Origin are refused. The signed appliance routes are rate-limited per address before
+authentication. A certificate superseded by rotation is accepted for 24 h, then revoked. A retired appliance's identity key is recorded (`retired_appliance_identities`, migration 0047) and refused
 on registration and offline import. An appliance that reports holding a customer's local data
 (`holds_customer_id`, signed) is never activated for another customer: changing customer always goes through a
 factory reset (§4). The appliance is local-first: client service never waits on Central, and
