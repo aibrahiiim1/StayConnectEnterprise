@@ -75,6 +75,18 @@ func serve() {
 		os.Exit(1)
 	}
 	logLevel.Set(cfg.LogLevel)
+	// Host hardening is checked before anything listens: a production Central does not start with the operator
+	// API on every interface or with an insecure session cookie (config.Validate).
+	hardenErrs, hardenWarns := cfg.Validate()
+	for _, w := range hardenWarns {
+		slog.Warn("configuration is not hardened", "problem", w)
+	}
+	if len(hardenErrs) > 0 {
+		for _, e := range hardenErrs {
+			slog.Error("refusing to start: configuration is not hardened", "problem", e)
+		}
+		os.Exit(1)
+	}
 
 	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
