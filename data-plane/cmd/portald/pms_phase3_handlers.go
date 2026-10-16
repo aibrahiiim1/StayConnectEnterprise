@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // scdResolve/scdGrant mirror scd's Phase-3 contract. They are separate types from the guest-facing ones on
@@ -61,6 +62,10 @@ type scdGrantResp struct {
 	Method      string `json:"method"`
 	RedirectURL string `json:"redirect_url"`
 	State       string `json:"state"`
+	// DeviceID and GuestNetworkID come only with a DEVICE_LIMIT refusal: the device scd placed and its network,
+	// held server-side for the replacement page. Never forwarded to the guest.
+	DeviceID       string `json:"device_id"`
+	GuestNetworkID string `json:"guest_network_id"`
 }
 
 // The two classes portald may decide on its own. Everything else comes from scd: portald knows what it could
@@ -267,7 +272,7 @@ func (h *handler) phase3Grant(w http.ResponseWriter, r *http.Request, b *phase3B
 			return
 		}
 		req["method"] = method
-		req["return_base"] = portalOrigin(r)
+		req["return_base"] = h.returnBase(r)
 	}
 	body, _ := json.Marshal(req)
 	var out scdGrantResp
@@ -288,6 +293,9 @@ func (h *handler) phase3Grant(w http.ResponseWriter, r *http.Request, b *phase3B
 		writeJSONPortal(w, http.StatusOK, phase3Out{OK: true, RedirectTo: to})
 		return
 	}
+	if out.FailureClass == "DEVICE_LIMIT" && h.phase3ToReplace(w, r, authContextID, out) {
+		return
+	}
 	if out.Outcome != "VERIFIED" || out.SessionID == "" {
 		// A grant that did not produce a session produced NO access. Reporting success here would leave the
 		// guest staring at a "you are connected" page on a network that will not carry their traffic. The
@@ -296,6 +304,32 @@ func (h *handler) phase3Grant(w http.ResponseWriter, r *http.Request, b *phase3B
 		return
 	}
 	writeJSONPortal(w, http.StatusOK, phase3Out{OK: true, SessionID: out.SessionID, RedirectTo: "/success"})
+}
+
+// phase3ToReplace sends a room guest whose stay has every device place taken to the replacement page, with the
+// same rules as every other client (contract ONEGATE_DEVICE_MANAGEMENT §3, audit H-6). Their identity is already
+// proved -- scd refused the GRANT, not the sign-in -- so this discloses nothing a wrong room could learn. The
+// verified sign-in (the auth context portald itself sent) and the device scd placed are held server-side in a
+// commerce session, exactly as the voucher and account paths hold theirs; the page then lists the stay's devices
+// and moves a place through scd's client_device_action. It reports false -- the device-limit sentence is
+// answered as before -- when there is nowhere to hold the proof (the Phase-2 portal surface is off) or scd did not
+// name the device.
+func (h *handler) phase3ToReplace(w http.ResponseWriter, r *http.Request, authContextID string, out scdGrantResp) bool {
+	authContextID = strings.TrimSpace(authContextID)
+	if h.commerceSessions == nil || authContextID == "" || out.DeviceID == "" || out.GuestNetworkID == "" {
+		return false
+	}
+	token, err := newCommerceToken()
+	if err != nil {
+		return false
+	}
+	sess := commerceSession{authContextID: authContextID, deviceID: out.DeviceID, guestNetworkID: out.GuestNetworkID,
+		expiry: time.Now().Add(commerceSessionTTL)}
+	h.commerceSessions.put(token, sess)
+	setPortalCookie(w, r, commerceCookie, token, commerceSessionTTL)
+	slog.Info("phase3 guest at the stay's device limit: offered the replacement page")
+	writeJSONPortal(w, http.StatusOK, phase3Out{OK: true, RedirectTo: "/devices/replace"})
+	return true
 }
 
 // scdPhase3Call performs one internal hop, under the BUDGET's context rather than the request's. That is what

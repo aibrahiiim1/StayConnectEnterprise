@@ -40,6 +40,18 @@ type commerceSession struct {
 	// acquired is set once this session has put the device online. The landing page continues an UNFINISHED
 	// journey at package selection (main.go index); a finished one is left to the success page and its panel.
 	acquired bool
+	// notice is a refusal waiting to be shown once on the package page, for a choice the page's script
+	// submitted (backToPackages): the script is told where to go, so the reason travels here, never in a URL.
+	notice string
+	// purchaseID is the card purchase this session started: the landing page sends a client who comes back to
+	// "/" to the page that asks where it stands, rather than offering the package list again (P-25).
+	purchaseID string
+	// held is set when activation was refused because the email account must verify its address first: the
+	// landing page then does not send the client round to the package list again (P-13).
+	held bool
+	// replacedEntitlement is the package a device replacement already moved a place to for this device: a retry
+	// activates on it rather than replacing another device (device_pages.go, audit P-10).
+	replacedEntitlement string
 }
 
 // commerceSessionStore maps an opaque cookie token to a trusted commerceSession. The browser only ever
@@ -87,6 +99,24 @@ func (h *handler) resolveCommerceSession(r *http.Request) (commerceSession, bool
 		return commerceSession{}, false
 	}
 	return h.commerceSessions.get(c.Value)
+}
+
+// updateCommerceSession applies fn to this request's commerce session (by its cookie) and stores the result. It
+// does nothing when there is no valid session.
+func (h *handler) updateCommerceSession(r *http.Request, fn func(*commerceSession)) {
+	if h.commerceSessions == nil {
+		return
+	}
+	c, err := r.Cookie(commerceCookie)
+	if err != nil || c.Value == "" {
+		return
+	}
+	sess, ok := h.commerceSessions.get(c.Value)
+	if !ok {
+		return
+	}
+	fn(&sess)
+	h.commerceSessions.put(c.Value, sess)
 }
 
 // commerceUnavailable is the single generic guest-facing response for every non-happy path.

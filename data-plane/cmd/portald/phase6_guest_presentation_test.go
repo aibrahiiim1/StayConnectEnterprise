@@ -27,7 +27,6 @@ func renderSuccess(t *testing.T) string {
 	p := buildGuestPage(nil, map[string]any{}, "n0nce", "tl.", "dev.", "unit.")
 	if err := tpl.Execute(&buf, successView{
 		guestPage: p, SessionID: "sess-1", DurationSeconds: 3600, HumanRemaining: "1 h",
-		CommerceEnabled: false,
 	}); err != nil {
 		t.Fatalf("render: %v", err)
 	}

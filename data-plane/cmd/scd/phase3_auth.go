@@ -135,6 +135,12 @@ type phase3Response struct {
 	AuthContextID string        `json:"auth_context_id,omitempty"`
 	ExpiresIn     int           `json:"expires_in_seconds,omitempty"`
 	Offers        []phase3Offer `json:"offers,omitempty"`
+	// DeviceID and GuestNetworkID are present ONLY on a DEVICE_LIMIT refusal of a grant, for portald alone: the
+	// device the appliance itself placed (never the body's) and its network, so portald can hold the guest's
+	// verified sign-in for the device-replacement page exactly as it does for every other sign-in (contract
+	// ONEGATE_DEVICE_MANAGEMENT §3, audit H-6). portald never forwards them to the guest.
+	DeviceID       string `json:"device_id,omitempty"`
+	GuestNetworkID string `json:"guest_network_id,omitempty"`
 }
 
 // phase3Offer is a package the SERVER determined this verified stay may be granted. The guest chooses among
@@ -1074,7 +1080,8 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 		// disconnect another device, while the attempt record keeps the closed result set.
 		if strings.Contains(err.Error(), "MAX_DEVICES_REACHED") {
 			slog.Info("phase3 auth: device limit reached for the stay's entitlement", "detail", err.Error())
-			writeJSONScd(w, http.StatusOK, phase3Response{Outcome: outcomeNotVerified, FailureClass: "DEVICE_LIMIT"})
+			writeJSONScd(w, http.StatusOK, phase3Response{Outcome: outcomeNotVerified, FailureClass: "DEVICE_LIMIT",
+				DeviceID: dev.DeviceID, GuestNetworkID: dev.GuestNetwork})
 			return
 		}
 		notVerified(w, grantResult, "grant: "+err.Error())

@@ -92,13 +92,30 @@ func (s *pendingOTPStore) clear(key string) {
 	delete(s.m, key)
 }
 
-// pendingKey is the device address as the connection reports it (never a header).
-func pendingKey(r *http.Request) string {
+// pendingKeyFor is the DEVICE a pending code belongs to: its address AND its hardware address (audit P-18).
+//
+// Keyed by the address alone, a code in flight followed the IP: when DHCP handed that address to another device,
+// the new device's landing page opened on the previous device's code box and could resend the message to the
+// previous device's number. The hardware address comes from the kernel neighbour table, never from the browser.
+func pendingKeyFor(ip net.IP, mac net.HardwareAddr) string {
+	if ip == nil || len(mac) == 0 {
+		return ""
+	}
+	return ip.String() + "|" + mac.String()
+}
+
+// pendingKey is this request's device key, from the connection and the resolving neighbour lookup ("" when the
+// device cannot be named: no pending code is offered to a device the portal cannot place).
+func (h *handler) pendingKey(r *http.Request) string {
 	ip := clientIP(r)
 	if ip == nil {
 		return ""
 	}
-	return ip.String()
+	mac, ok := h.deviceMAC(r.Context(), ip)
+	if !ok {
+		return ""
+	}
+	return pendingKeyFor(ip, mac)
 }
 
 // maskDestination renders a phone number for the page without disclosing it: +20•••1234.
@@ -114,7 +131,7 @@ func maskDestination(channel, dest string) string {
 // challenge itself still expires on its own clock in scd; dropping it here only stops the page reopening it.
 func (h *handler) authOTPForget(w http.ResponseWriter, r *http.Request) {
 	if h.pendingOTP != nil {
-		h.pendingOTP.clear(pendingKey(r))
+		h.pendingOTP.clear(h.pendingKey(r))
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{"ok":true}`))
@@ -127,7 +144,7 @@ func (h *handler) authOTPResend(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 404, "challenge not found")
 		return
 	}
-	p, ok := h.pendingOTP.get(pendingKey(r))
+	p, ok := h.pendingOTP.get(h.pendingKey(r))
 	if !ok {
 		jsonErr(w, 404, "challenge not found")
 		return
@@ -136,6 +153,8 @@ func (h *handler) authOTPResend(w http.ResponseWriter, r *http.Request) {
 	r2 := r.Clone(r.Context())
 	r2.Body = io.NopCloser(bytes.NewReader(body))
 	r2.ContentLength = int64(len(body))
+	// The body is portald's own; the origin rule still applies (the caller's Origin header is kept).
+	r2.Header.Set("Content-Type", "application/json")
 	h.authOTPRequest(w, r2)
 }
 
@@ -204,7 +223,7 @@ func (h *handler) authOTPLink(w http.ResponseWriter, r *http.Request) {
 	payload, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 	if resp.StatusCode == http.StatusOK {
 		if h.pendingOTP != nil {
-			h.pendingOTP.clear(pendingKey(r))
+			h.pendingOTP.clear(h.pendingKey(r))
 		}
 		if h.tryIAMv2Auth(w, r, payload) {
 			return

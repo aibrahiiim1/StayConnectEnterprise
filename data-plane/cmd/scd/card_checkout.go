@@ -255,6 +255,15 @@ func (s *server) purchaseStatus(w http.ResponseWriter, r *http.Request) {
 	if eid != nil {
 		out["entitlement_id"] = *eid
 	}
+	// How long the provider's checkout lives (the site's card payment setting), so the portal's pending page waits
+	// exactly that long before it says it could not confirm the payment (audit P-7), instead of a fixed 20 minutes.
+	if method == "ONLINE_PAYMENT" {
+		var exp int
+		if err := s.db.QueryRow(ctx, `SELECT checkout_expiry_minutes FROM iam_v2.card_payment_settings_get($1,$2)`,
+			s.tenID, s.siteID).Scan(&exp); err == nil && exp > 0 {
+			out["checkout_expiry_seconds"] = exp * 60
+		}
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 

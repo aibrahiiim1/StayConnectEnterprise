@@ -40,14 +40,24 @@ func TestOpenAccessMintsResumesAndRecovers(t *testing.T) {
 	if n != 0 {
 		t.Fatal("a resume token must never be stored in the clear")
 	}
-	// Another device resumes the same subject with the token, and with the recovery code (any spacing / case).
+	// The SAME device resumes the subject with its token (no live entitlement yet, so only the token can say who
+	// it is).
+	same := req
+	same.ResumeToken = first.NewResumeToken
+	r1, err := o.Begin(ctx, same)
+	if err != nil || r1.SubjectID != first.SubjectID || !r1.Resumed || r1.NewResumeToken != "" {
+		t.Fatalf("resume by token on its own device: %+v %v", r1, err)
+	}
+	// THE TOKEN IS DEVICE-BOUND (audit P-12): presented from another device it resolves to nothing, and that
+	// device is given a subject of its own rather than the client's.
 	other := req
 	other.MAC = "02:aa:00:00:00:02"
 	other.ResumeToken = first.NewResumeToken
 	r2, err := o.Begin(ctx, other)
-	if err != nil || r2.SubjectID != first.SubjectID || !r2.Resumed || r2.NewResumeToken != "" {
-		t.Fatalf("resume by token: %+v %v", r2, err)
+	if err != nil || r2.SubjectID == first.SubjectID || r2.Resumed || r2.NewResumeToken == "" {
+		t.Fatalf("a copied resume token must not resume the subject on another device: %+v %v", r2, err)
 	}
+	// Another device resumes the same subject with the recovery code (any spacing / case).
 	other.ResumeToken = ""
 	other.RecoveryCode = strings.ToLower(strings.ReplaceAll(first.NewRecoveryCode, "-", " "))
 	r3, err := o.Begin(ctx, other)

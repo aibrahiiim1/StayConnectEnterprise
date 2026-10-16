@@ -109,7 +109,9 @@ sign-in (OTP or social), scd issues a **device-bound resume credential**:
 
 * 256 random bits, stored only as a keyed HMAC in `iam_v2.principal_device_credentials` under the key
   `anonymous_access.key` with its own domain string; bound to `(tenant, site, principal, device)`;
-* set as the HttpOnly, `SameSite=Lax` portal cookie `og_client`;
+* set as the HttpOnly, `SameSite=Lax` portal cookie `og_client` (`Secure` when set over HTTPS), kept for exactly
+  the Remember-devices setting it was issued under; it is cleared only when the credential is refused, never on
+  a throttled or failed attempt (`429`, scd unreachable);
 * valid for the site's **Remember devices** setting (default 30 days; `0` disables the feature);
 * **usable only from the device it was issued to**: the MAC is resolved from the kernel neighbour table on
   every use, exactly as on every other sign-in path; a cookie presented from another device is refused and

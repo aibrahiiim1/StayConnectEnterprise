@@ -8,9 +8,9 @@ package main
 // never from the browser) and, if so, draws one Connect button. Connect mints an ordinary auth context and the
 // existing journey continues: join a live entitlement, or choose a package.
 //
-// The cookie is not Secure for the same reason the commerce cookie is not: a captive portal is reached over
-// plain HTTP before the device has any access. The credential is bound server-side to the device and carries
-// 256 bits; its value to anyone else is nil.
+// The cookie is Secure whenever it is set over TLS (cookies.go); on the HTTP fallback it cannot be, because a
+// captive portal is reached over plain HTTP before the device has any access. The credential is bound
+// server-side to the device and carries 256 bits; its value to anyone else is nil.
 
 import (
 	"bytes"
@@ -25,7 +25,11 @@ import (
 
 const (
 	clientResumeCookie = "og_client"
-	clientResumeMaxAge = 365 * 24 * time.Hour // the server-side expiry (the site's setting) governs; this only bounds the jar
+	// clientResumeDefaultDays is the contract's default Remember-devices setting (Identity policy §2.3), used when
+	// scd's reply does not say which setting the credential was issued under. The cookie lives as long as the
+	// credential: it used to be kept for a year whatever the site set (audit P-17).
+	clientResumeDefaultDays = 30
+	clientResumeMaxDays     = 365
 )
 
 type welcomeView struct {
@@ -33,14 +37,19 @@ type welcomeView struct {
 	Method string // OTP | SOCIAL
 }
 
-func setClientResumeCookie(w http.ResponseWriter, token string) {
-	http.SetCookie(w, &http.Cookie{Name: clientResumeCookie, Value: token, Path: "/", HttpOnly: true,
-		SameSite: http.SameSiteLaxMode, Expires: time.Now().Add(clientResumeMaxAge)})
+// setClientResumeCookie keeps the remembered-device credential for `days` (the site's setting at issue).
+func setClientResumeCookie(w http.ResponseWriter, r *http.Request, token string, days int) {
+	if days <= 0 {
+		days = clientResumeDefaultDays
+	}
+	if days > clientResumeMaxDays {
+		days = clientResumeMaxDays
+	}
+	setPortalCookie(w, r, clientResumeCookie, token, time.Duration(days)*24*time.Hour)
 }
 
-func clearClientResumeCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{Name: clientResumeCookie, Value: "", Path: "/", HttpOnly: true,
-		SameSite: http.SameSiteLaxMode, MaxAge: -1})
+func clearClientResumeCookie(w http.ResponseWriter, r *http.Request) {
+	clearPortalCookie(w, r, clientResumeCookie)
 }
 
 func (h *handler) resumeToken(r *http.Request) string {
@@ -100,12 +109,12 @@ func (h *handler) welcomeFor(r *http.Request, mac string) *welcomeView {
 func (h *handler) authResume(w http.ResponseWriter, r *http.Request) {
 	token := h.resumeToken(r)
 	if token == "" {
-		h.landing(w, r, "Please sign in.")
+		h.landing(w, r, msgPleaseSignIn)
 		return
 	}
 	ip := clientIP(r)
 	if ip == nil {
-		h.landing(w, r, "We couldn't detect your device. Please reconnect to the Wi-Fi and try again.")
+		h.landing(w, r, msgCannotDetectDevice)
 		return
 	}
 	// Resolving lookup, as on every sign-in path: a cold cache is not evidence the device left the network.
@@ -118,14 +127,21 @@ func (h *handler) authResume(w http.ResponseWriter, r *http.Request) {
 	if status == http.StatusOK && h.tryIAMv2Auth(w, r, payload) {
 		return
 	}
-	// Anything else: the credential is gone (expired, revoked, another device, method switched off) or the
-	// authority refused. The cookie is cleared so the greeting does not return, and the ordinary page is shown.
-	clearClientResumeCookie(w)
-	if status == http.StatusTooManyRequests {
-		h.landing(w, r, "Too many attempts. Please wait a moment and try again.")
+	// A REFUSAL THAT SAYS NOTHING ABOUT THE CREDENTIAL KEEPS IT (audit P-9). Too many attempts, scd unreachable
+	// (status 0) or a server error are about this moment, not about the remembered device: clearing the cookie
+	// then threw away a credential that was still good, and the next visit asked for a code again.
+	switch {
+	case status == http.StatusTooManyRequests:
+		h.landing(w, r, msgTooManyAttemptsMoment)
+		return
+	case status == 0 || status >= 500:
+		h.landing(w, r, "Service unavailable. Please try again.")
 		return
 	}
-	h.landing(w, r, "Please sign in.")
+	// Anything else: the credential is gone (expired, revoked, another device, method switched off) or the
+	// authority refused it. The cookie is cleared so the greeting does not return, and the ordinary page is shown.
+	clearClientResumeCookie(w, r)
+	h.landing(w, r, msgPleaseSignIn)
 }
 
 // POST /auth/resume/forget -- "Not you?": revoke the credential and forget the device.
@@ -138,6 +154,6 @@ func (h *handler) authResumeForget(w http.ResponseWriter, r *http.Request) {
 			resp.Body.Close()
 		}
 	}
-	clearClientResumeCookie(w)
+	clearClientResumeCookie(w, r)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }

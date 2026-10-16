@@ -15,9 +15,13 @@ package main
 //     AUTH_DENIED.") become a sentence a person can act on.
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -275,6 +279,8 @@ type guestPage struct {
 	// wrapping the sheet in `@layer hotel`, or empty. The sign-in page ignores it; its script applies the same
 	// sheet from /api/branding in the same way.
 	HotelSheet template.HTML
+	// Leave is this device's sign-out token (leave.go): every Disconnect / Sign out form carries it.
+	Leave string
 }
 
 // reImportant matches what the sign-in page's script removes a second time before layering the hotel's sheet.
@@ -313,10 +319,14 @@ func buildGuestPage(r *http.Request, d map[string]any, nonce string, jsPrefixes 
 	if lang.RTL {
 		dir = "rtl"
 	}
-	return guestPage{
+	p := guestPage{
 		Lang: lang.Code, Dir: dir, Nonce: nonce, T: words, JS: jsData(subset(words, jsPrefixes...)),
 		Languages: offeredLanguages(d), Brand: brandFor(d), HotelSheet: hotelSheet(d),
 	}
+	if r != nil {
+		p.Leave = leaveToken(clientIP(r))
+	}
+	return p
 }
 
 // capRunes keeps at most n characters: a value given back to a field is no longer than the field accepts.
@@ -377,21 +387,21 @@ func speed(words map[string]string, kbps float64) string {
 // of each key is the sentence itself wherever that sentence was already fit for a guest, so an English guest
 // reads exactly what the handler wrote.
 var serverMessageKeys = map[string]string{
-	"Please enter a voucher code.": "err.voucher.empty",
-	"Invalid voucher.":             "err.voucher.invalid",
-	"This voucher has reached its device limit. Disconnect another device and try again.": "err.voucher.devices",
-	"Please enter your username and password.":                                            "err.account.empty",
-	"Invalid username or password.":                                                       "err.account.invalid",
-	"This account has reached its device limit. Disconnect another device and try again.": "err.account.devices",
-	"This room has reached its device limit. Disconnect another device and try again.":    "err.room.devices",
-	"This sign-in method is not available. Please contact the site team for assistance.":  "err.method.disabled",
-	"Too many attempts. Please wait a minute and try again.":                              "err.attempts",
-	"The Wi-Fi network is at capacity. Please try again shortly.":                         "err.capacity",
-	"Your device isn't connected to this Wi-Fi network.":                                  "err.device.network",
-	"Unable to detect your device address.":                                               "err.device.detect",
-	"Service unavailable. Please try again.":                                              "err.service",
-	"Something went wrong. Please try again.":                                             "err.service",
-	"We could not complete that. Please try again.":                                       "err.service",
+	"Please enter a voucher code.":             "err.voucher.empty",
+	"Invalid voucher.":                         "err.voucher.invalid",
+	msgVoucherDevices:                          "err.voucher.devices",
+	"Please enter your username and password.": "err.account.empty",
+	"Invalid username or password.":            "err.account.invalid",
+	msgAccountDevices:                          "err.account.devices",
+	guestRoomDeviceLimitMessage:                "err.room.devices",
+	"This sign-in method is not available. Please contact the site team for assistance.": "err.method.disabled",
+	"Too many attempts. Please wait a minute and try again.":                             "err.attempts",
+	"The Wi-Fi network is at capacity. Please try again shortly.":                        "err.capacity",
+	"Your device isn't connected to this Wi-Fi network.":                                 "err.device.network",
+	"Unable to detect your device address.":                                              "err.device.detect",
+	"Service unavailable. Please try again.":                                             "err.service",
+	"Something went wrong. Please try again.":                                            "err.service",
+	"We could not complete that. Please try again.":                                      "err.service",
 	"Bad request.": "err.service",
 	"Internet packages are not available right now. Please contact the site team for assistance.": "err.packages.off",
 	"Internet packages are unavailable right now.":                                                "err.packages.off",
@@ -588,11 +598,11 @@ type successView struct {
 	SessionID       string
 	DurationSeconds int
 	HumanRemaining  string
-	CommerceEnabled bool
-	// The commerce panel's own words (commerce_strings.go), for the server-rendered heading (CX) and the
-	// panel's script (CXJS). Set only when the panel is rendered.
-	CX   map[string]string
-	CXJS template.JS
+	// Unlimited: the appliance said this access has no end. Neither it nor HumanRemaining is set when the
+	// appliance could not be asked, and the page then states no time at all.
+	Unlimited bool
+	// ReturnCode is the open-selection return code of this client's session (contract MODULES §6.5).
+	ReturnCode string
 }
 
 // ---- the package choice ------------------------------------------------------------------------------------
@@ -737,9 +747,56 @@ type scdStatus struct {
 	TimeMode               string   `json:"time_mode"`
 	RemainingOnlineSeconds *float64 `json:"remaining_online_seconds"`
 	HardExpiry             string   `json:"hard_expiry"`
+	// AccessEndsAt is the entitlement's calendar end, for any package that has one.
+	AccessEndsAt string `json:"access_ends_at"`
 	// OnlineTimeAllowance is scd's statement that remaining_online_seconds is a time allowance to show. It is
 	// set for the aggregate mode and, since migration 0122, for a validity-window plan with a time allowance.
 	OnlineTimeAllowance bool `json:"online_time_allowance"`
+}
+
+// remaining is how long this device's access has left: the earliest of the online time left, the hard expiry and
+// the calendar end. nil when scd reported none of them (access with no end).
+func (st scdStatus) remaining(now time.Time) *time.Duration {
+	var out *time.Duration
+	take := func(d time.Duration) {
+		if d < 0 {
+			d = 0
+		}
+		if out == nil || d < *out {
+			out = &d
+		}
+	}
+	if st.RemainingOnlineSeconds != nil && *st.RemainingOnlineSeconds >= 0 && !math.IsInf(*st.RemainingOnlineSeconds, 0) {
+		take(time.Duration(*st.RemainingOnlineSeconds * float64(time.Second)))
+	}
+	for _, at := range []string{st.HardExpiry, st.AccessEndsAt} {
+		if t, err := time.Parse(time.RFC3339, at); err == nil {
+			take(t.Sub(now))
+		}
+	}
+	return out
+}
+
+// deviceStatus asks scd about this device's session (the connection's address only). ok=false when scd could
+// not answer.
+func (h *handler) deviceStatus(ctx context.Context, ip net.IP) (scdStatus, bool) {
+	var st scdStatus
+	if ip == nil || h.scd == nil {
+		return st, false
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://unix/v1/sessions/status?ip="+ip.String(), nil)
+	if err != nil {
+		return st, false
+	}
+	resp, err := h.scd.Do(req)
+	if err != nil {
+		return st, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&st) != nil {
+		return scdStatus{}, false
+	}
+	return st, true
 }
 
 // onlinePageHref is the way back to "You're online": the page the guest came from, rebuilt from the two values

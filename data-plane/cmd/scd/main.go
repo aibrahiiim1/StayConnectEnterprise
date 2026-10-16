@@ -481,7 +481,9 @@ func (s *server) revoke(w http.ResponseWriter, r *http.Request) {
 	// Clamp to a known reason, so a caller passing an unexpected one ends the session cleanly instead of 500.
 	// The metric keeps these lower-case labels; the session row records the upper-case code (sessionEndCode).
 	switch req.Reason {
-	case "quota_bytes", "quota_time", "admin", "idle", "dhcp_expired", "policy":
+	// "logout" is the guest's own sign-out from the portal (audit P-30): it used to be recorded as "admin", so a
+	// guest who tapped Disconnect read in the console as if staff had disconnected them.
+	case "quota_bytes", "quota_time", "admin", "idle", "dhcp_expired", "policy", "logout":
 	default:
 		req.Reason = "admin"
 	}
@@ -534,6 +536,17 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 		"ip":         ip.String(),
 		"session_id": id,
 		"active":     active,
+	}
+	// When the access ends by the calendar (the entitlement's window), for the portal's "You're online" page and the
+	// captive API (audit P-6): the page used to read a duration from its own URL, which every IAM-v2 sign-in left
+	// empty, so it always said "No time limit". Absent for access with no end.
+	if active && id != "" && s.db != nil {
+		var ends *time.Time
+		if err := s.db.QueryRow(r.Context(), `SELECT e.window_ends_at FROM iam_v2.sessions x
+		     JOIN iam_v2.entitlements e ON e.id = x.entitlement_id
+		     WHERE x.id = $1::uuid AND x.tenant_id = $2 AND x.site_id = $3`, id, s.tenID, s.siteID).Scan(&ends); err == nil && ends != nil {
+			out["access_ends_at"] = ends.UTC().Format(time.RFC3339)
+		}
 	}
 	// A guest with an online-time budget needs both of their clocks. For the Phase-6 aggregate mode that stays
 	// behind its (DARK by default) flag, exactly as before. A VALIDITY_WINDOW plan's time allowance is enforced

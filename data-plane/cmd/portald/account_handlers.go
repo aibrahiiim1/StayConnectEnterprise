@@ -487,6 +487,10 @@ func (h *handler) renderAccountPage(w http.ResponseWriter, r *http.Request, st *
 		}
 	}
 	v.CanResend = token != "" && !v.Verified
+	if v.Hold {
+		// The landing page must not continue this sign-in at the package list again (main.go index, audit P-13).
+		h.updateCommerceSession(r, func(s *commerceSession) { s.held = true })
+	}
 	switch {
 	case v.Hold:
 		v.Title = p.T["acct.hold.title"]
@@ -710,7 +714,9 @@ const accountHTML = guestHead + `
       <button class="primary" type="submit">{{index .T "acct.grace"}}</button>
     </form>
   </div>{{end}}
-  <div class="actions"><a class="btn btn--outline" href="{{.BackHref}}">{{.BackLabel}}</a></div>
+  <!-- A HELD ACCOUNT IS OFFERED SIGN OUT (audit P-13). "Back" led to the landing page, which continued the
+       sign-in at the package list, which led back here: a loop with no way to use another account. -->
+  <div class="actions">{{if .Hold}}<form method="post" action="/logout"><input type="hidden" name="leave" value="{{.Leave}}"><button class="btn btn--outline" type="submit">{{index .T "pkg.signout"}}</button></form>{{else}}<a class="btn btn--outline" href="{{.BackHref}}">{{.BackLabel}}</a>{{end}}</div>
 </div>` + guestFoot + `
 </main>
 </div>` + guestScripts + acctMomentScript + `
