@@ -108,7 +108,7 @@ func (w *worker) ownAndServe(ctx context.Context) (time.Duration, error) {
 		logEvent(w.deps.log(), EventWorkerNotDialable, Classify(err), sf(StageReRead))
 		return 0, err
 	}
-	if iface.LifecycleState != "ACTIVE" {
+	if !workerLifecycle(iface.LifecycleState) {
 		logEvent(w.deps.log(), EventWorkerNotDialable, CodeInterfaceDisabled, sf(StageReRead))
 		return 0, coded(CodeInterfaceDisabled, nil)
 	}
