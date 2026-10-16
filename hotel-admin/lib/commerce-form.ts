@@ -228,6 +228,26 @@ export function validateSaleWindow(from?: string, until?: string): string | null
   return null;
 }
 
+// SPEED STEPS WERE NEVER APPLIED (audit O-5). A package's grant tiers are a first-match list with optional speed
+// overrides and no threshold; the override was shown to clients while the network always applied the service
+// plan's speed. The appliance now refuses to save more than one step, or a step with speeds, and so does the form,
+// in the same words. (The server message starts "speed_steps_not_supported"; this is the operator sentence.)
+export const SPEED_STEPS_REFUSAL =
+  "This package has speed steps, which were never applied: clients always get the speed of the package's service " +
+  "plan. Remove the speed steps, and choose a service plan with the speed you want.";
+
+/** Whether the tiers are the one plain step a package may carry: one step, no speeds of its own. */
+export function tiersArePlain(tiers: GrantTierForm[]): boolean {
+  const set = (v: number | string | undefined) => v !== undefined && v !== "";
+  return tiers.length <= 1 && tiers.every((t) => !set(t.down_kbps) && !set(t.up_kbps));
+}
+
+/** The one plain step that replaces speed steps: the lowest order, nothing else. */
+export function plainTiers(tiers: GrantTierForm[]): GrantTierForm[] {
+  const orders = tiers.map((t) => Number(t.order)).filter((n) => Number.isFinite(n));
+  return [{ order: orders.length ? Math.min(...orders) : 10 }];
+}
+
 // tiersInOrder returns the tiers sorted by ascending order (deterministic), each with numeric fields.
 export function tiersInOrder(tiers: GrantTierForm[]): { order: number; grant: Record<string, number> }[] {
   return tiers
@@ -266,6 +286,7 @@ export function buildPublishPayload(s: PublishFormState): { payload?: PublishPay
   if (!s.code.trim()) return { error: "code is required" };
   if (!s.service_plan_revision_id) return { error: "a service plan is required" };
   if (s.tiers.length === 0) return { error: "at least one grant tier is required" };
+  if (!tiersArePlain(s.tiers)) return { error: SPEED_STEPS_REFUSAL };
   const durErr = validateDuration(s.duration);
   if (durErr) return { error: durErr };
   const winErr = validateSaleWindow(s.visible_from, s.visible_until);

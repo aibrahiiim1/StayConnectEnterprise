@@ -416,6 +416,12 @@ func main() {
 				r.Use(s.resourcePermission("auth-methods"))
 				r.Mount("/", s.deviceSettingsRoutes())
 			})
+			// ACCOUNTING-DETAIL RETENTION (accounting_retention_admin.go, migration 0122): a data-retention
+			// decision that removes history when shortened, so the "backups" key -- site administrators write.
+			r.Route("/accounting-retention", func(r chi.Router) {
+				r.Use(s.resourcePermission("backups"))
+				r.Mount("/", s.accountingRetentionRoutes())
+			})
 			// USAGE EXPLORER. Read-only investigation over durable accounting and session data; see
 			// resources_usage.go. Under the "sessions" role because it is the same live-access state that
 			// resource already governs, rather than a new row in the role matrix.

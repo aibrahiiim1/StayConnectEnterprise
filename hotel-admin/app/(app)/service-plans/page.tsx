@@ -42,7 +42,7 @@ import { focusSheetItself } from "@/components/commerce/sheet-focus";
 import {
   formatSpeed, formatData, formatDuration, formatDevices, mbpsToKbps, gbToBytes,
   durationToSeconds, secondsToDurationField, bytesToGb,
-  DEVICE_LIMIT_POLICIES, TIME_ACCOUNTING_MODES,
+  DEVICE_LIMIT_POLICIES, SELECTABLE_DEVICE_LIMIT_POLICIES, TIME_ACCOUNTING_MODES,
 } from "@/lib/units";
 import {
   stalePackagesFor, repinPayload, repinOutcomeMessage, type PackageCurrentDTO,
@@ -602,11 +602,14 @@ export default function ServicePlansPage() {
               </div>
               <div>
                 <Label htmlFor="plan-device-policy">When the device limit is reached</Label>
-                <Select id="plan-device-policy" name="device_limit_policy" defaultValue={prefill?.device_limit_policy ?? "REJECT_NEW_DEVICE"}>
-                  {Object.entries(DEVICE_LIMIT_POLICIES).map(([v, label]) => (
-                    <option key={v} value={v}>{label}</option>
+                <Select id="plan-device-policy" name="device_limit_policy"
+                  defaultValue={(SELECTABLE_DEVICE_LIMIT_POLICIES as readonly string[]).includes(prefill?.device_limit_policy ?? "")
+                    ? (prefill?.device_limit_policy ?? "REJECT_NEW_DEVICE") : "REJECT_NEW_DEVICE"}>
+                  {SELECTABLE_DEVICE_LIMIT_POLICIES.map((v) => (
+                    <option key={v} value={v}>{DEVICE_LIMIT_POLICIES[v]}</option>
                   ))}
                 </Select>
+                <Hint>Disconnecting the oldest device ends its connection and frees its place for the new one.</Hint>
               </div>
 
               {/* PRE-FILLED, and that is a bug fix rather than a nicety: the form publishes a complete new version
@@ -622,7 +625,9 @@ export default function ServicePlansPage() {
                     <option value="days">days</option>
                   </Select>
                 </div>
-                <Hint>Up to {LIMITS.timeQuotaDays} days.</Hint>
+                <Hint>Time online, added up across the client&rsquo;s devices (two devices online for an hour use two
+                  hours). Access ends when it runs out, or when the package&rsquo;s duration ends if that comes first.
+                  Up to {LIMITS.timeQuotaDays} days.</Hint>
               </div>
               <div>
                 <Label htmlFor="plan-data">Data allowance (GB)</Label>
@@ -634,11 +639,14 @@ export default function ServicePlansPage() {
                 <Label htmlFor="plan-idle">Disconnect after inactivity (minutes)</Label>
                 <Input id="plan-idle" name="idle_timeout" type="number" min={0} max={LIMITS.idleMinutes} placeholder="Never"
                   defaultValue={secondsToDurationField(prefill?.idle_timeout_seconds, ["minutes"]).value} />
+                <Hint>A device with no traffic for this long is disconnected; it can sign in again, and the package is
+                  not used up.</Hint>
               </div>
               <div>
                 <Label htmlFor="plan-session">Maximum single session (hours)</Label>
                 <Input id="plan-session" name="max_session" type="number" min={0} max={LIMITS.sessionHours} placeholder="No limit"
                   defaultValue={secondsToDurationField(prefill?.max_continuous_session_seconds, ["hours"]).value} />
+                <Hint>A connection is ended after this long; the device can sign in again straight away.</Hint>
               </div>
 
               <div className="sm:col-span-2">

@@ -577,6 +577,15 @@ func validatePlanSpec(spec *PlanPublishSpec, allowAggregate bool) error {
 	if !deviceLimitPolicies[spec.DeviceLimitPolicy] {
 		return &Error{Code: ErrInvalidInput, Msg: "unknown device_limit_policy"}
 	}
+	// ADMIN_APPROVAL STAYS IN THE ENUM (published history names it) BUT CANNOT BE PUBLISHED (D-C). There is no
+	// approval workflow: no queue, no screen, nobody is asked -- so a device over the limit on such a plan could
+	// never be admitted, and the database refuses it outright. Saying so here, while the operator is looking at
+	// the plan, is the honest answer.
+	if spec.DeviceLimitPolicy == "ADMIN_APPROVAL" {
+		return &Error{Code: ErrInvalidInput, Msg: "device_limit_policy ADMIN_APPROVAL is not available: there is " +
+			"no approval workflow, so a device over the limit could never be admitted. Choose REJECT_NEW_DEVICE " +
+			"(refuse the new device) or DISCONNECT_OLDEST (disconnect the oldest device to admit the new one)"}
+	}
 	// THE DEFAULT IS THE OLD BEHAVIOUR, and it is a default rather than a branch: a spec that omits the mode
 	// publishes VALIDITY_WINDOW, exactly as every revision published so far did.
 	if spec.TimeAccountingMode == "" {

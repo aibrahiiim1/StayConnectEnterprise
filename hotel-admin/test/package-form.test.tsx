@@ -12,7 +12,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { PackageForm, type PlanOption } from "@/app/(app)/internet-packages/package-form";
-import { FORBIDDEN_RULE_TYPES, SUPPORTED_RULE_TYPES } from "@/lib/commerce-form";
+import { FORBIDDEN_RULE_TYPES, SUPPORTED_RULE_TYPES, SPEED_STEPS_REFUSAL } from "@/lib/commerce-form";
 
 // The Free access device switch is a Radix Switch, which measures itself; jsdom has no ResizeObserver.
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
@@ -338,21 +338,28 @@ describe("PackageForm", () => {
     expect(payload).not.toHaveProperty("room_charge_mappings");
   });
 
-  it("carries the existing rules and tiers through a save unchanged", () => {
+  it("carries the existing rules through a save, and refuses speed steps until they are removed", () => {
     const onSave = vi.fn();
     render(<PackageForm mode="edit" plans={plans} onSave={onSave} initial={{
       ...initial,
       rules: [{ type: "AUTH_METHOD", methods: "pms, voucher" }],
       tiers: [{ order: 10, down_kbps: 5000 }, { order: 5, down_kbps: 1000 }],
     }} />);
+    // Speed steps were never applied (audit O-5): the form says so, and will not save them.
+    expect(screen.getByTestId("speed-steps-notice").textContent).toContain(SPEED_STEPS_REFUSAL);
     fireEvent.change(screen.getByTestId("name"), { target: { value: "Renamed" } });
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getAllByText(SPEED_STEPS_REFUSAL).length).toBeGreaterThan(1);
 
+    fireEvent.click(screen.getByTestId("remove-speed-steps"));
+    expect(screen.queryByTestId("speed-steps-notice")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
     const payload = onSave.mock.calls[0][0].payload;
     expect(payload.eligibility_rules).toEqual([
       { type: "AUTH_METHOD", value: { methods: ["pms", "voucher"] } },
     ]);
-    expect(payload.grant_tiers.map((t: { order: number }) => t.order)).toEqual([5, 10]);
+    expect(payload.grant_tiers).toEqual([{ order: 5, grant: {} }]);
     // A package loaded with no price section is Free, and is saved as Free.
     expect(payload.acquisition_methods).toEqual(["NOT_REQUIRED"]);
     expect(payload.price_minor).toBe(0);

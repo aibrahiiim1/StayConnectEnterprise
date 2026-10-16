@@ -2,6 +2,7 @@ package iamv2
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -270,3 +271,41 @@ func ValidateGrantTier(t GrantTier) error {
 }
 
 var _ = time.Now
+
+// GrantTiersEnforceableRefusal is the editor's refusal for grant tiers the enforcement plane does not honour
+// (audit O-5, Product-Owner decision D-C), or "" when the tiers are acceptable.
+//
+// WHY REFUSE RATHER THAN ENFORCE. The stored tier model is (tier_order, grant_value): an ordered list of
+// optional speed/quota/device overrides, chosen per client by a FIRST-MATCH condition -- not by usage. It has no
+// threshold, so "speed steps applied in order" has no defined moment to step at, and a first-match list with an
+// unconditional first tier never reaches the second at all. The overrides on the chosen tier are frozen into the
+// quote and shown to the client, but shaping, device limits and quotas are enforced from the package's SERVICE
+// PLAN revision. So the screen promised speeds the network never applied.
+//
+// Inventing a threshold model would be a product decision; refusing is not. A package carries exactly one grant
+// tier, and that tier may hold only its optional match condition. Different speeds are different service plans.
+// Packages already published keep their stored tiers (history is immutable, and an automatic republish such as
+// a network replacement carries them unchanged); this applies to an operator saving a package.
+func GrantTiersEnforceableRefusal(tiers []GrantTier) string {
+	if len(tiers) > 1 {
+		return "speed_steps_not_supported: a package has a single grant step. Speed steps were shown to clients " +
+			"but never applied -- the speed, device limit and allowances a client gets come from the package's " +
+			"service plan. Remove the extra steps; to sell different speeds, give each speed its own service plan " +
+			"and package."
+	}
+	for _, t := range tiers {
+		keys := make([]string, 0, len(t.Value))
+		for k := range t.Value {
+			if k != "match" {
+				keys = append(keys, k)
+			}
+		}
+		if len(keys) > 0 {
+			sort.Strings(keys)
+			return "speed_steps_not_supported: the grant step sets " + strings.Join(keys, ", ") + ", which the " +
+				"network does not apply -- the speed, device limit and allowances come from the package's service " +
+				"plan. Clear the step's values and choose a service plan with the speeds you want."
+		}
+	}
+	return ""
+}

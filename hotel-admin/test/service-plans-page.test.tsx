@@ -294,6 +294,17 @@ describe("ServicePlansPage — add, record and delete", () => {
     expect(p.mock.calls[1][1]).not.toHaveProperty("create_only");
   });
 
+  // D-C / O-8: both offered policies are enforced; ADMIN_APPROVAL has no approval workflow and is not offered.
+  it("offers only the device-limit policies the appliance enforces", async () => {
+    mockLoad([], [ONEDAY]);
+    render(<ServicePlansPage />);
+    await screen.findByText("OneDay", { selector: "button" });
+    fireEvent.click(screen.getByRole("button", { name: /add plan/i }));
+    const select = document.querySelector('[name="device_limit_policy"]') as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(["REJECT_NEW_DEVICE", "DISCONNECT_OLDEST"]);
+    expect(screen.getByText(/two devices online for an hour use two/i)).toBeInTheDocument();
+  });
+
   it("shows the server's code_exists refusal inside the form", async () => {
     mockLoad([], [ONEDAY]);
     const { ApiError } = await import("@/lib/api");
