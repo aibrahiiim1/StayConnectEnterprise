@@ -45,15 +45,23 @@ installed (pilot), plain indexed tables otherwise.
 
 Authentication: local operator session (argon2id + cookie, same model as
 ctrlapi). Role gates per [ROLE_AND_SCOPE_MATRIX.md](ROLE_AND_SCOPE_MATRIX.md).
+The login and every password step-up are throttled in the site database (migration 0119: per account /
+operator and per source address, doubling back-off then a lockout; the numbers are the audited
+`public.operator_signin_protection` setting), every failure is audited (`operator.login_failed`,
+`operator.reauth_failed`, `operator.*_locked`), and a `must_change_password` session can reach only
+`/auth/whoami`, `/auth/password` and `/auth/logout`. Every state-changing request must carry the console's own
+Origin (or Referer) when it carries one; `/auth/logout` ends only the caller's own session.
 Provisioning writes are additionally gated by license state
 ([LICENSING_AND_ENTITLEMENTS.md](LICENSING_AND_ENTITLEMENTS.md)).
 
 | Resource | Routes | Purpose |
 |---|---|---|
-| health | `GET /edge/v1/health` | daemon + DB + license-state summary |
+| health | `GET /edge/v1/health` | liveness (`service`, `status`, `db`, `scd`) for anyone; site id, version and licence state only for a signed-in operator or a direct loopback caller on the appliance |
+| auth | `POST /edge/v1/auth/login`, `POST /auth/logout`, `GET /auth/whoami`, `POST /auth/password` (own password, current one required; ends every other session) | sign-in |
 | central | `GET /edge/v1/central/status` (activation, licence, Central connection, technical details — [CENTRAL_CONTROL_PLANE.md §8](CENTRAL_CONTROL_PLANE.md#8-admin-console--central)), `POST /edge/v1/central/refresh` (Check now), `GET /edge/v1/central/offline-request`, `POST /edge/v1/central/offline-package` | Appliance & licence page |
 | license | `POST /edge/v1/license` (licence file upload — offline renewal path) | Appliance & licence page |
-| operators | CRUD + set-password/roles | local site staff |
+| operators | CRUD + set-password (ends that operator's sessions and lockout; `require_change`)/roles; `GET/PUT /operators/signin-protection` (+ `/changes`) | local site staff, sign-in protection |
+| backup-download | `POST /backup-download/{name}/ticket` (password → single-use 60 s ticket), `POST /backup-download/{name}` (form field `ticket` → the file) | site_admin and IT manager only |
 | guest-access-plans | CRUD (`ticket_templates`) | duration/caps/bandwidth/price |
 | voucher-batches | list/create/detail/codes/CSV/revoke | |
 | vouchers | get/revoke | |

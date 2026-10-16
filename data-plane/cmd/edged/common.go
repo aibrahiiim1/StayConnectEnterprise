@@ -323,7 +323,13 @@ func runSeedAdmin(args []string) error {
 	if err := tx.Commit(ctx); err != nil {
 		return err
 	}
-	slog.Info("seeded site admin", "email", *email, "id", id)
+	// Break-glass recovery: a reset password must be usable now, so a running sign-in lockout on this account ends
+	// with it (the same as an administrator's reset). Best-effort -- before migration 0119 there is no throttle.
+	if _, err := pool.Exec(ctx, `SELECT public.operator_signin_throttle_clear('account', $1)`,
+		throttleKey(scopeAccount, *email)); err != nil {
+		slog.Warn("could not clear a sign-in lockout for the seeded account", "err", err)
+	}
+	slog.Info("seeded site admin", "email", *email, "id", id, "must_change_password", mustChange)
 	return nil
 }
 

@@ -573,3 +573,33 @@ func TestIntegrationSigninThrottlePrivilegesUnderEdgedsOwnLogin(t *testing.T) {
 		t.Error("svc_edged cleared a source-address counter")
 	}
 }
+
+// PROVISIONING'S --allow-weak IS USABLE EXACTLY ONCE: the seeded account must change its password, and a
+// break-glass re-seed ends a running lockout on that account.
+func TestIntegrationSeedAdminAllowWeakMustChange(t *testing.T) {
+	sf := newSigninAPI(t, "site_admin")
+	t.Setenv("EDGED_DB_URL", os.Getenv("PHASE3_TEST_DSN"))
+	email := fmt.Sprintf("seed-%d@test.local", time.Now().UnixNano())
+	ip := testIP()
+	if err := runSeedAdmin([]string{"--email", email, "--password", "admin", "--allow-weak"}); err != nil {
+		t.Fatalf("seed-admin: %v", err)
+	}
+	var must bool
+	if err := sf.pool.QueryRow(context.Background(), `SELECT must_change_password FROM operators WHERE email=$1`, email).Scan(&must); err != nil || !must {
+		t.Fatalf("--allow-weak did not mark the account (must=%v err=%v)", must, err)
+	}
+	for i := 0; i < 5; i++ {
+		sf.login(t, email, "not-admin-at-all", ip)
+		sf.age(t, scopeAccount, email, time.Minute)
+	}
+	if r := sf.login(t, email, "admin", ip); r.code != 429 {
+		t.Fatalf("expected a lockout before the re-seed: %d", r.code)
+	}
+	if err := runSeedAdmin([]string{"--email", email, "--password", "a-strong-break-glass-pw"}); err != nil {
+		t.Fatalf("re-seed: %v", err)
+	}
+	r := sf.login(t, email, "a-strong-break-glass-pw", ip)
+	if r.code != 200 || r.body["must_change_password"] != false {
+		t.Fatalf("after a strong re-seed: %d %s", r.code, r.raw)
+	}
+}

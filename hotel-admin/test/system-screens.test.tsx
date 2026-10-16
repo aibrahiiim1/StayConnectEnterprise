@@ -91,14 +91,21 @@ describe("Diagnostics", () => {
     await waitFor(() => expect(post).toHaveBeenCalledWith("/diagnostics/services/scd/restart", { reason: "stuck", password: "pw-123" }));
   });
 
-  it("offers a read-only role the logs but not Recheck or Restart, which the server refuses", async () => {
+  it("offers a read-only role neither the logs nor Recheck or Restart, which the server refuses (N-22)", async () => {
     routes({ "/diagnostics/services": SUMMARY }, ["site_viewer"]);
     const Page = (await import("@/app/(app)/health/page")).default;
     render(<Page />);
-    expect(await screen.findByRole("button", { name: "Logs for scd" })).toBeTruthy();
-    await screen.findByText(/can view diagnostics and read logs/i);
+    await screen.findByText(/can view diagnostics, but not read service logs/i);
+    expect(screen.queryByRole("button", { name: "Logs for scd" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Restart scd" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Recheck scd" })).toBeNull();
+  });
+
+  it("offers the IT manager the logs", async () => {
+    routes({ "/diagnostics/services": SUMMARY }, ["hotel_it_manager"]);
+    const Page = (await import("@/app/(app)/health/page")).default;
+    render(<Page />);
+    expect(await screen.findByRole("button", { name: "Logs for scd" })).toBeTruthy();
   });
 });
 
@@ -205,14 +212,39 @@ describe("Backups", () => {
     await waitFor(() => expect(post).toHaveBeenCalledWith("/backups/run", { password: "pw" }));
   });
 
-  it("shows a read-only role no write action", async () => {
+  it("shows a read-only role no write action and no download (decision D-B)", async () => {
     routes(base, ["site_viewer"]);
     const Page = (await import("@/app/(app)/backups/page")).default;
     render(<Page />);
-    await screen.findByText(/can see and download backups/);
+    await screen.findByText(/can see the backups, but not download/);
+    await screen.findByText("db-20260921T095526Z.sql.gz");
     expect(screen.queryByRole("button", { name: /Back up now/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Restore / })).toBeNull();
-    expect(screen.getAllByRole("link", { name: /^Download / }).length).toBe(2);
+    expect(screen.queryByRole("button", { name: /^Download / })).toBeNull();
+    expect(screen.queryByRole("link", { name: /^Download / })).toBeNull();
+  });
+
+  it("the IT manager downloads with a password: a ticket first, then the file by form post", async () => {
+    routes(base, ["hotel_it_manager"]);
+    post.mockResolvedValue({ ticket: "tkt-1" });
+    const submit = vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(function (this: HTMLFormElement) {
+      expect(this.method.toLowerCase()).toBe("post");
+      expect(this.action).toContain("/api/edge/v1/backup-download/db-20260921T095526Z.sql.gz");
+      expect((this.elements.namedItem("ticket") as HTMLInputElement).value).toBe("tkt-1");
+    });
+    const Page = (await import("@/app/(app)/backups/page")).default;
+    render(<Page />);
+    await screen.findByText(/can see and download backups/);
+    await userEvent.click(await screen.findByRole("button", { name: "Download db-20260921T095526Z.sql.gz" }));
+    const dialog = await screen.findByRole("dialog");
+    const go = within(dialog).getByRole("button", { name: "Download" }) as HTMLButtonElement;
+    expect(go.disabled, "the password is required").toBe(true);
+    await userEvent.type(within(dialog).getByLabelText(/Confirm your password/), "pw");
+    await userEvent.click(go);
+    await waitFor(() => expect(post).toHaveBeenCalledWith(
+      "/backup-download/db-20260921T095526Z.sql.gz/ticket", { password: "pw" }));
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+    submit.mockRestore();
   });
 });
 
