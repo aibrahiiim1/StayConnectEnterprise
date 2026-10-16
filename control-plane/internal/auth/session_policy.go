@@ -36,14 +36,14 @@ var ErrSessionEnded = errors.New("session ended")
 
 // OperatorState is what the database says about the session's operator right now.
 type OperatorState struct {
-	Found            bool
-	Status           string
-	Email            string
-	DisplayName      string
+	Found             bool
+	Status            string
+	Email             string
+	DisplayName       string
 	SessionsNotBefore *time.Time
-	Roles            []string
-	DefaultTenant    string
-	MaxHours         int
+	Roles             []string
+	DefaultTenant     string
+	MaxHours          int
 }
 
 // Validate applies the policy above. It returns the session refreshed with the operator's current identity

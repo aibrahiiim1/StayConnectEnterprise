@@ -27,10 +27,14 @@ type LicensesBase struct {
 
 // licenseTerms is the licence block of activate and of Set licence.
 type licenseTerms struct {
-	MaxConcurrentOnlineGuests int        `json:"max_concurrent_online_guests"`
-	ValidUntil                *time.Time `json:"valid_until"`
-	ValidDays                 int        `json:"valid_days"`
-	GracePeriodDays           *int       `json:"grace_period_days"`
+	MaxConcurrentOnlineGuests int `json:"max_concurrent_online_guests"`
+	// UnlimitedOnlineGuests must be sent, with max_concurrent_online_guests 0 or omitted, to issue a licence
+	// with NO concurrent cap. An omitted or zero cap used to mean "unlimited" silently; now it is refused, so
+	// an unlimited licence is always a deliberate choice.
+	UnlimitedOnlineGuests bool       `json:"unlimited_online_guests"`
+	ValidUntil            *time.Time `json:"valid_until"`
+	ValidDays             int        `json:"valid_days"`
+	GracePeriodDays       *int       `json:"grace_period_days"`
 	// Modules are the registered module ids the licence authorises (GET /cloud/v1/modules). Omitted or empty =
 	// core only. Unknown ids and unmet dependencies are refused with 400.
 	Modules []string `json:"modules"`
@@ -46,8 +50,13 @@ const (
 func (t licenseTerms) params(applianceID, createdBy string) (licensing.IssueParams, error) {
 	p := licensing.IssueParams{ApplianceID: applianceID, CreatedBy: createdBy,
 		MaxConcurrentOnlineGuests: t.MaxConcurrentOnlineGuests, GracePeriodDays: defaultGraceDays}
-	if t.MaxConcurrentOnlineGuests < 0 {
-		return p, errors.New("max_concurrent_online_guests cannot be negative (0 = unlimited)")
+	switch {
+	case t.MaxConcurrentOnlineGuests < 0:
+		return p, errors.New("max_concurrent_online_guests cannot be negative")
+	case t.UnlimitedOnlineGuests && t.MaxConcurrentOnlineGuests != 0:
+		return p, errors.New("give either max_concurrent_online_guests or unlimited_online_guests, not both")
+	case t.MaxConcurrentOnlineGuests == 0 && !t.UnlimitedOnlineGuests:
+		return p, errors.New("max_concurrent_online_guests must be 1 or more; for a licence with no cap send unlimited_online_guests: true")
 	}
 	_, _, ids, err := licensing.ModuleTerms(t.Modules)
 	if err != nil {
