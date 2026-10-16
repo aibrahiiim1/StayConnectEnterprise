@@ -93,7 +93,7 @@ describe("Devices for a role that cannot read the device setting (C-18)", () => 
     expect(screen.queryByText(/forbidden/i)).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: /manage/i }));
     const dialog = await screen.findByRole("dialog");
-    await within(dialog).findByText("Free Internet");
+    await within(dialog).findByText("Free package already used on this device");
     for (const action of [/disconnect/i, /require fresh sign-in/i, /prepare for a sign-in test/i, /release this place/i]) {
       expect(within(dialog).queryByRole("button", { name: action })).toBeNull();
     }
