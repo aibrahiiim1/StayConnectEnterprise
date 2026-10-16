@@ -57,6 +57,13 @@ var retentionSchema = []retentionSetting{
 		Explains: "How many database backups to retain. The newest is always kept regardless of this number."},
 	{Key: "KEEP_CONFIG", Label: "Configuration backups", Unit: "copies", Default: 3, Min: 1, Max: 30,
 		Explains: "Saved copies of configuration files taken before a change."},
+	// THE NIGHTLY SITE BACKUPS (/var/backups/stayconnect, decision D-H). They were never removed: every night
+	// added a database dump and a full copy of /etc/stayconnect. A set is removed only when it is older than
+	// SITE_BACKUP_DAYS AND not among the SITE_BACKUP_KEEP newest; the floor of seven is the Product Owner's.
+	{Key: "SITE_BACKUP_DAYS", Label: "Nightly site backups: keep for", Unit: "days", Default: 30, Min: 1, Max: 3650,
+		Explains: "Nightly site backups older than this are removed by the nightly sweep, except the newest ones kept below."},
+	{Key: "SITE_BACKUP_KEEP", Label: "Nightly site backups: always keep the newest", Unit: "backups", Default: 7, Min: 7, Max: 365,
+		Explains: "This many of the most recent nightly site backups are never removed, however old they are."},
 	{Key: "DISK_WARN", Label: "Disk warning threshold", Unit: "% used", Default: 80, Min: 50, Max: 95,
 		Explains: "Disk usage at which the nightly sweep reports a warning."},
 	{Key: "DISK_CRIT", Label: "Disk critical threshold", Unit: "% used", Default: 90, Min: 60, Max: 99,
