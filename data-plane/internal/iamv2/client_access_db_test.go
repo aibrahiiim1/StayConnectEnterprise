@@ -276,4 +276,28 @@ func TestFreeAllowanceIsKeyedOnThePackageAndCountsTheDevice(t *testing.T) {
 	if q, err := e.CreateQuote(ctx, QuoteRequest{TenantID: p2Tenant, SiteID: p2Site, AuthContextID: ac3, PackageID: s.packageID, DeviceID: s.deviceID, GuestNetworkID: p2GN}); err != nil || q.QuoteID != "" {
 		t.Fatalf("a quote must never pass what the list withheld: %+v %v", q, err)
 	}
+	// A VOUCHER ON THE SAME PHONE IS ITS OWN ALLOWANCE (O-10). The device has had this package, so the
+	// device-counted history answers "yes" -- for a voucher subject the device is not counted, and a second
+	// card redeems. The read is the real history query the list and quote use.
+	pol := PriorPurchasePolicyOf([]EligibilityRule{{Type: RulePriorPurchase, Value: map[string]any{"forbids_prior": true}}}, 0)
+	voucherSubject := CommerceSubject{Kind: SubjectVoucher, VoucherID: "00000000-0000-4000-8000-0000000000b1", DeviceID: s.deviceID}
+	if err := NewPgCommerceRepository(db).WithTx(ctx, func(tx CommerceTx) error {
+		before, err := tx.HasPriorPurchase(ctx, p2Tenant, p2Site, PriorPurchaseQuery{PackageID: s.packageID, Subject: voucherSubject, Policy: pol})
+		if err != nil {
+			return err
+		}
+		if !before {
+			t.Fatal("precondition: the device's history must hold this package")
+		}
+		after, err := tx.HasPriorPurchase(ctx, p2Tenant, p2Site, PriorPurchaseQuery{PackageID: s.packageID, Subject: voucherSubject, Policy: pol.ForSubject(SubjectVoucher)})
+		if err != nil {
+			return err
+		}
+		if after {
+			t.Fatal("a second voucher on the same phone was refused by the device-counted free limit")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 }

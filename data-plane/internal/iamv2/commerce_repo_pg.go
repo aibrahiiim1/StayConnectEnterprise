@@ -373,10 +373,11 @@ func (t *pgCommerceTx) HasPriorPurchase(ctx context.Context, tenantID, siteID st
 	if useDevice {
 		dev = nullable(q.Subject.DeviceID)
 	}
-	sql := `SELECT EXISTS(` + bySubject + `)`
-	if useDevice {
-		sql = `SELECT EXISTS(` + bySubject + `) OR EXISTS(` + byDevice + `)`
-	}
+	// ONE STATEMENT, every parameter referenced. The device branch used to be left out of the text when the
+	// policy did not count the device, which left $7 unreferenced -- and PostgreSQL refuses a statement with a
+	// parameter whose type it cannot determine (42P18), so every package whose free-access rule had the device
+	// switch OFF failed the listing outright. A NULL device simply never matches.
+	sql := `SELECT EXISTS(` + bySubject + `) OR EXISTS(` + byDevice + `)`
 	var exists bool
 	err := t.tx.QueryRow(ctx, sql, tenantID, siteID, q.PackageID, v, a, p, dev, since).Scan(&exists)
 	return exists, err
