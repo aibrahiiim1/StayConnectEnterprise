@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0118, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0125, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -67,6 +67,68 @@ COMMENT ON SCHEMA public IS 'standard public schema';
 --
 
 CREATE SCHEMA iam_v2;
+
+
+--
+-- Name: account_entitlements_follow_access(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.account_entitlements_follow_access(p_tenant uuid, p_site uuid, p_account uuid) RETURNS TABLE(suspended integer, resumed integer)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE
+  v_enabled boolean;
+  e         record;
+  v_s       integer := 0;
+  v_r       integer := 0;
+BEGIN
+  SELECT a.enabled INTO v_enabled
+    FROM iam_v2.guest_access_accounts a
+   WHERE a.id = p_account AND a.tenant_id = p_tenant AND a.site_id = p_site
+   FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'client account % does not exist on this site', p_account USING ERRCODE = 'no_data_found';
+  END IF;
+
+  IF NOT v_enabled THEN
+    FOR e IN
+      SELECT en.id FROM iam_v2.entitlements en
+       WHERE en.tenant_id = p_tenant AND en.site_id = p_site AND en.guest_account_id = p_account
+         AND en.status = 'ACTIVE'
+       ORDER BY en.id
+       FOR UPDATE
+    LOOP
+      PERFORM iam_v2.apply_entitlement_transition(e.id, 'SUSPENDED', now(), 'ACCOUNT_DISABLED');
+      v_s := v_s + 1;
+    END LOOP;
+  ELSE
+    FOR e IN
+      SELECT en.id FROM iam_v2.entitlements en
+       WHERE en.tenant_id = p_tenant AND en.site_id = p_site AND en.guest_account_id = p_account
+         AND en.status = 'SUSPENDED'
+         AND (en.window_ends_at IS NULL OR en.window_ends_at > now())
+         AND (SELECT t.reason FROM iam_v2.entitlement_state_transitions t
+               WHERE t.entitlement_id = en.id AND t.superseded_by IS NULL
+               ORDER BY t.seq DESC LIMIT 1) = 'ACCOUNT_DISABLED'
+       ORDER BY en.id
+       FOR UPDATE
+    LOOP
+      PERFORM iam_v2.apply_entitlement_transition(e.id, 'ACTIVE', now(), 'ACCOUNT_ENABLED');
+      v_r := v_r + 1;
+    END LOOP;
+  END IF;
+
+  suspended := v_s; resumed := v_r;
+  RETURN NEXT;
+END $$;
+
+
+--
+-- Name: FUNCTION account_entitlements_follow_access(p_tenant uuid, p_site uuid, p_account uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.account_entitlements_follow_access(p_tenant uuid, p_site uuid, p_account uuid) IS 'Aligns a client account''s live packages with its enabled flag (0120, decision D-A): disabled -> every ACTIVE package SUSPENDED (reason ACCOUNT_DISABLED); enabled -> every package that rule suspended, still inside its window, ACTIVE again (reason ACCOUNT_ENABLED). Through apply_entitlement_transition only; the window, consumption and device places are untouched. Sessions are ended by the caller through scd.';
 
 
 --
@@ -174,6 +236,86 @@ END $$;
 --
 
 COMMENT ON FUNCTION iam_v2.account_password_settings_set(p_tenant uuid, p_site uuid, p_style text, p_length integer, p_operator text, p_reason text) IS 'Stores a validated generated-password format and returns its new config_version. Takes effect on the NEXT generated password; no existing credential changes.';
+
+
+--
+-- Name: accounting_records_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.accounting_records_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF TG_OP = 'DELETE'
+     AND current_setting('iam_v2.accounting_purge', true) = 'retention'
+     AND current_user = (SELECT pg_get_userbyid(c.relowner) FROM pg_class c WHERE c.oid = TG_RELID) THEN
+    RETURN OLD;
+  END IF;
+  RAISE EXCEPTION '% is immutable (no UPDATE/DELETE) on %', TG_TABLE_NAME, TG_OP;
+END $$;
+
+
+--
+-- Name: accounting_retention_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.accounting_retention_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'iam_v2.% is append-only: % refused', TG_TABLE_NAME, TG_OP USING ERRCODE = 'restrict_violation';
+END $$;
+
+
+--
+-- Name: accounting_retention_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.accounting_retention_get(p_tenant uuid, p_site uuid) RETURNS TABLE(detail_retention_days integer, config_version bigint, updated_at timestamp with time zone, updated_by text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT s.detail_retention_days, COALESCE(s.config_version, 0), s.updated_at, s.updated_by
+    FROM (SELECT 1) one
+    LEFT JOIN iam_v2.site_accounting_retention s ON s.tenant_id = p_tenant AND s.site_id = p_site;
+$$;
+
+
+--
+-- Name: accounting_retention_set(uuid, uuid, integer, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.accounting_retention_set(p_tenant uuid, p_site uuid, p_days integer, p_operator text, p_reason text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_version bigint; v_old integer;
+BEGIN
+  IF p_operator IS NULL OR btrim(p_operator) = '' THEN
+    RAISE EXCEPTION 'an operator label is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_reason IS NULL OR length(btrim(p_reason)) < 4 OR length(btrim(p_reason)) > 500 THEN
+    RAISE EXCEPTION 'a reason of 4-500 characters is required to change the accounting retention'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_days IS NOT NULL AND p_days NOT BETWEEN 30 AND 3650 THEN
+    RAISE EXCEPTION 'detail_retention_days must be unlimited (null) or 30-3650 (got %)', p_days
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('accounting_retention'), hashtext(p_site::text));
+  SELECT s.detail_retention_days INTO v_old
+    FROM iam_v2.site_accounting_retention s WHERE s.tenant_id = p_tenant AND s.site_id = p_site FOR UPDATE;
+  INSERT INTO iam_v2.site_accounting_retention AS s (tenant_id, site_id, detail_retention_days, updated_by)
+  VALUES (p_tenant, p_site, p_days, btrim(p_operator))
+  ON CONFLICT (tenant_id, site_id) DO UPDATE
+     SET detail_retention_days = EXCLUDED.detail_retention_days,
+         updated_by = EXCLUDED.updated_by, config_version = s.config_version + 1, updated_at = now()
+  RETURNING s.config_version INTO v_version;
+  INSERT INTO iam_v2.accounting_retention_changes
+    (tenant_id, site_id, changed_by, change_reason, old_retention_days, new_retention_days, new_config_version)
+  VALUES (p_tenant, p_site, btrim(p_operator), btrim(p_reason), v_old, p_days, v_version);
+  RETURN v_version;
+END $$;
 
 
 --
@@ -332,19 +474,26 @@ END $$;
 CREATE FUNCTION iam_v2.apply_adjustment(p_ent uuid, p_field text, p_new text, p_actor uuid, p_reason text) RETURNS void
     LANGUAGE plpgsql
     AS $$
-DECLARE t uuid; s uuid; oldv text;
+DECLARE t uuid; s uuid; oldv text; v_new text; v_id uuid;
 BEGIN
   SELECT tenant_id, site_id INTO t, s FROM iam_v2.entitlements WHERE id=p_ent;
-  PERFORM set_config('iam_v2.allow_adjust','on', true);
   IF p_field='consumed_data_bytes' THEN
     SELECT consumed_data_bytes::text INTO oldv FROM iam_v2.entitlements WHERE id=p_ent;
-    UPDATE iam_v2.entitlements SET consumed_data_bytes=p_new::bigint, usage_version=usage_version+1 WHERE id=p_ent;
+    v_new := p_new::bigint::text;
   ELSIF p_field='window_ends_at' THEN
     SELECT window_ends_at::text INTO oldv FROM iam_v2.entitlements WHERE id=p_ent;
-    UPDATE iam_v2.entitlements SET window_ends_at=p_new::timestamptz, usage_version=usage_version+1 WHERE id=p_ent;
+    v_new := p_new::timestamptz::text;
   ELSE RAISE EXCEPTION 'unsupported adjustment field %', p_field; END IF;
+  -- Recorded BEFORE the write, in canonical text, so the guard can match the write to this exact record.
   INSERT INTO iam_v2.entitlement_adjustments(tenant_id,site_id,entitlement_id,field,old_value,new_value,actor,reason)
-    VALUES (t,s,p_ent,p_field,oldv,p_new,p_actor,p_reason);
+    VALUES (t,s,p_ent,p_field,oldv,v_new,p_actor,p_reason)
+    RETURNING id INTO v_id;
+  PERFORM set_config('iam_v2.allow_adjust', v_id::text, true);
+  IF p_field='consumed_data_bytes' THEN
+    UPDATE iam_v2.entitlements SET consumed_data_bytes=v_new::bigint, usage_version=usage_version+1 WHERE id=p_ent;
+  ELSE
+    UPDATE iam_v2.entitlements SET window_ends_at=v_new::timestamptz, usage_version=usage_version+1 WHERE id=p_ent;
+  END IF;
   PERFORM set_config('iam_v2.allow_adjust','off', true);
 END; $$;
 
@@ -487,6 +636,7 @@ CREATE FUNCTION iam_v2.authorize_entitlement_device(p_ent uuid, p_device uuid, p
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
 DECLARE v_t uuid; v_s uuid; v_status text; v_limit int; v_policy text; v_open int; v_seq bigint; v_id uuid; v_existing uuid;
+        v_old record; v_ended int;
 BEGIN
   -- This operation writes a capability-scoped family, so it declares its own scope. Doing it here
   -- rather than relying on ownership is what lets Gate-P give every function its own owner without
@@ -515,10 +665,38 @@ BEGIN
   SELECT count(*) INTO v_open FROM iam_v2.entitlement_device_authorizations
     WHERE entitlement_id = p_ent AND deauthorized_at IS NULL;
   IF v_limit IS NOT NULL AND v_open >= v_limit THEN
-    IF COALESCE(v_policy,'REJECT_NEW_DEVICE') <> 'REJECT_NEW_DEVICE' THEN
-      RAISE EXCEPTION 'device limit policy % is not implemented in this phase (fail closed)', v_policy;
+    IF COALESCE(v_policy, 'REJECT_NEW_DEVICE') = 'DISCONNECT_OLDEST' THEN
+      -- DISCONNECT_OLDEST (0122): make room by disconnecting the entitlement's OLDEST device -- the open place
+      -- admitted first -- until one place is free. Its live sessions end (enforcement tears them down from
+      -- durable state on its next pass), its place is released through the one primitive that closes an
+      -- interval, and the move is recorded. The entitlement's window, allowance and usage are untouched.
+      WHILE v_open >= v_limit LOOP
+        SELECT a.device_id, a.authorized_at INTO v_old
+          FROM iam_v2.entitlement_device_authorizations a
+         WHERE a.entitlement_id = p_ent AND a.deauthorized_at IS NULL
+         ORDER BY a.authorized_at, a.id LIMIT 1;
+        EXIT WHEN v_old.device_id IS NULL;
+        UPDATE iam_v2.sessions se
+           SET state = 'ended', ended = GREATEST(p_at, se.started), end_reason = 'DEVICE_LIMIT_OLDEST_DISCONNECTED'
+         WHERE se.entitlement_id = p_ent AND se.device_id = v_old.device_id
+           AND se.state IN ('active', 'PENDING_ENFORCEMENT');
+        GET DIAGNOSTICS v_ended = ROW_COUNT;
+        PERFORM iam_v2.deauthorize_entitlement_device(p_ent, v_old.device_id, GREATEST(p_at, v_old.authorized_at),
+                                                      'DISCONNECTED_FOR_NEWER_DEVICE');
+        INSERT INTO iam_v2.device_limit_disconnections
+          (tenant_id, site_id, entitlement_id, disconnected_device_id, admitted_device_id, device_limit,
+           sessions_ended, disconnected_at)
+        VALUES (v_t, v_s, p_ent, v_old.device_id, p_device, v_limit, v_ended, GREATEST(p_at, v_old.authorized_at));
+        v_open := v_open - 1;
+      END LOOP;
+    ELSIF COALESCE(v_policy, 'REJECT_NEW_DEVICE') = 'ADMIN_APPROVAL' THEN
+      -- There is no approval workflow, so a plan that names this policy cannot admit another device. Plans can
+      -- no longer be published with it (the editor refuses it); a revision published before keeps failing closed.
+      RAISE EXCEPTION 'MAX_DEVICES_REACHED: device limit policy ADMIN_APPROVAL is not available (no approval workflow); entitlement % has % of % devices',
+        p_ent, v_open, v_limit;
+    ELSE
+      RAISE EXCEPTION 'MAX_DEVICES_REACHED: entitlement % already has % of % devices authorized', p_ent, v_open, v_limit;
     END IF;
-    RAISE EXCEPTION 'MAX_DEVICES_REACHED: entitlement % already has % of % devices authorized', p_ent, v_open, v_limit;
   END IF;
   INSERT INTO iam_v2.entitlement_devices(tenant_id,site_id,entitlement_id,device_id,status,first_authorized,last_authorized)
     VALUES (v_t,v_s,p_ent,p_device,'AUTHORIZED',p_at,p_at)
@@ -725,6 +903,19 @@ BEGIN
   VALUES (p_tenant, p_site, btrim(p_operator), NULLIF(btrim(COALESCE(p_reason,'')),''), v_old_e, v_old_g,
           p_expiry, p_grace, v_version);
   RETURN v_version;
+END $$;
+
+
+--
+-- Name: card_purchase_sweeps_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.card_purchase_sweeps_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'card_purchase_sweeps is append-only' USING ERRCODE = 'insufficient_privilege';
 END $$;
 
 
@@ -962,6 +1153,19 @@ BEGIN
     WHERE entitlement_id = p_ent AND device_id = p_device;
   RETURN true;
 END $_$;
+
+
+--
+-- Name: device_limit_disconnections_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.device_limit_disconnections_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'iam_v2.device_limit_disconnections is append-only: % refused', TG_OP
+    USING ERRCODE = 'restrict_violation';
+END $$;
 
 
 --
@@ -1220,6 +1424,23 @@ BEGIN
   IF r.time_accounting_mode <> 'VALIDITY_WINDOW' THEN RETURN 'PLAN_TIME_ACCOUNTING'; END IF;
   RETURN NULL;
 END $_$;
+
+
+--
+-- Name: guest_access_account_removed_is_final(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.guest_access_account_removed_is_final() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF NOT OLD.enabled AND lower(OLD.username) LIKE '%.removed-%.invalid'
+     AND (NEW.enabled OR NEW.username IS DISTINCT FROM OLD.username) THEN
+    RAISE EXCEPTION 'client account % has been removed: it cannot be enabled or renamed', OLD.id
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $$;
 
 
 --
@@ -3932,6 +4153,54 @@ END $$;
 
 
 --
+-- Name: p4_fail_unstarted_card_purchases(uuid, uuid, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p4_fail_unstarted_card_purchases(p_tenant uuid, p_site uuid, p_older_than_seconds integer) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE r record; v_n integer := 0;
+BEGIN
+  IF p_tenant IS NULL OR p_site IS NULL THEN
+    RAISE EXCEPTION 'CARD_SWEEP_SCOPE: tenant and site are required' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_older_than_seconds IS NULL OR p_older_than_seconds < 600 OR p_older_than_seconds > 7 * 86400 THEN
+    RAISE EXCEPTION 'CARD_SWEEP_AGE: % s is outside 600 s .. 7 days', p_older_than_seconds
+      USING ERRCODE = 'check_violation';
+  END IF;
+  FOR r IN
+    SELECT se.id AS settlement_id, pu.id AS purchase_id,
+           GREATEST(1, extract(epoch FROM now() - q.consumed_at)::integer) AS waited
+      FROM iam_v2.settlements se
+      JOIN iam_v2.purchases pu
+        ON pu.tenant_id = se.tenant_id AND pu.site_id = se.site_id AND pu.id = se.purchase_id
+      JOIN iam_v2.offer_quotes q ON q.id = pu.offer_quote_id
+     WHERE se.tenant_id = p_tenant AND se.site_id = p_site
+       AND se.method = 'ONLINE_PAYMENT' AND se.status = 'REQUIRED'
+       AND pu.state = 'AWAITING_SETTLEMENT'
+       AND q.consumed_at IS NOT NULL
+       AND q.consumed_at < now() - make_interval(secs => p_older_than_seconds)
+       AND NOT EXISTS (SELECT 1 FROM iam_v2.payment_transactions pt WHERE pt.settlement_id = se.id)
+     ORDER BY q.consumed_at
+     LIMIT 200
+     FOR UPDATE OF se SKIP LOCKED
+  LOOP
+    -- Re-checked under the row lock: a transaction created between the scan and the lock wins.
+    IF EXISTS (SELECT 1 FROM iam_v2.payment_transactions pt WHERE pt.settlement_id = r.settlement_id) THEN
+      CONTINUE;
+    END IF;
+    UPDATE iam_v2.settlements SET status = 'IN_PROGRESS' WHERE id = r.settlement_id AND status = 'REQUIRED';
+    UPDATE iam_v2.settlements SET status = 'FAILED' WHERE id = r.settlement_id AND status = 'IN_PROGRESS';
+    INSERT INTO iam_v2.card_purchase_sweeps (tenant_id, site_id, purchase_id, settlement_id, reason, waited_seconds)
+    VALUES (p_tenant, p_site, r.purchase_id, r.settlement_id, 'NO_PAYMENT_TRANSACTION', r.waited);
+    v_n := v_n + 1;
+  END LOOP;
+  RETURN v_n;
+END $$;
+
+
+--
 -- Name: p4_fias_exponent_gate(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -6214,10 +6483,168 @@ END $$;
 
 
 --
+-- Name: p6_advance_data_crossing(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p6_advance_data_crossing(p_tenant uuid, p_site uuid) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE e record; b record; v_new bigint; v_max bigint; v_est numeric; v_exact timestamptz; n int := 0;
+BEGIN
+  FOR e IN
+    SELECT en.id, COALESCE(en.data_quota_bytes, spr.data_quota_bytes) AS quota
+      FROM iam_v2.entitlements en
+      LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = en.service_plan_revision_id
+     WHERE en.tenant_id = p_tenant AND en.site_id = p_site
+       AND en.status IN ('ACTIVE', 'PENDING', 'SUSPENDED')
+       AND COALESCE(en.data_quota_bytes, spr.data_quota_bytes) IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM iam_v2.data_crossing_state s
+                        WHERE s.entitlement_id = en.id AND s.crossed_at IS NOT NULL
+                          AND s.quota_bytes = COALESCE(en.data_quota_bytes, spr.data_quota_bytes))
+     ORDER BY en.id
+  LOOP
+    n := n + 1;
+    FOR b IN
+      SELECT sb.id, sb.session_id, sb.bound_from, sb.bound_until, se.ended,
+             COALESCE(pr.examined_seq, 0) AS seq, COALESCE(pr.final, false) AS final
+        FROM iam_v2.session_entitlement_bindings sb
+        JOIN iam_v2.sessions se ON se.id = sb.session_id
+        LEFT JOIN iam_v2.data_crossing_progress pr ON pr.binding_id = sb.id
+       WHERE sb.entitlement_id = e.id
+    LOOP
+      IF b.final THEN
+        CONTINUE;   -- an ended session's records are complete; there is nothing new to read
+      END IF;
+      -- ONLY the records after the checkpoint: the unique (session_id, sample_seq) index answers this directly.
+      SELECT COALESCE(sum(CASE WHEN b.bound_from <= ar.sampled_at
+                                    AND (b.bound_until IS NULL OR b.bound_until > ar.sampled_at)
+                               THEN ar.bytes_up + ar.bytes_down ELSE 0 END), 0),
+             max(ar.sample_seq)
+        INTO v_new, v_max
+        FROM iam_v2.accounting_records ar
+       WHERE ar.session_id = b.session_id AND ar.sample_seq > b.seq;
+      INSERT INTO iam_v2.data_crossing_progress AS pr
+        (binding_id, tenant_id, site_id, entitlement_id, session_id, examined_seq, counted_bytes, final)
+      VALUES (b.id, p_tenant, p_site, e.id, b.session_id, COALESCE(v_max, b.seq), v_new,
+              -- ingestion refuses an ended session outright, so once it has been ended for a while (longer than
+              -- any in-flight observation could take) its record set is closed for good
+              b.ended IS NOT NULL AND b.ended < now() - interval '5 minutes')
+      ON CONFLICT (binding_id) DO UPDATE
+        SET examined_seq = GREATEST(pr.examined_seq, EXCLUDED.examined_seq),
+            counted_bytes = pr.counted_bytes + EXCLUDED.counted_bytes,
+            final = EXCLUDED.final, updated_at = now();
+    END LOOP;
+
+    SELECT COALESCE(sum(pr.counted_bytes), 0) INTO v_est
+      FROM iam_v2.data_crossing_progress pr WHERE pr.entitlement_id = e.id;
+    IF v_est >= e.quota THEN
+      -- The running total says the quota may have been reached: establish the exact instant ONCE.
+      v_exact := iam_v2.p6_data_crossing_full(e.id);
+      IF v_exact IS NULL THEN
+        -- The checkpoint overstated (an attribution interval shrank after it counted). Recount every binding of
+        -- this entitlement exactly, so the estimate is honest again and this branch is not taken every tick.
+        UPDATE iam_v2.data_crossing_progress pr
+           SET counted_bytes = COALESCE((
+                 SELECT sum(ar.bytes_up + ar.bytes_down)
+                   FROM iam_v2.accounting_records ar
+                   JOIN iam_v2.session_entitlement_bindings sb ON sb.id = pr.binding_id
+                  WHERE ar.session_id = pr.session_id AND ar.sample_seq <= pr.examined_seq
+                    AND sb.bound_from <= ar.sampled_at
+                    AND (sb.bound_until IS NULL OR sb.bound_until > ar.sampled_at)), 0),
+               updated_at = now()
+         WHERE pr.entitlement_id = e.id;
+      END IF;
+      INSERT INTO iam_v2.data_crossing_state AS s (entitlement_id, tenant_id, site_id, quota_bytes, crossed_at)
+      VALUES (e.id, p_tenant, p_site, e.quota, v_exact)
+      ON CONFLICT (entitlement_id) DO UPDATE
+        SET quota_bytes = EXCLUDED.quota_bytes, crossed_at = EXCLUDED.crossed_at, verified_at = now();
+    END IF;
+  END LOOP;
+  RETURN n;
+END $$;
+
+
+--
+-- Name: FUNCTION p6_advance_data_crossing(p_tenant uuid, p_site uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.p6_advance_data_crossing(p_tenant uuid, p_site uuid) IS 'Advances the data-crossing checkpoint of every live, quota-bearing entitlement of a site by the accounting records that arrived since the last call (0122), and establishes the exact crossing instant once the running total reaches the quota. Called by acctd before the expiry sweep. Deletes nothing.';
+
+
+--
+-- Name: p6_counts_online_time(text, bigint); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p6_counts_online_time(p_mode text, p_budget bigint) RETURNS boolean
+    LANGUAGE sql IMMUTABLE
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT p_mode = 'AGGREGATE_ONLINE_TIME'
+      OR (p_mode = 'VALIDITY_WINDOW' AND p_budget IS NOT NULL AND p_budget > 0);
+$$;
+
+
+--
+-- Name: FUNCTION p6_counts_online_time(p_mode text, p_budget bigint); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.p6_counts_online_time(p_mode text, p_budget bigint) IS 'Whether an entitlement in this time mode, pinned to a plan revision with this time_quota_seconds, is accounted in online time (0122): always for AGGREGATE_ONLINE_TIME, and for VALIDITY_WINDOW when the plan carries a positive time allowance. The one definition every online-time function uses.';
+
+
+--
 -- Name: p6_data_crossing(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
 CREATE FUNCTION iam_v2.p6_data_crossing(p_entitlement uuid) RETURNS timestamp with time zone
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_quota bigint; st record; v_est numeric;
+BEGIN
+  SELECT COALESCE(e.data_quota_bytes, spr.data_quota_bytes) INTO v_quota
+    FROM iam_v2.entitlements e
+    LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
+   WHERE e.id = p_entitlement;
+  IF v_quota IS NULL THEN
+    RETURN NULL;   -- no quota (or no such entitlement): nothing to cross, and nothing is read
+  END IF;
+  SELECT s.quota_bytes, s.crossed_at INTO st FROM iam_v2.data_crossing_state s WHERE s.entitlement_id = p_entitlement;
+  IF FOUND AND st.crossed_at IS NOT NULL AND st.quota_bytes = v_quota THEN
+    RETURN st.crossed_at;
+  END IF;
+  -- An UPPER BOUND on the attributed bytes: each binding's checkpoint plus whatever arrived after it (a binding
+  -- with no checkpoint yet contributes everything it has). Below the quota it proves there is no crossing, and
+  -- that is the steady state, answered from an index probe per binding instead of the whole history.
+  SELECT COALESCE(sum(COALESCE(pr.counted_bytes, 0) + COALESCE(tail.bytes, 0)), 0) INTO v_est
+    FROM iam_v2.session_entitlement_bindings sb
+    LEFT JOIN iam_v2.data_crossing_progress pr ON pr.binding_id = sb.id
+    LEFT JOIN LATERAL (
+      SELECT sum(ar.bytes_up + ar.bytes_down) AS bytes
+        FROM iam_v2.accounting_records ar
+       WHERE ar.session_id = sb.session_id AND ar.sample_seq > COALESCE(pr.examined_seq, 0)
+         AND sb.bound_from <= ar.sampled_at AND (sb.bound_until IS NULL OR sb.bound_until > ar.sampled_at)
+    ) tail ON true
+   WHERE sb.entitlement_id = p_entitlement;
+  IF v_est < v_quota THEN
+    RETURN NULL;
+  END IF;
+  RETURN iam_v2.p6_data_crossing_full(p_entitlement);
+END $$;
+
+
+--
+-- Name: FUNCTION p6_data_crossing(p_entitlement uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.p6_data_crossing(p_entitlement uuid) IS 'The instant attributed usage first reached this entitlement''s quota, or NULL. The quota is the entitlement''s own frozen data_quota_bytes when it has one (a PER_STAY_NIGHT grant) and the pinned plan revision''s otherwise. Since 0122 it answers from the durable checkpoint (data_crossing_progress / data_crossing_state) and runs the exact derivation (p6_data_crossing_full) only when the running total has reached the quota. Both the expiry sweep''s candidate query and the sanctioned expiry writer call it, so they cannot disagree.';
+
+
+--
+-- Name: p6_data_crossing_full(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p6_data_crossing_full(p_entitlement uuid) RETURNS timestamp with time zone
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
@@ -6239,10 +6666,10 @@ $$;
 
 
 --
--- Name: FUNCTION p6_data_crossing(p_entitlement uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+-- Name: FUNCTION p6_data_crossing_full(p_entitlement uuid); Type: COMMENT; Schema: iam_v2; Owner: -
 --
 
-COMMENT ON FUNCTION iam_v2.p6_data_crossing(p_entitlement uuid) IS 'The instant attributed usage first reached this entitlement''s quota, or NULL. The quota is the entitlement''s own frozen data_quota_bytes when it has one (a PER_STAY_NIGHT grant) and the pinned plan revision''s otherwise. The single implementation: both the expiry sweep''s candidate query and the sanctioned expiry writer call it, so they cannot disagree about when -- or whether -- a guest ran out.';
+COMMENT ON FUNCTION iam_v2.p6_data_crossing_full(p_entitlement uuid) IS 'The exact data-quota crossing by full derivation over every attributed accounting record (the pre-0122 p6_data_crossing). Called only once the checkpointed running total says the quota may have been reached.';
 
 
 --
@@ -6282,7 +6709,11 @@ BEGIN
   IF v_data IS NOT NULL AND v_data = at THEN
     reason := 'DATA'; time_cause := NULL;
   ELSIF v_agg IS NOT NULL AND v_agg = at THEN
-    reason := 'TIME'; time_cause := 'AGGREGATE_ONLINE_TIME_EXHAUSTED';
+    reason := 'TIME';
+    -- Which online-time clock ran out: the aggregate mode's budget, or the time allowance a
+    -- VALIDITY_WINDOW plan carries (0122). Same terminal reason, distinguishable evidence.
+    time_cause := CASE WHEN e.time_accounting_mode = 'AGGREGATE_ONLINE_TIME'
+                       THEN 'AGGREGATE_ONLINE_TIME_EXHAUSTED' ELSE 'ONLINE_TIME_ALLOWANCE_EXHAUSTED' END;
   ELSE
     reason := 'TIME';
     time_cause := CASE WHEN e.time_accounting_mode = 'AGGREGATE_ONLINE_TIME'
@@ -6297,6 +6728,78 @@ END $$;
 --
 
 COMMENT ON FUNCTION iam_v2.p6_due_terminal(p_entitlement uuid) IS 'The terminal condition an entitlement has ALREADY reached -- earliest of outer window, data crossing and aggregate exhaustion -- or no row when it is healthy. This is the fact the expiry writer establishes for itself instead of accepting from its caller.';
+
+
+--
+-- Name: p6_end_sessions_over_plan_limits(uuid, uuid, timestamp with time zone, boolean); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p6_end_sessions_over_plan_limits(p_tenant uuid, p_site uuid, p_now timestamp with time zone, p_judge_idle boolean) RETURNS TABLE(session_id uuid, entitlement_id uuid, end_reason text, ended_at timestamp with time zone)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+#variable_conflict use_column
+DECLARE
+  s          record;
+  v_last     timestamptz;
+  v_max_end  timestamptz;
+  v_idle_end timestamptz;
+  v_end      timestamptz;
+BEGIN
+  IF p_now IS NULL THEN
+    RAISE EXCEPTION 'a reference instant is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  FOR s IN
+    SELECT se.id, se.entitlement_id AS ent, se.started,
+           COALESCE(spr.idle_timeout_seconds, 0) AS idle_s,
+           COALESCE(spr.max_continuous_session_seconds, 0) AS max_s
+      FROM iam_v2.sessions se
+      JOIN iam_v2.entitlements e ON e.id = se.entitlement_id
+      JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
+     WHERE se.tenant_id = p_tenant AND se.site_id = p_site
+       AND se.state = 'active' AND se.ended IS NULL
+       AND (COALESCE(spr.idle_timeout_seconds, 0) > 0 OR COALESCE(spr.max_continuous_session_seconds, 0) > 0)
+     ORDER BY se.id
+     FOR UPDATE OF se
+  LOOP
+    v_max_end := NULL; v_idle_end := NULL;
+    IF s.max_s > 0 THEN
+      v_max_end := s.started + make_interval(secs => s.max_s);
+    END IF;
+    -- IDLE is judged only from evidence. The checkpoint's prev_sampled_at moves only when the session's counters
+    -- moved (an unchanged reading is a replay and writes nothing), so it is the last instant traffic was seen. A
+    -- session the accounting has never observed has no such evidence and is not judged; neither is any session
+    -- when the caller says this tick's accounting pass did not complete -- silence from a broken meter is not
+    -- idleness.
+    IF p_judge_idle AND s.idle_s > 0 THEN
+      SELECT max(cp.prev_sampled_at) INTO v_last FROM iam_v2.accounting_checkpoints cp WHERE cp.session_id = s.id;
+      IF v_last IS NOT NULL THEN
+        v_idle_end := GREATEST(v_last, s.started) + make_interval(secs => s.idle_s);
+      END IF;
+    END IF;
+    v_end := LEAST(COALESCE(v_max_end, 'infinity'::timestamptz), COALESCE(v_idle_end, 'infinity'::timestamptz));
+    IF v_end = 'infinity'::timestamptz OR v_end > p_now THEN
+      CONTINUE;
+    END IF;
+    session_id := s.id; entitlement_id := s.ent; ended_at := GREATEST(v_end, s.started);
+    end_reason := CASE WHEN v_max_end IS NOT NULL AND v_max_end = v_end THEN 'MAX_SESSION_DURATION'
+                       ELSE 'IDLE_TIMEOUT' END;
+    -- The SESSION ends at the instant the limit was reached. Nothing else moves: the entitlement stays ACTIVE
+    -- with its window and allowance, and the device keeps its place on it, so signing in again simply opens a
+    -- new session.
+    UPDATE iam_v2.sessions se2 SET state = 'ended', ended = p6_end_sessions_over_plan_limits.ended_at,
+           end_reason = p6_end_sessions_over_plan_limits.end_reason
+     WHERE se2.id = s.id;
+    RETURN NEXT;
+  END LOOP;
+END $$;
+
+
+--
+-- Name: FUNCTION p6_end_sessions_over_plan_limits(p_tenant uuid, p_site uuid, p_now timestamp with time zone, p_judge_idle boolean); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.p6_end_sessions_over_plan_limits(p_tenant uuid, p_site uuid, p_now timestamp with time zone, p_judge_idle boolean) IS 'Ends live sessions whose pinned plan''s maximum continuous session (MAX_SESSION_DURATION, started + N) or idle timeout (IDLE_TIMEOUT, last metered traffic + N) has been reached, at that instant (0122). Idle is judged only when the caller''s accounting pass completed and only from a session''s own checkpoint. The entitlement and the device''s place are untouched.';
 
 
 --
@@ -6319,7 +6822,9 @@ BEGIN
   SELECT id, status, time_accounting_mode, consumed_online_seconds, online_time_exhausted_at,
          service_plan_revision_id
     INTO e FROM iam_v2.entitlements WHERE id = p_entitlement;
-  IF NOT FOUND OR e.time_accounting_mode <> 'AGGREGATE_ONLINE_TIME' THEN
+  IF NOT FOUND OR NOT iam_v2.p6_counts_online_time(e.time_accounting_mode,
+       (SELECT spr0.time_quota_seconds FROM iam_v2.service_plan_revisions spr0
+         WHERE spr0.id = e.service_plan_revision_id)) THEN
     RETURN NULL;
   END IF;
   IF e.online_time_exhausted_at IS NOT NULL THEN
@@ -6640,8 +7145,7 @@ CREATE FUNCTION iam_v2.p6_over_budget_now(p_entitlement uuid) RETURNS boolean
     FROM iam_v2.entitlements e
     JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
    WHERE e.id = p_entitlement
-     AND e.time_accounting_mode = 'AGGREGATE_ONLINE_TIME'
-     AND spr.time_quota_seconds IS NOT NULL;
+     AND iam_v2.p6_counts_online_time(e.time_accounting_mode, spr.time_quota_seconds);
 $$;
 
 
@@ -6661,7 +7165,8 @@ CREATE FUNCTION iam_v2.p6_record_time_termination(p_entitlement uuid, p_cause te
     AS $$
 DECLARE e record; v_budget bigint;
 BEGIN
-  IF p_cause NOT IN ('VALIDITY_WINDOW_ELAPSED','AGGREGATE_ONLINE_TIME_EXHAUSTED','AGGREGATE_OUTER_WINDOW_EXPIRED') THEN
+  IF p_cause NOT IN ('VALIDITY_WINDOW_ELAPSED','AGGREGATE_ONLINE_TIME_EXHAUSTED','AGGREGATE_OUTER_WINDOW_EXPIRED',
+                     'ONLINE_TIME_ALLOWANCE_EXHAUSTED') THEN
     RAISE EXCEPTION 'unknown time-termination cause %', p_cause USING ERRCODE = 'invalid_parameter_value';
   END IF;
   SELECT id, tenant_id, site_id, status, terminal_reason, terminated_at, time_accounting_mode,
@@ -6822,7 +7327,9 @@ BEGIN
     SELECT en.id
       FROM iam_v2.entitlements en
      WHERE en.tenant_id = p_tenant AND en.site_id = p_site
-       AND en.time_accounting_mode = 'AGGREGATE_ONLINE_TIME'
+       AND iam_v2.p6_counts_online_time(en.time_accounting_mode,
+             (SELECT spr0.time_quota_seconds FROM iam_v2.service_plan_revisions spr0
+               WHERE spr0.id = en.service_plan_revision_id))
        AND en.status IN ('ACTIVE', 'PENDING')          -- already SUSPENDED: nothing to do, and nothing to say
        AND iam_v2.p6_over_budget_now(en.id)
        AND iam_v2.p6_exhaustion_instant(en.id) IS NULL -- datable ones terminate through the normal path
@@ -6993,7 +7500,9 @@ BEGIN
            en.window_ends_at
       FROM iam_v2.entitlements en
      WHERE en.tenant_id = p_tenant AND en.site_id = p_site
-       AND en.time_accounting_mode = 'AGGREGATE_ONLINE_TIME'
+       AND iam_v2.p6_counts_online_time(en.time_accounting_mode,
+             (SELECT spr0.time_quota_seconds FROM iam_v2.service_plan_revisions spr0
+               WHERE spr0.id = en.service_plan_revision_id))
        AND en.status IN ('ACTIVE', 'PENDING', 'SUSPENDED')
      ORDER BY en.id
      FOR UPDATE
@@ -7163,7 +7672,40 @@ END $$;
 -- Name: FUNCTION p6_tick_online_time(p_tenant uuid, p_site uuid, p_now timestamp with time zone, p_max_charge_seconds integer, p_capped_entitlements uuid[], p_caps timestamp with time zone[]); Type: COMMENT; Schema: iam_v2; Owner: -
 --
 
-COMMENT ON FUNCTION iam_v2.p6_tick_online_time(p_tenant uuid, p_site uuid, p_now timestamp with time zone, p_max_charge_seconds integer, p_capped_entitlements uuid[], p_caps timestamp with time zone[]) IS 'One AGGREGATE_ONLINE_TIME accrual tick for a site. Billable only to the earliest of now, session end, the immutable outer window and any cap the caller passes; charges only sessions in state active, within the per-tick observation bound. Exhaustion is the exact piecewise crossing, and an already-exhausted entitlement is re-reported only with an instant that can be proven -- never with the clock of the tick that noticed. It terminates nothing.';
+COMMENT ON FUNCTION iam_v2.p6_tick_online_time(p_tenant uuid, p_site uuid, p_now timestamp with time zone, p_max_charge_seconds integer, p_capped_entitlements uuid[], p_caps timestamp with time zone[]) IS 'One online-time accrual tick for a site: AGGREGATE_ONLINE_TIME entitlements, and VALIDITY_WINDOW entitlements whose plan carries a time allowance (0122). Billable only to the earliest of now, session end, the immutable outer window and any cap the caller passes; charges only sessions in state active, within the per-tick observation bound. Exhaustion is the exact piecewise crossing, re-reported only with a provable instant. It terminates nothing.';
+
+
+--
+-- Name: payment_account_has_open_checkouts(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.payment_account_has_open_checkouts(p_account uuid) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT EXISTS (SELECT 1 FROM iam_v2.payment_transactions pt
+                  WHERE pt.merchant_account_id = p_account AND pt.transaction_type = 'CHARGE'
+                    AND pt.status IN ('CREATED','PENDING'))
+$$;
+
+
+--
+-- Name: payment_account_identity_guard(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.payment_account_identity_guard() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+BEGIN
+  IF (NEW.provider, NEW.merchant_account_ref, NEW.mode, NEW.currency)
+     IS DISTINCT FROM (OLD.provider, OLD.merchant_account_ref, OLD.mode, OLD.currency)
+     AND iam_v2.payment_account_has_open_checkouts(OLD.id) THEN
+    RAISE EXCEPTION 'PAYMENT_ACCOUNT_CHECKOUTS_OPEN: this account has card checkouts in progress, so its provider, merchant, mode and currency cannot change until they finish. Try again later, or add a new account.'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $$;
 
 
 --
@@ -7215,6 +7757,23 @@ BEGIN
           CASE WHEN v_old IS NULL THEN 'CREATED' ELSE 'UPDATED' END, v_old, v_new);
   RETURN v_id;
 END $_$;
+
+
+--
+-- Name: payment_account_secret_guard(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.payment_account_secret_guard() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+BEGIN
+  IF iam_v2.payment_account_has_open_checkouts(NEW.account_id) THEN
+    RAISE EXCEPTION 'PAYMENT_ACCOUNT_CHECKOUTS_OPEN: this account has card checkouts in progress, so its credentials cannot change until they finish. Try again later, or add a new account.'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $$;
 
 
 --
@@ -7708,6 +8267,25 @@ END $$;
 
 
 --
+-- Name: pms_interface_has_undrained_postings(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_interface_has_undrained_postings(p_tenant uuid, p_site uuid, p_iface uuid) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+    -- The same set the decommission gate (p4_interface_decommission_gate) refuses on: work that was authorized
+    -- and has not reached a terminal answer. While any exists, wind down keeps the link to the PMS.
+    SELECT EXISTS (SELECT 1 FROM iam_v2.posting_outbox o
+                    WHERE o.tenant_id = p_tenant AND o.site_id = p_site AND o.pms_interface_id = p_iface
+                      AND o.state IN ('QUEUED','IN_FLIGHT','HELD_RECOVERY'))
+        OR EXISTS (SELECT 1 FROM iam_v2.posting_attempts a
+                    WHERE a.tenant_id = p_tenant AND a.site_id = p_site AND a.pms_interface_id = p_iface
+                      AND a.outcome IN ('SENDING','UNKNOWN'));
+$$;
+
+
+--
 -- Name: pms_known_room_inventory(uuid, uuid, uuid, bigint, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -7851,6 +8429,46 @@ $$;
 
 
 --
+-- Name: pms_reconciliation_settings_set_checked(uuid, uuid, bigint, integer, integer, integer, integer, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_reconciliation_settings_set_checked(p_tenant uuid, p_site uuid, p_expected_version bigint, p_floor integer, p_cap integer, p_tolerance integer, p_lookback integer, p_operator text, p_reason text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_cur bigint;
+BEGIN
+    IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
+        RAISE EXCEPTION 'RECON_SETTINGS_ACTOR: an operator identity is required' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF p_reason IS NULL OR length(btrim(p_reason)) < 3 OR length(p_reason) > 500 THEN
+        RAISE EXCEPTION 'RECON_SETTINGS_REASON: a reason of 3 to 500 characters is required' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF p_floor IS NULL OR p_floor < 1 OR p_floor > 100000 THEN
+        RAISE EXCEPTION 'RECON_SETTINGS_BOUNDS: the minimum roster size must be between 1 and 100000' USING ERRCODE = 'check_violation';
+    END IF;
+    IF p_cap IS NULL OR p_cap < 1 OR p_cap > 100000 THEN
+        RAISE EXCEPTION 'RECON_SETTINGS_BOUNDS: the most stays one run may close must be between 1 and 100000' USING ERRCODE = 'check_violation';
+    END IF;
+    IF p_tolerance IS NULL OR p_tolerance < 0 OR p_tolerance > 10000 THEN
+        RAISE EXCEPTION 'RECON_SETTINGS_BOUNDS: the room tolerance must be between 0 and 10000' USING ERRCODE = 'check_violation';
+    END IF;
+    IF p_lookback IS NULL OR p_lookback < 1 OR p_lookback > 1000 THEN
+        RAISE EXCEPTION 'RECON_SETTINGS_BOUNDS: the inventory look-back must be between 1 and 1000 sweeps' USING ERRCODE = 'check_violation';
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtext('pms_recon_settings'), hashtext(p_site::text));
+    SELECT g.config_version INTO v_cur FROM iam_v2.pms_reconciliation_settings_get(p_tenant, p_site) g;
+    IF p_expected_version IS NULL OR v_cur IS DISTINCT FROM p_expected_version THEN
+        RAISE EXCEPTION 'RECON_SETTINGS_VERSION_CONFLICT: the settings changed (now version %); reload and try again', v_cur
+            USING ERRCODE = 'serialization_failure';
+    END IF;
+    RETURN iam_v2.pms_reconciliation_settings_set(p_tenant, p_site, p_floor, p_cap, p_operator, btrim(p_reason),
+                                                   p_tolerance, p_lookback);
+END;
+$$;
+
+
+--
 -- Name: pms_record_resync_coverage(uuid, uuid, uuid, bigint, text[], integer, integer, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -7879,6 +8497,218 @@ BEGIN
      WHERE d.tenant_id = p_tenant AND d.site_id = p_site AND d.pms_interface_id = p_iface
        AND d.resync_generation <= p_generation - 500;
 END;
+$$;
+
+
+--
+-- Name: pms_review_decide(uuid, uuid, uuid, text, uuid, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_review_decide(p_tenant uuid, p_site uuid, p_event uuid, p_action text, p_stay uuid, p_operator text, p_reason text) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_iface uuid; v_status text; v_res uuid; v_match text;
+BEGIN
+    IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
+        RAISE EXCEPTION 'REVIEW_ACTOR: an operator identity is required' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF p_reason IS NULL OR length(btrim(p_reason)) < 3 OR length(p_reason) > 500 THEN
+        RAISE EXCEPTION 'REVIEW_REASON: a reason of 3 to 500 characters is required' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF p_action NOT IN ('ACKNOWLEDGE','LINK') THEN
+        RAISE EXCEPTION 'REVIEW_ACTION: ACKNOWLEDGE or LINK' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+
+    SELECT e.pms_interface_id, e.processing_status INTO v_iface, v_status
+      FROM iam_v2.stay_events e
+     WHERE e.id = p_event AND e.tenant_id = p_tenant AND e.site_id = p_site
+       FOR SHARE;
+    IF v_iface IS NULL THEN
+        RAISE EXCEPTION 'REVIEW_NOT_FOUND: no such PMS message on this property' USING ERRCODE = 'no_data_found';
+    END IF;
+    IF v_status <> 'MANUAL_REVIEW' THEN
+        RAISE EXCEPTION 'REVIEW_NOT_WAITING: this message is % and needs no decision', v_status USING ERRCODE = 'check_violation';
+    END IF;
+    IF EXISTS (SELECT 1 FROM iam_v2.pms_case_resolutions x WHERE x.stay_event_id = p_event) THEN
+        RAISE EXCEPTION 'REVIEW_ALREADY_DECIDED: this message already carries a decision' USING ERRCODE = 'unique_violation';
+    END IF;
+
+    IF p_action = 'ACKNOWLEDGE' THEN
+        INSERT INTO iam_v2.pms_case_resolutions
+               (tenant_id, site_id, pms_interface_id, stay_event_id, stay_id, disposition,
+                evidence_kind, evidence_ref, resolved_by, note)
+        VALUES (p_tenant, p_site, v_iface, p_event, NULL, 'ACKNOWLEDGED_BY_OPERATOR',
+                'OPERATOR_DECISION', NULL, btrim(p_operator), btrim(p_reason))
+        RETURNING id INTO v_res;
+        RETURN v_res;
+    END IF;
+
+    IF p_stay IS NULL THEN
+        RAISE EXCEPTION 'REVIEW_STAY_REQUIRED: choose the stay this message is about' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    SELECT c.matched_by INTO v_match
+      FROM iam_v2.pms_review_link_candidates(p_tenant, p_site, p_event) c WHERE c.stay_id = p_stay;
+    IF v_match IS NULL THEN
+        RAISE EXCEPTION 'REVIEW_NOT_MATCHABLE: this message cannot be matched to that stay (different connection, reservation or room)'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    INSERT INTO iam_v2.pms_case_resolutions
+           (tenant_id, site_id, pms_interface_id, stay_event_id, stay_id, disposition,
+            evidence_kind, evidence_ref, resolved_by, note)
+    VALUES (p_tenant, p_site, v_iface, p_event, p_stay, 'LINKED_TO_STAY',
+            'OPERATOR_DECISION', 'matched by ' || lower(v_match), btrim(p_operator), btrim(p_reason))
+    RETURNING id INTO v_res;
+    RETURN v_res;
+END;
+$$;
+
+
+--
+-- Name: pms_review_expire_due(uuid, uuid, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_review_expire_due(p_tenant uuid, p_site uuid, p_limit integer DEFAULT 500) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_on boolean; v_days int; v_from timestamptz; v_ver bigint; v_n int := 0;
+BEGIN
+    SELECT s.enabled, s.expire_after_days, s.applies_from, s.config_version INTO v_on, v_days, v_from, v_ver
+      FROM iam_v2.pms_review_expiry_settings s WHERE s.tenant_id = p_tenant AND s.site_id = p_site;
+    IF NOT COALESCE(v_on, false) OR v_from IS NULL THEN
+        RETURN 0;
+    END IF;
+    INSERT INTO iam_v2.pms_case_resolutions
+           (tenant_id, site_id, pms_interface_id, stay_event_id, stay_id, disposition,
+            evidence_kind, evidence_ref, resolved_by, note)
+    SELECT e.tenant_id, e.site_id, e.pms_interface_id, e.id, NULL, 'EXPIRED_UNDECIDED',
+           'EXPIRY_SETTING', 'setting version ' || v_ver::text || ', after ' || v_days::text || ' days',
+           'automatic expiry', NULL
+      FROM iam_v2.stay_events e
+     WHERE e.tenant_id = p_tenant AND e.site_id = p_site
+       AND e.processing_status = 'MANUAL_REVIEW'
+       AND e.received_at >= v_from
+       AND e.received_at < now() - make_interval(days => v_days)
+       AND NOT EXISTS (SELECT 1 FROM iam_v2.pms_case_resolutions x WHERE x.stay_event_id = e.id)
+     ORDER BY e.received_at
+     LIMIT GREATEST(1, LEAST(COALESCE(p_limit, 500), 5000))
+    ON CONFLICT (stay_event_id) DO NOTHING;
+    GET DIAGNOSTICS v_n = ROW_COUNT;
+    RETURN v_n;
+END;
+$$;
+
+
+--
+-- Name: pms_review_expiry_settings_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_review_expiry_settings_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RAISE EXCEPTION 'iam_v2.pms_review_expiry_settings_changes is append-only: % refused', TG_OP
+        USING ERRCODE = 'restrict_violation';
+END;
+$$;
+
+
+--
+-- Name: pms_review_expiry_settings_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_review_expiry_settings_get(p_tenant uuid, p_site uuid) RETURNS TABLE(enabled boolean, expire_after_days integer, applies_from timestamp with time zone, config_version bigint, is_default boolean)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+    SELECT COALESCE(s.enabled, false), COALESCE(s.expire_after_days, 30), s.applies_from,
+           COALESCE(s.config_version, 0), (s.tenant_id IS NULL)
+      FROM (SELECT p_tenant AS t, p_site AS si) k
+      LEFT JOIN iam_v2.pms_review_expiry_settings s ON s.tenant_id = k.t AND s.site_id = k.si;
+$$;
+
+
+--
+-- Name: pms_review_expiry_settings_set(uuid, uuid, bigint, boolean, integer, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_review_expiry_settings_set(p_tenant uuid, p_site uuid, p_expected_version bigint, p_enabled boolean, p_days integer, p_operator text, p_reason text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_old jsonb; v_cur bigint; v_was boolean; v_from timestamptz; v_ver bigint;
+BEGIN
+    IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
+        RAISE EXCEPTION 'REVIEW_EXPIRY_ACTOR: an operator identity is required' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF p_reason IS NULL OR length(btrim(p_reason)) < 3 OR length(p_reason) > 500 THEN
+        RAISE EXCEPTION 'REVIEW_EXPIRY_REASON: a reason of 3 to 500 characters is required' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF p_enabled IS NULL OR p_days IS NULL OR p_days < 1 OR p_days > 365 THEN
+        RAISE EXCEPTION 'REVIEW_EXPIRY_BOUNDS: the waiting period must be between 1 and 365 days' USING ERRCODE = 'check_violation';
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtext('pms_review_expiry'), hashtext(p_site::text));
+    SELECT to_jsonb(s), s.config_version, s.enabled, s.applies_from INTO v_old, v_cur, v_was, v_from
+      FROM iam_v2.pms_review_expiry_settings s
+     WHERE s.tenant_id = p_tenant AND s.site_id = p_site FOR UPDATE;
+    IF p_expected_version IS NULL OR COALESCE(v_cur, 0) <> p_expected_version THEN
+        RAISE EXCEPTION 'REVIEW_EXPIRY_VERSION_CONFLICT: the setting changed (now version %); reload and try again', COALESCE(v_cur,0)
+            USING ERRCODE = 'serialization_failure';
+    END IF;
+    -- Switching ON starts the clock now; staying on keeps it; switching off clears it.
+    IF p_enabled AND NOT COALESCE(v_was, false) THEN
+        v_from := now();
+    ELSIF NOT p_enabled THEN
+        v_from := NULL;
+    END IF;
+    INSERT INTO iam_v2.pms_review_expiry_settings AS s
+           (tenant_id, site_id, enabled, expire_after_days, applies_from, config_version, updated_at)
+    VALUES (p_tenant, p_site, p_enabled, p_days, v_from, 1, now())
+    ON CONFLICT (tenant_id, site_id) DO UPDATE
+       SET enabled = EXCLUDED.enabled, expire_after_days = EXCLUDED.expire_after_days,
+           applies_from = EXCLUDED.applies_from,
+           config_version = s.config_version + 1, updated_at = now()
+    RETURNING s.config_version INTO v_ver;
+    INSERT INTO iam_v2.pms_review_expiry_settings_changes
+           (tenant_id, site_id, changed_by, reason, old_values, new_values, new_config_version)
+    VALUES (p_tenant, p_site, btrim(p_operator), btrim(p_reason), v_old,
+            jsonb_build_object('enabled', p_enabled, 'expire_after_days', p_days, 'applies_from', v_from), v_ver);
+    RETURN v_ver;
+END;
+$$;
+
+
+--
+-- Name: pms_review_link_candidates(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.pms_review_link_candidates(p_tenant uuid, p_site uuid, p_event uuid) RETURNS TABLE(stay_id uuid, matched_by text, room text, status text, arrival date, departure date)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+    WITH ev AS (
+        SELECT e.tenant_id, e.site_id, e.pms_interface_id, e.received_at,
+               btrim(COALESCE(e.payload->>'reservation','')) AS res,
+               upper(btrim(COALESCE(e.payload->>'room',''))) AS room
+          FROM iam_v2.stay_events e
+         WHERE e.id = p_event AND e.tenant_id = p_tenant AND e.site_id = p_site
+           AND e.processing_status = 'MANUAL_REVIEW')
+    SELECT s.id, 'RESERVATION', s.normalized_room_number, s.status, s.arrival::date, s.departure::date
+      FROM ev JOIN iam_v2.stays s
+        ON s.tenant_id = ev.tenant_id AND s.site_id = ev.site_id AND s.pms_interface_id = ev.pms_interface_id
+     WHERE ev.res <> '' AND btrim(s.external_reservation_id) = ev.res
+    UNION ALL
+    -- A message that names no reservation is about a ROOM. The stays it can be about are the ones that were in
+    -- that room when it arrived: arrived by then, and not checked out before it.
+    SELECT s.id, 'ROOM', s.normalized_room_number, s.status, s.arrival::date, s.departure::date
+      FROM ev JOIN iam_v2.stays s
+        ON s.tenant_id = ev.tenant_id AND s.site_id = ev.site_id AND s.pms_interface_id = ev.pms_interface_id
+     WHERE ev.res = '' AND ev.room <> '' AND s.normalized_room_number = ev.room
+       AND (s.arrival IS NULL OR s.arrival <= ev.received_at)
+       AND (s.effective_checkout_at IS NULL OR s.effective_checkout_at >= ev.received_at)
+     ORDER BY 2, 4, 5 DESC
+     LIMIT 50;
 $$;
 
 
@@ -7927,7 +8757,7 @@ DECLARE
     v_rooms int; v_expected int := 0; v_missing int := 0; v_conflicts int := 0;
     v_have boolean := false; v_swept text[]; v_known text[]; v_added text[];
     v_published bigint; v_boundary timestamptz; v_run uuid; v_outcome text;
-    v_sync text; v_cont text; v_scope int; v_ver bigint;
+    v_sync text; v_cont text; v_scope int; v_ver bigint; v_norm int;
 BEGIN
     IF p_operator IS NULL OR length(btrim(p_operator)) = 0 THEN
         RAISE EXCEPTION 'roster reconciliation: an operator identity is required'
@@ -7942,15 +8772,21 @@ BEGIN
     SELECT count(*) INTO v_scope FROM iam_v2.pms_interfaces i
      WHERE i.id = p_iface AND i.tenant_id = p_tenant AND i.site_id = p_site;
 
-    SELECT r.published_resync_generation, r.sync_status, r.continuity_status
-      INTO v_published, v_sync, v_cont
+    SELECT r.published_resync_generation, r.sync_status, r.continuity_status,
+           COALESCE((SELECT rv.normalization_version FROM iam_v2.pms_interface_revisions rv
+                      WHERE rv.id = r.pinned_revision_id), 1)
+      INTO v_published, v_sync, v_cont, v_norm
       FROM iam_v2.pms_interface_runtime r
      WHERE r.tenant_id = p_tenant AND r.site_id = p_site AND r.pms_interface_id = p_iface;
 
+    -- The boundary is the roster's own: the latest record the PMS sent in this generation. The checkouts this
+    -- function queues are admitted under the same generation and are excluded here, so re-running a generation
+    -- measures the same roster it measured the first time.
     SELECT max(e.received_at) INTO v_boundary
       FROM iam_v2.stay_events e
      WHERE e.tenant_id = p_tenant AND e.site_id = p_site AND e.pms_interface_id = p_iface
-       AND e.resync_generation = p_generation;
+       AND e.resync_generation = p_generation
+       AND e.external_event_identity NOT LIKE 'ROSTER_RECONCILIATION:%';
 
     SELECT count(*) INTO v_roster
       FROM iam_v2.pms_roster_of_generation(p_tenant, p_site, p_iface, p_generation);
@@ -7968,9 +8804,10 @@ BEGIN
     SELECT i.rooms INTO v_known FROM iam_v2.pms_room_inventory i
      WHERE i.tenant_id = p_tenant AND i.site_id = p_site AND i.pms_interface_id = p_iface;
 
-    -- BOOTSTRAP. The first uncontradicted sweep establishes the building; there is nothing else it could be
-    -- established from, and refusing for ever would make the feature unreachable on a new appliance.
-    IF v_known IS NULL AND v_have AND v_conflicts = 0 AND COALESCE(array_length(v_swept,1),0) > 0 THEN
+    -- BOOTSTRAP. The first uncontradicted sweep establishes the building -- on an APPLY only. A dry run
+    -- describes what a run would do and changes nothing it describes (H-13): opening a screen, or pressing
+    -- "Run dry run", must never be what established the inventory every later run is judged against.
+    IF p_apply AND v_known IS NULL AND v_have AND v_conflicts = 0 AND COALESCE(array_length(v_swept,1),0) > 0 THEN
         INSERT INTO iam_v2.pms_room_inventory
                (tenant_id, site_id, pms_interface_id, rooms, established_from, config_version)
         VALUES (p_tenant, p_site, p_iface, v_swept, p_generation, 1)
@@ -7989,14 +8826,9 @@ BEGIN
           FROM (SELECT unnest(v_known) EXCEPT SELECT unnest(COALESCE(v_swept,'{}'))) m;
     END IF;
 
-    -- ON COMMIT DROP keeps the table alive until the TRANSACTION ends, not until the function returns, so a
-    -- second call in the same transaction failed with "relation _absent already exists". pmsd calls this once
-    -- per transaction and never hit it; a controlled failure-to-recovery test that drove three generations in
-    -- one DO block did, immediately. Dropping first makes the function re-entrant within a transaction, which
-    -- is what any caller would reasonably assume.
     DROP TABLE IF EXISTS _absent;
     CREATE TEMP TABLE _absent ON COMMIT DROP AS
-    SELECT s.id, s.external_reservation_id
+    SELECT s.id, s.external_reservation_id, s.normalized_room_number
       FROM iam_v2.stays s
      WHERE s.tenant_id = p_tenant AND s.site_id = p_site AND s.pms_interface_id = p_iface
        AND s.status = 'IN_HOUSE'
@@ -8009,6 +8841,7 @@ BEGIN
            SELECT 1 FROM iam_v2.stay_events e2
             WHERE e2.tenant_id = p_tenant AND e2.site_id = p_site AND e2.pms_interface_id = p_iface
               AND v_boundary IS NOT NULL AND e2.received_at > v_boundary
+              AND e2.external_event_identity NOT LIKE 'ROSTER_RECONCILIATION:%'
               AND (e2.stay_id = s.id
                    OR btrim(COALESCE(e2.payload->>'reservation','')) = btrim(s.external_reservation_id)));
     SELECT count(*) INTO v_absent FROM _absent;
@@ -8055,13 +8888,11 @@ BEGIN
             NULLIF(btrim(COALESCE(p_reason,'')),''), COALESCE(v_rooms,0), v_expected, v_protected)
     RETURNING id INTO v_run;
 
-    IF v_outcome = 'COMPLETED' THEN
-        -- GROWTH, and only here: a sweep that accounted for the building may add rooms to it. A sweep that
-        -- could not is refused above and never reaches this point, so a degraded feed cannot enlarge the
-        -- building any more than it can shrink it.
+    IF v_outcome = 'COMPLETED' AND p_apply THEN
+        -- GROWTH, and only on an apply (see BOOTSTRAP above).
         SELECT COALESCE(ARRAY(SELECT unnest(COALESCE(v_swept,'{}')) EXCEPT SELECT unnest(v_known)), '{}')
           INTO v_added;
-        IF COALESCE(array_length(v_added,1),0) > 0 THEN
+        IF v_known IS NOT NULL AND COALESCE(array_length(v_added,1),0) > 0 THEN
             UPDATE iam_v2.pms_room_inventory
                SET rooms = ARRAY(SELECT DISTINCT unnest(rooms || v_added) ORDER BY 1),
                    updated_at = now(), config_version = config_version + 1
@@ -8074,13 +8905,31 @@ BEGIN
                     'a complete sweep named rooms not previously known', 'GREW',
                     v_expected, v_expected + array_length(v_added,1), v_added, v_ver);
         END IF;
-    END IF;
 
-    IF v_outcome = 'COMPLETED' AND p_apply THEN
-        UPDATE iam_v2.stays s
-           SET status = 'CHECKED_OUT', effective_checkout_at = v_boundary
+        -- THE CHECKOUT, AS A PMS CHECKOUT. One durable GO per stay, admitted under the published generation
+        -- the roster came from. The Stay Engine applies it and runs the Checkout Converter in the same
+        -- transaction, so the entitlement, devices, sessions, grace and audit follow exactly the rules a
+        -- checkout the PMS sent follows. A stay with a checkout already waiting gets no second one.
+        INSERT INTO iam_v2.stay_events
+               (tenant_id, site_id, pms_interface_id, external_event_identity, event_type,
+                pms_timestamp_utc, normalization_version, clock_suspect, payload,
+                admission_kind, admission_runtime_generation, resync_generation)
+        SELECT p_tenant, p_site, p_iface,
+               'ROSTER_RECONCILIATION:' || p_generation::text || ':' || a.id::text, 'GO',
+               v_boundary, v_norm, false,
+               jsonb_build_object('reservation', a.external_reservation_id,
+                                  'room', COALESCE(a.normalized_room_number, ''),
+                                  'source', 'ROSTER_RECONCILIATION',
+                                  'run_id', v_run::text,
+                                  'resync_generation', p_generation),
+               'RESYNC', 0, p_generation
           FROM _absent a
-         WHERE s.id = a.id AND s.status = 'IN_HOUSE';
+         WHERE NOT EXISTS (
+               SELECT 1 FROM iam_v2.stay_events q
+                WHERE q.tenant_id = p_tenant AND q.site_id = p_site AND q.pms_interface_id = p_iface
+                  AND q.processing_status = 'PENDING' AND q.event_type = 'GO'
+                  AND btrim(COALESCE(q.payload->>'reservation','')) = btrim(a.external_reservation_id))
+        ON CONFLICT DO NOTHING;
         GET DIAGNOSTICS v_closed = ROW_COUNT;
 
         INSERT INTO iam_v2.pms_case_resolutions
@@ -8101,6 +8950,13 @@ BEGIN
                         COALESCE(v_rooms,0), v_expected, v_protected, v_run;
 END;
 $$;
+
+
+--
+-- Name: FUNCTION pms_roster_reconcile(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_operator text, p_apply boolean, p_reason text); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.pms_roster_reconcile(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_operator text, p_apply boolean, p_reason text) IS 'Reconciles the mirror against a complete published roster. APPLY queues one checkout (GO) stay event per absent stay, which the Stay Engine applies through the Checkout Converter (0123); stays_closed counts the checkouts queued. A dry run changes nothing but its own run row.';
 
 
 --
@@ -8235,6 +9091,58 @@ BEGIN
                       WHERE tenant_id = p_tenant AND site_id = p_site AND config_version = v_new);
   RETURN v_new;
 END $_$;
+
+
+--
+-- Name: purge_accounting_detail(uuid, uuid, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.purge_accounting_detail(p_tenant uuid, p_site uuid, p_batch integer) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_days integer; v_cutoff timestamptz; v_n integer;
+BEGIN
+  IF p_batch IS NULL OR p_batch NOT BETWEEN 1 AND 100000 THEN
+    RAISE EXCEPTION 'a batch of 1-100000 records is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  SELECT s.detail_retention_days INTO v_days
+    FROM iam_v2.site_accounting_retention s WHERE s.tenant_id = p_tenant AND s.site_id = p_site;
+  IF v_days IS NULL THEN
+    RETURN 0;   -- UNLIMITED (the default): nothing is read, nothing is deleted, nothing is recorded
+  END IF;
+  v_cutoff := now() - make_interval(days => v_days);
+  PERFORM set_config('iam_v2.accounting_purge', 'retention', true);
+  WITH doomed AS (
+    SELECT ar.id
+      FROM iam_v2.accounting_records ar
+      JOIN iam_v2.sessions se ON se.id = ar.session_id
+      JOIN iam_v2.entitlements cur ON cur.id = se.entitlement_id
+     WHERE ar.tenant_id = p_tenant AND ar.site_id = p_site
+       AND ar.sampled_at < v_cutoff
+       AND se.ended IS NOT NULL AND se.ended < v_cutoff
+       AND cur.status = 'TERMINATED'
+       -- every entitlement the session was ever attributed to has ended: live usage is never touched
+       AND NOT EXISTS (SELECT 1 FROM iam_v2.session_entitlement_bindings b
+                         JOIN iam_v2.entitlements be ON be.id = b.entitlement_id
+                        WHERE b.session_id = ar.session_id AND be.status <> 'TERMINATED')
+     LIMIT p_batch)
+  DELETE FROM iam_v2.accounting_records ar USING doomed WHERE ar.id = doomed.id;
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  PERFORM set_config('iam_v2.accounting_purge', '', true);
+  IF v_n > 0 THEN
+    INSERT INTO iam_v2.accounting_purge_runs (tenant_id, site_id, retention_days, cutoff, records_deleted)
+    VALUES (p_tenant, p_site, v_days, v_cutoff, v_n);
+  END IF;
+  RETURN v_n;
+END $$;
+
+
+--
+-- Name: FUNCTION purge_accounting_detail(p_tenant uuid, p_site uuid, p_batch integer); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.purge_accounting_detail(p_tenant uuid, p_site uuid, p_batch integer) IS 'The accounting-detail retention purge (0122). Does nothing while the site''s retention is unlimited (the default). Otherwise removes at most p_batch accounting records older than the retention, of sessions ended before it whose every entitlement is TERMINATED, and records the run. Totals on entitlements and sessions are not touched.';
 
 
 --
@@ -9290,17 +10198,59 @@ END $$;
 
 CREATE FUNCTION iam_v2.trg_entitlement_guard() RETURNS trigger
     LANGUAGE plpgsql
-    AS $$
-DECLARE s_key text; os_key text;
+    AS $_$
+DECLARE s_key text; os_key text; v_owner text; v_trusted boolean; v_adj text; v_field text; v_new text;
 BEGIN
   IF TG_OP='UPDATE' THEN
     IF OLD.status='TERMINATED' AND NEW.status<>'TERMINATED' THEN
       RAISE EXCEPTION 'no transition out of TERMINATED'; END IF;
+
+    -- WHO IS WRITING. The controlled writers are SECURITY DEFINER functions owned by the owner of
+    -- apply_entitlement_transition, so inside them current_user is that owner. A superuser is the maintenance
+    -- path. Everybody else -- every runtime role -- is untrusted here. Resolved from the catalog on every call,
+    -- like p3_controlled_writer_only, so a re-owned schema is followed rather than hard-coded.
+    SELECT pg_get_userbyid(p.proowner) INTO v_owner FROM pg_proc p
+     WHERE p.oid = to_regprocedure('iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text)');
+    v_trusted := current_user = v_owner
+              OR EXISTS (SELECT 1 FROM pg_roles WHERE rolname = current_user AND rolsuper);
+
+    -- AN UNTRUSTED CALLER CHANGES NOTHING BUT STATUS, and status has its own controlled-writer guard
+    -- (p3_entitlement_controlled_writer), which refuses it outside apply_entitlement_transition. The window, the
+    -- counters, the quota (data_quota_bytes), the pinned plan and package (service_plan_revision_id,
+    -- package_revision_id), the policy snapshot, the subject and the scope are the terms the entitlement was
+    -- granted on; none is a runtime write.
+    IF NOT v_trusted AND (to_jsonb(NEW) - 'status') IS DISTINCT FROM (to_jsonb(OLD) - 'status') THEN
+      RAISE EXCEPTION 'entitlements: the terms of a grant are written only by the controlled iam_v2 writers (caller %)',
+        current_user USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
     IF ( NEW.consumed_data_bytes < OLD.consumed_data_bytes
       OR NEW.consumed_online_seconds < OLD.consumed_online_seconds
-      OR (OLD.window_ends_at IS NOT NULL AND NEW.window_ends_at IS DISTINCT FROM OLD.window_ends_at) )
-      AND current_setting('iam_v2.allow_adjust', true) IS DISTINCT FROM 'on'
-    THEN RAISE EXCEPTION 'counter decrease / window move only via entitlement_adjustments'; END IF;
+      OR (OLD.window_ends_at IS NOT NULL AND NEW.window_ends_at IS DISTINCT FROM OLD.window_ends_at) ) THEN
+      v_adj := current_setting('iam_v2.allow_adjust', true);
+      IF v_adj = 'on' AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = current_user AND rolsuper) THEN
+        NULL;  -- the superuser maintenance path, as before
+      ELSE
+        -- The ONE field this statement moves, and the value it moves it to. A statement that moves two of them
+        -- matches no single recorded adjustment and is refused.
+        IF NEW.consumed_data_bytes < OLD.consumed_data_bytes
+           AND NEW.window_ends_at IS NOT DISTINCT FROM OLD.window_ends_at
+           AND NEW.consumed_online_seconds >= OLD.consumed_online_seconds THEN
+          v_field := 'consumed_data_bytes'; v_new := NEW.consumed_data_bytes::text;
+        ELSIF OLD.window_ends_at IS NOT NULL AND NEW.window_ends_at IS DISTINCT FROM OLD.window_ends_at
+           AND NEW.consumed_data_bytes >= OLD.consumed_data_bytes
+           AND NEW.consumed_online_seconds >= OLD.consumed_online_seconds THEN
+          v_field := 'window_ends_at'; v_new := NEW.window_ends_at::text;
+        END IF;
+        IF v_field IS NULL OR v_adj IS NULL OR v_adj !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+           OR NOT EXISTS (SELECT 1 FROM iam_v2.entitlement_adjustments a
+                           WHERE a.id = v_adj::uuid AND a.entitlement_id = NEW.id AND a.field = v_field
+                             AND a.created_at = now()
+                             AND a.new_value IS NOT DISTINCT FROM v_new) THEN
+          RAISE EXCEPTION 'counter decrease / window move only via entitlement_adjustments';
+        END IF;
+      END IF;
+    END IF;
   END IF;
   IF NEW.supersedes_entitlement_id IS NOT NULL THEN
     SELECT CASE WHEN stay_id IS NOT NULL THEN 'stay:'||stay_id WHEN guest_account_id IS NOT NULL THEN 'acct:'||guest_account_id
@@ -9311,7 +10261,14 @@ BEGIN
     IF s_key IS DISTINCT FROM os_key THEN RAISE EXCEPTION 'cross-subject supersession rejected (% vs %)', s_key, os_key; END IF;
   END IF;
   RETURN NEW;
-END; $$;
+END; $_$;
+
+
+--
+-- Name: FUNCTION trg_entitlement_guard(); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.trg_entitlement_guard() IS 'Entitlement row guard (0124): no transition out of TERMINATED; a caller that is neither the controlled writers'' owner nor a superuser changes no column but status; a counter decrease or window move needs a superuser with iam_v2.allow_adjust=on or an entitlement_adjustments row recorded in this transaction for this entitlement, field and value, named by iam_v2.allow_adjust; no cross-subject supersession.';
 
 
 --
@@ -9760,6 +10717,275 @@ END $$;
 
 
 --
+-- Name: walled_garden_settings_changes_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.walled_garden_settings_changes_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'iam_v2.walled_garden_settings_changes is append-only: % refused', TG_OP
+    USING ERRCODE = 'restrict_violation';
+END $$;
+
+
+--
+-- Name: walled_garden_settings_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.walled_garden_settings_get(p_tenant uuid, p_site uuid) RETURNS TABLE(widest_prefix_len integer, config_version bigint, updated_at timestamp with time zone, updated_by text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE(s.widest_prefix_len, 24), COALESCE(s.config_version, 0), s.updated_at, s.updated_by
+    FROM (SELECT 1) one
+    LEFT JOIN iam_v2.site_walled_garden_settings s ON s.tenant_id = p_tenant AND s.site_id = p_site;
+$$;
+
+
+--
+-- Name: FUNCTION walled_garden_settings_get(p_tenant uuid, p_site uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.walled_garden_settings_get(p_tenant uuid, p_site uuid) IS 'The walled-garden policy in force for a site. config_version 0 = no row; the default (/24) is in force.';
+
+
+--
+-- Name: walled_garden_settings_set(uuid, uuid, integer, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.walled_garden_settings_set(p_tenant uuid, p_site uuid, p_widest_prefix_len integer, p_operator text, p_reason text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_version bigint; v_old int;
+BEGIN
+  IF p_operator IS NULL OR btrim(p_operator) = '' THEN
+    RAISE EXCEPTION 'an operator label is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_reason IS NULL OR length(btrim(p_reason)) < 4 OR length(btrim(p_reason)) > 500 THEN
+    RAISE EXCEPTION 'a reason of 4-500 characters is required to change the walled-garden policy'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_widest_prefix_len IS NULL OR p_widest_prefix_len < 16 OR p_widest_prefix_len > 32 THEN
+    RAISE EXCEPTION 'the widest walled-garden network must be between /16 and /32 (got %)', p_widest_prefix_len
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtext('walled_garden_settings'), hashtext(p_site::text));
+
+  SELECT s.widest_prefix_len INTO v_old
+    FROM iam_v2.site_walled_garden_settings s
+   WHERE s.tenant_id = p_tenant AND s.site_id = p_site
+     FOR UPDATE;
+
+  INSERT INTO iam_v2.site_walled_garden_settings AS s (tenant_id, site_id, widest_prefix_len, updated_by)
+  VALUES (p_tenant, p_site, p_widest_prefix_len, btrim(p_operator))
+  ON CONFLICT (tenant_id, site_id) DO UPDATE
+     SET widest_prefix_len = EXCLUDED.widest_prefix_len,
+         updated_by        = EXCLUDED.updated_by,
+         config_version    = s.config_version + 1,
+         updated_at        = now()
+  RETURNING s.config_version INTO v_version;
+
+  INSERT INTO iam_v2.walled_garden_settings_changes
+    (tenant_id, site_id, changed_by, change_reason, old_widest_prefix_len, new_widest_prefix_len, new_config_version)
+  VALUES (p_tenant, p_site, btrim(p_operator), btrim(p_reason), v_old, p_widest_prefix_len, v_version);
+
+  RETURN v_version;
+END $$;
+
+
+--
+-- Name: FUNCTION walled_garden_settings_set(p_tenant uuid, p_site uuid, p_widest_prefix_len integer, p_operator text, p_reason text); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.walled_garden_settings_set(p_tenant uuid, p_site uuid, p_widest_prefix_len integer, p_operator text, p_reason text) IS 'Stores a validated walled-garden policy and its change row in one transaction. Applies to the next rule created or edited; existing rules are not changed.';
+
+
+--
+-- Name: operator_signin_protection_changes_append_only(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.operator_signin_protection_changes_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'public.operator_signin_protection_changes is append-only: % refused', TG_OP
+    USING ERRCODE = 'restrict_violation';
+END $$;
+
+
+--
+-- Name: operator_signin_protection_get(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.operator_signin_protection_get() RETURNS TABLE(account_max_failures integer, account_window_seconds integer, ip_max_failures integer, ip_window_seconds integer, lockout_seconds integer, config_version bigint, updated_at timestamp with time zone, updated_by text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT COALESCE(p.account_max_failures, 5), COALESCE(p.account_window_seconds, 900),
+         COALESCE(p.ip_max_failures, 20), COALESCE(p.ip_window_seconds, 900),
+         COALESCE(p.lockout_seconds, 900), COALESCE(p.config_version, 0::bigint), p.updated_at, p.updated_by
+    FROM (SELECT 1) one
+    LEFT JOIN public.operator_signin_protection p ON p.id;
+$$;
+
+
+--
+-- Name: operator_signin_protection_set(integer, integer, integer, integer, integer, text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.operator_signin_protection_set(p_account_max_failures integer, p_account_window_seconds integer, p_ip_max_failures integer, p_ip_window_seconds integer, p_lockout_seconds integer, p_operator text, p_reason text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE v_version bigint; v_old jsonb; v_new jsonb;
+BEGIN
+  IF p_operator IS NULL OR btrim(p_operator) = '' THEN
+    RAISE EXCEPTION 'an operator label is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_reason IS NULL OR length(btrim(p_reason)) < 4 OR length(btrim(p_reason)) > 500 THEN
+    RAISE EXCEPTION 'a reason of 4-500 characters is required to change the sign-in protection'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  -- The bounds are the table CHECKs; the INSERT below refuses anything outside them with check_violation.
+  PERFORM pg_advisory_xact_lock(hashtext('operator_signin_protection'));
+  SELECT jsonb_build_object('account_max_failures', p.account_max_failures,
+                            'account_window_seconds', p.account_window_seconds,
+                            'ip_max_failures', p.ip_max_failures, 'ip_window_seconds', p.ip_window_seconds,
+                            'lockout_seconds', p.lockout_seconds)
+    INTO v_old FROM public.operator_signin_protection p WHERE p.id FOR UPDATE;
+  INSERT INTO public.operator_signin_protection AS p
+    (id, account_max_failures, account_window_seconds, ip_max_failures, ip_window_seconds, lockout_seconds,
+     updated_by)
+  VALUES (true, p_account_max_failures, p_account_window_seconds, p_ip_max_failures, p_ip_window_seconds,
+          p_lockout_seconds, btrim(p_operator))
+  ON CONFLICT (id) DO UPDATE
+     SET account_max_failures = EXCLUDED.account_max_failures,
+         account_window_seconds = EXCLUDED.account_window_seconds,
+         ip_max_failures = EXCLUDED.ip_max_failures, ip_window_seconds = EXCLUDED.ip_window_seconds,
+         lockout_seconds = EXCLUDED.lockout_seconds, updated_by = EXCLUDED.updated_by,
+         config_version = p.config_version + 1, updated_at = now()
+  RETURNING p.config_version INTO v_version;
+  v_new := jsonb_build_object('account_max_failures', p_account_max_failures,
+                              'account_window_seconds', p_account_window_seconds,
+                              'ip_max_failures', p_ip_max_failures, 'ip_window_seconds', p_ip_window_seconds,
+                              'lockout_seconds', p_lockout_seconds);
+  INSERT INTO public.operator_signin_protection_changes
+    (changed_by, change_reason, old_values, new_values, new_config_version)
+  VALUES (btrim(p_operator), btrim(p_reason), v_old, v_new, v_version);
+  RETURN v_version;
+END $$;
+
+
+--
+-- Name: operator_signin_throttle_clear(text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.operator_signin_throttle_clear(p_scope text, p_key_hash text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+BEGIN
+  IF p_scope IS NULL OR p_scope NOT IN ('account','reauth') THEN
+    RAISE EXCEPTION 'only an account or step-up counter can be cleared (got %)', p_scope
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  DELETE FROM public.operator_signin_throttle t WHERE t.scope = p_scope AND t.key_hash = p_key_hash;
+END $$;
+
+
+--
+-- Name: operator_signin_throttle_fail(text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.operator_signin_throttle_fail(p_scope text, p_key_hash text) RETURNS TABLE(failures integer, locked_until timestamp with time zone, newly_locked boolean)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE l record; v_fail integer; v_until timestamptz; v_was timestamptz;
+BEGIN
+  IF p_scope IS NULL OR p_scope NOT IN ('account','ip','reauth') THEN
+    RAISE EXCEPTION 'unknown throttle scope %', p_scope USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  SELECT * INTO l FROM public.operator_signin_throttle_limits(p_scope);
+  -- Serialise failures on ONE key so "was a lockout already running" is read under the same lock the update
+  -- takes; different keys never wait for each other.
+  PERFORM pg_advisory_xact_lock(hashtext('operator_signin_throttle'), hashtext(p_scope || ':' || p_key_hash));
+  SELECT t.locked_until INTO v_was FROM public.operator_signin_throttle t
+   WHERE t.scope = p_scope AND t.key_hash = p_key_hash;
+  INSERT INTO public.operator_signin_throttle AS t (scope, key_hash, failures, window_started_at, last_failure_at,
+                                                    locked_until)
+  VALUES (p_scope, p_key_hash, 1, now(), now(), NULL)
+  ON CONFLICT (scope, key_hash) DO UPDATE SET
+    -- A window that ran out with no lockout running starts again at one.
+    failures = CASE WHEN t.window_started_at < now() - make_interval(secs => l.window_seconds)
+                         AND (t.locked_until IS NULL OR t.locked_until <= now())
+                    THEN 1 ELSE t.failures + 1 END,
+    window_started_at = CASE WHEN t.window_started_at < now() - make_interval(secs => l.window_seconds)
+                                  AND (t.locked_until IS NULL OR t.locked_until <= now())
+                             THEN now() ELSE t.window_started_at END,
+    last_failure_at = now(),
+    locked_until = CASE WHEN t.locked_until > now() THEN t.locked_until ELSE NULL END
+  RETURNING t.failures, t.locked_until INTO v_fail, v_until;
+  -- The failure that reaches the threshold starts the lockout. A lockout already running keeps its expiry: a
+  -- guess during a lockout does not extend it, so the owner's wait is predictable.
+  IF (v_until IS NULL OR v_until <= now()) AND v_fail >= l.max_failures THEN
+    v_until := now() + make_interval(secs => l.lockout_seconds);
+    UPDATE public.operator_signin_throttle t SET locked_until = v_until
+     WHERE t.scope = p_scope AND t.key_hash = p_key_hash;
+  END IF;
+  failures := v_fail;
+  locked_until := CASE WHEN v_until > now() THEN v_until END;
+  newly_locked := v_until > now() AND (v_was IS NULL OR v_was <= now());
+  RETURN NEXT;
+  -- Bounded retention: counters nobody has touched for two days are past every window and lockout the
+  -- bounds allow (both at most 24 h). Occasional, so a burst of failures does not each pay for it.
+  IF random() < 0.05 THEN
+    DELETE FROM public.operator_signin_throttle d
+     WHERE d.last_failure_at < now() - interval '2 days'
+       AND (d.locked_until IS NULL OR d.locked_until < now());
+  END IF;
+END $$;
+
+
+--
+-- Name: operator_signin_throttle_limits(text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.operator_signin_throttle_limits(p_scope text, OUT max_failures integer, OUT window_seconds integer, OUT lockout_seconds integer) RETURNS record
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT CASE WHEN p_scope = 'ip' THEN g.ip_max_failures ELSE g.account_max_failures END,
+         CASE WHEN p_scope = 'ip' THEN g.ip_window_seconds ELSE g.account_window_seconds END,
+         g.lockout_seconds
+    FROM public.operator_signin_protection_get() g;
+$$;
+
+
+--
+-- Name: operator_signin_throttle_state(text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.operator_signin_throttle_state(p_scope text, p_key_hash text) RETURNS TABLE(failures integer, last_failure_at timestamp with time zone, locked_until timestamp with time zone, max_failures integer)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT CASE WHEN t.scope IS NULL
+                OR (t.window_started_at < now() - make_interval(secs => l.window_seconds)
+                    AND (t.locked_until IS NULL OR t.locked_until <= now()))
+              THEN 0 ELSE t.failures END,
+         t.last_failure_at,
+         CASE WHEN t.locked_until > now() THEN t.locked_until END,
+         l.max_failures
+    FROM public.operator_signin_throttle_limits(p_scope) l
+    LEFT JOIN public.operator_signin_throttle t ON t.scope = p_scope AND t.key_hash = p_key_hash;
+$$;
+
+
+--
 -- Name: portal_https_settings_changes_append_only(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -9860,6 +11086,29 @@ CREATE TABLE iam_v2.accounting_checkpoints (
 
 
 --
+-- Name: accounting_purge_runs; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.accounting_purge_runs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    retention_days integer NOT NULL,
+    cutoff timestamp with time zone NOT NULL,
+    records_deleted integer NOT NULL,
+    ran_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT apr_deleted CHECK ((records_deleted > 0))
+);
+
+
+--
+-- Name: TABLE accounting_purge_runs; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.accounting_purge_runs IS 'Every retention purge that removed accounting detail (0122): the retention in force, the cutoff and how many records went. Append-only. A purge that removed nothing writes nothing.';
+
+
+--
 -- Name: accounting_records; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -9873,6 +11122,25 @@ CREATE TABLE iam_v2.accounting_records (
     bytes_down bigint DEFAULT 0 NOT NULL,
     sampled_at timestamp with time zone DEFAULT now() NOT NULL,
     ingested_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: accounting_retention_changes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.accounting_retention_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    changed_by text NOT NULL,
+    change_reason text NOT NULL,
+    old_retention_days integer,
+    new_retention_days integer,
+    new_config_version bigint NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT arc_actor CHECK ((length(btrim(changed_by)) > 0)),
+    CONSTRAINT arc_reason CHECK (((length(btrim(change_reason)) >= 4) AND (length(btrim(change_reason)) <= 500)))
 );
 
 
@@ -10191,6 +11459,31 @@ COMMENT ON TABLE iam_v2.backfill_0066_identity_text IS 'Rollback evidence for mi
 
 
 --
+-- Name: card_purchase_sweeps; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.card_purchase_sweeps (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    purchase_id uuid NOT NULL,
+    settlement_id uuid NOT NULL,
+    swept_at timestamp with time zone DEFAULT now() NOT NULL,
+    reason text NOT NULL,
+    waited_seconds integer NOT NULL,
+    CONSTRAINT card_purchase_sweeps_reason_check CHECK ((reason = 'NO_PAYMENT_TRANSACTION'::text)),
+    CONSTRAINT card_purchase_sweeps_waited_seconds_check CHECK ((waited_seconds > 0))
+);
+
+
+--
+-- Name: TABLE card_purchase_sweeps; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.card_purchase_sweeps IS 'Card purchases failed because no payment transaction was ever created for them (0121). Append-only.';
+
+
+--
 -- Name: card_reversal_reviews; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -10364,6 +11657,53 @@ COMMENT ON TABLE iam_v2.controlled_operation_scope IS 'Transaction-scoped capabi
 
 
 --
+-- Name: data_crossing_progress; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.data_crossing_progress (
+    binding_id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    entitlement_id uuid NOT NULL,
+    session_id uuid NOT NULL,
+    examined_seq bigint DEFAULT 0 NOT NULL,
+    counted_bytes bigint DEFAULT 0 NOT NULL,
+    final boolean DEFAULT false NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT dcp_bytes CHECK ((counted_bytes >= 0)),
+    CONSTRAINT dcp_seq CHECK ((examined_seq >= 0))
+);
+
+
+--
+-- Name: TABLE data_crossing_progress; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.data_crossing_progress IS 'Per session-entitlement binding: the highest accounting sample_seq of the session already examined and the bytes of those samples that fell inside the binding (0122). A derived checkpoint, never evidence: the records stay the authority, and the counted bytes can only overstate (an attribution interval that later shrank), which is answered by the exact derivation. final = the session ended long enough ago that no record can still arrive.';
+
+
+--
+-- Name: data_crossing_state; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.data_crossing_state (
+    entitlement_id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    quota_bytes bigint NOT NULL,
+    crossed_at timestamp with time zone,
+    verified_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE data_crossing_state; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.data_crossing_state IS 'The exact data-quota crossing instant of an entitlement, established by the full derivation once the running total reached quota_bytes (0122). Trusted only while the entitlement''s quota is still quota_bytes.';
+
+
+--
 -- Name: delayed_accounting_records; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -10380,6 +11720,33 @@ CREATE TABLE iam_v2.delayed_accounting_records (
     bytes_down bigint NOT NULL,
     detected_at timestamp with time zone DEFAULT now() NOT NULL
 );
+
+
+--
+-- Name: device_limit_disconnections; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.device_limit_disconnections (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    entitlement_id uuid NOT NULL,
+    disconnected_device_id uuid NOT NULL,
+    admitted_device_id uuid NOT NULL,
+    device_limit integer NOT NULL,
+    sessions_ended integer NOT NULL,
+    disconnected_at timestamp with time zone NOT NULL,
+    recorded_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT dld_limit CHECK ((device_limit >= 1)),
+    CONSTRAINT dld_sessions CHECK ((sessions_ended >= 0))
+);
+
+
+--
+-- Name: TABLE device_limit_disconnections; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.device_limit_disconnections IS 'Every device the DISCONNECT_OLDEST device-limit policy disconnected to admit a new one (0122): which device left, which device was admitted, the limit, how many sessions ended. Append-only.';
 
 
 --
@@ -10601,11 +11968,12 @@ CREATE TABLE iam_v2.entitlement_termination_evidence (
     terminated_at timestamp with time zone NOT NULL,
     recorded_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT entitlement_termination_evidence_budget_seconds_check CHECK (((budget_seconds IS NULL) OR (budget_seconds >= 0))),
-    CONSTRAINT entitlement_termination_evidence_cause_detail_check CHECK ((cause_detail = ANY (ARRAY['VALIDITY_WINDOW_ELAPSED'::text, 'AGGREGATE_ONLINE_TIME_EXHAUSTED'::text, 'AGGREGATE_OUTER_WINDOW_EXPIRED'::text]))),
+    CONSTRAINT entitlement_termination_evidence_cause_detail_check CHECK ((cause_detail = ANY (ARRAY['VALIDITY_WINDOW_ELAPSED'::text, 'AGGREGATE_ONLINE_TIME_EXHAUSTED'::text, 'AGGREGATE_OUTER_WINDOW_EXPIRED'::text, 'ONLINE_TIME_ALLOWANCE_EXHAUSTED'::text]))),
     CONSTRAINT entitlement_termination_evidence_consumed_online_seconds_check CHECK (((consumed_online_seconds IS NULL) OR (consumed_online_seconds >= 0))),
     CONSTRAINT entitlement_termination_evidence_terminal_reason_check CHECK ((terminal_reason = 'TIME'::text)),
     CONSTRAINT entitlement_termination_evidence_time_mode_check CHECK ((time_mode = ANY (ARRAY['VALIDITY_WINDOW'::text, 'AGGREGATE_ONLINE_TIME'::text]))),
     CONSTRAINT ete_aggregate_carries_its_budget CHECK (((cause_detail <> ALL (ARRAY['AGGREGATE_ONLINE_TIME_EXHAUSTED'::text, 'AGGREGATE_OUTER_WINDOW_EXPIRED'::text])) OR ((budget_seconds IS NOT NULL) AND (consumed_online_seconds IS NOT NULL)))),
+    CONSTRAINT ete_allowance_carries_its_budget CHECK (((cause_detail <> 'ONLINE_TIME_ALLOWANCE_EXHAUSTED'::text) OR ((time_mode = 'VALIDITY_WINDOW'::text) AND (budget_seconds IS NOT NULL) AND (consumed_online_seconds IS NOT NULL) AND (consumed_online_seconds >= budget_seconds)))),
     CONSTRAINT ete_detail_matches_mode CHECK (((cause_detail = ANY (ARRAY['AGGREGATE_ONLINE_TIME_EXHAUSTED'::text, 'AGGREGATE_OUTER_WINDOW_EXPIRED'::text])) = (time_mode = 'AGGREGATE_ONLINE_TIME'::text))),
     CONSTRAINT ete_exhaustion_reached_its_budget CHECK (((cause_detail <> 'AGGREGATE_ONLINE_TIME_EXHAUSTED'::text) OR (consumed_online_seconds >= budget_seconds))),
     CONSTRAINT ete_outer_window_is_distinguishable CHECK (((cause_detail <> 'AGGREGATE_OUTER_WINDOW_EXPIRED'::text) OR ((window_ends_at IS NOT NULL) AND (consumed_online_seconds < budget_seconds))))
@@ -11654,8 +13022,8 @@ CREATE TABLE iam_v2.pms_case_resolutions (
     resolved_at timestamp with time zone DEFAULT now() NOT NULL,
     resolved_by text NOT NULL,
     note text,
-    CONSTRAINT pms_case_resolutions_disposition_check CHECK ((disposition = ANY (ARRAY['DEPARTED_CONFIRMED_BY_ROSTER'::text, 'NOT_A_DEPARTURE_ROSTER_SNAPSHOT'::text, 'ALREADY_CLOSED'::text, 'NEEDS_PMS_EVIDENCE'::text, 'ACCEPTED_STARTUP_DATA_GAP'::text]))),
-    CONSTRAINT pms_case_resolutions_evidence_kind_check CHECK ((evidence_kind = ANY (ARRAY['PUBLISHED_ROSTER_GENERATION'::text, 'ADMISSION_KIND'::text, 'STAY_STATE'::text, 'NONE'::text, 'OPERATOR_DECISION'::text]))),
+    CONSTRAINT pms_case_resolutions_disposition_check CHECK ((disposition = ANY (ARRAY['DEPARTED_CONFIRMED_BY_ROSTER'::text, 'NOT_A_DEPARTURE_ROSTER_SNAPSHOT'::text, 'ALREADY_CLOSED'::text, 'NEEDS_PMS_EVIDENCE'::text, 'ACCEPTED_STARTUP_DATA_GAP'::text, 'ACKNOWLEDGED_BY_OPERATOR'::text, 'LINKED_TO_STAY'::text, 'EXPIRED_UNDECIDED'::text]))),
+    CONSTRAINT pms_case_resolutions_evidence_kind_check CHECK ((evidence_kind = ANY (ARRAY['PUBLISHED_ROSTER_GENERATION'::text, 'ADMISSION_KIND'::text, 'STAY_STATE'::text, 'NONE'::text, 'OPERATOR_DECISION'::text, 'EXPIRY_SETTING'::text]))),
     CONSTRAINT pms_case_resolutions_evidence_ref_check CHECK (((evidence_ref IS NULL) OR (length(evidence_ref) <= 200))),
     CONSTRAINT pms_case_resolutions_note_check CHECK (((note IS NULL) OR (length(note) <= 500))),
     CONSTRAINT pms_case_resolutions_resolved_by_check CHECK ((length(btrim(resolved_by)) > 0))
@@ -12294,6 +13662,43 @@ COMMENT ON COLUMN iam_v2.pms_resync_coverage.rooms IS 'The room identities this 
 --
 
 COMMENT ON COLUMN iam_v2.pms_resync_coverage.conflicting_rooms IS 'Rooms this sweep reported BOTH occupied and empty. Any value above zero makes the generation unusable for reconciliation.';
+
+
+--
+-- Name: pms_review_expiry_settings; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.pms_review_expiry_settings (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    enabled boolean DEFAULT false NOT NULL,
+    expire_after_days integer DEFAULT 30 NOT NULL,
+    applies_from timestamp with time zone,
+    config_version bigint DEFAULT 1 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pres_days_bounded CHECK (((expire_after_days >= 1) AND (expire_after_days <= 365))),
+    CONSTRAINT pres_on_has_start CHECK (((NOT enabled) OR (applies_from IS NOT NULL))),
+    CONSTRAINT pres_version_positive CHECK ((config_version >= 1))
+);
+
+
+--
+-- Name: pms_review_expiry_settings_changes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.pms_review_expiry_settings_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by text NOT NULL,
+    reason text NOT NULL,
+    old_values jsonb,
+    new_values jsonb NOT NULL,
+    new_config_version bigint NOT NULL,
+    CONSTRAINT pms_review_expiry_settings_changes_changed_by_check CHECK ((length(btrim(changed_by)) > 0)),
+    CONSTRAINT pms_review_expiry_settings_changes_reason_check CHECK (((length(btrim(reason)) >= 3) AND (length(btrim(reason)) <= 500)))
+);
 
 
 --
@@ -13129,6 +14534,29 @@ COMMENT ON COLUMN iam_v2.site_account_password_settings.password_length IS 'Char
 
 
 --
+-- Name: site_accounting_retention; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.site_accounting_retention (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    detail_retention_days integer,
+    config_version bigint DEFAULT 1 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_by text,
+    CONSTRAINT sar_days CHECK (((detail_retention_days IS NULL) OR ((detail_retention_days >= 30) AND (detail_retention_days <= 3650)))),
+    CONSTRAINT sar_version CHECK ((config_version >= 1))
+);
+
+
+--
+-- Name: TABLE site_accounting_retention; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.site_accounting_retention IS 'How long per-sample accounting detail (iam_v2.accounting_records) is kept (0122). NULL -- the default, and what a site with no row reads -- is UNLIMITED: nothing is ever purged. Otherwise 30-3650 days. Written only through iam_v2.accounting_retention_set.';
+
+
+--
 -- Name: site_card_payment_setting_changes; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -13390,6 +14818,29 @@ COMMENT ON COLUMN iam_v2.site_voucher_code_settings.code_mode IS 'numbers = digi
 --
 
 COMMENT ON COLUMN iam_v2.site_voucher_code_settings.code_length IS 'Number of characters in the code, 6 to 8. Eight is the Product-Owner ceiling for both modes; six is the floor the issuance path already enforced. Shorter is easier to read aloud and easier to guess.';
+
+
+--
+-- Name: site_walled_garden_settings; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.site_walled_garden_settings (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    widest_prefix_len integer DEFAULT 24 NOT NULL,
+    config_version bigint DEFAULT 1 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_by text,
+    CONSTRAINT walled_garden_settings_prefix CHECK (((widest_prefix_len >= 16) AND (widest_prefix_len <= 32))),
+    CONSTRAINT walled_garden_settings_version CHECK ((config_version >= 1))
+);
+
+
+--
+-- Name: TABLE site_walled_garden_settings; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.site_walled_garden_settings IS 'Per-site walled-garden policy: the widest IPv4 network (smallest prefix length) a rule may name. Read by edged on every rule create and edit.';
 
 
 --
@@ -13817,6 +15268,25 @@ COMMENT ON COLUMN iam_v2.vouchers.created_at IS 'When this voucher was minted. N
 --
 
 COMMENT ON COLUMN iam_v2.vouchers.issued_by IS 'The authenticated operator who issued it, as the server resolved them from the session.';
+
+
+--
+-- Name: walled_garden_settings_changes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.walled_garden_settings_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    changed_by text NOT NULL,
+    change_reason text NOT NULL,
+    old_widest_prefix_len integer,
+    new_widest_prefix_len integer NOT NULL,
+    new_config_version bigint NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT walled_garden_settings_changes_actor CHECK ((length(btrim(changed_by)) > 0)),
+    CONSTRAINT walled_garden_settings_changes_reason CHECK ((length(btrim(change_reason)) > 0))
+);
 
 
 --
@@ -14254,6 +15724,85 @@ CREATE TABLE public.operator_roles (
 
 
 --
+-- Name: operator_signin_protection; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.operator_signin_protection (
+    id boolean DEFAULT true NOT NULL,
+    account_max_failures integer DEFAULT 5 NOT NULL,
+    account_window_seconds integer DEFAULT 900 NOT NULL,
+    ip_max_failures integer DEFAULT 20 NOT NULL,
+    ip_window_seconds integer DEFAULT 900 NOT NULL,
+    lockout_seconds integer DEFAULT 900 NOT NULL,
+    config_version bigint DEFAULT 1 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_by text,
+    CONSTRAINT osp_account_max CHECK (((account_max_failures >= 3) AND (account_max_failures <= 20))),
+    CONSTRAINT osp_account_window CHECK (((account_window_seconds >= 60) AND (account_window_seconds <= 86400))),
+    CONSTRAINT osp_ip_max CHECK (((ip_max_failures >= 5) AND (ip_max_failures <= 500))),
+    CONSTRAINT osp_ip_window CHECK (((ip_window_seconds >= 60) AND (ip_window_seconds <= 86400))),
+    CONSTRAINT osp_lockout CHECK (((lockout_seconds >= 60) AND (lockout_seconds <= 86400))),
+    CONSTRAINT osp_singleton CHECK (id),
+    CONSTRAINT osp_version CHECK ((config_version >= 1))
+);
+
+
+--
+-- Name: TABLE operator_signin_protection; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.operator_signin_protection IS 'Admin Console sign-in protection (0119): failed passwords allowed per account and per source address within a window, and the lockout that follows. One row for the appliance; no row means the defaults (5/900s, 20/900s, lockout 900s). Written only through public.operator_signin_protection_set.';
+
+
+--
+-- Name: operator_signin_protection_changes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.operator_signin_protection_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    changed_by text NOT NULL,
+    change_reason text NOT NULL,
+    old_values jsonb,
+    new_values jsonb NOT NULL,
+    new_config_version bigint NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ospc_actor CHECK ((length(btrim(changed_by)) > 0)),
+    CONSTRAINT ospc_reason CHECK ((length(btrim(change_reason)) > 0))
+);
+
+
+--
+-- Name: TABLE operator_signin_protection_changes; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.operator_signin_protection_changes IS 'Append-only history of public.operator_signin_protection (0119).';
+
+
+--
+-- Name: operator_signin_throttle; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.operator_signin_throttle (
+    scope text NOT NULL,
+    key_hash text NOT NULL,
+    failures integer DEFAULT 0 NOT NULL,
+    window_started_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_failure_at timestamp with time zone DEFAULT now() NOT NULL,
+    locked_until timestamp with time zone,
+    CONSTRAINT ost_failures CHECK ((failures >= 0)),
+    CONSTRAINT ost_key_hex CHECK ((key_hash ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT ost_scope CHECK ((scope = ANY (ARRAY['account'::text, 'ip'::text, 'reauth'::text])))
+);
+
+
+--
+-- Name: TABLE operator_signin_throttle; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.operator_signin_throttle IS 'Admin Console sign-in throttle counters (0119): per account (login), per operator (password step-up) and per source address. key_hash is SHA-256 of the value, never the value. Live state, not history: the history is public.audit_log. Written only through operator_signin_throttle_fail / _clear.';
+
+
+--
 -- Name: operators; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -14269,9 +15818,17 @@ CREATE TABLE public.operators (
     auth_method text DEFAULT 'local'::text NOT NULL,
     oidc_sub text,
     last_sso_login_at timestamp with time zone,
+    must_change_password boolean DEFAULT false NOT NULL,
     CONSTRAINT operators_auth_method_check CHECK ((auth_method = ANY (ARRAY['local'::text, 'sso'::text]))),
     CONSTRAINT operators_status_check CHECK ((status = ANY (ARRAY['active'::text, 'disabled'::text, 'invited'::text])))
 );
+
+
+--
+-- Name: COLUMN operators.must_change_password; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.operators.must_change_password IS 'When true the operator can only change their password in the Admin Console (0119). Set by seed-admin --allow-weak, by an administrator reset or create with "must change", and at sign-in with a password shorter than the policy; cleared when the operator sets a new password.';
 
 
 --
@@ -14699,6 +16256,14 @@ ALTER TABLE ONLY iam_v2.accounting_checkpoints
 
 
 --
+-- Name: accounting_purge_runs accounting_purge_runs_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.accounting_purge_runs
+    ADD CONSTRAINT accounting_purge_runs_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: accounting_records accounting_records_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -14712,6 +16277,14 @@ ALTER TABLE ONLY iam_v2.accounting_records
 
 ALTER TABLE ONLY iam_v2.accounting_records
     ADD CONSTRAINT accounting_records_session_id_sample_seq_key UNIQUE (session_id, sample_seq);
+
+
+--
+-- Name: accounting_retention_changes accounting_retention_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.accounting_retention_changes
+    ADD CONSTRAINT accounting_retention_changes_pkey PRIMARY KEY (id);
 
 
 --
@@ -14824,6 +16397,22 @@ ALTER TABLE ONLY iam_v2.auth_resolutions
 
 ALTER TABLE ONLY iam_v2.backfill_0066_identity_text
     ADD CONSTRAINT backfill_0066_identity_text_pkey PRIMARY KEY (kind, row_id);
+
+
+--
+-- Name: card_purchase_sweeps card_purchase_sweeps_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.card_purchase_sweeps
+    ADD CONSTRAINT card_purchase_sweeps_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: card_purchase_sweeps card_purchase_sweeps_settlement_id_key; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.card_purchase_sweeps
+    ADD CONSTRAINT card_purchase_sweeps_settlement_id_key UNIQUE (settlement_id);
 
 
 --
@@ -14947,6 +16536,22 @@ ALTER TABLE ONLY iam_v2.controlled_operation_scope
 
 
 --
+-- Name: data_crossing_progress data_crossing_progress_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.data_crossing_progress
+    ADD CONSTRAINT data_crossing_progress_pkey PRIMARY KEY (binding_id);
+
+
+--
+-- Name: data_crossing_state data_crossing_state_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.data_crossing_state
+    ADD CONSTRAINT data_crossing_state_pkey PRIMARY KEY (entitlement_id);
+
+
+--
 -- Name: delayed_accounting_records delayed_accounting_records_accounting_record_id_key; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -14960,6 +16565,14 @@ ALTER TABLE ONLY iam_v2.delayed_accounting_records
 
 ALTER TABLE ONLY iam_v2.delayed_accounting_records
     ADD CONSTRAINT delayed_accounting_records_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: device_limit_disconnections device_limit_disconnections_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.device_limit_disconnections
+    ADD CONSTRAINT device_limit_disconnections_pkey PRIMARY KEY (id);
 
 
 --
@@ -15819,6 +17432,22 @@ ALTER TABLE ONLY iam_v2.pms_resync_coverage
 
 
 --
+-- Name: pms_review_expiry_settings_changes pms_review_expiry_settings_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.pms_review_expiry_settings_changes
+    ADD CONSTRAINT pms_review_expiry_settings_changes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: pms_review_expiry_settings pms_review_expiry_settings_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.pms_review_expiry_settings
+    ADD CONSTRAINT pms_review_expiry_settings_pkey PRIMARY KEY (tenant_id, site_id);
+
+
+--
 -- Name: pms_room_inventory_changes pms_room_inventory_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -16195,6 +17824,14 @@ ALTER TABLE ONLY iam_v2.site_account_password_settings
 
 
 --
+-- Name: site_accounting_retention site_accounting_retention_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.site_accounting_retention
+    ADD CONSTRAINT site_accounting_retention_pkey PRIMARY KEY (tenant_id, site_id);
+
+
+--
 -- Name: site_card_payment_setting_changes site_card_payment_setting_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -16280,6 +17917,14 @@ ALTER TABLE ONLY iam_v2.site_self_service_settings
 
 ALTER TABLE ONLY iam_v2.site_voucher_code_settings
     ADD CONSTRAINT site_voucher_code_settings_pkey PRIMARY KEY (tenant_id, site_id);
+
+
+--
+-- Name: site_walled_garden_settings site_walled_garden_settings_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.site_walled_garden_settings
+    ADD CONSTRAINT site_walled_garden_settings_pkey PRIMARY KEY (tenant_id, site_id);
 
 
 --
@@ -16483,6 +18128,14 @@ ALTER TABLE ONLY iam_v2.vouchers
 
 
 --
+-- Name: walled_garden_settings_changes walled_garden_settings_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.walled_garden_settings_changes
+    ADD CONSTRAINT walled_garden_settings_changes_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: appliance_boot_convergence appliance_boot_convergence_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -16664,6 +18317,30 @@ ALTER TABLE ONLY public.notification_providers
 
 ALTER TABLE ONLY public.operator_roles
     ADD CONSTRAINT operator_roles_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: operator_signin_protection_changes operator_signin_protection_changes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.operator_signin_protection_changes
+    ADD CONSTRAINT operator_signin_protection_changes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: operator_signin_protection operator_signin_protection_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.operator_signin_protection
+    ADD CONSTRAINT operator_signin_protection_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: operator_signin_throttle operator_signin_throttle_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.operator_signin_throttle
+    ADD CONSTRAINT operator_signin_throttle_pkey PRIMARY KEY (scope, key_hash);
 
 
 --
@@ -16869,10 +18546,24 @@ CREATE INDEX anonymous_subject_credentials_subject ON iam_v2.anonymous_subject_c
 
 
 --
+-- Name: apr_site; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX apr_site ON iam_v2.accounting_purge_runs USING btree (tenant_id, site_id, ran_at DESC);
+
+
+--
 -- Name: aps_changes_lookup; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
 CREATE INDEX aps_changes_lookup ON iam_v2.appliance_product_setting_changes USING btree (tenant_id, site_id, appliance_id, changed_at DESC);
+
+
+--
+-- Name: arc_site; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX arc_site ON iam_v2.accounting_retention_changes USING btree (tenant_id, site_id, changed_at DESC);
 
 
 --
@@ -16911,10 +18602,31 @@ CREATE UNIQUE INDEX client_groups_name_per_site ON iam_v2.client_groups USING bt
 
 
 --
+-- Name: dcp_entitlement; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX dcp_entitlement ON iam_v2.data_crossing_progress USING btree (entitlement_id);
+
+
+--
 -- Name: device_settings_changes_lookup; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
 CREATE INDEX device_settings_changes_lookup ON iam_v2.device_settings_changes USING btree (tenant_id, site_id, changed_at DESC);
+
+
+--
+-- Name: dld_entitlement; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX dld_entitlement ON iam_v2.device_limit_disconnections USING btree (entitlement_id, disconnected_at DESC);
+
+
+--
+-- Name: dld_site; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX dld_site ON iam_v2.device_limit_disconnections USING btree (tenant_id, site_id, disconnected_at DESC);
 
 
 --
@@ -17289,6 +19001,13 @@ CREATE UNIQUE INDEX ppsg_one_current ON iam_v2.payment_provider_secret_generatio
 
 
 --
+-- Name: pres_changes_scope_idx; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX pres_changes_scope_idx ON iam_v2.pms_review_expiry_settings_changes USING btree (tenant_id, site_id, changed_at DESC);
+
+
+--
 -- Name: principal_device_credentials_device; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
@@ -17548,6 +19267,13 @@ CREATE INDEX vouchers_created_lookup ON iam_v2.vouchers USING btree (tenant_id, 
 
 
 --
+-- Name: walled_garden_settings_changes_lookup; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX walled_garden_settings_changes_lookup ON iam_v2.walled_garden_settings_changes USING btree (tenant_id, site_id, changed_at DESC);
+
+
+--
 -- Name: accounting_records_session_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -17716,6 +19442,20 @@ CREATE UNIQUE INDEX operator_roles_uniq ON public.operator_roles USING btree (op
 
 
 --
+-- Name: operator_signin_protection_changes_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX operator_signin_protection_changes_at ON public.operator_signin_protection_changes USING btree (changed_at DESC);
+
+
+--
+-- Name: operator_signin_throttle_last_failure; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX operator_signin_throttle_last_failure ON public.operator_signin_throttle USING btree (last_failure_at);
+
+
+--
 -- Name: operators_oidc_sub_uniq; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -17828,10 +19568,24 @@ CREATE TRIGGER account_password_settings_changes_append_only BEFORE DELETE OR UP
 
 
 --
+-- Name: accounting_purge_runs accounting_purge_runs_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER accounting_purge_runs_append_only BEFORE DELETE OR UPDATE ON iam_v2.accounting_purge_runs FOR EACH ROW EXECUTE FUNCTION iam_v2.accounting_retention_append_only();
+
+
+--
+-- Name: accounting_retention_changes accounting_retention_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER accounting_retention_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.accounting_retention_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.accounting_retention_append_only();
+
+
+--
 -- Name: accounting_records ao_accounting; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER ao_accounting BEFORE DELETE OR UPDATE ON iam_v2.accounting_records FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_reject_update_delete();
+CREATE TRIGGER ao_accounting BEFORE DELETE OR UPDATE ON iam_v2.accounting_records FOR EACH ROW EXECUTE FUNCTION iam_v2.accounting_records_append_only();
 
 
 --
@@ -17877,6 +19631,13 @@ CREATE TRIGGER ao_review BEFORE DELETE OR UPDATE ON iam_v2.posting_review_action
 
 
 --
+-- Name: card_purchase_sweeps card_purchase_sweeps_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER card_purchase_sweeps_append_only BEFORE DELETE OR UPDATE ON iam_v2.card_purchase_sweeps FOR EACH ROW EXECUTE FUNCTION iam_v2.card_purchase_sweeps_append_only();
+
+
+--
 -- Name: card_reversal_reviews card_reversal_reviews_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
@@ -17898,6 +19659,13 @@ CREATE TRIGGER client_group_changes_append_only BEFORE DELETE OR UPDATE ON iam_v
 
 
 --
+-- Name: device_limit_disconnections device_limit_disconnections_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER device_limit_disconnections_append_only BEFORE DELETE OR UPDATE ON iam_v2.device_limit_disconnections FOR EACH ROW EXECUTE FUNCTION iam_v2.device_limit_disconnections_append_only();
+
+
+--
 -- Name: device_settings_changes device_settings_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
@@ -17916,6 +19684,13 @@ CREATE TRIGGER device_slot_actions_append_only BEFORE DELETE OR UPDATE ON iam_v2
 --
 
 CREATE TRIGGER ent_guard BEFORE INSERT OR UPDATE ON iam_v2.entitlements FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_entitlement_guard();
+
+
+--
+-- Name: guest_access_accounts guest_access_account_removed_is_final; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER guest_access_account_removed_is_final BEFORE UPDATE OF enabled, username ON iam_v2.guest_access_accounts FOR EACH ROW EXECUTE FUNCTION iam_v2.guest_access_account_removed_is_final();
 
 
 --
@@ -18556,6 +20331,20 @@ CREATE TRIGGER pacc_append_only BEFORE DELETE OR UPDATE ON iam_v2.payment_accoun
 
 
 --
+-- Name: payment_provider_accounts payment_account_identity_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER payment_account_identity_guard BEFORE UPDATE ON iam_v2.payment_provider_accounts FOR EACH ROW EXECUTE FUNCTION iam_v2.payment_account_identity_guard();
+
+
+--
+-- Name: payment_provider_secret_generations payment_account_secret_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER payment_account_secret_guard BEFORE INSERT ON iam_v2.payment_provider_secret_generations FOR EACH ROW EXECUTE FUNCTION iam_v2.payment_account_secret_guard();
+
+
+--
 -- Name: payment_checkouts payment_checkouts_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
@@ -18602,6 +20391,13 @@ CREATE TRIGGER pms_interface_financial_setting_changes_append_only BEFORE DELETE
 --
 
 CREATE TRIGGER pms_reconciliation_settings_changes_no_update BEFORE DELETE OR UPDATE ON iam_v2.pms_reconciliation_settings_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.pms_reconciliation_settings_append_only();
+
+
+--
+-- Name: pms_review_expiry_settings_changes pms_review_expiry_settings_changes_no_update; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER pms_review_expiry_settings_changes_no_update BEFORE DELETE OR UPDATE ON iam_v2.pms_review_expiry_settings_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.pms_review_expiry_settings_append_only();
 
 
 --
@@ -18721,6 +20517,20 @@ CREATE TRIGGER voucher_issuance_gate BEFORE INSERT ON iam_v2.vouchers FOR EACH R
 --
 
 CREATE TRIGGER voucher_revocations_append_only BEFORE DELETE OR UPDATE ON iam_v2.voucher_revocations FOR EACH ROW EXECUTE FUNCTION iam_v2.voucher_revocations_append_only();
+
+
+--
+-- Name: walled_garden_settings_changes walled_garden_settings_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER walled_garden_settings_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.walled_garden_settings_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.walled_garden_settings_changes_append_only();
+
+
+--
+-- Name: operator_signin_protection_changes operator_signin_protection_changes_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER operator_signin_protection_changes_append_only BEFORE DELETE OR UPDATE ON public.operator_signin_protection_changes FOR EACH ROW EXECUTE FUNCTION public.operator_signin_protection_changes_append_only();
 
 
 --
@@ -20045,6 +21855,14 @@ GRANT USAGE ON SCHEMA iam_v2 TO svc_pmsd;
 
 
 --
+-- Name: FUNCTION account_entitlements_follow_access(p_tenant uuid, p_site uuid, p_account uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.account_entitlements_follow_access(p_tenant uuid, p_site uuid, p_account uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.account_entitlements_follow_access(p_tenant uuid, p_site uuid, p_account uuid) TO svc_edged;
+
+
+--
 -- Name: FUNCTION account_password_settings_changes_append_only(); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -20065,6 +21883,22 @@ GRANT ALL ON FUNCTION iam_v2.account_password_settings_get(p_tenant uuid, p_site
 
 REVOKE ALL ON FUNCTION iam_v2.account_password_settings_set(p_tenant uuid, p_site uuid, p_style text, p_length integer, p_operator text, p_reason text) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.account_password_settings_set(p_tenant uuid, p_site uuid, p_style text, p_length integer, p_operator text, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION accounting_retention_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.accounting_retention_get(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.accounting_retention_get(p_tenant uuid, p_site uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION accounting_retention_set(p_tenant uuid, p_site uuid, p_days integer, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.accounting_retention_set(p_tenant uuid, p_site uuid, p_days integer, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.accounting_retention_set(p_tenant uuid, p_site uuid, p_days integer, p_operator text, p_reason text) TO svc_edged;
 
 
 --
@@ -20092,13 +21926,18 @@ GRANT ALL ON FUNCTION iam_v2.allocate_p_number(p_tenant uuid, p_site uuid, p_int
 
 
 --
+-- Name: FUNCTION apply_adjustment(p_ent uuid, p_field text, p_new text, p_actor uuid, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.apply_adjustment(p_ent uuid, p_field text, p_new text, p_actor uuid, p_reason text) FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION apply_entitlement_transition(p_ent uuid, p_to text, p_at timestamp with time zone, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
 --
 
 REVOKE ALL ON FUNCTION iam_v2.apply_entitlement_transition(p_ent uuid, p_to text, p_at timestamp with time zone, p_reason text) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.apply_entitlement_transition(p_ent uuid, p_to text, p_at timestamp with time zone, p_reason text) TO svc_scd;
-GRANT ALL ON FUNCTION iam_v2.apply_entitlement_transition(p_ent uuid, p_to text, p_at timestamp with time zone, p_reason text) TO svc_netd;
-GRANT ALL ON FUNCTION iam_v2.apply_entitlement_transition(p_ent uuid, p_to text, p_at timestamp with time zone, p_reason text) TO svc_acctd;
 GRANT ALL ON FUNCTION iam_v2.apply_entitlement_transition(p_ent uuid, p_to text, p_at timestamp with time zone, p_reason text) TO svc_pmsd;
 
 
@@ -20115,7 +21954,6 @@ REVOKE ALL ON FUNCTION iam_v2.apply_payment_callback_v2(p_tenant uuid, p_provide
 
 REVOKE ALL ON FUNCTION iam_v2.authorize_entitlement_device(p_ent uuid, p_device uuid, p_at timestamp with time zone) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.authorize_entitlement_device(p_ent uuid, p_device uuid, p_at timestamp with time zone) TO svc_scd;
-GRANT ALL ON FUNCTION iam_v2.authorize_entitlement_device(p_ent uuid, p_device uuid, p_at timestamp with time zone) TO svc_acctd;
 
 
 --
@@ -20238,6 +22076,7 @@ GRANT ALL ON FUNCTION iam_v2.emergency_grace_health(p_tenant uuid, p_site uuid) 
 --
 
 REVOKE ALL ON FUNCTION iam_v2.end_session_enforcement(p_tenant uuid, p_site uuid, p_session uuid, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.end_session_enforcement(p_tenant uuid, p_site uuid, p_session uuid, p_reason text) TO svc_scd;
 GRANT ALL ON FUNCTION iam_v2.end_session_enforcement(p_tenant uuid, p_site uuid, p_session uuid, p_reason text) TO svc_netd;
 
 
@@ -20246,7 +22085,6 @@ GRANT ALL ON FUNCTION iam_v2.end_session_enforcement(p_tenant uuid, p_site uuid,
 --
 
 REVOKE ALL ON FUNCTION iam_v2.entitlement_usage_bytes(p_ent uuid, p_at timestamp with time zone) FROM PUBLIC;
-GRANT ALL ON FUNCTION iam_v2.entitlement_usage_bytes(p_ent uuid, p_at timestamp with time zone) TO svc_acctd;
 GRANT ALL ON FUNCTION iam_v2.entitlement_usage_bytes(p_ent uuid, p_at timestamp with time zone) TO svc_pmsd;
 
 
@@ -20265,6 +22103,13 @@ GRANT ALL ON FUNCTION iam_v2.grace_package_matches_policy(p_tenant uuid, p_site 
 REVOKE ALL ON FUNCTION iam_v2.grace_package_mismatch_reason(p_tenant uuid, p_site uuid, p_pkg_rev uuid, p_duration integer, p_down integer, p_up integer, p_quota bigint, p_dev_limit integer, p_dev_policy text) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.grace_package_mismatch_reason(p_tenant uuid, p_site uuid, p_pkg_rev uuid, p_duration integer, p_down integer, p_up integer, p_quota bigint, p_dev_limit integer, p_dev_policy text) TO svc_pmsd;
 GRANT ALL ON FUNCTION iam_v2.grace_package_mismatch_reason(p_tenant uuid, p_site uuid, p_pkg_rev uuid, p_duration integer, p_down integer, p_up integer, p_quota bigint, p_dev_limit integer, p_dev_policy text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION guest_access_account_removed_is_final(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.guest_access_account_removed_is_final() FROM PUBLIC;
 
 
 --
@@ -20327,8 +22172,14 @@ GRANT ALL ON FUNCTION iam_v2.guest_signin_release(p_tenant uuid, p_site uuid, p_
 --
 
 REVOKE ALL ON FUNCTION iam_v2.ingest_absolute_counters(p_tenant uuid, p_site uuid, p_session uuid, p_source_device uuid, p_bridge text, p_class_minor integer, p_epoch bigint, p_abs_up bigint, p_abs_down bigint, p_sampled_at timestamp with time zone) FROM PUBLIC;
-GRANT ALL ON FUNCTION iam_v2.ingest_absolute_counters(p_tenant uuid, p_site uuid, p_session uuid, p_source_device uuid, p_bridge text, p_class_minor integer, p_epoch bigint, p_abs_up bigint, p_abs_down bigint, p_sampled_at timestamp with time zone) TO svc_netd;
 GRANT ALL ON FUNCTION iam_v2.ingest_absolute_counters(p_tenant uuid, p_site uuid, p_session uuid, p_source_device uuid, p_bridge text, p_class_minor integer, p_epoch bigint, p_abs_up bigint, p_abs_down bigint, p_sampled_at timestamp with time zone) TO svc_acctd;
+
+
+--
+-- Name: FUNCTION ingest_sample(p_session uuid, p_seq bigint, p_up bigint, p_down bigint, p_epoch integer); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.ingest_sample(p_session uuid, p_seq bigint, p_up bigint, p_down bigint, p_epoch integer) FROM PUBLIC;
 
 
 --
@@ -20445,8 +22296,6 @@ REVOKE ALL ON FUNCTION iam_v2.p3_checkout_grace_audit_appendonly() FROM PUBLIC;
 
 REVOKE ALL ON FUNCTION iam_v2.p3_controlled_operation_open(p_family text) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.p3_controlled_operation_open(p_family text) TO svc_scd;
-GRANT ALL ON FUNCTION iam_v2.p3_controlled_operation_open(p_family text) TO svc_netd;
-GRANT ALL ON FUNCTION iam_v2.p3_controlled_operation_open(p_family text) TO svc_acctd;
 GRANT ALL ON FUNCTION iam_v2.p3_controlled_operation_open(p_family text) TO svc_pmsd;
 
 
@@ -20736,6 +22585,14 @@ REVOKE ALL ON FUNCTION iam_v2.p4_entitlement_grant_kernel(p_tenant uuid, p_site 
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p4_entitlement_grant_kernel_v2(p_tenant uuid, p_site uuid, p_purchase uuid, p_voucher uuid, p_account uuid, p_principal uuid, p_anon uuid, p_stay uuid, p_iface uuid, p_snapshot jsonb, p_plan_rev uuid, p_pkg_rev uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION p4_fail_unstarted_card_purchases(p_tenant uuid, p_site uuid, p_older_than_seconds integer); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p4_fail_unstarted_card_purchases(p_tenant uuid, p_site uuid, p_older_than_seconds integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p4_fail_unstarted_card_purchases(p_tenant uuid, p_site uuid, p_older_than_seconds integer) TO sc_payment_outcome;
 
 
 --
@@ -21092,11 +22949,6 @@ REVOKE ALL ON FUNCTION iam_v2.p5_controlled_operation_open(p_family text) FROM P
 GRANT ALL ON FUNCTION iam_v2.p5_controlled_operation_open(p_family text) TO sc_commerce_runtime;
 GRANT ALL ON FUNCTION iam_v2.p5_controlled_operation_open(p_family text) TO sc_financial_operator;
 GRANT ALL ON FUNCTION iam_v2.p5_controlled_operation_open(p_family text) TO sc_financial_readonly;
-GRANT ALL ON FUNCTION iam_v2.p5_controlled_operation_open(p_family text) TO svc_scd;
-GRANT ALL ON FUNCTION iam_v2.p5_controlled_operation_open(p_family text) TO svc_netd;
-GRANT ALL ON FUNCTION iam_v2.p5_controlled_operation_open(p_family text) TO svc_acctd;
-GRANT ALL ON FUNCTION iam_v2.p5_controlled_operation_open(p_family text) TO svc_edged;
-GRANT ALL ON FUNCTION iam_v2.p5_controlled_operation_open(p_family text) TO svc_pmsd;
 
 
 --
@@ -21135,6 +22987,14 @@ REVOKE ALL ON FUNCTION iam_v2.p5_stay_link_guard() FROM PUBLIC;
 
 
 --
+-- Name: FUNCTION p6_advance_data_crossing(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p6_advance_data_crossing(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p6_advance_data_crossing(p_tenant uuid, p_site uuid) TO svc_acctd;
+
+
+--
 -- Name: FUNCTION p6_data_crossing(p_entitlement uuid); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -21143,11 +23003,25 @@ GRANT ALL ON FUNCTION iam_v2.p6_data_crossing(p_entitlement uuid) TO svc_acctd;
 
 
 --
+-- Name: FUNCTION p6_data_crossing_full(p_entitlement uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p6_data_crossing_full(p_entitlement uuid) FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION p6_due_terminal(p_entitlement uuid); Type: ACL; Schema: iam_v2; Owner: -
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p6_due_terminal(p_entitlement uuid) FROM PUBLIC;
-GRANT ALL ON FUNCTION iam_v2.p6_due_terminal(p_entitlement uuid) TO svc_acctd;
+
+
+--
+-- Name: FUNCTION p6_end_sessions_over_plan_limits(p_tenant uuid, p_site uuid, p_now timestamp with time zone, p_judge_idle boolean); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p6_end_sessions_over_plan_limits(p_tenant uuid, p_site uuid, p_now timestamp with time zone, p_judge_idle boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p6_end_sessions_over_plan_limits(p_tenant uuid, p_site uuid, p_now timestamp with time zone, p_judge_idle boolean) TO svc_acctd;
 
 
 --
@@ -21268,11 +23142,32 @@ GRANT ALL ON FUNCTION iam_v2.p6_tick_online_time(p_tenant uuid, p_site uuid, p_n
 
 
 --
+-- Name: FUNCTION payment_account_has_open_checkouts(p_account uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.payment_account_has_open_checkouts(p_account uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION payment_account_identity_guard(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.payment_account_identity_guard() FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION payment_account_save(p_tenant uuid, p_site uuid, p_id uuid, p_provider text, p_merchant_ref text, p_display_name text, p_currency text, p_mode text, p_status text, p_is_default boolean, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
 --
 
 REVOKE ALL ON FUNCTION iam_v2.payment_account_save(p_tenant uuid, p_site uuid, p_id uuid, p_provider text, p_merchant_ref text, p_display_name text, p_currency text, p_mode text, p_status text, p_is_default boolean, p_operator text, p_reason text) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.payment_account_save(p_tenant uuid, p_site uuid, p_id uuid, p_provider text, p_merchant_ref text, p_display_name text, p_currency text, p_mode text, p_status text, p_is_default boolean, p_operator text, p_reason text) TO svc_scd;
+
+
+--
+-- Name: FUNCTION payment_account_secret_guard(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.payment_account_secret_guard() FROM PUBLIC;
 
 
 --
@@ -21303,7 +23198,6 @@ REVOKE ALL ON FUNCTION iam_v2.payment_checkouts_guard() FROM PUBLIC;
 --
 
 REVOKE ALL ON FUNCTION iam_v2.pms_accept_startup_data_gap(p_tenant uuid, p_site uuid, p_event uuid, p_operator text, p_reason text) FROM PUBLIC;
-GRANT ALL ON FUNCTION iam_v2.pms_accept_startup_data_gap(p_tenant uuid, p_site uuid, p_event uuid, p_operator text, p_reason text) TO svc_edged;
 
 
 --
@@ -21323,9 +23217,6 @@ GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site u
 GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site uuid, p_interface uuid) TO sc_financial_operator;
 GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site uuid, p_interface uuid) TO sc_financial_readonly;
 GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site uuid, p_interface uuid) TO svc_edged;
-GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site uuid, p_interface uuid) TO svc_scd;
-GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site uuid, p_interface uuid) TO svc_acctd;
-GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site uuid, p_interface uuid) TO svc_netd;
 GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_get(p_tenant uuid, p_site uuid, p_interface uuid) TO svc_pmsd;
 
 
@@ -21338,10 +23229,6 @@ GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_set(p_tenant uuid, p_site u
 GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_set(p_tenant uuid, p_site uuid, p_interface uuid, p_operator text, p_reason text, p_backoff_min_ms integer, p_backoff_max_ms integer, p_stable_reset_seconds integer, p_link_down_alert_seconds integer, p_blocked_after_refusals integer) TO sc_financial_operator;
 GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_set(p_tenant uuid, p_site uuid, p_interface uuid, p_operator text, p_reason text, p_backoff_min_ms integer, p_backoff_max_ms integer, p_stable_reset_seconds integer, p_link_down_alert_seconds integer, p_blocked_after_refusals integer) TO sc_financial_readonly;
 GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_set(p_tenant uuid, p_site uuid, p_interface uuid, p_operator text, p_reason text, p_backoff_min_ms integer, p_backoff_max_ms integer, p_stable_reset_seconds integer, p_link_down_alert_seconds integer, p_blocked_after_refusals integer) TO svc_edged;
-GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_set(p_tenant uuid, p_site uuid, p_interface uuid, p_operator text, p_reason text, p_backoff_min_ms integer, p_backoff_max_ms integer, p_stable_reset_seconds integer, p_link_down_alert_seconds integer, p_blocked_after_refusals integer) TO svc_scd;
-GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_set(p_tenant uuid, p_site uuid, p_interface uuid, p_operator text, p_reason text, p_backoff_min_ms integer, p_backoff_max_ms integer, p_stable_reset_seconds integer, p_link_down_alert_seconds integer, p_blocked_after_refusals integer) TO svc_acctd;
-GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_set(p_tenant uuid, p_site uuid, p_interface uuid, p_operator text, p_reason text, p_backoff_min_ms integer, p_backoff_max_ms integer, p_stable_reset_seconds integer, p_link_down_alert_seconds integer, p_blocked_after_refusals integer) TO svc_netd;
-GRANT ALL ON FUNCTION iam_v2.pms_connection_settings_set(p_tenant uuid, p_site uuid, p_interface uuid, p_operator text, p_reason text, p_backoff_min_ms integer, p_backoff_max_ms integer, p_stable_reset_seconds integer, p_link_down_alert_seconds integer, p_blocked_after_refusals integer) TO svc_pmsd;
 
 
 --
@@ -21352,11 +23239,6 @@ REVOKE ALL ON FUNCTION iam_v2.pms_dispose_snapshot_cases(p_tenant uuid, p_site u
 GRANT ALL ON FUNCTION iam_v2.pms_dispose_snapshot_cases(p_tenant uuid, p_site uuid, p_iface uuid, p_operator text, p_note text) TO sc_commerce_runtime;
 GRANT ALL ON FUNCTION iam_v2.pms_dispose_snapshot_cases(p_tenant uuid, p_site uuid, p_iface uuid, p_operator text, p_note text) TO sc_financial_operator;
 GRANT ALL ON FUNCTION iam_v2.pms_dispose_snapshot_cases(p_tenant uuid, p_site uuid, p_iface uuid, p_operator text, p_note text) TO sc_financial_readonly;
-GRANT ALL ON FUNCTION iam_v2.pms_dispose_snapshot_cases(p_tenant uuid, p_site uuid, p_iface uuid, p_operator text, p_note text) TO svc_edged;
-GRANT ALL ON FUNCTION iam_v2.pms_dispose_snapshot_cases(p_tenant uuid, p_site uuid, p_iface uuid, p_operator text, p_note text) TO svc_scd;
-GRANT ALL ON FUNCTION iam_v2.pms_dispose_snapshot_cases(p_tenant uuid, p_site uuid, p_iface uuid, p_operator text, p_note text) TO svc_acctd;
-GRANT ALL ON FUNCTION iam_v2.pms_dispose_snapshot_cases(p_tenant uuid, p_site uuid, p_iface uuid, p_operator text, p_note text) TO svc_netd;
-GRANT ALL ON FUNCTION iam_v2.pms_dispose_snapshot_cases(p_tenant uuid, p_site uuid, p_iface uuid, p_operator text, p_note text) TO svc_pmsd;
 
 
 --
@@ -21392,12 +23274,18 @@ GRANT ALL ON FUNCTION iam_v2.pms_interface_financially_ready(p_tenant uuid, p_si
 
 
 --
+-- Name: FUNCTION pms_interface_has_undrained_postings(p_tenant uuid, p_site uuid, p_iface uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.pms_interface_has_undrained_postings(p_tenant uuid, p_site uuid, p_iface uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_interface_has_undrained_postings(p_tenant uuid, p_site uuid, p_iface uuid) TO svc_pmsd;
+
+
+--
 -- Name: FUNCTION pms_known_room_inventory(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_lookback integer); Type: ACL; Schema: iam_v2; Owner: -
 --
 
 REVOKE ALL ON FUNCTION iam_v2.pms_known_room_inventory(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_lookback integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION iam_v2.pms_known_room_inventory(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_lookback integer) TO svc_edged;
-GRANT ALL ON FUNCTION iam_v2.pms_known_room_inventory(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_lookback integer) TO svc_pmsd;
 
 
 --
@@ -21405,7 +23293,6 @@ GRANT ALL ON FUNCTION iam_v2.pms_known_room_inventory(p_tenant uuid, p_site uuid
 --
 
 REVOKE ALL ON FUNCTION iam_v2.pms_rebaseline_room_inventory(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_operator text, p_reason text) FROM PUBLIC;
-GRANT ALL ON FUNCTION iam_v2.pms_rebaseline_room_inventory(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_operator text, p_reason text) TO svc_edged;
 
 
 --
@@ -21417,10 +23304,6 @@ GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_get(p_tenant uuid, p_si
 GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_get(p_tenant uuid, p_site uuid) TO sc_financial_operator;
 GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_get(p_tenant uuid, p_site uuid) TO sc_financial_readonly;
 GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_get(p_tenant uuid, p_site uuid) TO svc_edged;
-GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_get(p_tenant uuid, p_site uuid) TO svc_scd;
-GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_get(p_tenant uuid, p_site uuid) TO svc_acctd;
-GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_get(p_tenant uuid, p_site uuid) TO svc_netd;
-GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_get(p_tenant uuid, p_site uuid) TO svc_pmsd;
 
 
 --
@@ -21431,11 +23314,14 @@ REVOKE ALL ON FUNCTION iam_v2.pms_reconciliation_settings_set(p_tenant uuid, p_s
 GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_set(p_tenant uuid, p_site uuid, p_floor integer, p_cap integer, p_operator text, p_reason text, p_tolerance integer, p_lookback integer) TO sc_commerce_runtime;
 GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_set(p_tenant uuid, p_site uuid, p_floor integer, p_cap integer, p_operator text, p_reason text, p_tolerance integer, p_lookback integer) TO sc_financial_operator;
 GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_set(p_tenant uuid, p_site uuid, p_floor integer, p_cap integer, p_operator text, p_reason text, p_tolerance integer, p_lookback integer) TO sc_financial_readonly;
-GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_set(p_tenant uuid, p_site uuid, p_floor integer, p_cap integer, p_operator text, p_reason text, p_tolerance integer, p_lookback integer) TO svc_edged;
-GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_set(p_tenant uuid, p_site uuid, p_floor integer, p_cap integer, p_operator text, p_reason text, p_tolerance integer, p_lookback integer) TO svc_scd;
-GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_set(p_tenant uuid, p_site uuid, p_floor integer, p_cap integer, p_operator text, p_reason text, p_tolerance integer, p_lookback integer) TO svc_acctd;
-GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_set(p_tenant uuid, p_site uuid, p_floor integer, p_cap integer, p_operator text, p_reason text, p_tolerance integer, p_lookback integer) TO svc_netd;
-GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_set(p_tenant uuid, p_site uuid, p_floor integer, p_cap integer, p_operator text, p_reason text, p_tolerance integer, p_lookback integer) TO svc_pmsd;
+
+
+--
+-- Name: FUNCTION pms_reconciliation_settings_set_checked(p_tenant uuid, p_site uuid, p_expected_version bigint, p_floor integer, p_cap integer, p_tolerance integer, p_lookback integer, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.pms_reconciliation_settings_set_checked(p_tenant uuid, p_site uuid, p_expected_version bigint, p_floor integer, p_cap integer, p_tolerance integer, p_lookback integer, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_reconciliation_settings_set_checked(p_tenant uuid, p_site uuid, p_expected_version bigint, p_floor integer, p_cap integer, p_tolerance integer, p_lookback integer, p_operator text, p_reason text) TO svc_edged;
 
 
 --
@@ -21446,11 +23332,47 @@ REVOKE ALL ON FUNCTION iam_v2.pms_record_resync_coverage(p_tenant uuid, p_site u
 GRANT ALL ON FUNCTION iam_v2.pms_record_resync_coverage(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_rooms text[], p_roster integer, p_vacant integer, p_conflicts integer) TO sc_commerce_runtime;
 GRANT ALL ON FUNCTION iam_v2.pms_record_resync_coverage(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_rooms text[], p_roster integer, p_vacant integer, p_conflicts integer) TO sc_financial_operator;
 GRANT ALL ON FUNCTION iam_v2.pms_record_resync_coverage(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_rooms text[], p_roster integer, p_vacant integer, p_conflicts integer) TO sc_financial_readonly;
-GRANT ALL ON FUNCTION iam_v2.pms_record_resync_coverage(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_rooms text[], p_roster integer, p_vacant integer, p_conflicts integer) TO svc_scd;
-GRANT ALL ON FUNCTION iam_v2.pms_record_resync_coverage(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_rooms text[], p_roster integer, p_vacant integer, p_conflicts integer) TO svc_edged;
-GRANT ALL ON FUNCTION iam_v2.pms_record_resync_coverage(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_rooms text[], p_roster integer, p_vacant integer, p_conflicts integer) TO svc_acctd;
-GRANT ALL ON FUNCTION iam_v2.pms_record_resync_coverage(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_rooms text[], p_roster integer, p_vacant integer, p_conflicts integer) TO svc_netd;
 GRANT ALL ON FUNCTION iam_v2.pms_record_resync_coverage(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint, p_rooms text[], p_roster integer, p_vacant integer, p_conflicts integer) TO svc_pmsd;
+
+
+--
+-- Name: FUNCTION pms_review_decide(p_tenant uuid, p_site uuid, p_event uuid, p_action text, p_stay uuid, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.pms_review_decide(p_tenant uuid, p_site uuid, p_event uuid, p_action text, p_stay uuid, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_review_decide(p_tenant uuid, p_site uuid, p_event uuid, p_action text, p_stay uuid, p_operator text, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION pms_review_expire_due(p_tenant uuid, p_site uuid, p_limit integer); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.pms_review_expire_due(p_tenant uuid, p_site uuid, p_limit integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_review_expire_due(p_tenant uuid, p_site uuid, p_limit integer) TO svc_pmsd;
+
+
+--
+-- Name: FUNCTION pms_review_expiry_settings_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.pms_review_expiry_settings_get(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_review_expiry_settings_get(p_tenant uuid, p_site uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION pms_review_expiry_settings_set(p_tenant uuid, p_site uuid, p_expected_version bigint, p_enabled boolean, p_days integer, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.pms_review_expiry_settings_set(p_tenant uuid, p_site uuid, p_expected_version bigint, p_enabled boolean, p_days integer, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_review_expiry_settings_set(p_tenant uuid, p_site uuid, p_expected_version bigint, p_enabled boolean, p_days integer, p_operator text, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION pms_review_link_candidates(p_tenant uuid, p_site uuid, p_event uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.pms_review_link_candidates(p_tenant uuid, p_site uuid, p_event uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.pms_review_link_candidates(p_tenant uuid, p_site uuid, p_event uuid) TO svc_edged;
 
 
 --
@@ -21461,11 +23383,6 @@ REVOKE ALL ON FUNCTION iam_v2.pms_roster_of_generation(p_tenant uuid, p_site uui
 GRANT ALL ON FUNCTION iam_v2.pms_roster_of_generation(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint) TO sc_commerce_runtime;
 GRANT ALL ON FUNCTION iam_v2.pms_roster_of_generation(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint) TO sc_financial_operator;
 GRANT ALL ON FUNCTION iam_v2.pms_roster_of_generation(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint) TO sc_financial_readonly;
-GRANT ALL ON FUNCTION iam_v2.pms_roster_of_generation(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint) TO svc_edged;
-GRANT ALL ON FUNCTION iam_v2.pms_roster_of_generation(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint) TO svc_scd;
-GRANT ALL ON FUNCTION iam_v2.pms_roster_of_generation(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint) TO svc_acctd;
-GRANT ALL ON FUNCTION iam_v2.pms_roster_of_generation(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint) TO svc_netd;
-GRANT ALL ON FUNCTION iam_v2.pms_roster_of_generation(p_tenant uuid, p_site uuid, p_iface uuid, p_generation bigint) TO svc_pmsd;
 
 
 --
@@ -21485,11 +23402,6 @@ REVOKE ALL ON FUNCTION iam_v2.pms_site_blocked_after_refusals(p_tenant uuid, p_s
 GRANT ALL ON FUNCTION iam_v2.pms_site_blocked_after_refusals(p_tenant uuid, p_site uuid) TO sc_commerce_runtime;
 GRANT ALL ON FUNCTION iam_v2.pms_site_blocked_after_refusals(p_tenant uuid, p_site uuid) TO sc_financial_operator;
 GRANT ALL ON FUNCTION iam_v2.pms_site_blocked_after_refusals(p_tenant uuid, p_site uuid) TO sc_financial_readonly;
-GRANT ALL ON FUNCTION iam_v2.pms_site_blocked_after_refusals(p_tenant uuid, p_site uuid) TO svc_scd;
-GRANT ALL ON FUNCTION iam_v2.pms_site_blocked_after_refusals(p_tenant uuid, p_site uuid) TO svc_edged;
-GRANT ALL ON FUNCTION iam_v2.pms_site_blocked_after_refusals(p_tenant uuid, p_site uuid) TO svc_acctd;
-GRANT ALL ON FUNCTION iam_v2.pms_site_blocked_after_refusals(p_tenant uuid, p_site uuid) TO svc_netd;
-GRANT ALL ON FUNCTION iam_v2.pms_site_blocked_after_refusals(p_tenant uuid, p_site uuid) TO svc_pmsd;
 
 
 --
@@ -21508,11 +23420,18 @@ GRANT ALL ON FUNCTION iam_v2.publish_checkout_grace_policy(p_tenant uuid, p_site
 
 
 --
+-- Name: FUNCTION purge_accounting_detail(p_tenant uuid, p_site uuid, p_batch integer); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.purge_accounting_detail(p_tenant uuid, p_site uuid, p_batch integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.purge_accounting_detail(p_tenant uuid, p_site uuid, p_batch integer) TO svc_acctd;
+
+
+--
 -- Name: FUNCTION rebind_session_entitlement(p_session uuid, p_ent uuid, p_at timestamp with time zone); Type: ACL; Schema: iam_v2; Owner: -
 --
 
 REVOKE ALL ON FUNCTION iam_v2.rebind_session_entitlement(p_session uuid, p_ent uuid, p_at timestamp with time zone) FROM PUBLIC;
-GRANT ALL ON FUNCTION iam_v2.rebind_session_entitlement(p_session uuid, p_ent uuid, p_at timestamp with time zone) TO svc_acctd;
 GRANT ALL ON FUNCTION iam_v2.rebind_session_entitlement(p_session uuid, p_ent uuid, p_at timestamp with time zone) TO svc_pmsd;
 
 
@@ -21529,7 +23448,6 @@ REVOKE ALL ON FUNCTION iam_v2.record_alert_action(p_tenant uuid, p_site uuid, p_
 
 REVOKE ALL ON FUNCTION iam_v2.record_auth_context_offer(p_tenant uuid, p_site uuid, p_auth_context uuid, p_package_revision uuid, p_tier integer, p_evidence_version bigint, p_expires_at timestamp with time zone) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.record_auth_context_offer(p_tenant uuid, p_site uuid, p_auth_context uuid, p_package_revision uuid, p_tier integer, p_evidence_version bigint, p_expires_at timestamp with time zone) TO svc_scd;
-GRANT ALL ON FUNCTION iam_v2.record_auth_context_offer(p_tenant uuid, p_site uuid, p_auth_context uuid, p_package_revision uuid, p_tier integer, p_evidence_version bigint, p_expires_at timestamp with time zone) TO svc_netd;
 
 
 --
@@ -21546,7 +23464,6 @@ GRANT ALL ON FUNCTION iam_v2.record_posting_review_action(p_posting uuid, p_acti
 
 REVOKE ALL ON FUNCTION iam_v2.register_class_origin(p_tenant uuid, p_site uuid, p_session uuid, p_source_device uuid, p_bridge text, p_class_minor integer, p_epoch bigint, p_origin_up bigint, p_origin_down bigint, p_created_at timestamp with time zone) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.register_class_origin(p_tenant uuid, p_site uuid, p_session uuid, p_source_device uuid, p_bridge text, p_class_minor integer, p_epoch bigint, p_origin_up bigint, p_origin_down bigint, p_created_at timestamp with time zone) TO svc_netd;
-GRANT ALL ON FUNCTION iam_v2.register_class_origin(p_tenant uuid, p_site uuid, p_session uuid, p_source_device uuid, p_bridge text, p_class_minor integer, p_epoch bigint, p_origin_up bigint, p_origin_down bigint, p_created_at timestamp with time zone) TO svc_acctd;
 
 
 --
@@ -21617,7 +23534,6 @@ REVOKE ALL ON FUNCTION iam_v2.site_module_changes_append_only() FROM PUBLIC;
 
 REVOKE ALL ON FUNCTION iam_v2.site_module_get(p_tenant uuid, p_site uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.site_module_get(p_tenant uuid, p_site uuid) TO svc_scd;
-GRANT ALL ON FUNCTION iam_v2.site_module_get(p_tenant uuid, p_site uuid) TO svc_edged;
 
 
 --
@@ -21671,7 +23587,6 @@ REVOKE ALL ON FUNCTION iam_v2.supersede_entitlement_transition(p_target uuid, p_
 --
 
 REVOKE ALL ON FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at timestamp with time zone, p_reason text) FROM PUBLIC;
-GRANT ALL ON FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at timestamp with time zone, p_reason text) TO svc_acctd;
 GRANT ALL ON FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at timestamp with time zone, p_reason text) TO svc_pmsd;
 
 
@@ -21766,6 +23681,83 @@ GRANT ALL ON FUNCTION iam_v2.voucher_revoke(p_tenant uuid, p_site uuid, p_vouche
 
 
 --
+-- Name: FUNCTION walled_garden_settings_changes_append_only(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.walled_garden_settings_changes_append_only() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION walled_garden_settings_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.walled_garden_settings_get(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.walled_garden_settings_get(p_tenant uuid, p_site uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION walled_garden_settings_set(p_tenant uuid, p_site uuid, p_widest_prefix_len integer, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.walled_garden_settings_set(p_tenant uuid, p_site uuid, p_widest_prefix_len integer, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.walled_garden_settings_set(p_tenant uuid, p_site uuid, p_widest_prefix_len integer, p_operator text, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION operator_signin_protection_changes_append_only(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.operator_signin_protection_changes_append_only() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION operator_signin_protection_get(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.operator_signin_protection_get() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.operator_signin_protection_get() TO svc_edged;
+
+
+--
+-- Name: FUNCTION operator_signin_protection_set(p_account_max_failures integer, p_account_window_seconds integer, p_ip_max_failures integer, p_ip_window_seconds integer, p_lockout_seconds integer, p_operator text, p_reason text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.operator_signin_protection_set(p_account_max_failures integer, p_account_window_seconds integer, p_ip_max_failures integer, p_ip_window_seconds integer, p_lockout_seconds integer, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.operator_signin_protection_set(p_account_max_failures integer, p_account_window_seconds integer, p_ip_max_failures integer, p_ip_window_seconds integer, p_lockout_seconds integer, p_operator text, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION operator_signin_throttle_clear(p_scope text, p_key_hash text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.operator_signin_throttle_clear(p_scope text, p_key_hash text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.operator_signin_throttle_clear(p_scope text, p_key_hash text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION operator_signin_throttle_fail(p_scope text, p_key_hash text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.operator_signin_throttle_fail(p_scope text, p_key_hash text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.operator_signin_throttle_fail(p_scope text, p_key_hash text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION operator_signin_throttle_limits(p_scope text, OUT max_failures integer, OUT window_seconds integer, OUT lockout_seconds integer); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.operator_signin_throttle_limits(p_scope text, OUT max_failures integer, OUT window_seconds integer, OUT lockout_seconds integer) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION operator_signin_throttle_state(p_scope text, p_key_hash text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.operator_signin_throttle_state(p_scope text, p_key_hash text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.operator_signin_throttle_state(p_scope text, p_key_hash text) TO svc_edged;
+
+
+--
 -- Name: TABLE account_email_tokens; Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -21780,18 +23772,25 @@ GRANT SELECT ON TABLE iam_v2.account_password_settings_changes TO svc_edged;
 
 
 --
--- Name: TABLE accounting_checkpoints; Type: ACL; Schema: iam_v2; Owner: -
+-- Name: TABLE accounting_purge_runs; Type: ACL; Schema: iam_v2; Owner: -
 --
 
-GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.accounting_checkpoints TO svc_acctd;
+GRANT SELECT ON TABLE iam_v2.accounting_purge_runs TO svc_edged;
 
 
 --
 -- Name: TABLE accounting_records; Type: ACL; Schema: iam_v2; Owner: -
 --
 
-GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.accounting_records TO svc_acctd;
+GRANT SELECT ON TABLE iam_v2.accounting_records TO svc_acctd;
 GRANT SELECT ON TABLE iam_v2.accounting_records TO svc_edged;
+
+
+--
+-- Name: TABLE accounting_retention_changes; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.accounting_retention_changes TO svc_edged;
 
 
 --
@@ -21935,13 +23934,6 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE iam_v2.client_groups TO svc_edged;
 
 
 --
--- Name: TABLE delayed_accounting_records; Type: ACL; Schema: iam_v2; Owner: -
---
-
-GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.delayed_accounting_records TO svc_acctd;
-
-
---
 -- Name: TABLE device_network_appearances; Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -21996,8 +23988,6 @@ GRANT SELECT(acted_at) ON TABLE iam_v2.device_slot_actions TO svc_scd;
 --
 
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.devices TO svc_scd;
-GRANT SELECT ON TABLE iam_v2.devices TO svc_netd;
-GRANT SELECT ON TABLE iam_v2.devices TO svc_acctd;
 GRANT SELECT ON TABLE iam_v2.devices TO svc_edged;
 
 
@@ -22005,7 +23995,6 @@ GRANT SELECT ON TABLE iam_v2.devices TO svc_edged;
 -- Name: TABLE entitlement_boundary_watermarks; Type: ACL; Schema: iam_v2; Owner: -
 --
 
-GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.entitlement_boundary_watermarks TO svc_acctd;
 GRANT SELECT,INSERT ON TABLE iam_v2.entitlement_boundary_watermarks TO svc_pmsd;
 
 
@@ -22021,7 +24010,6 @@ GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.entitlement_device_authorizations TO 
 --
 
 GRANT SELECT ON TABLE iam_v2.entitlement_devices TO svc_scd;
-GRANT SELECT ON TABLE iam_v2.entitlement_devices TO svc_acctd;
 GRANT SELECT ON TABLE iam_v2.entitlement_devices TO svc_edged;
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.entitlement_devices TO svc_pmsd;
 
@@ -22038,7 +24026,6 @@ GRANT SELECT ON TABLE iam_v2.entitlement_state_transitions TO svc_pmsd;
 -- Name: TABLE entitlement_termination_evidence; Type: ACL; Schema: iam_v2; Owner: -
 --
 
-GRANT SELECT ON TABLE iam_v2.entitlement_termination_evidence TO svc_acctd;
 GRANT SELECT ON TABLE iam_v2.entitlement_termination_evidence TO svc_edged;
 
 
@@ -22054,10 +24041,18 @@ GRANT SELECT ON TABLE iam_v2.entitlement_transfers TO svc_edged;
 --
 
 GRANT SELECT ON TABLE iam_v2.entitlements TO sc_payment_runtime;
-GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.entitlements TO svc_scd;
+GRANT SELECT,INSERT ON TABLE iam_v2.entitlements TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.entitlements TO svc_acctd;
 GRANT SELECT ON TABLE iam_v2.entitlements TO svc_edged;
-GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.entitlements TO svc_pmsd;
+GRANT SELECT,INSERT ON TABLE iam_v2.entitlements TO svc_pmsd;
+
+
+--
+-- Name: COLUMN entitlements.status; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT UPDATE(status) ON TABLE iam_v2.entitlements TO svc_scd;
+GRANT UPDATE(status) ON TABLE iam_v2.entitlements TO svc_pmsd;
 
 
 --
@@ -22197,7 +24192,6 @@ GRANT SELECT ON TABLE iam_v2.guest_signin_restrictions TO svc_edged;
 GRANT SELECT ON TABLE iam_v2.internet_package_revisions TO sc_payment_runtime;
 GRANT SELECT ON TABLE iam_v2.internet_package_revisions TO sc_posting_runtime;
 GRANT SELECT ON TABLE iam_v2.internet_package_revisions TO svc_scd;
-GRANT SELECT ON TABLE iam_v2.internet_package_revisions TO svc_acctd;
 GRANT SELECT,INSERT ON TABLE iam_v2.internet_package_revisions TO svc_edged;
 GRANT SELECT ON TABLE iam_v2.internet_package_revisions TO svc_pmsd;
 
@@ -22207,7 +24201,6 @@ GRANT SELECT ON TABLE iam_v2.internet_package_revisions TO svc_pmsd;
 --
 
 GRANT SELECT ON TABLE iam_v2.internet_packages TO svc_scd;
-GRANT SELECT ON TABLE iam_v2.internet_packages TO svc_acctd;
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.internet_packages TO svc_edged;
 GRANT SELECT ON TABLE iam_v2.internet_packages TO svc_pmsd;
 
@@ -22281,13 +24274,6 @@ GRANT SELECT,INSERT ON TABLE iam_v2.package_settlement_mappings TO svc_edged;
 GRANT SELECT ON TABLE iam_v2.payment_account_conversion TO sc_payment_runtime;
 GRANT SELECT ON TABLE iam_v2.payment_account_conversion TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.payment_account_conversion TO svc_edged;
-
-
---
--- Name: TABLE payment_account_conversion_changes; Type: ACL; Schema: iam_v2; Owner: -
---
-
-GRANT SELECT ON TABLE iam_v2.payment_account_conversion_changes TO svc_edged;
 
 
 --
@@ -22419,24 +24405,10 @@ GRANT SELECT ON TABLE iam_v2.pms_connection_settings TO svc_edged;
 
 
 --
--- Name: TABLE pms_connection_settings_changes; Type: ACL; Schema: iam_v2; Owner: -
---
-
-GRANT SELECT ON TABLE iam_v2.pms_connection_settings_changes TO svc_edged;
-
-
---
 -- Name: TABLE pms_financial_onboardings; Type: ACL; Schema: iam_v2; Owner: -
 --
 
 GRANT SELECT ON TABLE iam_v2.pms_financial_onboardings TO svc_edged;
-
-
---
--- Name: TABLE pms_interface_financial_setting_changes; Type: ACL; Schema: iam_v2; Owner: -
---
-
-GRANT SELECT ON TABLE iam_v2.pms_interface_financial_setting_changes TO svc_edged;
 
 
 --
@@ -22479,7 +24451,6 @@ GRANT SELECT ON TABLE iam_v2.pms_interface_secret_generations TO svc_pmsd;
 
 GRANT SELECT ON TABLE iam_v2.pms_interfaces TO sc_posting_runtime;
 GRANT SELECT ON TABLE iam_v2.pms_interfaces TO svc_scd;
-GRANT SELECT ON TABLE iam_v2.pms_interfaces TO svc_acctd;
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.pms_interfaces TO svc_edged;
 GRANT SELECT ON TABLE iam_v2.pms_interfaces TO svc_pmsd;
 
@@ -22507,7 +24478,6 @@ GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.stay_events TO svc_pmsd;
 
 GRANT SELECT ON TABLE iam_v2.stays TO sc_posting_runtime;
 GRANT SELECT ON TABLE iam_v2.stays TO svc_scd;
-GRANT SELECT ON TABLE iam_v2.stays TO svc_acctd;
 GRANT SELECT ON TABLE iam_v2.stays TO svc_edged;
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.stays TO svc_pmsd;
 
@@ -22524,36 +24494,6 @@ GRANT SELECT ON TABLE iam_v2.pms_reconciliation_cases TO svc_edged;
 --
 
 GRANT SELECT ON TABLE iam_v2.pms_reconciliation_settings TO svc_edged;
-
-
---
--- Name: TABLE pms_reconciliation_settings_changes; Type: ACL; Schema: iam_v2; Owner: -
---
-
-GRANT SELECT ON TABLE iam_v2.pms_reconciliation_settings_changes TO svc_edged;
-
-
---
--- Name: TABLE pms_resync_coverage; Type: ACL; Schema: iam_v2; Owner: -
---
-
-GRANT SELECT ON TABLE iam_v2.pms_resync_coverage TO svc_edged;
-GRANT SELECT ON TABLE iam_v2.pms_resync_coverage TO svc_pmsd;
-
-
---
--- Name: TABLE pms_room_inventory; Type: ACL; Schema: iam_v2; Owner: -
---
-
-GRANT SELECT ON TABLE iam_v2.pms_room_inventory TO svc_edged;
-GRANT SELECT ON TABLE iam_v2.pms_room_inventory TO svc_pmsd;
-
-
---
--- Name: TABLE pms_room_inventory_changes; Type: ACL; Schema: iam_v2; Owner: -
---
-
-GRANT SELECT ON TABLE iam_v2.pms_room_inventory_changes TO svc_edged;
 
 
 --
@@ -22647,13 +24587,6 @@ GRANT SELECT ON TABLE iam_v2.posting_execution_state TO svc_edged;
 
 
 --
--- Name: TABLE posting_presend_aborts; Type: ACL; Schema: iam_v2; Owner: -
---
-
-GRANT SELECT ON TABLE iam_v2.posting_presend_aborts TO svc_edged;
-
-
---
 -- Name: TABLE posting_review_actions; Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -22739,7 +24672,6 @@ GRANT SELECT ON TABLE iam_v2.purchases TO sc_payment_runtime;
 GRANT SELECT ON TABLE iam_v2.purchases TO sc_financial_operator;
 GRANT SELECT ON TABLE iam_v2.purchases TO sc_posting_runtime;
 GRANT SELECT,INSERT ON TABLE iam_v2.purchases TO svc_scd;
-GRANT SELECT ON TABLE iam_v2.purchases TO svc_acctd;
 GRANT SELECT ON TABLE iam_v2.purchases TO svc_edged;
 GRANT SELECT,INSERT ON TABLE iam_v2.purchases TO svc_pmsd;
 
@@ -22773,7 +24705,6 @@ GRANT SELECT ON TABLE iam_v2.service_plan_revisions TO svc_pmsd;
 -- Name: TABLE service_plans; Type: ACL; Schema: iam_v2; Owner: -
 --
 
-GRANT SELECT ON TABLE iam_v2.service_plans TO svc_acctd;
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.service_plans TO svc_edged;
 GRANT SELECT ON TABLE iam_v2.service_plans TO svc_pmsd;
 
@@ -22782,25 +24713,46 @@ GRANT SELECT ON TABLE iam_v2.service_plans TO svc_pmsd;
 -- Name: TABLE session_entitlement_bindings; Type: ACL; Schema: iam_v2; Owner: -
 --
 
-GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.session_entitlement_bindings TO svc_acctd;
-
-
---
--- Name: TABLE session_online_watermarks; Type: ACL; Schema: iam_v2; Owner: -
---
-
-GRANT SELECT ON TABLE iam_v2.session_online_watermarks TO svc_acctd;
+GRANT SELECT ON TABLE iam_v2.session_entitlement_bindings TO svc_acctd;
 
 
 --
 -- Name: TABLE sessions; Type: ACL; Schema: iam_v2; Owner: -
 --
 
-GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.sessions TO svc_scd;
+GRANT SELECT,INSERT ON TABLE iam_v2.sessions TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.sessions TO svc_netd;
 GRANT SELECT ON TABLE iam_v2.sessions TO svc_acctd;
-GRANT SELECT,UPDATE ON TABLE iam_v2.sessions TO svc_edged;
-GRANT SELECT,UPDATE ON TABLE iam_v2.sessions TO svc_pmsd;
+GRANT SELECT ON TABLE iam_v2.sessions TO svc_edged;
+GRANT SELECT ON TABLE iam_v2.sessions TO svc_pmsd;
+
+
+--
+-- Name: COLUMN sessions.entitlement_id; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT UPDATE(entitlement_id) ON TABLE iam_v2.sessions TO svc_edged;
+
+
+--
+-- Name: COLUMN sessions.state; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT UPDATE(state) ON TABLE iam_v2.sessions TO svc_pmsd;
+
+
+--
+-- Name: COLUMN sessions.ended; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT UPDATE(ended) ON TABLE iam_v2.sessions TO svc_pmsd;
+
+
+--
+-- Name: COLUMN sessions.end_reason; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT UPDATE(end_reason) ON TABLE iam_v2.sessions TO svc_pmsd;
 
 
 --
@@ -22928,14 +24880,6 @@ GRANT SELECT ON TABLE iam_v2.v_zero_attempt_recovery_queue TO svc_edged;
 
 
 --
--- Name: TABLE verification_access_grants; Type: ACL; Schema: iam_v2; Owner: -
---
-
-GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.verification_access_grants TO svc_scd;
-GRANT SELECT ON TABLE iam_v2.verification_access_grants TO svc_edged;
-
-
---
 -- Name: TABLE voucher_batches; Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -22965,13 +24909,6 @@ GRANT SELECT ON TABLE iam_v2.voucher_code_settings_changes TO svc_edged;
 
 
 --
--- Name: TABLE voucher_revocations; Type: ACL; Schema: iam_v2; Owner: -
---
-
-GRANT SELECT ON TABLE iam_v2.voucher_revocations TO svc_edged;
-
-
---
 -- Name: TABLE vouchers; Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -22979,11 +24916,17 @@ GRANT SELECT,INSERT ON TABLE iam_v2.vouchers TO svc_scd;
 
 
 --
+-- Name: TABLE walled_garden_settings_changes; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.walled_garden_settings_changes TO svc_edged;
+
+
+--
 -- Name: TABLE accounting_records; Type: ACL; Schema: public; Owner: -
 --
 
 GRANT SELECT,DELETE ON TABLE public.accounting_records TO svc_scd;
-GRANT INSERT ON TABLE public.accounting_records TO svc_acctd;
 
 
 --
@@ -23012,9 +24955,6 @@ GRANT SELECT,USAGE ON SEQUENCE public.appliance_recovery_events_id_seq TO svc_ed
 --
 
 GRANT SELECT,INSERT,UPDATE ON TABLE public.appliance_service_health TO svc_edged;
-GRANT SELECT,INSERT,UPDATE ON TABLE public.appliance_service_health TO svc_scd;
-GRANT SELECT,INSERT,UPDATE ON TABLE public.appliance_service_health TO svc_acctd;
-GRANT SELECT,INSERT,UPDATE ON TABLE public.appliance_service_health TO svc_netd;
 
 
 --
@@ -23144,6 +25084,13 @@ GRANT SELECT,INSERT,DELETE ON TABLE public.operator_roles TO svc_edged;
 
 
 --
+-- Name: TABLE operator_signin_protection_changes; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT ON TABLE public.operator_signin_protection_changes TO svc_edged;
+
+
+--
 -- Name: TABLE operators; Type: ACL; Schema: public; Owner: -
 --
 
@@ -23177,7 +25124,7 @@ GRANT SELECT ON TABLE public.otp_hmac_key_generations TO svc_scd;
 -- Name: TABLE pms_attempts; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE ON TABLE public.pms_attempts TO svc_scd;
+GRANT SELECT,DELETE ON TABLE public.pms_attempts TO svc_scd;
 
 
 --
