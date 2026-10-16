@@ -192,7 +192,8 @@ clients.
 
 **Internet package** (**Internet offering → Internet packages → Add package**) —
 what the client is offered: name, short code, the service plan, how long access
-lasts, the data allowance (the service plan's, or per night of the stay), and **who it is
+lasts, the data allowance (the service plan's, or per night of the stay — per night is given only to
+clients who signed in with their room, and never issued as vouchers), and **who it is
 offered to** (conditions, grouped **General** and **Hotel (PMS stay)**; empty
 means everyone who signs in). Packages are free to
 the client. Only the Site admin can create or change packages and service plans (the

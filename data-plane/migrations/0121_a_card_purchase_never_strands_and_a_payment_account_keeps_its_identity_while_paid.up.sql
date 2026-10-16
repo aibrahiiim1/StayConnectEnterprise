@@ -1,5 +1,6 @@
--- 0121 -- a card purchase never strands, and a payment account keeps its identity while checkouts are open
--- (OneGate audit remediation, stream 4: O-2', O-13).
+-- 0121 -- a card purchase never strands, a payment account keeps its identity while checkouts are open, and scd
+-- ends sessions through the controlled writer
+-- (OneGate audit remediation, stream 4: O-2', O-13, B-4).
 --
 --   * A purchase AWAITING_SETTLEMENT whose REQUIRED ONLINE_PAYMENT settlement never got a payment transaction
 --     -- the intent was refused (a currency the account cannot settle, no account, a provider that refused
@@ -133,16 +134,25 @@ CREATE TRIGGER payment_account_secret_guard BEFORE INSERT ON iam_v2.payment_prov
   FOR EACH ROW EXECUTE FUNCTION iam_v2.payment_account_secret_guard();
 
 -- ---------------------------------------------------------------------------------------------------------
+-- 3. scd ends a session through the controlled session-end writer (audit B-4).
+--
+-- scd ended sessions (operator disconnect, the email-account suspension sweep, password reset, device
+-- replace/release, the reconnect re-pin) with a raw UPDATE, which the sessions guard refuses for a session still
+-- PENDING_ENFORCEMENT -- so such a session could not be ended and kept its licensed slot and device place. The
+-- writer iam_v2.end_session_enforcement exists since 0010 and was granted to netd only. No function changes.
+-- ---------------------------------------------------------------------------------------------------------
+
+-- ---------------------------------------------------------------------------------------------------------
 -- Grants. The sweep is a provider-independent OUTCOME (nothing exists at the provider), applied through the
--- outcome credential that records every other card outcome. edged reads the sweep record for the console.
+-- outcome credential that records every other card outcome. Mirrored in deploy/gatep.
 -- ---------------------------------------------------------------------------------------------------------
 DO $g$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'sc_payment_outcome') THEN
     GRANT EXECUTE ON FUNCTION iam_v2.p4_fail_unstarted_card_purchases(uuid, uuid, integer) TO sc_payment_outcome;
   END IF;
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_edged') THEN
-    GRANT SELECT ON iam_v2.card_purchase_sweeps TO svc_edged;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_scd') THEN
+    GRANT EXECUTE ON FUNCTION iam_v2.end_session_enforcement(uuid, uuid, uuid, text) TO svc_scd;
   END IF;
 END $g$;
 

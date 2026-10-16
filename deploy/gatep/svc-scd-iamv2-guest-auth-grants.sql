@@ -360,3 +360,7 @@ GRANT SELECT, INSERT, DELETE ON iam_v2.otp_code_reveals TO svc_scd;
 -- reads the mark to decide which package currencies a card can be offered in.
 GRANT EXECUTE ON FUNCTION iam_v2.payment_account_set_conversion(uuid,uuid,uuid,boolean,text,text) TO svc_scd;
 GRANT SELECT ON iam_v2.payment_account_conversion TO svc_scd;
+
+-- ---- 0121: scd ends sessions through the controlled session-end writer (audit B-4) ------------------------
+-- A raw UPDATE is refused for a session still PENDING_ENFORCEMENT; the writer (0010) is the one netd uses.
+GRANT EXECUTE ON FUNCTION iam_v2.end_session_enforcement(uuid, uuid, uuid, text) TO svc_scd;

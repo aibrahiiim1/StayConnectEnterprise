@@ -187,6 +187,13 @@ func TestIntegrationReviewAPI_PaymentsOperatorCanDecide(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("payments_operator holds financial-review write per section 15, got %d: %v", code, body)
 	}
+	// The decision is in the console's audit trail too, by the session's operator (audit O-22).
+	var n int
+	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM public.audit_log
+		WHERE action='financial_review.decided' AND target_id=$1 AND actor_id=$2 AND payload->>'action'='CONFIRM_POSTED'`,
+		id, f.operator).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("the review decision was not audited once (%d, %v)", n, err)
+	}
 }
 
 // ---------------------------------------------------------------- identity

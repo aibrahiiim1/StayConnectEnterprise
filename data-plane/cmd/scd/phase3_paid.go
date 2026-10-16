@@ -37,6 +37,11 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
+// stayMethodGate is the site's effective acquisition methods as the Room sign-in path reads them: the same
+// module resolver and default-account currency the commerce engine's gate uses (siteAcquisitionMethods). It is
+// a variable only so an integration test can stand in for the module resolver, which needs a licence.
+var stayMethodGate = func(ctx context.Context, s *server) iamv2.SiteMethods { return s.siteAcquisitionMethods(ctx) }
+
 // stayMethods returns the acquisition methods this verified stay may use for one offered package now.
 func (p *phase3Auth) stayMethods(ctx context.Context, stayID, ifaceID string, d offerDecision) []string {
 	if d.PriceMinor == 0 {
@@ -45,7 +50,7 @@ func (p *phase3Auth) stayMethods(ctx context.Context, stayID, ifaceID string, d 
 		}
 		return nil
 	}
-	site := p.srv.siteAcquisitionMethods(ctx)
+	site := stayMethodGate(ctx, p.srv)
 	if !site.PaidAccess {
 		return nil
 	}

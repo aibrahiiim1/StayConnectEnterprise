@@ -128,7 +128,9 @@ What clients are offered on the portal, and what those packages are doing for cl
   Clicking a package opens a side sheet with what it gives, its saved versions and a support reference.
 - **Add package / Edit** (large dialog): Name (what the client sees), Short code (fixed once created),
   Service plan (required, with a summary of what it gives), **How long access lasts**, **Data allowance**
-  (the service plan's allowance or an amount per night of the stay, with minimum/maximum), **Who this package is
+  (the service plan's allowance or an amount per night of the stay, with minimum/maximum — a per-night package is
+  given only to clients who signed in with their room; it is not offered to voucher, account, email, phone or
+  social clients, and vouchers cannot be issued for it), **Who this package is
   offered to** (conditions; empty means everyone who signs in — the condition types are grouped **General**
   and **Hotel (PMS stay)**, the Hotel group holding the conditions that only mean something for a PMS stay:
   nights staying, room type, rate plan, VIP guest, travel agent and which PMS the stay came from; travel agents are
