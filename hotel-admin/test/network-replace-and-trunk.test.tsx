@@ -164,6 +164,10 @@ describe("New client network: one wizard for one network or a whole trunk", () =
     });
     fireEvent.click(screen.getByRole("button", { name: /Continue to apply/i }));
     fireEvent.click(await screen.findByRole("button", { name: /Create, validate & apply/i }));
+    // Applying a network change needs the operator's password (audit N-15), typed into the dialog.
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/Confirm your password/), { target: { value: "s3cret-pass" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Apply changes" }));
 
     await waitFor(() => expect(post).toHaveBeenCalledWith("/network/guest-networks/batch", expect.anything()));
     const [, body] = post.mock.calls.find(([p]) => String(p).endsWith("/batch"))!;

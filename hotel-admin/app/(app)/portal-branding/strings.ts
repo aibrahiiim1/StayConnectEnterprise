@@ -233,7 +233,7 @@ export const PORTAL_STRINGS: PortalString[] = [
   { group: "Confirming a payment", key: "pay.connecting", english: "Payment confirmed. Connecting your device…", module: "card_payment" },
   { group: "Confirming a payment", key: "pay.again", english: "Back to sign-in", module: "card_payment" },
   { group: "Choose your package", key: "room.pending", english: "We are charging your room. This takes a moment…", module: "room_charge" },
-  { group: "Confirming a payment", key: "pay.other", english: "Choose another way to get online" },
+  { group: "Confirming a payment", key: "pay.other", english: "Choose another way to get online", module: ["card_payment", "room_charge"] },
   { group: "Choose your package", key: "room.failed", english: "The room charge was not completed. Nothing was charged for internet access. You can choose another way to get online.", module: "room_charge" },
   { group: "Choose your package", key: "room.review", english: "We could not confirm the room charge automatically. The site team will check it; please contact them if your room was charged.", module: "room_charge" },
   { group: "Continue without signing in", key: "open.button", english: "Continue without signing in" },
