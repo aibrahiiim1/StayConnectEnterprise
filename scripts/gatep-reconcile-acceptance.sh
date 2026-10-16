@@ -45,19 +45,22 @@ qraw(){ docker exec "$C" psql -tAX -U postgres -d "$DB" -c "$1" 2>/dev/null; }
 
 # The full ACL surface, ordered, as one comparable blob. Comparing whole snapshots rather than a chosen list is
 # the point of the rollback test: a change anywhere must show up, including somewhere nobody thought to check.
+# Each object's ACL is compared as a SET: its entries are sorted. PostgreSQL keeps aclitems in the order the grants
+# were made, so a revoke-and-regrant reconcile may list the same grants in another order (seen on a sequence,
+# 2026-10-16) -- not a privilege change. An added or removed entry still makes the snapshots differ.
 acl_snapshot(){
   docker exec "$C" psql -tAX -U postgres -d "$DB" -c "
     SELECT string_agg(x, E'\n' ORDER BY x) FROM (
-      SELECT n.nspname||'.'||c.relname||'='||COALESCE(c.relacl::text,'-') AS x
+      SELECT n.nspname||'.'||c.relname||'='||(SELECT COALESCE(string_agg(i::text, ',' ORDER BY i::text),'-') FROM unnest(c.relacl) i) AS x
         FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
        WHERE n.nspname IN ('iam_v2','public') AND c.relkind IN ('r','S','v')
       UNION ALL
       SELECT 'fn:'||n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')='
-             ||COALESCE(p.proacl::text,'-')
+             ||(SELECT COALESCE(string_agg(i::text, ',' ORDER BY i::text),'-') FROM unnest(p.proacl) i)
         FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
        WHERE n.nspname IN ('iam_v2','public')
       UNION ALL
-      SELECT 'schema:'||nspname||'='||COALESCE(nspacl::text,'-') FROM pg_namespace
+      SELECT 'schema:'||nspname||'='||(SELECT COALESCE(string_agg(i::text, ',' ORDER BY i::text),'-') FROM unnest(nspacl) i) FROM pg_namespace
        WHERE nspname IN ('iam_v2','public')
     ) s;" 2>/dev/null
 }
