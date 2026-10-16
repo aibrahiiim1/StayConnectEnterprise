@@ -22,6 +22,7 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/metrics"
 	"github.com/stayconnect/enterprise/control-plane/internal/pki"
 	"github.com/stayconnect/enterprise/control-plane/internal/portaltls"
+	"github.com/stayconnect/enterprise/control-plane/internal/ratebudget"
 )
 
 type Deps struct {
@@ -56,7 +57,14 @@ const (
 func NewRouter(d Deps) http.Handler {
 	store := &auth.SessionStore{R: d.Redis}
 	repo := &auth.Repo{DB: d.DB}
-	adeps := authDeps{Repo: repo, Store: store, Secure: d.CookieSecure, DB: d.DB}
+	adeps := authDeps{Repo: repo, Store: store, Secure: d.CookieSecure, DB: d.DB,
+		Failures: ratebudget.New(5, 300, time.Minute)}
+	// Every authenticated request re-reads the operator (session_policy.go). Only a router built without a
+	// database (unit tests of the unauthenticated limits) runs without it.
+	var checker auth.SessionChecker
+	if d.DB != nil {
+		checker = auth.DBSessionChecker{DB: d.DB}
+	}
 
 	replayCache := d.ReplayCache
 	if replayCache == nil {
@@ -98,8 +106,8 @@ func NewRouter(d Deps) http.Handler {
 		// holds for guesses made without a valid session.
 		r.With(limit("login", loginPerMinute)).Post("/auth/login", adeps.login)
 		r.Post("/auth/logout", adeps.logout)
-		r.With(limit("reauth", reauthPerMinute), auth.RequireAuth(store)).Post("/auth/reauth", adeps.reauth)
-		r.With(auth.RequireAuth(store)).Get("/auth/whoami", adeps.whoami)
+		r.With(limit("reauth", reauthPerMinute), auth.RequireAuth(store, checker)).Post("/auth/reauth", adeps.reauth)
+		r.With(auth.RequireAuth(store, checker)).Get("/auth/whoami", adeps.whoami)
 
 		// Appliance: TOKEN-LESS registration. The appliance self-signs with its locally generated identity
 		// key and appears as WAITING.
@@ -133,7 +141,7 @@ func NewRouter(d Deps) http.Handler {
 	}
 	off := api.NewOfflineBase(base, d.VendorKeyPath, d.CABundlePath, d.ApplianceBase)
 	r.Route("/cloud/v1", func(r chi.Router) {
-		r.Use(auth.RequireAuth(store))
+		r.Use(auth.RequireAuth(store, checker))
 		r.Mount("/", base.CloudRoutes(off))
 	})
 	return r
