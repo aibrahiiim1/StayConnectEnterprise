@@ -228,7 +228,7 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 	// THE RENEWAL PATH: a healthy pass over an unchanged session is what refreshes its kernel lease.
 	if epoch, active := p.epochs[key]; active {
 		if _, held := p.classes[key]; held {
-			present, err := p.classPresent(ctx, bridge, minor)
+			present, err := p.classPresentCached(ctx, bridge, minor)
 			if err == nil && present {
 				if rerr := p.shp.ReRateSession(ctx, bridge, ip, s.DownKbps, s.UpKbps); rerr != nil {
 					// A failed re-rate leaves the class forwarding at its last AUTHORISED rate — not an
@@ -516,4 +516,43 @@ func (p *phase3Shaping) classPresent(ctx context.Context, bridge string, minor i
 	_, d := down[minor]
 	_, u := up[minor]
 	return d && u, nil
+}
+
+// classPresentCached is classPresent answered from the pass's class inventory (readClassesForPass). Only the
+// renewal of an ALREADY-ACTIVE class may use it; a verification after creating or activating a class must read
+// the kernel afresh (classPresent).
+func (p *phase3Shaping) classPresentCached(ctx context.Context, bridge string, minor int) (bool, error) {
+	down, err := p.readClassesForPass(ctx, bridge)
+	if err != nil {
+		return false, err
+	}
+	up, err := p.readClassesForPass(ctx, shape.IFBName(bridge))
+	if err != nil {
+		return false, err
+	}
+	_, d := down[minor]
+	_, u := up[minor]
+	return d && u, nil
+}
+
+// readClassesForPass reads a device's classes once per SHAPE step (passClasses), or directly outside one.
+//
+// The cache is only consulted by classPresentCached, which asks about an already-active class; nothing earlier in the
+// same step deletes such a class (teardown and stray removal run before the step begins), and the classes the
+// step creates belong to other minors, so the cached answer is the same answer a fresh read would give.
+// A failed read is never cached.
+func (p *phase3Shaping) readClassesForPass(ctx context.Context, device string) (map[int]shape.ClassBytes, error) {
+	if p.passClasses != nil {
+		if c, ok := p.passClasses[device]; ok {
+			return c, nil
+		}
+	}
+	c, err := p.shp.ReadClasses(ctx, device)
+	if err != nil {
+		return nil, err
+	}
+	if p.passClasses != nil {
+		p.passClasses[device] = c
+	}
+	return c, nil
 }

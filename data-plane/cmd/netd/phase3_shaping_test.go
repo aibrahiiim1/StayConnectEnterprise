@@ -907,7 +907,15 @@ func TestHealthReportsTruthfulShapingState(t *testing.T) {
 	}
 
 	// CONVERGED: the kernel was driven to a current plan with nothing failing.
-	if _, err := p.submit(context.Background(), standardPlan(1), time.Now()); err != nil {
+	//
+	// gone-1 is NOT in this first plan: a session whose teardown already succeeded is not torn down again
+	// (B-9), so the failure staged below must hit a teardown that is genuinely being attempted.
+	plan1 := envelope(1,
+		shapeplan.Session{SessionID: "gone-2", DeviceID: "dev-gone-2", IP: "10.0.0.9", Bridge: "br-guest"},
+		shapeplan.Session{SessionID: "live-1", DeviceID: "dev-live-1", IP: "10.0.0.1", Bridge: "br-guest", DownKbps: 8000, UpKbps: 3000, Entitled: true},
+		shapeplan.Session{SessionID: "live-2", DeviceID: "dev-live-2", IP: "10.0.0.2", Bridge: "br-lan", DownKbps: 4000, UpKbps: 1500, Entitled: true},
+	)
+	if _, err := p.submit(context.Background(), plan1, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	st = p.status()

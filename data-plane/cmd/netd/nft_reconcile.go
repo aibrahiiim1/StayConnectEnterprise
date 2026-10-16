@@ -35,6 +35,13 @@ func (a *applier) nftEngine() *nftconverge.Engine {
 // ensureNftStructure makes the live ruleset match what this binary renders for the given intent, and returns
 // whether anything had to change.
 func (a *applier) ensureNftStructure(ctx context.Context, intent []netcfg.GuestNetwork, trigger string) (nftConvergeOutcome, error) {
+	a.nftMu.Lock()
+	defer a.nftMu.Unlock()
+	return a.ensureNftStructureLocked(ctx, intent, trigger)
+}
+
+// ensureNftStructureLocked is ensureNftStructure for a caller that already holds a.nftMu.
+func (a *applier) ensureNftStructureLocked(ctx context.Context, intent []netcfg.GuestNetwork, trigger string) (nftConvergeOutcome, error) {
 	if a.dryRun {
 		return nftConvergeOutcome{Trigger: trigger, DesiredFP: netcfg.RenderFingerprint(intent, a.renderTopo())}, nil
 	}

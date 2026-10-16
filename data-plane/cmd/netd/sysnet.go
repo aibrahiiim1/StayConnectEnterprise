@@ -13,6 +13,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -60,6 +61,16 @@ type sysNetMgr struct {
 	mgmtAddr      string
 	confirmWindow time.Duration
 	dryRun        bool
+	// afterNetplan runs after every `netplan apply` (apply and restore): the firewall's management pin follows
+	// the WAN address (nft_watch.go). nil = nothing to do.
+	afterNetplan func(ctx context.Context)
+	// settle is how long an apply waits for links and routes before verifying. Zero in tests.
+	settle time.Duration
+	// Test seams: the files, the netplan runner, the current state and the post-apply verification.
+	files     *sysnetPaths
+	runFn     func(name string, args ...string) error
+	currentFn func(ctx context.Context) (sysnet.WANConfig, sysnet.LANConfig)
+	verifyFn  func(w sysnet.WANConfig, l sysnet.LANConfig) map[string]bool
 }
 
 // ---- state model returned to the UI ----
@@ -191,7 +202,7 @@ func (m *sysNetMgr) readState(ctx context.Context) sysNetState {
 	s.LAN.DNS = l.DNS
 	s.LAN.Members = bridgeMembers(m.lanBr)
 
-	if pc, ok := readPendingChange(); ok {
+	if pc, ok := m.readPending(); ok {
 		s.Pending = &pendingSysNet{DeadlineUnix: pc.Deadline, ManagementURL: pc.MgmtURL, BackupPath: pc.Backup}
 	}
 	return s
@@ -209,10 +220,29 @@ func (m *sysNetMgr) connectivity(w sysnet.WANConfig) connState {
 
 // ---- validate ----
 
+func (m *sysNetMgr) current(ctx context.Context) (sysnet.WANConfig, sysnet.LANConfig) {
+	if m.currentFn != nil {
+		return m.currentFn(ctx)
+	}
+	return m.currentWANLAN(ctx)
+}
+
 func (m *sysNetMgr) validate(ctx context.Context, p sysnet.Proposal) (sysnet.ValidationResult, sysnet.WANConfig, sysnet.LANConfig) {
-	cw, cl := m.currentWANLAN(ctx)
+	cw, cl := m.current(ctx)
 	w, l := sysnet.Merge(cw, cl, p)
-	return sysnet.ValidateFull(w, l), w, l
+	res := sysnet.ValidateProposal(w, l, cl, p)
+	// THE LOCKOUT CHECK THAT MEANS SOMETHING. The old check accepted the change when the console process
+	// answered on loopback (127.0.0.1:3100), which is always true and says nothing about whether an operator can
+	// reach the console at the new address. What can lock an operator out is the firewall: a LITERAL
+	// NETD_MGMT_ADDR pins the console's port 443 to that one address, so moving the WAN away from it would leave
+	// the console reachable nowhere. NETD_MGMT_ADDR=auto follows the WAN (nft_watch.go) and is never refused.
+	if pin := strings.TrimSpace(m.mgmtAddr); pin != "" && pin != mgmtAddrAuto && p.WAN != nil && w.IP != pin {
+		res.OK = false
+		res.Issues = append(res.Issues, sysnet.Issue{Field: "wan.ip", Code: "management_pin_lockout",
+			Msg: "the Admin Console's port 443 is pinned to " + pin + " (NETD_MGMT_ADDR); a WAN address of " +
+				nullOr(w.IP, "DHCP") + " would leave the console unreachable. Set NETD_MGMT_ADDR=auto first."})
+	}
+	return res, w, l
 }
 
 // ---- apply / confirm / rollback ----
@@ -228,11 +258,22 @@ type applySysResult struct {
 	Verify        map[string]bool         `json:"verify,omitempty"`
 }
 
+// errNothingPending: a rollback was asked for with no applied-but-unconfirmed change to undo.
+var errNothingPending = errors.New("there is no unconfirmed WAN / LAN change to roll back")
+
+func (m *sysNetMgr) netplan(args ...string) error {
+	if m.runFn != nil {
+		return m.runFn("netplan", args...)
+	}
+	return run("netplan", args...)
+}
+
 func (m *sysNetMgr) apply(ctx context.Context, p sysnet.Proposal, actor, actorID, srcIP string) (*applySysResult, error) {
 	if !m.mu.TryLock() {
 		return &applySysResult{OK: false, State: "failed", Message: "another network change is in progress"}, nil
 	}
 	defer m.mu.Unlock()
+	ps := m.paths()
 
 	res, w, l := m.validate(ctx, p)
 	out := &applySysResult{Validation: res, ManagementURL: sysnet.ManagementURL(w)}
@@ -254,76 +295,88 @@ func (m *sysNetMgr) apply(ctx context.Context, p sysnet.Proposal, actor, actorID
 		return out, nil
 	}
 
-	// 1. backup
+	// 1. backup -- including the fact that a file did NOT exist, so a restore can remove what this apply created.
 	stamp := time.Now().UTC().Format("20060102-150405")
-	bk := filepath.Join(sysnetBackups, stamp)
+	bk := filepath.Join(ps.backups, stamp)
 	if err := os.MkdirAll(bk, 0o700); err != nil {
 		return nil, err
 	}
-	_ = copyFile(wanNetplanFile, filepath.Join(bk, "01-static.yaml"))
-	_ = copyFile(lanNetplanFile, filepath.Join(bk, "02-lan-bridge.yaml"))
+	backupFile(ps.wan, filepath.Join(bk, "01-static.yaml"))
+	backupFile(ps.lan, filepath.Join(bk, "02-lan-bridge.yaml"))
 	out.BackupPath = bk
 	pc.Backup = bk
 
 	// 2. render + write netplan (structured serializer)
 	if p.WAN != nil {
-		if err := os.WriteFile(wanNetplanFile, []byte(sysnet.RenderWANNetplan(w)), 0o600); err != nil {
-			m.restore(ctx, bk)
+		if err := os.WriteFile(ps.wan, []byte(sysnet.RenderWANNetplan(w)), 0o600); err != nil {
+			m.restoreFiles(bk)
 			return nil, err
 		}
 	}
 	if p.LAN != nil {
-		if err := os.WriteFile(lanNetplanFile, []byte(sysnet.RenderLANNetplan(l)), 0o600); err != nil {
-			m.restore(ctx, bk)
+		if err := os.WriteFile(ps.lan, []byte(sysnet.RenderLANNetplan(l)), 0o600); err != nil {
+			m.restoreFiles(bk)
 			return nil, err
 		}
 	}
 
 	// 3. validate the generated config
-	if err := run("netplan", "generate"); err != nil {
-		m.restore(ctx, bk)
+	if err := m.netplan("generate"); err != nil {
+		m.restoreFiles(bk)
 		out.State = "failed"
 		out.Message = "netplan generate failed: " + err.Error()
 		m.auditEvent(ctx, revID, "network.apply.rejected", pc, "generate_failed: "+err.Error(), bk)
 		return out, nil
 	}
 
-	// 4. begin apply — persist the pending marker + reset the commit flag. The
-	// in-process watchdog (sysnetWatchdog) auto-rolls-back if unconfirmed.
-	os.Remove(sysnetCommit)
+	// 4. THE PENDING MARKER IS WRITTEN BEFORE THE CHANGE TAKES EFFECT. It used to be written only after
+	// `netplan apply` and the post-apply verification, so a crash or a power cut in between left a live,
+	// unconfirmed change with no marker -- and nothing (neither the watchdog nor the boot reconcile) would ever
+	// roll it back. Persisted first, the worst case is a marker for a change that never took effect, whose
+	// rollback restores the files that are already in place.
+	m.removeCommit()
 	deadline := time.Now().Add(m.confirmWindow)
 	pc.Deadline = deadline.Unix()
+	m.writePending(pc)
 	m.auditEvent(ctx, revID, "network.apply.started", pc, "", bk)
 
 	// 5. apply
-	if err := run("netplan", "apply"); err != nil {
+	if err := m.netplan("apply"); err != nil {
 		m.restore(ctx, bk)
-		clearPending()
+		m.clearPendingFiles()
 		out.State = "failed"
 		out.Message = "netplan apply failed: " + err.Error()
 		m.auditEvent(ctx, revID, "network.apply.failed", pc, "netplan_apply: "+err.Error(), bk)
 		return out, nil
 	}
-	time.Sleep(3 * time.Second)
+	// The firewall follows the new address before anything checks reachability (NETD_MGMT_ADDR=auto).
+	if m.afterNetplan != nil {
+		m.afterNetplan(ctx)
+	}
+	if m.settle > 0 {
+		time.Sleep(m.settle)
+	}
 
 	// 6. verify — any critical failure => immediate in-process rollback
-	v := m.verify(w, l)
+	v := m.verifyNow(w, l)
 	out.Verify = v
-	critical := v["wan_ip"] && v["gateway"] && v["management_local"]
+	critical := v["wan_ip"] && v["gateway"] && v["management_reachable"]
 	if !critical {
 		m.auditEvent(ctx, revID, "network.apply.verify_failed", pc, fmt.Sprintf("%v", v), bk)
 		m.auditEvent(ctx, revID, "network.rollback.automatic.started", pc, "verify_failed", bk)
 		m.restore(ctx, bk)
-		clearPending()
+		m.clearPendingFiles()
 		m.auditEvent(ctx, revID, "network.rollback.automatic.succeeded", pc, "verify_failed", bk)
 		out.State = "rolled_back"
 		out.Message = "post-apply verification failed; restored last-known-good"
 		return out, nil
 	}
 
-	// 7. enter pending_confirmation — persist the marker so the watchdog (and a
-	// boot reconcile after a crash) can auto-roll-back if unconfirmed.
-	m.writePendingLocked(pc)
+	// 7. pending_confirmation, with the window measured from now: the operator's time starts when there is
+	// something to confirm, not when the apply began.
+	deadline = time.Now().Add(m.confirmWindow)
+	pc.Deadline = deadline.Unix()
+	m.writePending(pc)
 	out.OK = true
 	out.State = "pending_confirmation"
 	out.DeadlineUnix = deadline.Unix()
@@ -333,34 +386,44 @@ func (m *sysNetMgr) apply(ctx context.Context, p sysnet.Proposal, actor, actorID
 }
 
 // writePendingLocked persists the marker (helper kept for symmetry/testing).
-func (m *sysNetMgr) writePendingLocked(pc pendingChange) { writePendingChange(pc) }
+func (m *sysNetMgr) writePendingLocked(pc pendingChange) { m.writePending(pc) }
 
 func (m *sysNetMgr) confirm(ctx context.Context, actor, actorID, srcIP string) error {
-	pc, ok := readPendingChange()
+	pc, ok := m.readPending()
 	if !ok {
 		return fmt.Errorf("no pending network change to confirm")
 	}
 	// commit: flag prevents any concurrent rollback; clear the pending marker.
-	_ = os.WriteFile(sysnetCommit, []byte(time.Now().String()), 0o644)
+	_ = os.WriteFile(m.paths().commit, []byte(time.Now().String()), 0o644)
 	pc.Actor, pc.ActorID, pc.SourceIP = actor, actorID, srcIP
-	clearPending()
+	m.clearPendingFiles()
 	m.auditEvent(ctx, pc.RevisionID, "network.apply.confirmed", pc, "", pc.Backup)
 	return nil
 }
 
+// rollback undoes the PENDING change, and nothing else.
+//
+// With nothing pending it used to restore whatever backup directory sorted last -- a change that may have been
+// confirmed weeks ago, with everything applied since silently reverted by a button labelled "roll back".
+// A confirmed change is the configuration; going back from it is a new change, made and confirmed like any
+// other.
 func (m *sysNetMgr) rollback(ctx context.Context, actor, actorID, srcIP string) error {
-	pc, ok := readPendingChange()
-	bk := pc.Backup
-	if !ok || bk == "" {
-		bk = latestBackup()
+	if !m.mu.TryLock() {
+		return fmt.Errorf("another network change is in progress")
 	}
+	defer m.mu.Unlock()
+	pc, ok := m.readPending()
+	if !ok {
+		return errNothingPending
+	}
+	bk := pc.Backup
 	if bk == "" {
-		return fmt.Errorf("no backup to roll back to")
+		return fmt.Errorf("the pending change recorded no backup to roll back to")
 	}
 	pc.Actor, pc.ActorID, pc.SourceIP = actor, actorID, srcIP
 	m.auditEvent(ctx, pc.RevisionID, "network.rollback.manual.started", pc, "operator requested", bk)
 	m.restore(ctx, bk)
-	clearPending()
+	m.clearPendingFiles()
 	m.auditEvent(ctx, pc.RevisionID, "network.rollback.manual.succeeded", pc, "operator requested", bk)
 	return nil
 }
@@ -383,11 +446,11 @@ func (m *sysNetMgr) sysnetWatchdog(ctx context.Context) {
 }
 
 func (m *sysNetMgr) maybeAutoRollback(ctx context.Context) {
-	pc, ok := readPendingChange()
+	pc, ok := m.readPending()
 	if !ok {
 		return
 	}
-	if _, err := os.Stat(sysnetCommit); err == nil {
+	if _, err := os.Stat(m.paths().commit); err == nil {
 		return // committed
 	}
 	if time.Now().Unix() < pc.Deadline {
@@ -398,18 +461,18 @@ func (m *sysNetMgr) maybeAutoRollback(ctx context.Context) {
 	}
 	defer m.mu.Unlock()
 	// re-check under lock (a confirm may have raced)
-	if pc2, ok := readPendingChange(); !ok || pc2.RevisionID != pc.RevisionID {
+	if pc2, ok := m.readPending(); !ok || pc2.RevisionID != pc.RevisionID {
 		return
 	}
 	m.auditEvent(ctx, pc.RevisionID, "network.apply.confirmation_timeout", pc, fmt.Sprintf("no confirmation within %s", m.confirmWindow), pc.Backup)
 	m.auditEvent(ctx, pc.RevisionID, "network.rollback.automatic.started", pc, "confirmation_timeout", pc.Backup)
 	if pc.Backup == "" {
-		clearPending()
+		m.clearPendingFiles()
 		m.auditEvent(ctx, pc.RevisionID, "network.rollback.automatic.failed", pc, "no backup recorded", "")
 		return
 	}
 	m.restore(ctx, pc.Backup)
-	clearPending()
+	m.clearPendingFiles()
 	m.auditEvent(ctx, pc.RevisionID, "network.rollback.automatic.succeeded", pc, "confirmation_timeout", pc.Backup)
 }
 
@@ -419,12 +482,12 @@ func (m *sysNetMgr) maybeAutoRollback(ctx context.Context) {
 // the reconciliation is audited. A marker still within its window is left for
 // the watchdog. Committed/absent markers are cleaned up.
 func (m *sysNetMgr) ReconcileStalePendingOnBoot(ctx context.Context) {
-	pc, ok := readPendingChange()
+	pc, ok := m.readPending()
 	if !ok {
 		return
 	}
-	if _, err := os.Stat(sysnetCommit); err == nil {
-		clearPending() // was confirmed; just tidy the marker
+	if _, err := os.Stat(m.paths().commit); err == nil {
+		m.clearPendingFiles() // was confirmed; just tidy the marker
 		return
 	}
 	if time.Now().Unix() < pc.Deadline {
@@ -434,23 +497,59 @@ func (m *sysNetMgr) ReconcileStalePendingOnBoot(ctx context.Context) {
 	m.auditEvent(ctx, pc.RevisionID, "network.reconcile.stale_pending", pc, "unconfirmed across restart", pc.Backup)
 	m.auditEvent(ctx, pc.RevisionID, "network.rollback.automatic.started", pc, "boot_reconcile", pc.Backup)
 	if pc.Backup == "" {
-		clearPending()
+		m.clearPendingFiles()
 		m.auditEvent(ctx, pc.RevisionID, "network.rollback.automatic.failed", pc, "no backup recorded", "")
 		return
 	}
 	if !m.dryRun {
 		m.restore(ctx, pc.Backup)
 	}
-	clearPending()
+	m.clearPendingFiles()
 	m.auditEvent(ctx, pc.RevisionID, "network.rollback.automatic.succeeded", pc, "boot_reconcile", pc.Backup)
 }
 
-func (m *sysNetMgr) restore(ctx context.Context, bk string) {
-	_ = copyFile(filepath.Join(bk, "01-static.yaml"), wanNetplanFile)
-	_ = copyFile(filepath.Join(bk, "02-lan-bridge.yaml"), lanNetplanFile)
-	if !m.dryRun {
-		_ = run("netplan", "apply")
+// backupFile copies src into the backup, or -- when src does not exist -- records that it did not, so a restore
+// removes the file the apply created instead of leaving it in force.
+func backupFile(src, dst string) {
+	if err := copyFile(src, dst); err != nil && os.IsNotExist(err) {
+		_ = os.WriteFile(dst+absentSuffix, []byte("did not exist before this change\n"), 0o600)
 	}
+}
+
+const absentSuffix = ".absent"
+
+// restoreFiles puts the backed-up netplan files back, and REMOVES a file the backup records as absent. The old
+// restore only copied, so a file this change created survived every rollback and took effect at the next
+// `netplan apply` or reboot.
+func (m *sysNetMgr) restoreFiles(bk string) {
+	ps := m.paths()
+	for name, live := range map[string]string{"01-static.yaml": ps.wan, "02-lan-bridge.yaml": ps.lan} {
+		saved := filepath.Join(bk, name)
+		if _, err := os.Stat(saved); err == nil {
+			_ = copyFile(saved, live)
+			continue
+		}
+		if _, err := os.Stat(saved + absentSuffix); err == nil {
+			_ = os.Remove(live)
+		}
+	}
+}
+
+func (m *sysNetMgr) restore(ctx context.Context, bk string) {
+	m.restoreFiles(bk)
+	if !m.dryRun {
+		_ = m.netplan("apply")
+		if m.afterNetplan != nil {
+			m.afterNetplan(ctx)
+		}
+	}
+}
+
+func (m *sysNetMgr) verifyNow(w sysnet.WANConfig, l sysnet.LANConfig) map[string]bool {
+	if m.verifyFn != nil {
+		return m.verifyFn(w, l)
+	}
+	return m.verify(w, l)
 }
 
 func (m *sysNetMgr) verify(w sysnet.WANConfig, l sysnet.LANConfig) map[string]bool {
@@ -461,7 +560,15 @@ func (m *sysNetMgr) verify(w sysnet.WANConfig, l sysnet.LANConfig) map[string]bo
 	v["dns"] = resolves("github.com")
 	v["lan_bridge"] = ifaceHasIP(l.Bridge, l.IP)
 	v["lan_member"] = ifaceMaster(l.PhysicalInterface) == l.Bridge
-	v["management_local"] = tcpProbe("127.0.0.1:3100") || tcpProbe(w.IP+":443")
+	// THE CONSOLE ANSWERS AT THE ADDRESS THE OPERATOR WILL USE. This used to accept a loopback probe of the
+	// console process (127.0.0.1:3100), which is up whatever the network looks like, so the check could never
+	// fail. The new WAN address on 443 is what the operator's browser will reach (Caddy listens on every
+	// address; the firewall pin follows NETD_MGMT_ADDR=auto, re-asserted just before this check).
+	addr := w.IP
+	if addr == "" {
+		addr, _ = primaryV4(w.Interface) // DHCP: whatever the lease gave
+	}
+	v["management_reachable"] = addr != "" && tcpProbe(addr+":443")
 	return v
 }
 
@@ -544,7 +651,8 @@ func (s *server) sysnetApply(w http.ResponseWriter, r *http.Request) {
 		SourceIP string          `json:"source_ip"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
-	res, err := s.sn.apply(r.Context(), req.Proposal, req.Actor, req.ActorID, req.SourceIP)
+	actor, actorID, srcIP := s.callers.actorFor(r.Context(), req.Actor, req.ActorID, req.SourceIP)
+	res, err := s.sn.apply(r.Context(), req.Proposal, actor, actorID, srcIP)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -555,7 +663,8 @@ func (s *server) sysnetApply(w http.ResponseWriter, r *http.Request) {
 func (s *server) sysnetConfirm(w http.ResponseWriter, r *http.Request) {
 	var req struct{ Actor, ActorID, SourceIP string }
 	_ = json.NewDecoder(r.Body).Decode(&req)
-	if err := s.sn.confirm(r.Context(), req.Actor, req.ActorID, req.SourceIP); err != nil {
+	actor, actorID, srcIP := s.callers.actorFor(r.Context(), req.Actor, req.ActorID, req.SourceIP)
+	if err := s.sn.confirm(r.Context(), actor, actorID, srcIP); err != nil {
 		writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return
 	}
@@ -565,8 +674,13 @@ func (s *server) sysnetConfirm(w http.ResponseWriter, r *http.Request) {
 func (s *server) sysnetRollback(w http.ResponseWriter, r *http.Request) {
 	var req struct{ Actor, ActorID, SourceIP string }
 	_ = json.NewDecoder(r.Body).Decode(&req)
-	if err := s.sn.rollback(r.Context(), req.Actor, req.ActorID, req.SourceIP); err != nil {
-		writeJSON(w, 400, map[string]string{"error": err.Error()})
+	actor, actorID, srcIP := s.callers.actorFor(r.Context(), req.Actor, req.ActorID, req.SourceIP)
+	if err := s.sn.rollback(r.Context(), actor, actorID, srcIP); err != nil {
+		code := 400
+		if errors.Is(err, errNothingPending) {
+			code = 409
+		}
+		writeJSON(w, code, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, 200, map[string]string{"state": "rolled_back"})
@@ -780,14 +894,31 @@ func sanitize(s string) string {
 
 // --- persistent pending marker (survives netd restart for boot reconcile) ---
 
-func writePendingChange(pc pendingChange) {
-	_ = os.MkdirAll(filepath.Dir(sysnetPendingFile), 0o700)
-	b, _ := json.Marshal(pc)
-	_ = os.WriteFile(sysnetPendingFile, b, 0o600)
+// sysnetPaths are the files the system-network manager reads and writes. A field so a test can point them at a
+// temporary directory; the zero value is the appliance's real layout.
+type sysnetPaths struct{ wan, lan, backups, pending, commit string }
+
+func (m *sysNetMgr) paths() sysnetPaths {
+	if m.files != nil {
+		return *m.files
+	}
+	return sysnetPaths{wan: wanNetplanFile, lan: lanNetplanFile, backups: sysnetBackups,
+		pending: sysnetPendingFile, commit: sysnetCommit}
 }
-func readPendingChange() (pendingChange, bool) {
+
+func (m *sysNetMgr) writePending(pc pendingChange) {
+	path := m.paths().pending
+	_ = os.MkdirAll(filepath.Dir(path), 0o700)
+	b, _ := json.Marshal(pc)
+	tmp := path + ".tmp"
+	if os.WriteFile(tmp, b, 0o600) == nil {
+		_ = os.Rename(tmp, path)
+	}
+}
+
+func (m *sysNetMgr) readPending() (pendingChange, bool) {
 	var pc pendingChange
-	b, err := os.ReadFile(sysnetPendingFile)
+	b, err := os.ReadFile(m.paths().pending)
 	if err != nil {
 		return pc, false
 	}
@@ -797,13 +928,16 @@ func readPendingChange() (pendingChange, bool) {
 	return pc, true
 }
 
-// clearPending removes BOTH the persistent pending marker and the commit flag —
+func (m *sysNetMgr) removeCommit() { _ = os.Remove(m.paths().commit) }
+
+// clearPendingFiles removes BOTH the persistent pending marker and the commit flag —
 // called on every terminal outcome (confirm / manual rollback / auto rollback /
 // failed rollback / boot reconcile) so no stale marker is ever left behind
 // (carryover E).
-func clearPending() {
-	_ = os.Remove(sysnetPendingFile)
-	_ = os.Remove(sysnetCommit)
+func (m *sysNetMgr) clearPendingFiles() {
+	ps := m.paths()
+	_ = os.Remove(ps.pending)
+	_ = os.Remove(ps.commit)
 }
 
 // genUUID returns a random RFC-4122 v4 UUID (netd has no google/uuid dep).
@@ -834,18 +968,4 @@ func nullOr(s, d string) string {
 		return d
 	}
 	return s
-}
-
-func latestBackup() string {
-	entries, _ := os.ReadDir(sysnetBackups)
-	var newest string
-	for _, e := range entries {
-		if e.IsDir() && e.Name() > newest {
-			newest = e.Name()
-		}
-	}
-	if newest == "" {
-		return ""
-	}
-	return filepath.Join(sysnetBackups, newest)
 }

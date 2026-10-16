@@ -39,7 +39,8 @@ die() { echo "[provision] ABORT: $*" >&2; exit 1; }
 say "packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq ca-certificates curl gnupg lsb-release nftables unbound jq python3 >/dev/null
+# conntrack: the fallback netd uses to end a revoked address's open flows when ctnetlink is unavailable (audit B-1).
+apt-get install -y -qq ca-certificates curl gnupg lsb-release nftables conntrack unbound jq python3 >/dev/null
 if ! command -v docker >/dev/null; then
   install -m 0755 -d /etc/apt/keyrings
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -84,7 +85,10 @@ chmod 700 "$ETC/secrets"
 #	stayconnect-portald   the captive portal. It listens on *:8380 -- on every guest VLAN -- so it is the
 #	                      process most likely to be attacked and the one that must own the least. It keeps
 #	                      the stayconnect SUPPLEMENTARY group because guest authentication runs through
-#	                      scd's socket, and gets nothing else.
+#	                      scd's socket. That group also opens netd's socket; what keeps portald out there
+#	                      is netd's per-route caller check (SO_PEERCRED against NETD_ADMIN_CALLERS /
+#	                      NETD_FLOW_CALLERS in stayconnect-netd.service), which does not name it. Group
+#	                      membership alone is not the boundary on either socket.
 #	stayconnect-pmsd      the PMS interface, which holds the credentials for the hotel's Protel connection.
 #
 # Sharing a uid makes the separation cosmetic: a process can ptrace another running under the same uid, so
@@ -324,8 +328,15 @@ EOF
 NETD_DB_URL=${NETD_DB_URL}
 NETD_WAN_IFACE=${WAN_IFACE}
 NETD_MGMT_IFACE=${WAN_IFACE}
+NETD_MGMT_ADDR=auto
 NETD_LAN_PHYS=${LAN_IFACE}
 EOF
+# THE ADMIN CONSOLE'S PORT 443 IS PINNED TO THE WAN ADDRESS (docs/HOTEL_ADMIN_IP_ALIAS.md). The WAN is also the
+# management interface (two-NIC topology, docs/DEPLOYMENT_APPLIANCE.md), so without a pin 443 was accepted on
+# EVERY address the WAN NIC carries. "auto" pins it to the WAN's current primary IPv4 and follows a change made
+# through System network (cmd/netd/nft_watch.go); a literal address would lock the console out at the first WAN
+# readdressing. Added to an existing netd.env too, because this script never rewrites one.
+grep -qE '^NETD_MGMT_ADDR=' "$ETC/netd.env" || printf 'NETD_MGMT_ADDR=auto\n' >> "$ETC/netd.env"
 [ -f "$ETC/portald.env" ] || printf 'PORTALD_SCD_SOCKET=/run/stayconnect/scd.sock\n' > "$ETC/portald.env"
 [ -f "$ETC/pmsd.env" ] || cp "$DEPLOY/env/pmsd.env.dark" "$ETC/pmsd.env"
 chmod 640 "$ETC"/*.env && chown root:stayconnect "$ETC"/*.env

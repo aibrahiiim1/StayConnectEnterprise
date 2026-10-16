@@ -29,6 +29,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/stayconnect/enterprise/data-plane/internal/conntrack"
 	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
@@ -45,6 +46,11 @@ func envOr(k, d string) string {
 }
 
 func main() {
+	// `netd flows-end --ip X`: the conntrack flush alone, in the calling namespace (flows.go). Handled before
+	// anything else so it needs no database, no socket and no backoff tracker.
+	if len(os.Args) > 1 && os.Args[1] == "flows-end" {
+		os.Exit(runFlowsEndCommand(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 
 	// Adaptive crash-loop backoff (see internal/startupbackoff): a persistently
@@ -128,6 +134,9 @@ func main() {
 	// the portal-names resolver fragment (both follow scd's HTTPS verdict, which changes with no revision).
 	// Never touches nftables or netplan. See portal.go.
 	go ap.portalRuntimeLoop(rootCtx)
+	// The ruleset is re-asserted while netd runs, not only at boot and apply (nft_watch.go): a restart of
+	// nftables.service or a hand-loaded ruleset is repaired within one tick. Steady state issues no mutation.
+	go ap.nftStructureLoop(rootCtx, 10*time.Second)
 
 	sn := &sysNetMgr{
 		st:            st,
@@ -137,6 +146,10 @@ func main() {
 		mgmtAddr:      topo.MgmtAddr,
 		confirmWindow: confirmWindow,
 		dryRun:        dryRun,
+		// A WAN address change moves the Admin Console's pinned address (NETD_MGMT_ADDR=auto): the firewall follows
+		// as soon as netplan has applied, so the operator can confirm from the new address.
+		afterNetplan: func(ctx context.Context) { ap.reassertNftStructure(ctx, "system_network") },
+		settle:       3 * time.Second,
 	}
 
 	// Phase 3 (ADR-0002): netd is the ONLY process that mutates Phase-3 shaping — and it decides for itself
@@ -188,7 +201,10 @@ func main() {
 		// THE PACKET-AUTHORIZATION GATE. netd owns both halves of Phase-3 enforcement — the nft admission and
 		// the accountable tc class — so no other daemon can admit a guest while this one is still preparing to
 		// meter them. It writes ONLY the Phase-3 set, never legacy auth_ipv4.
-		gate: newNFTGate(),
+		//
+		// Revocation also ENDS THE ADDRESS'S OPEN FLOWS (conntrack), so a guest whose access ends is cut off,
+		// not merely prevented from opening new connections (audit B-1).
+		gate: newFlushingGate(newNFTGate(), conntrack.New()),
 		// The confirmed kernel result, recorded through the controlled writers, so a Session only ever claims
 		// `active` once both halves are actually in force.
 		enforcement: &pgEnforcement{pool: pool, tenant: p3mode.TenantID, site: p3mode.SiteID},
@@ -217,6 +233,15 @@ func main() {
 			"kernel_verified", verified, "note", p3shaping.restoreNote)
 	}
 	srv := &server{st: st, ap: ap, kea: ap.kea, topo: topo, sn: sn, phase3: p3shaping}
+	// The scope is re-read while netd runs, so a reassignment does not leave every guest offline until a restart
+	// (phase3_scope_watch.go).
+	go scopeWatch{
+		p:    p3shaping,
+		load: func(ctx context.Context) (phase3Mode, error) { return loadPhase3Mode(ctx, os.Getenv) },
+		verifyBoundary: func(ctx context.Context) error {
+			return writerguard.Verify(ctx, pool, writerguard.Phase3Requirements())
+		},
+	}.loop(rootCtx, 30*time.Second)
 	slog.Info("netd phase3 shaping writer", "active", p3mode.Active, "producer_authenticated", p3authz.configured)
 
 	// Watchdog: roll back any pending revision whose deadline has passed. Also
@@ -229,32 +254,14 @@ func main() {
 	sn.ReconcileStalePendingOnBoot(rootCtx)
 	go sn.sysnetWatchdog(rootCtx)
 
-	r := chi.NewRouter()
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(90 * time.Second))
-	r.Get("/v1/health", srv.health)
-	r.Get("/v1/interfaces", srv.interfaces)
-	r.Post("/v1/validate", srv.validate)
-	r.Post("/v1/apply", srv.apply)
-	r.Post("/v1/confirm", srv.confirm)
-	r.Post("/v1/rollback", srv.rollback)
-	r.Get("/v1/leases", srv.leases)
-	r.Get("/v1/pending", srv.pending)
-	// May this address become the portal address? Read-only; edged asks before saving the setting.
-	r.Post("/v1/portal-ip/validate", srv.portalIPValidate)
-	// System (WAN/LAN) network management — the appliance's own base networking.
-	// Phase 3: the ONLY Phase-3 tc mutation entry point on this appliance (ADR-0002).
-	r.Post("/v1/phase3/shaping", srv.phase3ShapingHandler)
-	// the TC owner's per-class generations: the only trustworthy answer to "did this counter series restart?"
-	r.Get("/v1/phase3/shaping/epochs", srv.phase3EpochsHandler)
-
-	r.Get("/v1/system-network", srv.sysnetGet)
-	r.Post("/v1/system-network/validate", srv.sysnetValidate)
-	r.Post("/v1/system-network/apply", srv.sysnetApply)
-	r.Post("/v1/system-network/confirm", srv.sysnetConfirm)
-	r.Post("/v1/system-network/rollback", srv.sysnetRollback)
-	r.Get("/v1/system-network/history", srv.sysnetHistory)
-	r.Get("/v1/system-network/diagnostics", srv.sysnetDiagnostics)
+	// EVERY ROUTE NAMES ITS CALLERS (caller_authz.go). The Phase-3 routes keep their own, stricter producer check
+	// (exactly NETD_PHASE3_PRODUCER_UID, phase3_control.go); everything else is admitted per class.
+	callers := loadCallerPolicy(os.Getenv)
+	for _, pr := range callers.problems {
+		slog.Warn("netd caller policy", "problem", pr)
+	}
+	srv.callers = callers
+	r := srv.routes()
 
 	_ = os.MkdirAll("/run/stayconnect", 0o755)
 	_ = os.Remove(sock)
@@ -296,6 +303,43 @@ func main() {
 	_ = hs.Shutdown(shutCtx)
 }
 
+// routes is netd's whole HTTP surface. Every route names its callers (caller_authz.go); the two Phase-3 routes
+// authenticate the single producer themselves.
+func (s *server) routes() http.Handler {
+	admin := func(h http.HandlerFunc) http.HandlerFunc { return s.callers.gate(classAdmin, h) }
+
+	r := chi.NewRouter()
+	r.Use(middleware.Recoverer)
+	r.Use(middleware.Timeout(90 * time.Second))
+	r.Get("/v1/health", admin(s.health))
+	r.Get("/v1/interfaces", admin(s.interfaces))
+	r.Post("/v1/validate", admin(s.validate))
+	r.Post("/v1/apply", admin(s.apply))
+	r.Post("/v1/confirm", admin(s.confirm))
+	r.Post("/v1/rollback", admin(s.rollback))
+	r.Get("/v1/leases", admin(s.leases))
+	r.Get("/v1/pending", admin(s.pending))
+	// May this address become the portal address? Read-only; edged asks before saving the setting.
+	r.Post("/v1/portal-ip/validate", admin(s.portalIPValidate))
+	// Phase 3: the ONLY Phase-3 tc mutation entry point on this appliance (ADR-0002). Authenticated in the handler
+	// against the single producer uid.
+	r.Post("/v1/phase3/shaping", s.phase3ShapingHandler)
+	// the TC owner's per-class generations: the only trustworthy answer to "did this counter series restart?"
+	r.Get("/v1/phase3/shaping/epochs", s.phase3EpochsHandler)
+	// End an address's flows NOW: the kernel half of a staff disconnect (flows.go).
+	r.Post("/v1/flows/end", s.callers.gate(classFlows, s.flowsEnd))
+
+	// System (WAN/LAN) network management — the appliance's own base networking.
+	r.Get("/v1/system-network", admin(s.sysnetGet))
+	r.Post("/v1/system-network/validate", admin(s.sysnetValidate))
+	r.Post("/v1/system-network/apply", admin(s.sysnetApply))
+	r.Post("/v1/system-network/confirm", admin(s.sysnetConfirm))
+	r.Post("/v1/system-network/rollback", admin(s.sysnetRollback))
+	r.Get("/v1/system-network/history", admin(s.sysnetHistory))
+	r.Get("/v1/system-network/diagnostics", admin(s.sysnetDiagnostics))
+	return r
+}
+
 type server struct {
 	st   *store
 	ap   *applier
@@ -304,6 +348,8 @@ type server struct {
 	sn   *sysNetMgr
 	// phase3 is the SINGLE Phase-3 shaping writer (ADR-0002). acctd derives the plan; netd applies it.
 	phase3 *phase3Shaping
+	// callers decides who may call each route, and whose body-supplied actor is believed (caller_authz.go).
+	callers callerPolicy
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -402,7 +448,8 @@ type actorReq struct {
 func (s *server) validate(w http.ResponseWriter, r *http.Request) {
 	var req actorReq
 	_ = json.NewDecoder(r.Body).Decode(&req)
-	res, err := s.ap.Validate(r.Context(), req.Summary, req.Actor)
+	actor, _, _ := s.callers.actorFor(r.Context(), req.Actor, "", "")
+	res, err := s.ap.Validate(r.Context(), req.Summary, actor)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -413,7 +460,8 @@ func (s *server) validate(w http.ResponseWriter, r *http.Request) {
 func (s *server) apply(w http.ResponseWriter, r *http.Request) {
 	var req actorReq
 	_ = json.NewDecoder(r.Body).Decode(&req)
-	res, err := s.ap.Apply(r.Context(), req.Summary, req.Actor)
+	actor, _, _ := s.callers.actorFor(r.Context(), req.Actor, "", "")
+	res, err := s.ap.Apply(r.Context(), req.Summary, actor)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -433,7 +481,8 @@ type idReq struct {
 func (s *server) confirm(w http.ResponseWriter, r *http.Request) {
 	var req idReq
 	_ = json.NewDecoder(r.Body).Decode(&req)
-	if err := s.ap.Confirm(r.Context(), req.RevisionID, req.Actor); err != nil {
+	actor, _, _ := s.callers.actorFor(r.Context(), req.Actor, "", "")
+	if err := s.ap.Confirm(r.Context(), req.RevisionID, actor); err != nil {
 		code := 500
 		if errors.Is(err, errNotPending) {
 			code = 409
@@ -447,7 +496,8 @@ func (s *server) confirm(w http.ResponseWriter, r *http.Request) {
 func (s *server) rollback(w http.ResponseWriter, r *http.Request) {
 	var req idReq
 	_ = json.NewDecoder(r.Body).Decode(&req)
-	if err := s.ap.Rollback(r.Context(), req.RevisionID, req.Actor); err != nil {
+	actor, _, _ := s.callers.actorFor(r.Context(), req.Actor, "", "")
+	if err := s.ap.Rollback(r.Context(), req.RevisionID, actor); err != nil {
 		// A DELIBERATE REFUSAL IS NOT AN INTERNAL ERROR. Rollback declines when the revision is not in a
 		// state that has a rollback target -- most importantly when it is the CONFIRMED active
 		// configuration, where the only remaining code path would tear down every guest network. Reporting

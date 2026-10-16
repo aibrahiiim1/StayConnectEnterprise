@@ -256,9 +256,12 @@ func (p *phase3Shaping) wallStamp() string { return time.Now().UTC().Format(time
 // see: a session torn down because a newer session took its address is a routine handover, not a teardown, and
 // the durable record should not call it one. Anything malformed falls back to the default rather than being
 // passed to the writer, which validates the code and would refuse the whole call.
-func (p *phase3Shaping) markEnded(ctx context.Context, sessionID, reason string) {
+//
+// It reports whether durable state converged, so a teardown is only considered finished (and not repeated)
+// once the record says so.
+func (p *phase3Shaping) markEnded(ctx context.Context, sessionID, reason string) bool {
 	if p.enforcement == nil {
-		return
+		return true
 	}
 	if !validEndReason(reason) {
 		reason = "ENFORCEMENT_TORN_DOWN"
@@ -267,7 +270,9 @@ func (p *phase3Shaping) markEnded(ctx context.Context, sessionID, reason string)
 		// Access is already denied at the packet layer, so this is a bookkeeping lag, not continued access.
 		slog.Warn("phase3: session enforcement ended but durable state not converged",
 			"session", sessionID, "err", err)
+		return false
 	}
+	return true
 }
 
 // endReasonPattern is the writer's own rule, restated here so a malformed code is replaced rather than sent:
