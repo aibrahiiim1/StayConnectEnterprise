@@ -147,6 +147,12 @@ func (p callerPolicy) gate(class routeClass, h http.HandlerFunc) http.HandlerFun
 	}
 }
 
+// changeCtx is the context a network CHANGE runs under: the request's values (the caller identity) without its
+// cancellation or deadline. An apply, confirm or rollback that has started must finish -- or roll itself back --
+// whatever happens to the connection that asked for it; a cancelled context reaching exec.CommandContext would
+// kill netplan or a Kea reload half-way (audit N-3). Each step inside keeps its own bounded timeout.
+func changeCtx(r *http.Request) context.Context { return context.WithoutCancel(r.Context()) }
+
 // actorFor decides what an audit row records as the actor of a change. edged authenticated an operator and
 // says who; anything else admitted to the route (root tooling) is recorded as itself, whatever its body claims.
 func (p callerPolicy) actorFor(ctx context.Context, bodyActor, bodyActorID, bodySourceIP string) (actor, actorID, sourceIP string) {

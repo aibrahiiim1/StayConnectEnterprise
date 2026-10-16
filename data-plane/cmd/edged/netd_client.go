@@ -19,7 +19,7 @@ type netdClient struct {
 
 func newNetdClient(socket string) *netdClient {
 	return &netdClient{http: &http.Client{
-		Timeout: 100 * time.Second, // apply can take a while (netplan/kea/health)
+		Timeout: 175 * time.Second, // apply can take a while (netplan/kea/health); just inside routeTimeout's 180 s
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 				var d net.Dialer

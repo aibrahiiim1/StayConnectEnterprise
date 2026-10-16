@@ -310,7 +310,7 @@ func (s *server) routes() http.Handler {
 
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(90 * time.Second))
+	r.Use(middleware.Timeout(180 * time.Second))
 	r.Get("/v1/health", admin(s.health))
 	r.Get("/v1/interfaces", admin(s.interfaces))
 	r.Post("/v1/validate", admin(s.validate))
@@ -449,7 +449,7 @@ func (s *server) validate(w http.ResponseWriter, r *http.Request) {
 	var req actorReq
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	actor, _, _ := s.callers.actorFor(r.Context(), req.Actor, "", "")
-	res, err := s.ap.Validate(r.Context(), req.Summary, actor)
+	res, err := s.ap.Validate(changeCtx(r), req.Summary, actor)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -461,7 +461,7 @@ func (s *server) apply(w http.ResponseWriter, r *http.Request) {
 	var req actorReq
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	actor, _, _ := s.callers.actorFor(r.Context(), req.Actor, "", "")
-	res, err := s.ap.Apply(r.Context(), req.Summary, actor)
+	res, err := s.ap.Apply(changeCtx(r), req.Summary, actor)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -482,7 +482,7 @@ func (s *server) confirm(w http.ResponseWriter, r *http.Request) {
 	var req idReq
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	actor, _, _ := s.callers.actorFor(r.Context(), req.Actor, "", "")
-	if err := s.ap.Confirm(r.Context(), req.RevisionID, actor); err != nil {
+	if err := s.ap.Confirm(changeCtx(r), req.RevisionID, actor); err != nil {
 		code := 500
 		if errors.Is(err, errNotPending) {
 			code = 409
@@ -497,7 +497,7 @@ func (s *server) rollback(w http.ResponseWriter, r *http.Request) {
 	var req idReq
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	actor, _, _ := s.callers.actorFor(r.Context(), req.Actor, "", "")
-	if err := s.ap.Rollback(r.Context(), req.RevisionID, actor); err != nil {
+	if err := s.ap.Rollback(changeCtx(r), req.RevisionID, actor); err != nil {
 		// A DELIBERATE REFUSAL IS NOT AN INTERNAL ERROR. Rollback declines when the revision is not in a
 		// state that has a rollback target -- most importantly when it is the CONFIRMED active
 		// configuration, where the only remaining code path would tear down every guest network. Reporting

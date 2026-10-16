@@ -652,7 +652,7 @@ func (s *server) sysnetApply(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	actor, actorID, srcIP := s.callers.actorFor(r.Context(), req.Actor, req.ActorID, req.SourceIP)
-	res, err := s.sn.apply(r.Context(), req.Proposal, actor, actorID, srcIP)
+	res, err := s.sn.apply(changeCtx(r), req.Proposal, actor, actorID, srcIP)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -664,7 +664,7 @@ func (s *server) sysnetConfirm(w http.ResponseWriter, r *http.Request) {
 	var req struct{ Actor, ActorID, SourceIP string }
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	actor, actorID, srcIP := s.callers.actorFor(r.Context(), req.Actor, req.ActorID, req.SourceIP)
-	if err := s.sn.confirm(r.Context(), actor, actorID, srcIP); err != nil {
+	if err := s.sn.confirm(changeCtx(r), actor, actorID, srcIP); err != nil {
 		writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return
 	}
@@ -675,7 +675,7 @@ func (s *server) sysnetRollback(w http.ResponseWriter, r *http.Request) {
 	var req struct{ Actor, ActorID, SourceIP string }
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	actor, actorID, srcIP := s.callers.actorFor(r.Context(), req.Actor, req.ActorID, req.SourceIP)
-	if err := s.sn.rollback(r.Context(), actor, actorID, srcIP); err != nil {
+	if err := s.sn.rollback(changeCtx(r), actor, actorID, srcIP); err != nil {
 		code := 400
 		if errors.Is(err, errNothingPending) {
 			code = 409

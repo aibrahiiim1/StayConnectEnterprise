@@ -344,7 +344,8 @@ func main() {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(15 * time.Second))
+	// 15 s for every request but the network applies, which wait for netd (route_timeout.go).
+	r.Use(routeTimeout(defaultRequestTimeout, networkApplyTimeout))
 
 	r.Route("/edge/v1", func(r chi.Router) {
 		r.Get("/health", s.health)
