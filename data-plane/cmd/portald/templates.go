@@ -2041,7 +2041,7 @@ const successHTML = guestHead + `
     fetch('/status', {headers:{'Accept':'application/json'}})
       .then(function(r){ return r.ok ? r.json() : null; })
       .then(function(st){
-        if(!st || st.time_mode !== 'AGGREGATE_ONLINE_TIME') return;  // every other package: nothing changes
+        if(!st || (st.time_mode !== 'AGGREGATE_ONLINE_TIME' && !st.online_time_allowance)) return;  // no time allowance: nothing changes
         main.textContent = fill(t('tl.left'), 't', human(st.remaining_online_seconds));
         if(st.hard_expiry){
           var when = day(st.hard_expiry);

@@ -86,14 +86,15 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 		// The entitlement must be ours, live, and still within its window. Checked inside the transaction so
 		// a revocation racing this activation cannot slip a session in behind it.
 		var maxDevices int
-		var status string
+		var status, devicePolicy string
 		if err := tx.QueryRow(ctx, `
-		    SELECT e.status, COALESCE(spr.max_concurrent_devices, 1)
+		    SELECT e.status, COALESCE(spr.max_concurrent_devices, 1),
+		           COALESCE(spr.device_limit_policy, 'REJECT_NEW_DEVICE')
 		      FROM iam_v2.entitlements e
 		      LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
 		     WHERE e.id=$1 AND e.tenant_id=$2 AND e.site_id=$3
 		       AND (e.window_ends_at IS NULL OR e.window_ends_at > now())
-		     FOR UPDATE OF e`, req.EntitlementID, s.tenID, s.siteID).Scan(&status, &maxDevices); err != nil {
+		     FOR UPDATE OF e`, req.EntitlementID, s.tenID, s.siteID).Scan(&status, &maxDevices, &devicePolicy); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return errEntitlementUnusable
 			}
@@ -244,7 +245,10 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 			req.EntitlementID).Scan(&inUse); err != nil {
 			return err
 		}
-		if inUse >= maxDevices {
+		// DISCONNECT_OLDEST (0122) admits the new device by disconnecting the entitlement's oldest one, inside
+		// authorize_entitlement_device under the entitlement lock -- so a full plan with that policy is not a
+		// refusal here. Every other policy refuses at the limit, as before.
+		if inUse >= maxDevices && devicePolicy != "DISCONNECT_OLDEST" {
 			return &maxDevicesError{Limit: maxDevices, Current: inUse}
 		}
 

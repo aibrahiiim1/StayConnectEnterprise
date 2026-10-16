@@ -463,18 +463,21 @@ func (h *handler) deviceOnline(ctx context.Context, ip net.IP) (bool, *int64) {
 	if !st.Active {
 		return false, nil
 	}
+	// The earlier of the two clocks: the online-time allowance left, and the hard expiry. Either one ends the
+	// access, so the device is told the sooner (a validity-window plan with a time allowance has both).
+	var out *int64
 	if st.RemainingOnlineSeconds != nil && *st.RemainingOnlineSeconds >= 0 && !math.IsInf(*st.RemainingOnlineSeconds, 0) {
 		n := int64(*st.RemainingOnlineSeconds)
-		return true, &n
+		out = &n
 	}
 	if st.HardExpiry != "" {
 		if t, err := time.Parse(time.RFC3339, st.HardExpiry); err == nil {
-			if n := int64(time.Until(t).Seconds()); n >= 0 {
-				return true, &n
+			if n := int64(time.Until(t).Seconds()); n >= 0 && (out == nil || n < *out) {
+				out = &n
 			}
 		}
 	}
-	return true, nil
+	return true, out
 }
 
 // clientIPString is the connection's address for a log line ("" when it cannot be read).

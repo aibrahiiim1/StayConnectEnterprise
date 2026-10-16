@@ -86,6 +86,40 @@ func (g *nftGate) List(ctx context.Context) ([]gateElem, error) {
 	return out, nil
 }
 
+// THE LEGACY SET IS KEPT EMPTY (audit B-14/B-15).
+//
+// auth_ipv4 is the pre-IAM-v2 authorization set. Nothing writes to it any more -- the legacy session domain and
+// its scd writer are gone -- but the forward chain still accepts whatever it holds, and nothing ever emptied it.
+// An element left behind there (by an old build, a restore, or a hand-run `nft add element`) would be internet
+// access that no session, entitlement or plan accounts for, and that no reconciliation would ever remove.
+//
+// So while netd owns Phase-3 enforcement, the legacy set is reconciled to EMPTY on every pass. This is a
+// separate sweeper rather than a gate method on purpose: the gate's contract -- it can only ever enumerate and
+// mutate the Phase-3 set -- is unchanged, and the sweeper does exactly one thing.
+type legacySet interface {
+	// Drain removes every element of the legacy set and reports how many it removed.
+	Drain(ctx context.Context) (int, error)
+}
+
+type nftLegacySet struct{ c *nft.Client }
+
+func newNFTLegacySet() *nftLegacySet { return &nftLegacySet{c: nft.New()} }
+
+func (l *nftLegacySet) Drain(ctx context.Context) (int, error) {
+	elems, err := l.c.ListIn(ctx, nft.AuthV4)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, e := range elems {
+		if err := l.c.DenyIn(ctx, nft.AuthV4, e.Iface, e.IP); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
 // gateView is ONE reconciliation pass's snapshot of the Phase-3 authorization set.
 //
 // It exists for two reasons. Correctness: stray removal and per-session renewal must judge the same set, and
