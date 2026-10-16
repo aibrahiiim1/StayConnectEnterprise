@@ -14,6 +14,8 @@ import (
 	"context"
 	"errors"
 	"net"
+	"regexp"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -45,20 +47,82 @@ func (s *server) findActiveSessionByIP(ctx context.Context, ip net.IP) (string, 
 	return id, true, nil
 }
 
-// endActiveSessionByIP closes the active session behind an IP. `ended` is clamped to at least `started` so a
-// revocation can never produce a session that ended before it began, which is the same rule internal/enforce
-// applies when an entitlement expires.
+// endActiveSessionByIP closes every live session behind an IP, through the controlled session-end writer
+// (endSessionControlled). It returns how many sessions it ended.
 //
-// It is idempotent: revoking an IP with no active session is not an error, because the caller's intent --
-// that this address is not on the network -- is already satisfied.
-func (s *server) endActiveSessionByIP(ctx context.Context, ip net.IP, reason string) error {
-	_, err := s.db.Exec(ctx, `
-        UPDATE iam_v2.sessions
-           SET state='ended', ended=GREATEST(now(), started), end_reason=$4
-         WHERE tenant_id=$1 AND site_id=$2 AND ip=$3::inet AND state IN ('active','PENDING_ENFORCEMENT')`,
-		s.tenID, s.siteID, ip.String(), reason)
-	return err
+// It is idempotent: revoking an IP with no live session is not an error, because the caller's intent -- that
+// this address is not on the network -- is already satisfied.
+func (s *server) endActiveSessionByIP(ctx context.Context, ip net.IP, reason string) (int, error) {
+	rows, err := s.db.Query(ctx, `
+        SELECT id::text FROM iam_v2.sessions
+         WHERE tenant_id=$1 AND site_id=$2 AND ip=$3::inet AND ended IS NULL
+           AND state IN ('active','PENDING_ENFORCEMENT')`, s.tenID, s.siteID, ip.String())
+	if err != nil {
+		return 0, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, id := range ids {
+		ended, err := s.endSessionControlled(ctx, s.db, id, reason)
+		if err != nil {
+			return n, err
+		}
+		if ended {
+			n++
+		}
+	}
+	return n, nil
 }
+
+// sessionQuerier is what endSessionControlled needs: the pool, or a transaction it must join.
+type sessionQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// endSessionControlled ends ONE session through iam_v2.end_session_enforcement, the controlled session-end
+// writer netd already uses. It reports whether this call ended it (false: it had already ended).
+//
+// WHY NOT A RAW UPDATE. The sessions guard (p3_controlled_writer_only) refuses any non-owner write that moves a
+// session OUT of PENDING_ENFORCEMENT, so scd's raw `UPDATE ... SET state='ended'` raised for exactly the
+// sessions that most need ending: a grant whose enforcement never converged. The disconnect answered 500, the
+// row stayed PENDING_ENFORCEMENT and kept its licensed slot and its device place (audit B-4). The definer
+// function is allowed that transition, clamps `ended` to at least `started`, and is idempotent.
+//
+// The function takes a bounded upper-case machine code; sessionEndCode maps scd's reasons onto that form.
+func (s *server) endSessionControlled(ctx context.Context, q sessionQuerier, sessionID, reason string) (bool, error) {
+	var out string
+	if err := q.QueryRow(ctx, `SELECT iam_v2.end_session_enforcement($1::uuid,$2::uuid,$3::uuid,$4)`,
+		s.tenID, s.siteID, sessionID, sessionEndCode(reason)).Scan(&out); err != nil {
+		return false, err
+	}
+	return out == "ENDED", nil
+}
+
+// sessionEndCode turns a reason into the bounded machine code end_session_enforcement accepts
+// (^[A-Z][A-Z0-9_]{0,63}$): "admin" -> "ADMIN", "quota_bytes" -> "QUOTA_BYTES". Anything that still does not fit
+// (empty, punctuation, too long) is recorded as ADMIN, the operator disconnect it came from, rather than
+// failing the disconnect.
+func sessionEndCode(reason string) string {
+	c := strings.ToUpper(strings.TrimSpace(reason))
+	if !sessionEndCodeRe.MatchString(c) {
+		return "ADMIN"
+	}
+	return c
+}
+
+var sessionEndCodeRe = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
 
 // reserveLicensedSlot admits one more concurrent guest on THIS APPLIANCE, or refuses.
 //

@@ -140,7 +140,9 @@ What clients are offered on the portal, and what those packages are doing for cl
   Clicking a package opens a side sheet with what it gives, its saved versions and a support reference.
 - **Add package / Edit** (large dialog): Name (what the client sees), Short code (fixed once created),
   Service plan (required, with a summary of what it gives), **How long access lasts**, **Data allowance**
-  (the service plan's allowance or an amount per night of the stay, with minimum/maximum), **Who this package is
+  (the service plan's allowance or an amount per night of the stay, with minimum/maximum — a per-night package is
+  given only to clients who signed in with their room; it is not offered to voucher, account, email, phone or
+  social clients, and vouchers cannot be issued for it), **Who this package is
   offered to** (conditions; empty means everyone who signs in — the condition types are grouped **General**
   and **Hotel (PMS stay)**, the Hotel group holding the conditions that only mean something for a PMS stay:
   nights staying, room type, rate plan, VIP guest, travel agent and which PMS the stay came from; travel agents are
@@ -824,13 +826,17 @@ W = can change, R = read-only, — = not shown. The appliance enforces these on 
 | Action | Page | What is asked |
 |---|---|---|
 | Disable an internet package | Internet packages | Reason + password |
+| Enable (offer again) an internet package | Internet packages | Password |
+| Save a package with a changed price, currency, way to get it, or service plan | Internet packages | Password (a rename or a new condition needs none) |
+| Save changes to an existing service plan | Service plans | Password |
+| Apply current settings to packages | Service plans | Password, asked once for all the packages moved |
 | Delete a package or service plan | Internet packages, Service plans | Reason + password (refused while in use) |
 | Publish a Grace Period policy | Grace Period | Reason (from a list) + password |
 | Show a voucher code / export a batch | Vouchers | Reason + password, recorded |
 | Cancel a voucher card | Vouchers | Reason + password |
 | Change the voucher code format | Vouchers → Code security | Reason |
 | Retire a code key | Vouchers → Code security | Reason + password |
-| Issue vouchers | Vouchers | One-time reveal of the codes (no password) |
+| Issue vouchers | Vouchers | Password, then one-time reveal of the codes |
 | Create an account / set a password | Client accounts | One-time reveal of the password |
 | Remove a client account | Client accounts | Password |
 | Mark an email address verified | Client accounts → Manage | Reason + password |

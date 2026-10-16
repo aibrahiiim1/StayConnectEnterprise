@@ -354,6 +354,11 @@ type PackagePublishSpec struct {
 	// later validator rejects, or whose conditions are unreadable). Pre-flighting through the real
 	// PublishRevision is what keeps that answer from drifting away from the thing it predicts.
 	DryRun bool
+	// PriorDurationPolicy is the duration policy of the revision this one replaces, when it replaces one. A
+	// FIXED_AT end that has already passed is refused for a NEW end, but a republish that carries the package's
+	// existing, now-past end unchanged (a rename, a network replacement) is not a duration decision and must not
+	// be blocked by one.
+	PriorDurationPolicy map[string]any
 }
 
 // RoomChargeMapping is how a room-charge purchase of one revision is posted on one PMS interface: the
@@ -427,17 +432,28 @@ func (a *CommerceAdmin) PublishRevision(ctx context.Context, spec PackagePublish
 			return AdminResult{Reason: reasonWithDetail("invalid_eligibility_rule", rule.Type, err)}, nil
 		}
 	}
+	if why := contradictoryPriorPurchase(spec.EligibilityRules); why != "" {
+		return AdminResult{Reason: "invalid_eligibility_rule: " + why}, nil
+	}
 	if len(spec.GrantTiers) == 0 {
 		return AdminResult{Reason: "no_grant_tiers"}, nil
 	}
+	seenOrder := map[int]bool{}
 	for _, tier := range spec.GrantTiers {
 		if err := ValidateGrantTier(tier); err != nil {
 			return AdminResult{Reason: reasonWithDetail("invalid_grant_tier", "", err)}, nil
 		}
+		// Two speed steps with the same order collide on the tier key and used to surface as a 500 from the
+		// insert. It is the operator's to fix, so it is refused here, in words.
+		if seenOrder[tier.Order] {
+			return AdminResult{Reason: fmt.Sprintf("invalid_grant_tier: two speed steps share the order %d; give each step its own order", tier.Order)}, nil
+		}
+		seenOrder[tier.Order] = true
 	}
-	// the immutable duration policy must resolve (PMS/checkout/local-time modes are capability-disabled)
-	if _, _, err := ResolveEndPolicy(spec.DurationPolicy, a.now()); err != nil {
-		return AdminResult{Reason: "invalid_duration_policy"}, nil
+	// the immutable duration policy must resolve (PMS/checkout/local-time modes are capability-disabled).
+	// The REASON travels: "invalid_duration_policy" alone told the operator nothing.
+	if _, _, err := ResolveEndPolicy(spec.DurationPolicy, a.now()); err != nil && !unchangedPastFixedEnd(spec, err) {
+		return AdminResult{Reason: reasonWithDetail("invalid_duration_policy", "", err)}, nil
 	}
 	if spec.VisibleFrom != nil && spec.VisibleUntil != nil && !spec.VisibleFrom.Before(*spec.VisibleUntil) {
 		return AdminResult{Reason: "invalid_sale_window"}, nil
@@ -655,6 +671,54 @@ func validatePlanSpec(spec *PlanPublishSpec, allowAggregate bool) error {
 
 // reasonWithDetail appends the validator's own sentence (and the rule type, when there is one) to the machine
 // label, so a refusal names what to fix. The label stays first and unchanged, because callers match on it.
+// contradictoryPriorPurchase refuses purchase-history rules that can never be satisfied together. A package
+// may carry one PRIOR_PURCHASE rule: "free access once" (forbids_prior) and "requires an earlier purchase"
+// (requires_prior) both test THIS package's history, so together they pass for nobody -- the package was
+// saved and then offered to no one, with nothing saying why.
+func contradictoryPriorPurchase(rules []EligibilityRule) string {
+	var forbids, requires, n int
+	for _, r := range rules {
+		if strings.ToUpper(strings.TrimSpace(r.Type)) != RulePriorPurchase {
+			continue
+		}
+		n++
+		if b, _ := r.Value["forbids_prior"].(bool); b {
+			forbids++
+		}
+		if b, _ := r.Value["requires_prior"].(bool); b {
+			requires++
+		}
+	}
+	if forbids > 0 && requires > 0 {
+		return "PRIOR_PURCHASE: the free-access limit (once per client) and \"requires an earlier purchase\" " +
+			"both test this package's own history, so together they offer the package to nobody; keep one of them"
+	}
+	if n > 1 {
+		return "PRIOR_PURCHASE: a package carries at most one purchase-history rule"
+	}
+	return ""
+}
+
+// unchangedPastFixedEnd reports whether a duration refusal is only "FIXED_AT ends_at must be in the future"
+// for an end the package already had: the republish carries it, it does not decide it.
+func unchangedPastFixedEnd(spec PackagePublishSpec, err error) bool {
+	var e *Error
+	if !errors.As(err, &e) || !strings.Contains(e.Msg, "must be in the future") || spec.PriorDurationPolicy == nil {
+		return false
+	}
+	mode := func(m map[string]any) string {
+		s, _ := m["end_mode"].(string)
+		return strings.ToUpper(strings.TrimSpace(s))
+	}
+	end := func(m map[string]any) string { s, _ := m["ends_at"].(string); return strings.TrimSpace(s) }
+	if mode(spec.DurationPolicy) != "FIXED_AT" || mode(spec.PriorDurationPolicy) != "FIXED_AT" {
+		return false
+	}
+	a, aerr := time.Parse(time.RFC3339, end(spec.DurationPolicy))
+	b, berr := time.Parse(time.RFC3339, end(spec.PriorDurationPolicy))
+	return aerr == nil && berr == nil && a.Equal(b)
+}
+
 func reasonWithDetail(label, ruleType string, err error) string {
 	var e *Error
 	if !errors.As(err, &e) || e.Msg == "" {
@@ -831,6 +895,13 @@ func normalizeAcquisition(spec *PackagePublishSpec) string {
 			return "invalid_currency: " + err.Error()
 		}
 		spec.Currency = c
+	}
+	// THREE-DECIMAL CURRENCIES BY CARD. Stripe, the card provider that presents BHD, JOD, KWD, OMR and TND,
+	// accepts them only in amounts whose last minor-unit digit is 0, and refuses the checkout otherwise -- after
+	// the client chose the package. Refused here, while the operator is looking at the price.
+	if hasMethod(spec.AcquisitionMethods, AcquireCard) && spec.CurrencyExponent == 3 && spec.PriceMinor%10 != 0 {
+		return "invalid_currency: card payment providers accept " + spec.Currency +
+			" prices only in steps of 0.010 (the last of the three decimals must be 0)"
 	}
 	room := hasMethod(spec.AcquisitionMethods, AcquireRoomCharge)
 	if !room && len(spec.RoomChargeMappings) > 0 {

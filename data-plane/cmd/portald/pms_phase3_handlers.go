@@ -218,20 +218,28 @@ func (h *handler) authPMSPhase3(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) phase3Resolve(w http.ResponseWriter, r *http.Request, b *phase3Budget, in phase3In, device map[string]string) (scdResolveResp, bool) {
-	// Every verification field is forwarded, and the guest-supplied identity stops here. `device` is built by
-	// the appliance from its own neighbour table — the guest cannot supply ip, mac, stay or interface, and no
-	// field of phase3In can reach those keys.
-	body, _ := json.Marshal(map[string]any{
-		"room":               in.Room,
-		"verification":       in.Verification,
-		"first_name":         in.FirstName,
-		"last_name":          in.LastName,
-		"reservation_number": in.ReservationNumber,
-		"request_id":         in.RequestID,
-		"device":             device,
-	})
+	// Every verification field the guest FILLED is forwarded as typed, and the guest-supplied identity stops
+	// here. `device` is built by the appliance from its own neighbour table — the guest cannot supply ip, mac,
+	// stay or interface, and no field of phase3In can reach those keys.
+	//
+	// WHICH FIELDS THE SITE ACCEPTS IS scd's DECISION, not this hop's. scd reads the configured Room sign-in mode
+	// from the same record the portal draws its prompt from and refuses a request carrying a field that mode does
+	// not accept (cmd/scd/phase3_auth_mode.go). This hop only stops sending empty keys, so what scd judges is
+	// exactly what the page filled in -- the portal script fills only the one field its mode names -- and a
+	// blank key can never be mistaken for evidence of a second kind. Not looked up here: a second scd hop inside
+	// the guest-visible budget would buy nothing the enforcement point does not already guarantee.
+	body := map[string]any{"room": in.Room, "request_id": in.RequestID, "device": device}
+	for k, v := range map[string]string{
+		"verification": in.Verification, "first_name": in.FirstName,
+		"last_name": in.LastName, "reservation_number": in.ReservationNumber,
+	} {
+		if strings.TrimSpace(v) != "" {
+			body[k] = v
+		}
+	}
+	raw, _ := json.Marshal(body)
 	var out scdResolveResp
-	if !h.scdPhase3Call(b, "http://unix/v1/phase3/auth/pms/resolve", body, &out) {
+	if !h.scdPhase3Call(b, "http://unix/v1/phase3/auth/pms/resolve", raw, &out) {
 		// This covers an abandoned hop as well as a refused one: when the budget expires mid-flight the hop
 		// returns a context error and lands here. scd said nothing, so nothing about what the guest typed is
 		// known — TECHNICAL is the only honest class.

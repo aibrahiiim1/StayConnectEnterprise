@@ -528,6 +528,9 @@ func main() {
 				// permission because they share a readership, and mount under the same flag so the whole
 				// financial surface appears and disappears together.
 				mountResource(r, s, "financial-ops", s.financialOpsRoutes)
+			} else {
+				// Card disputes are reachable whatever the review flag (resources_phase4_review.go cardCasesRoutes).
+				mountResource(r, s, "financial-review", s.cardCasesRoutes)
 			}
 			// THE VOUCHER SURFACE, and it is mounted UNCONDITIONALLY on purpose.
 			//

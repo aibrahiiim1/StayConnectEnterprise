@@ -406,18 +406,23 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// Room sign-in switched off in Hotel Admin is refused here as well as hidden on the portal. It answers as
 	// the service not being available -- which it is not -- and looks up no room.
-	if !p.srv.guestMethodEnabled(ctx, guestMethodPMS) {
+	//
+	// The same read supplies the configured sign-in mode (phase3_auth_mode.go), so the switch and the mode a
+	// request is judged by come from one record, read once.
+	methods, methodsOK := p.srv.guestMethodSwitches(ctx)
+	if !methodsOK || !methodSwitchOn(methods, guestMethodPMS) {
 		at.Result = signinattempt.ServiceUnavailable
 		notVerified(w, at.Result, "pms_method_disabled")
 		return
 	}
 
 	room := normalizeRoom(req.Room)
-	last := normalizeName(req.LastName)
-	first := normalizeName(req.FirstName)
-	res := strings.TrimSpace(req.ReservationNumber)
-
-	last, first, res = combineVerification(req.Verification, last, first, res)
+	// THE SITE'S MODE DECIDES WHICH FIELDS MAY BE COMPARED. A request carrying a field the mode does not
+	// accept is refused below -- after the protection gate, so a restricted device is answered as restricted --
+	// and none of its values is compared against anything.
+	evidence := applyRoomSignInMode(roomSignInMode(methods), req.Verification,
+		normalizeName(req.LastName), normalizeName(req.FirstName), strings.TrimSpace(req.ReservationNumber))
+	last, first, res := evidence.Last, evidence.First, evidence.Res
 
 	// WHAT THE GUEST TYPED, recorded before anything is decided about it. The raw value and the normalized
 	// form sit side by side because the difference between them is frequently the whole answer at the desk:
@@ -428,7 +433,7 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 	at.Sensitive.SubmittedVerifier = submitted
 	at.Sensitive.NormalizedVerifier = normalizedVerifier(last, first, res)
 
-	if room == "" || (last == "" && first == "" && res == "") {
+	if room == "" || (!evidence.Violation && last == "" && first == "" && res == "") {
 		// Incomplete evidence is a non-success like any other: telling the guest WHICH field was missing is
 		// a small oracle, and the portal already knows what it asked for.
 		at.Result = signinattempt.MalformedSubmission
@@ -473,6 +478,24 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 			notVerifiedRetryAfter(w, at.Result, "restricted", gate.RemainingSeconds)
 			return
 		}
+	}
+
+	// A REQUEST THE SITE'S MODE DOES NOT ACCEPT -- a reservation number on a surname site, a surname and a
+	// reservation number together, a first name on the legacy setting. The real portal never builds one, so it
+	// comes from something that is not the portal.
+	//
+	// IT COUNTS ONCE, as a wrong credential from that device. It is evidence submitted for a room that is not
+	// the evidence the site accepts, which is what a wrong credential is; recording it as malformed (which never
+	// counts) would let a client probe the mode -- or keep submitting -- for free while every honest wrong guess
+	// is counted. It is recorded as CREDENTIAL_MISMATCH because that is the counted code that names the
+	// submission rather than the room (ROOM_NOT_IN_MIRROR would claim a lookup that never happened); no room is
+	// looked up, so the record shows no room in the mirror and no candidates, and the log line names the mode.
+	// One request is one attempt row and therefore at most one count, however many fields it carried: the
+	// record is written once, by the deferred recordAttempt above, and the policy counts rows.
+	if evidence.Violation {
+		at.Result = signinattempt.CredentialMismatch
+		notVerified(w, at.Result, "evidence_not_accepted_by_room_sign_in_mode")
+		return
 	}
 
 	// CAN THE MIRROR ANSWER FOR ANYBODY? Asked BEFORE the room is looked at, and refused on before the
@@ -566,7 +589,7 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// THE OFFER SET the real eligibility engine says this verified Stay qualifies for — not the site's whole
 	// free catalogue. Two Stays verified a second apart can legitimately get different answers.
-	decisions, err := p.offersFor(ctx, out.Stay, iface, dev.GuestNetwork, time.Now())
+	decisions, err := p.offersFor(ctx, out.Stay, iface, dev.GuestNetwork, dev.DeviceID, time.Now())
 	if err != nil {
 		at.Result = signinattempt.ServiceUnavailable
 		notVerified(w, at.Result, "offers: "+err.Error())
@@ -1164,14 +1187,20 @@ func (p *phase3Auth) alreadyGranted(ctx context.Context, authContextID string, d
 // and this guest SHOULD be enforced. netd, the enforcement owner, promotes it to 'active' through
 // iam_v2.activate_session_enforcement once the accountable tc class and the nft authorization are both proven.
 func (p *phase3Auth) openSessionTx(ctx context.Context, tx pgx.Tx, entitlement string, dev deviceIdentity) (string, error) {
+	return p.openSessionWithMethodTx(ctx, tx, entitlement, dev, "PMS")
+}
+
+// openSessionWithMethodTx is openSessionTx with the session's credential label named by the caller: the
+// post-stay conversion opens its session through exactly this path, labelled POST_STAY.
+func (p *phase3Auth) openSessionWithMethodTx(ctx context.Context, tx pgx.Tx, entitlement string, dev deviceIdentity, method string) (string, error) {
 	var id string
 	err := tx.QueryRow(ctx, `
 		INSERT INTO iam_v2.sessions
 		  (tenant_id, site_id, entitlement_id, device_id, credential_method, state, started, ip, mac, ingress_interface)
-		VALUES ($1,$2,$3,$4,'PMS','PENDING_ENFORCEMENT',now(),$5::inet,$6::macaddr,$7)
+		VALUES ($1,$2,$3,$4,$8,'PENDING_ENFORCEMENT',now(),$5::inet,$6::macaddr,$7)
 		RETURNING id::text`,
 		p.srv.tenID, p.srv.siteID, entitlement, dev.DeviceID,
-		dev.IP.String(), dev.MAC.String(), p.bridgeFor(ctx, dev.IP)).Scan(&id)
+		dev.IP.String(), dev.MAC.String(), p.bridgeFor(ctx, dev.IP), method).Scan(&id)
 	return id, err
 }
 

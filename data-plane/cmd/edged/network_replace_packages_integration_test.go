@@ -247,16 +247,39 @@ func TestIntegration_NetworkReplace_ForwardedRevisionChangesTheNetworkAndNothing
 	}
 }
 
-// A PACKAGE THAT CANNOT BE CARRIED FORWARD STOPS THE CHANGE SETTLING. The forced failure is a duration policy
-// that was valid when it was published and is not valid to publish now — a FIXED_AT end that has since passed.
-// Publication refuses it, by design, and that refusal must not be swallowed.
+// A PACKAGE WHOSE FIXED END HAS PASSED IS CARRIED FORWARD UNCHANGED (audit O-18). The cabling change does not
+// decide the package's end, so the end it already had -- now in the past -- must not stop the network change.
+func TestIntegration_NetworkReplace_CarriesAPackageWhoseEndHasPassed(t *testing.T) {
+	f := newAPI(t)
+	f.app.commerce = f.commerceAdmin(t)
+	parent := uniqueParent()
+	netID, _ := f.seedReplaceable(t, parent, "10.153.0.0/24", "10.153.0.1")
+	f.seedNetworkPackage(t, "ended-"+parent, netID, map[string]string{
+		"duration_policy": `'{"end_mode":"FIXED_AT","ends_at":"2020-01-01T00:00:00Z"}'::jsonb`,
+	})
+	st, body := f.do(t, "POST", "/network/guest-networks/"+netID+"/replace", map[string]any{
+		"network_type": "vlan", "parent_interface": parent, "vlan_id": 63, "reason": "port moved to a trunk"})
+	if st != 201 {
+		t.Fatalf("stage = %d %v", st, body)
+	}
+	rev := f.materialise(t, body["replacement_id"].(string), "pending_confirmation")
+	if blocking := f.app.replacementsBlockingConfirm(context.Background(), rev); len(blocking) != 0 {
+		t.Fatalf("an unchanged past end blocked the network change: %v", blocking)
+	}
+}
+
+// A PACKAGE THAT CANNOT BE CARRIED FORWARD STOPS THE CHANGE SETTLING. The forced failure is a stored duration
+// policy this build refuses to publish (a stay-dependent end). Publication refuses it, by design, and that
+// refusal must not be swallowed. (A FIXED_AT end that has since passed used to be the example; carrying an
+// unchanged past end is no longer refused, because it is not a duration decision -- audit O-18, and
+// TestIntegration_NetworkReplace_CarriesAPackageWhoseEndHasPassed.)
 func TestIntegration_NetworkReplace_WillNotSettleWhileAPackageCannotBeCarriedForward(t *testing.T) {
 	f := newAPI(t)
 	f.app.commerce = f.commerceAdmin(t)
 	parent := uniqueParent()
 	netID, _ := f.seedReplaceable(t, parent, "10.151.0.0/24", "10.151.0.1")
 	pkgID, _ := f.seedNetworkPackage(t, "expired-"+parent, netID, map[string]string{
-		"duration_policy": `'{"end_mode":"FIXED_AT","ends_at":"2020-01-01T00:00:00Z"}'::jsonb`,
+		"duration_policy": `'{"end_mode":"AT_CHECKOUT"}'::jsonb`,
 	})
 	before := f.revisionFacts(t, pkgID)
 

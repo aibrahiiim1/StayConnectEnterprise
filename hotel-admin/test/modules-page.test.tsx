@@ -25,6 +25,30 @@ const mod = (id: string, label: string, extra: Record<string, unknown> = {}) => 
   enabled: false, ready: true, effective: false, manageable: false, reasons: ["NOT_LICENSED", "DISABLED_BY_SITE"], ...extra,
 });
 
+// AUDIT O-25: an identity module the site switched OFF on Sign-in methods read "Switched on: Yes", because the
+// page printed Yes for every module without a switch here. scd reports the Sign-in methods setting as `enabled`.
+describe("Modules — identity modules say what Sign-in methods says", () => {
+  it("shows No for a licensed identity module that is switched off, Yes when on, and where it is set", async () => {
+    (api.get as ReturnType<typeof vi.fn>).mockImplementation((p: string) => {
+      if (p === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
+      return Promise.resolve({
+        site_type: "HOTEL", license_state: "Active", deployment: {},
+        modules: {
+          sms_otp: mod("sms_otp", "SMS one-time code", { authorized: true, licensed: true, enabled: false, reasons: ["DISABLED_BY_SITE"] }),
+          email_otp: mod("email_otp", "Email one-time code", { authorized: true, licensed: true, enabled: true, effective: true, reasons: [] }),
+        },
+      });
+    });
+    render(<ModulesPage />);
+    const sms = (await screen.findByText("SMS one-time code")).closest("div.flex.flex-col, [class*='flex-col']") as HTMLElement;
+    const smsSwitched = within(sms).getByText("Switched on").nextElementSibling as HTMLElement;
+    expect(smsSwitched.textContent).toBe("NoSet on Sign-in methods");
+    expect(within(sms).getByRole("link", { name: /Sign-in methods/ })).toHaveAttribute("href", "/sign-in-methods");
+    const email = screen.getByText("Email one-time code").closest("div.flex.flex-col, [class*='flex-col']") as HTMLElement;
+    expect((within(email).getByText("Switched on").nextElementSibling as HTMLElement).textContent).toBe("YesSet on Sign-in methods");
+  });
+});
+
 describe("Modules on a café", () => {
   it("shows every module, dashes where the licence is missing, no configure link, and the kept hotel records", async () => {
     (api.get as ReturnType<typeof vi.fn>).mockImplementation((p: string) => {

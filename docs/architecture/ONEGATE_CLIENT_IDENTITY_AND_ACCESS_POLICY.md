@@ -218,6 +218,17 @@ The `PRIOR_PURCHASE` rule is the free-allowance policy, extended rather than rep
   a real case, and the operator may turn it off.
 * The Client key is the principal, so every linked factor (§2.2) shares one history; the anonymous subject's
   history is its device's (unchanged, §6.5 of the acquisition contract).
+* **A voucher is its own allowance** (2026-10-16, audit O-10). Each card is a separate prepaid credential, so
+  for a voucher redemption the device is not counted: a guest's second voucher on the same phone redeems. The
+  voucher's own history still counts, and every other subject is bound exactly as above.
+* **Room guests are held to the same limits** (Product-Owner decision D-J, 2026-10-16). A Room sign-in offer
+  applies the package's `PRIOR_PURCHASE` rule against the STAY's history and — under the device switch — the
+  device's, keyed on the package. Choosing the package behind the stay's live access is a join, not a second
+  acquisition, so a room's other devices are never locked out of access the stay already holds. Client groups
+  stay principal-based; a room guest is in no group. A room guest is evaluated as subject kind `STAY` (a
+  `SUBJECT_KIND` rule naming `PRINCIPAL` no longer matches room guests), and `AUTH_METHOD` may name `PMS`.
+* **Contradictory rules are refused at save**: the free-access limit together with "requires an earlier
+  purchase" tests the same history both ways and would offer the package to nobody.
 
 The editor exposes this as **Free access: once per client / once every N hours**, with the device switch
 underneath. `max_purchases_per_stay` and `renewable` remain stored-only; the editor no longer implies they act.
@@ -282,10 +293,15 @@ captive browser gone again. While the commerce session is valid (10 minutes from
 itself continues an unfinished journey at package selection; a finished one (the device is online) is left to
 the success page. Captive-portal probes carry no cookie and are unaffected.
 
-**Card is offered only in a currency an active payment account settles.** A card payment is never converted
-(`PAYMENT_ACCOUNT_CURRENCY` refuses the mismatch at confirm), so a package priced in USD is not offered by
-card at a site whose only active account settles GBP: the method is withheld at listing rather than refused
-after the choice. `iamv2.SiteMethods.CardCurrencies` carries the active accounts' currencies.
+**Card is offered only in a currency the default payment account accepts.** The client pays in the package
+currency (presentment). The default ACTIVE account — the one a checkout uses — accepts its own currency and,
+when it is marked provider-converts and its provider converts (§9, migration 0112), the currencies the provider
+presents from. Any other package currency is refused by the payment identity gate (`PAYMENT_ACCOUNT_CURRENCY`),
+so the method is withheld at listing rather than refused after the choice. One function decides it,
+`iamv2.SiteMethods.CardApplicable`, and every path asks it: the Room sign-in offer and choice, the listing and
+quote of every other client, and again at confirm (2026-10-16, audit O-2′/O-14). A card purchase whose payment
+transaction was never created (the gate refused it) is failed once it is older than the checkout expiry plus the
+reconcile grace, recorded in `card_purchase_sweeps` (migration 0121), so the package is offered again.
 
 ### 6.5 Reading the code without leaving the Wi-Fi (2026-10-11)
 
@@ -501,7 +517,8 @@ and reads both facts from the session.
 **The currency a card can settle is said where it is decided.** Payment methods lists, under the accounts,
 every active package priced in a currency no active account settles ("Not offered by card: OneDay (USD) —
 your active account settles GBP"), and the package editor says the same beside the price when Card is ticked.
-Nothing converts; §6.4 withholds the method.
+Both read the DEFAULT active account and its provider-converts mark, exactly as scd decides (§6.4); a
+currency the provider converts on a provider-converts Stripe account is not listed as a problem.
 
 **Provider-managed currency conversion (Product-Owner decision 2026-10-11; migration 0112).** The client sees
 and pays the package price in the package's currency (presentment). An account may be marked

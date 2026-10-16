@@ -858,15 +858,15 @@ func (s *server) sweepSuspended(ctx context.Context) {
 // endSessionNow is the operator-disconnect path for one session: the row is ended first (so netd's convergence
 // can only agree), then the address leaves the authorization set and its shaping class goes (denyAtGate, the
 // same kernel steps /v1/sessions/revoke takes). Idempotent: an already-ended session changes nothing.
+//
+// The row is ended through the controlled session-end writer (endSessionControlled), which -- unlike a raw
+// UPDATE -- may also end a session still PENDING_ENFORCEMENT.
 func (s *server) endSessionNow(ctx context.Context, sessionID string, ip net.IP, reason string) error {
-	tag, err := s.db.Exec(ctx, `
-	    UPDATE iam_v2.sessions SET state = 'ended', ended = GREATEST(now(), started), end_reason = $4
-	     WHERE id = $1::uuid AND tenant_id = $2 AND site_id = $3 AND state IN ('active','PENDING_ENFORCEMENT')`,
-		sessionID, s.tenID, s.siteID, reason)
+	ended, err := s.endSessionControlled(ctx, s.db, sessionID, reason)
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if !ended {
 		return nil
 	}
 	if ip != nil {

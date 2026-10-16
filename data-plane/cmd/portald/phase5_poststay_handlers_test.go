@@ -121,10 +121,11 @@ func TestPostStayMalformedBodyIsTheSameAnswer(t *testing.T) {
 
 // ...and the legitimate shapes still work, or the strictness above would just be a broken endpoint.
 func TestPostStayAcceptsTheFieldsItActuallyDefines(t *testing.T) {
-	stub := &scdStub{grant: map[string]any{"outcome": "VERIFIED", "auth_context_id": "ctx-1"}}
+	stub := &scdStub{grant: map[string]any{"outcome": "VERIFIED", "auth_context_id": "ctx-1",
+		"offers": []map[string]any{{"package_revision_id": "pkg-1", "code": "A"}, {"package_revision_id": "pkg-2", "code": "B"}}}}
 	h := stubHandler(t, stub)
 	_, out := postStayPost(t, h, "/auth/post-stay-pin", `{"pin":"K7M4RTQX"}`)
-	if !out.OK || out.AuthContextID != "ctx-1" {
+	if !out.OK || out.AuthContextID != "ctx-1" || !out.NeedsChoice {
 		t.Fatalf("a well-formed PIN submission was refused: %+v", out)
 	}
 	// The device scd receives is the SERVER-derived one, never anything from the body.
@@ -137,7 +138,7 @@ func TestPostStayAcceptsTheFieldsItActuallyDefines(t *testing.T) {
 	}
 
 	// The second call, carrying a context and a chosen package, is also accepted.
-	stub2 := &scdStub{grant: map[string]any{"outcome": "GRANTED", "session_id": "sess-1"}}
+	stub2 := &scdStub{grant: map[string]any{"outcome": "GRANTED", "session_id": "sess-1", "entitlement_id": "ent-1"}}
 	h2 := stubHandler(t, stub2)
 	_, out2 := postStayPost(t, h2, "/auth/post-stay-pin",
 		`{"auth_context_id":"ctx-1","package_revision_id":"pkg-1"}`)

@@ -192,7 +192,8 @@ clients.
 
 **Internet package** (**Internet offering → Internet packages → Add package**) —
 what the client is offered: name, short code, the service plan, how long access
-lasts, the data allowance (the service plan's, or per night of the stay), and **who it is
+lasts, the data allowance (the service plan's, or per night of the stay — per night is given only to
+clients who signed in with their room, and never issued as vouchers), and **who it is
 offered to** (conditions, grouped **General** and **Hotel (PMS stay)**; empty
 means everyone who signs in). Packages are free to
 the client. Only the Site admin can create or change packages and service plans (the
@@ -272,7 +273,9 @@ password sign-in, an alternative to vouchers:
      three, and refuses sign-in rather than guess if it matches more than one
      guest in the room;
    - **Room number + surname**, **Room number + first name** or **Room number +
-     reservation number** — only that detail is accepted.
+     reservation number** — only that detail is accepted. The appliance enforces
+     this itself: a sign-in that sends any other detail is refused, whatever
+     sent it.
 
    The choice saves immediately. A site still on the older *either* setting
    sees a warning; choosing one of the options replaces it.

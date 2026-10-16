@@ -20,6 +20,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/buildprofile"
 )
 
 // Sender delivers one code.
@@ -103,9 +105,14 @@ func checkMessage(m Message) error {
 }
 
 // Stub records outgoing codes to a local file for development only. It never contacts a provider.
+//
+// In a production build (buildprofile.Production) it records only that a message was not delivered and never
+// writes the code (audit B-13): the stub is also the fallback for a site with no WhatsApp provider configured.
 type Stub struct {
 	Path string
 	mu   sync.Mutex
+	// redact is buildprofile.Production unless a test overrides it.
+	redact bool
 }
 
 // NewStub builds a development stub writing to path (default /var/log/stayconnect/otp-whatsapp.log).
@@ -113,7 +120,7 @@ func NewStub(path string) *Stub {
 	if path == "" {
 		path = "/var/log/stayconnect/otp-whatsapp.log"
 	}
-	return &Stub{Path: path}
+	return &Stub{Path: path, redact: buildprofile.Production}
 }
 
 // Send appends the message to the stub file (the development stand-in for the recipient's phone). The code is
@@ -129,8 +136,13 @@ func (s *Stub) Send(_ context.Context, m Message) error {
 		slog.Warn("whatsapp stub: open failed", "path", s.Path, "err", err)
 	} else {
 		defer f.Close()
-		_, _ = fmt.Fprintf(f, "[%s] To=%s Code=%s TTL=%dm\n---\n",
-			time.Now().UTC().Format(time.RFC3339), m.To, m.Code, m.TTLMinutes)
+		if s.redact {
+			_, _ = fmt.Fprintf(f, "[%s] To=%s NOT DELIVERED: no WhatsApp provider is configured; code withheld (production build)\n---\n",
+				time.Now().UTC().Format(time.RFC3339), Suffix(m.To))
+		} else {
+			_, _ = fmt.Fprintf(f, "[%s] To=%s Code=%s TTL=%dm\n---\n",
+				time.Now().UTC().Format(time.RFC3339), m.To, m.Code, m.TTLMinutes)
+		}
 	}
 	slog.Info("whatsapp.stub", "to", Suffix(m.To))
 	return nil

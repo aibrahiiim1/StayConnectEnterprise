@@ -57,7 +57,27 @@ func (s *Store) Convert(ctx context.Context, req ConvertRequest, ac *authctx.Sto
 		return Converted{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	out, err := s.ConvertTx(ctx, tx, req, ac)
+	if err != nil {
+		return Converted{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Converted{}, err
+	}
+	return out, nil
+}
 
+// ConvertTx is Convert inside the caller's transaction, so the guest-facing conversion can open the device's
+// session in the SAME commit -- exactly as the room grant does (staygrant.GrantTx then openSessionTx). A
+// conversion that committed without a session would be an entitlement the guest cannot use, behind a consumed
+// one-time context they cannot present again.
+//
+// No package is no grant: an empty PackageRevision is refused here as not grantable, before anything is
+// consumed. The guest chooses from GrantableOffers, which the PIN verification returns.
+func (s *Store) ConvertTx(ctx context.Context, tx pgx.Tx, req ConvertRequest, ac *authctx.Store) (Converted, error) {
+	if req.PackageRevision == "" {
+		return Converted{}, ErrPackageNotGrantable
+	}
 	// (L1/L2) Consume the context. This locks the origin Stay and re-asserts the episode before flipping the
 	// context to consumed, so everything below is serialized against Checkout and Reinstatement.
 	consumed, err := ac.ConsumeTx(ctx, tx, req.Context, req.Presenter)
@@ -126,11 +146,16 @@ func (s *Store) Convert(ctx context.Context, req ConvertRequest, ac *authctx.Sto
 	var purchase string
 	// amount_minor is written as a literal 0 rather than from the revision: this path grants free access and
 	// nothing else, so the row cannot carry an amount even if a revision were mis-priced.
+	//
+	// auth_context_id records WHICH sign-in acquired it -- the consumed POST_STAY_PIN context, issued to the
+	// presenting device. It is the acquisition chain session activation reads (entitlement -> purchase ->
+	// auth context -> device) to know which device the entitlement belongs to; without it the device that
+	// converted could never be admitted again after its first session ended.
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.purchases
-		(tenant_id, site_id, package_revision_id, stay_id, trigger, amount_minor, state)
-		VALUES ($1,$2,$3,$4,'POST_STAY_CONVERSION',0,'GRANTED')
+		(tenant_id, site_id, package_revision_id, stay_id, auth_context_id, trigger, amount_minor, state)
+		VALUES ($1,$2,$3,$4,$5::uuid,'POST_STAY_CONVERSION',0,'GRANTED')
 		RETURNING id::text`,
-		req.Tenant, req.Site, req.PackageRevision, stay).Scan(&purchase); err != nil {
+		req.Tenant, req.Site, req.PackageRevision, stay, req.Context).Scan(&purchase); err != nil {
 		return Converted{}, err
 	}
 
@@ -153,6 +178,13 @@ func (s *Store) Convert(ctx context.Context, req ConvertRequest, ac *authctx.Sto
 		`SELECT iam_v2.apply_entitlement_transition($1,'ACTIVE',now(),NULL)`, entitlement); err != nil {
 		return Converted{}, err
 	}
+	// The presenting device is admitted to the entitlement through the controlled operation, as the room grant
+	// admits its device: a session may only exist for a device holding an AUTHORIZED binding (the database
+	// refuses the insert otherwise), and the plan's device limit is enforced here under the entitlement lock.
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.authorize_entitlement_device($1,$2,now())`,
+		entitlement, req.Presenter.Device); err != nil {
+		return Converted{}, err
+	}
 
 	// The Stay conversion, last, while its lock is still held. posting_allowed is already false after
 	// checkout and the posting_only_in_house CHECK keeps it that way for POST_STAY_ACTIVE.
@@ -171,10 +203,6 @@ func (s *Store) Convert(ctx context.Context, req ConvertRequest, ac *authctx.Sto
 		// The Stay left the episode between consumption and here, or was never checked out. Fail closed.
 		return Converted{}, ErrNotAuthenticable
 	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return Converted{}, err
-	}
 	return Converted{Profile: consumed.PostStayProfile, Stay: stay, Purchase: purchase,
 		Entitlement: entitlement, WindowEnds: windowEnds}, nil
 }
@@ -189,6 +217,47 @@ func onlyNotRequired(methods []string) bool {
 		}
 	}
 	return true
+}
+
+// Offer is one package a verified post-stay guest may convert to.
+type Offer struct {
+	PackageRevisionID string `json:"package_revision_id"`
+	Code              string `json:"code"`
+	DownKbps          int    `json:"down_kbps"`
+	UpKbps            int    `json:"up_kbps"`
+}
+
+// GrantableOffers lists what ConvertTx would grant on this site: the CURRENT revision of an active POST_STAY
+// package, zero-price and taken only with NOT_REQUIRED. It is the same predicate ConvertTx applies, so an
+// offer shown to the guest is one the conversion accepts, and a priced post-stay package is never offered
+// (ConvertTx would refuse it with ErrSettlementRequired).
+func (s *Store) GrantableOffers(ctx context.Context, tenant, site string) ([]Offer, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT ipr.id::text, ip.code, COALESCE(spr.down_kbps,0), COALESCE(spr.up_kbps,0)
+		  FROM iam_v2.internet_package_revisions ipr
+		  JOIN iam_v2.internet_packages ip
+		    ON ip.tenant_id=ipr.tenant_id AND ip.site_id=ipr.site_id AND ip.id=ipr.package_id
+		  LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = ipr.service_plan_revision_id
+		 WHERE ipr.tenant_id=$1 AND ipr.site_id=$2
+		   AND ipr.package_type='POST_STAY' AND ip.active
+		   AND ip.current_revision_id = ipr.id
+		   AND ipr.price_minor = 0
+		   AND cardinality(ipr.settlement_methods) > 0
+		   AND 'NOT_REQUIRED' = ALL(ipr.settlement_methods)
+		 ORDER BY ip.code, ipr.id`, tenant, site)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Offer
+	for rows.Next() {
+		var o Offer
+		if err := rows.Scan(&o.PackageRevisionID, &o.Code, &o.DownKbps, &o.UpKbps); err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	return out, rows.Err()
 }
 
 // windowFromPolicy reads the revision's duration policy. An absent or malformed policy yields a SHORT

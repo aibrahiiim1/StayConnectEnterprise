@@ -2,9 +2,13 @@
 
 // ISSUE VOUCHERS — a guided print run.
 //
-// Package → quantity and validity → review → issue → the codes, shown once. Issuing is not a step-up action
-// (it creates secrets nobody holds yet rather than revealing existing ones), so there is no password here;
-// the operator is recorded from the session by the server.
+// Package → quantity and validity → review → issue → the codes, shown once. Issuing IS a step-up action: a
+// batch of cards is access (and, for a priced package, money) handed out in bulk, so the review step asks for
+// the operator's password and the server refuses the batch without it (401 reauth_required, audit O-21).
+//
+// The server also refuses, with a sentence, a package that can never be redeemed from a voucher -- a
+// per-night data allowance, an audience of client groups only, a hotel (PMS) condition. That sentence is shown
+// as the server wrote it.
 //
 // The one-time nature is real: the issue response is the only moment the codes exist outside the server's
 // encryption. They live in this component's state and nowhere else, and closing the dialog drops them.
@@ -23,6 +27,7 @@ import { Skeleton } from "@/components/ui/misc";
 import { useToast } from "@/components/ui/toast";
 import { formatPrice, validityWords, type Grantable, type IssuedBatch } from "@/lib/api/vouchers";
 import { CodesHeld } from "./codes-held";
+import { stepUpError } from "./shared";
 
 const STEPS = ["Package", "Quantity & validity", "Review"];
 
@@ -53,6 +58,7 @@ export function IssueDialog({
   const [validFrom, setValidFrom] = React.useState("");
   const [validUntil, setValidUntil] = React.useState("");
   const [note, setNote] = React.useState("");
+  const [password, setPassword] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<unknown>(null);
   const [issued, setIssued] = React.useState<IssuedBatch | null>(null);
@@ -79,6 +85,7 @@ export function IssueDialog({
       setValidFrom("");
       setValidUntil("");
       setNote("");
+      setPassword("");
       setErr(null);
       setIssued(null);
       setBusy(false);
@@ -98,20 +105,23 @@ export function IssueDialog({
         : null;
 
   async function issue() {
-    if (!chosen || countProblem || windowProblem) return;
+    if (!chosen || countProblem || windowProblem || !password) return;
     setBusy(true);
     setErr(null);
     try {
-      const body: Record<string, unknown> = { package_revision_id: chosen.id, count: n };
+      const body: Record<string, unknown> = { package_revision_id: chosen.id, count: n, password };
       if (note.trim()) body.note = note.trim();
       if (fromIso) body.valid_from = fromIso;
       if (untilIso) body.valid_until = untilIso;
       const out = await api.post<IssuedBatch>("/vouchers/issue", body);
       setIssued(out);
+      setPassword("");
       toast.success(`${out.count} voucher${out.count === 1 ? "" : "s"} issued`, "Print or save the codes before closing.");
       onIssued();
     } catch (e) {
-      setErr(e);
+      // A wrong password is said in words; any other refusal (409: the package can never be redeemed from a
+      // voucher) is the server's own sentence.
+      setErr(stepUpError(e, "No vouchers were issued."));
     } finally {
       setBusy(false);
     }
@@ -217,6 +227,10 @@ export function IssueDialog({
               <Callout tone="info">
                 The codes appear once, on the next screen. The code format is the one set under Code security.
               </Callout>
+              <Field label="Confirm your password" hint="Issuing a batch of cards is recorded against your name." required>
+                <Input type="password" autoComplete="current-password" value={password}
+                  onChange={(e) => setPassword(e.target.value)} />
+              </Field>
             </div>
           )}
         </DialogBody>
@@ -239,7 +253,7 @@ export function IssueDialog({
                 </Button>
               )}
               {step === 2 && (
-                <Button disabled={busy || !chosen || !!countProblem || !!windowProblem} onClick={issue}>
+                <Button disabled={busy || !chosen || !!countProblem || !!windowProblem || !password} onClick={issue}>
                   {busy ? "Issuing…" : `Issue ${n.toLocaleString()} voucher${n === 1 ? "" : "s"}`}
                 </Button>
               )}

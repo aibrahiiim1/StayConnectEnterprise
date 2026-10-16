@@ -147,7 +147,7 @@ func (e *CommerceEngine) CreateQuote(ctx context.Context, req QuoteRequest) (Quo
 		}
 		// The prior-purchase history is keyed on the PACKAGE under the revision's own policy (contract §5),
 		// exactly as the list did -- a quote must never pass what the list withheld.
-		if pol := PriorPurchasePolicyOf(rules, pkg.PriceMinor); pol.Present {
+		if pol := PriorPurchasePolicyOf(rules, pkg.PriceMinor).ForSubject(ac.Subject.Kind); pol.Present {
 			prior, err := tx.HasPriorPurchase(ctx, req.TenantID, req.SiteID, PriorPurchaseQuery{PackageID: pkg.PackageID, Subject: ac.Subject, Policy: pol})
 			if err != nil {
 				return err
@@ -261,6 +261,14 @@ func (e *CommerceEngine) ConfirmPurchase(ctx context.Context, req ConfirmRequest
 		// 1b. PHASE 6, RE-CHECKED AT CONFIRM AND BEFORE ANYTHING IS CONSUMED.
 		if why := TimeModeAcquirable(q.GrantSnapshot.TimeAccountingMode, e.aggregateOnlineTime); why != "" {
 			res = purchaseDeny(why)
+			return nil
+		}
+		// 1c. A PER-NIGHT ALLOWANCE NEEDS A STAY, re-checked here as the listing and the quote check it
+		// (applicableMethods): no subject on this path carries one.
+		if pkg, perr := tx.LoadPackageRevisionByID(ctx, req.TenantID, req.SiteID, q.PackageRevisionID); perr != nil {
+			return perr
+		} else if pkg.DataAllocationMode == AllocPerStayNight {
+			res = purchaseDeny("per_night_allowance_needs_stay")
 			return nil
 		}
 		// 2. lock the EXACT pinned auth-context; verify all pins.
@@ -393,6 +401,12 @@ func revalidateQuote(q OfferQuoteRow, method string, site SiteMethods) string {
 		}
 		if q.PMSInterfaceID != nil || q.SettlementMappingID != nil {
 			return "quote_has_pms_settlement"
+		}
+		// THE CURRENCY, re-checked now: the default account (or its conversion) may have changed since the
+		// quote. Confirming anyway would write a purchase AWAITING_SETTLEMENT that the payment identity gate
+		// then refuses (PAYMENT_ACCOUNT_CURRENCY), stranding it.
+		if !site.CardApplicable(q.Currency) {
+			return "card_currency_not_accepted"
 		}
 	default:
 		return "method_not_available"

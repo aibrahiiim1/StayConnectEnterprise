@@ -117,6 +117,21 @@ offered(pkg, client) = resolver.effective(module of method)      -- four gates, 
 A package with no applicable method is not listed. Every gate is re-checked when the quote is created **and**
 when it is confirmed or executed; the earlier page state is never trusted.
 
+For Card, `applicable` includes the currency: the default account settles the package currency or its provider
+converts it (`iamv2.SiteMethods.CardApplicable`, the one function the Room sign-in offer and choice, the listing,
+the quote and the confirm all ask). A package whose data allowance is `PER_STAY_NIGHT` is applicable only to a
+stay-bound client (Room sign-in); it is never listed, quoted or confirmed for any other client, and vouchers are
+not issued for it (2026-10-16, audit O-4).
+
+**What a revision must state, and who may change it (2026-10-16, audit O-1/O-15/O-21).** A new revision of an
+existing package carries `price_minor`, `currency`, `currency_exponent`, `acquisition_methods` and
+`room_charge_mappings` explicitly, or is refused (`commercial_fields_required`) — a republish never infers the
+commercial terms. `package_type`, `plan_overrides`, `renewable` and `max_purchases_per_stay` are carried from the
+current revision when absent. Changing the price, currency, methods or pinned service-plan revision, revising a
+service plan, reactivating a package and issuing vouchers each need the operator's password. A payment
+account's provider, merchant, mode, currency and credentials cannot change while one of its checkouts is open
+(migration 0121); add a new account instead.
+
 ## 6. Acquisition flows
 
 ### 6.1 Free

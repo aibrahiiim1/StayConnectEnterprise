@@ -399,6 +399,8 @@ func (s *server) resolveRecoveryHold(w http.ResponseWriter, r *http.Request) {
 		financialOpErr(w, err)
 		return
 	}
+	s.audit(r, "financial_recovery.hold_resolved", "recovery_hold", chi.URLParam(r, "id"),
+		map[string]any{"resolution": req.Resolution, "note": req.Note})
 	writeJSON(w, http.StatusOK, map[string]any{"resolved": true})
 }
 
@@ -429,6 +431,8 @@ func (s *server) releaseRecovery(w http.ResponseWriter, r *http.Request) {
 		financialOpErr(w, err)
 		return
 	}
+	s.audit(r, "financial_recovery.released", "financial_recovery", s.siteID,
+		map[string]any{"epoch": epoch, "note": req.Note})
 	writeJSON(w, http.StatusOK, map[string]any{"released": true, "epoch": epoch})
 }
 
@@ -604,6 +608,8 @@ func (s *server) authorizeZeroAttemptRetry(w http.ResponseWriter, r *http.Reques
 		jsonErr(w, code, msg, reviewErrorMessage(err))
 		return
 	}
+	s.audit(r, "financial_recovery.retry_authorized", "pms_posting", id,
+		map[string]any{"action_id": actionID, "reason": reason})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"action_id":             actionID,
 		"authorized_attempt_no": 1,

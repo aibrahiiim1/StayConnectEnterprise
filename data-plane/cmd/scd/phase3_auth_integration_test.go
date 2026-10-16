@@ -923,6 +923,14 @@ func TestIntegration_Phase3Auth_ConcurrentReplaysConvergeOnOneContext(t *testing
 // kernel halves are proven. It stops when the returned function is called.
 func (f *authFixture) startEnforcementOwner(t *testing.T) func() {
 	t.Helper()
+	return f.startEnforcementOwnerAtEpoch(t, 1)
+}
+
+// startEnforcementOwnerAtEpoch is startEnforcementOwner enforcing under class generation epoch. A device that
+// gets a SECOND session on the same address (the same tc class) is enforced by netd under a newer generation;
+// a test that opens one stops the first owner and starts another at a higher epoch, as netd would.
+func (f *authFixture) startEnforcementOwnerAtEpoch(t *testing.T, epoch int64) func() {
+	t.Helper()
 	done := make(chan struct{})
 	stopped := make(chan struct{})
 	go func() {
@@ -959,12 +967,12 @@ func (f *authFixture) startEnforcementOwner(t *testing.T) func() {
 				// accounting origin itself, so a promotion attempted without one is refused by the database.
 				// Registering it here is what keeps this simulation an honest stand-in rather than a shortcut.
 				_, _ = f.pool.Exec(context.Background(), `
-					SELECT iam_v2.register_class_origin($1,$2,$3::uuid,$4::uuid,$5,$6,1,0,0,now())`,
-					f.tenant, f.site, p.id, p.device, p.bridge, minor)
+					SELECT iam_v2.register_class_origin($1,$2,$3::uuid,$4::uuid,$5,$6,$7,0,0,now())`,
+					f.tenant, f.site, p.id, p.device, p.bridge, minor, epoch)
 				// The real controlled writer, with the real coherence rules.
 				_, _ = f.pool.Exec(context.Background(),
 					`SELECT iam_v2.activate_session_enforcement($1,$2,$3::uuid,$4,$5,$6)`,
-					f.tenant, f.site, p.id, p.bridge, minor, int64(1))
+					f.tenant, f.site, p.id, p.bridge, minor, epoch)
 			}
 		}
 	}()

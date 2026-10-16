@@ -16,6 +16,7 @@ package main
 // status and the same body. The real reason goes to the log, where an operator can see it and a guest cannot.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -67,11 +68,16 @@ type psResponse struct {
 	// re-derive it, and will never return it again for this generation.
 	PIN       string `json:"pin,omitempty"`
 	ExpiresAt string `json:"pin_expires_at,omitempty"`
-	// AuthContextID/ExpiresIn are present on VERIFIED only.
-	AuthContextID string `json:"auth_context_id,omitempty"`
-	ExpiresIn     int    `json:"expires_in_seconds,omitempty"`
-	// SessionID is present on GRANTED only.
-	SessionID string `json:"session_id,omitempty"`
+	// AuthContextID/ExpiresIn/Offers are present on VERIFIED only. Offers are the packages the conversion will
+	// grant (poststay.GrantableOffers); the guest names one of them on the conversion call.
+	AuthContextID string           `json:"auth_context_id,omitempty"`
+	ExpiresIn     int              `json:"expires_in_seconds,omitempty"`
+	Offers        []poststay.Offer `json:"offers,omitempty"`
+	// SessionID/EntitlementID are present on GRANTED only: the session opened for this device, and the
+	// entitlement it runs on. They are different rows; a session id is what the portal's success page and the
+	// device's later sign-out name.
+	SessionID     string `json:"session_id,omitempty"`
+	EntitlementID string `json:"entitlement_id,omitempty"`
 }
 
 // unavailable is the single non-success answer for the whole surface. reason is for the log, never the guest.
@@ -181,6 +187,18 @@ func (p *phase5PostStay) verifyHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	// WHAT THE GUEST MAY CHOOSE, read before a context is minted. A site with no grantable post-stay package can
+	// convert nobody, and a context that can be redeemed against nothing is not issued: the guest gets the same
+	// uniform answer and the operator reads why.
+	offers, err := p.store.GrantableOffers(ctx, dev.Tenant, dev.Site)
+	if err != nil {
+		p.unavailable(w, "offers_unreadable: "+err.Error())
+		return
+	}
+	if len(offers) == 0 {
+		p.unavailable(w, "no_grantable_post_stay_package")
+		return
+	}
 	id, err := p.ctxs.IssuePostStay(ctx, authctx.PostStayGrant{
 		Tenant: dev.Tenant, Site: dev.Site, Profile: profile,
 		Device: dev.DeviceID, GuestNetwork: dev.GuestNetwork,
@@ -190,7 +208,7 @@ func (p *phase5PostStay) verifyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSONScd(w, http.StatusOK, psResponse{
-		Outcome: psOutcomeVerified, AuthContextID: id, ExpiresIn: int(p.contextTTL.Seconds())})
+		Outcome: psOutcomeVerified, AuthContextID: id, ExpiresIn: int(p.contextTTL.Seconds()), Offers: offers})
 }
 
 // ---- zero-price conversion -------------------------------------------------
@@ -224,7 +242,31 @@ func (p *phase5PostStay) convertHandler(w http.ResponseWriter, r *http.Request) 
 		p.unavailable(w, "device_identity: "+err.Error())
 		return
 	}
-	out, err := p.store.Convert(ctx, poststay.ConvertRequest{
+	// A RETRY OF A CONVERSION THIS DEVICE ALREADY MADE -- a response the phone never received, or one refused
+	// only because enforcement had not converged yet -- returns the session that conversion opened, once it is
+	// genuinely enforced. The context is one-time, so without this the guest would be stuck behind a consumed
+	// context with access that exists.
+	if sid, ent, ok := p.alreadyConverted(ctx, req.AuthContextID, dev); ok {
+		if enforced, werr := p.p3.awaitEnforced(ctx, sid); werr != nil || !enforced {
+			p.unavailable(w, "retry_enforcement_not_confirmed")
+			return
+		}
+		writeJSONScd(w, http.StatusOK, psResponse{Outcome: psOutcomeGranted, SessionID: sid, EntitlementID: ent})
+		return
+	}
+
+	// THE CONVERSION AND THE DEVICE'S SESSION COMMIT TOGETHER, exactly as the room grant's entitlement and
+	// session do (phase3_auth.go grantHandler): the context is consumed, the entitlement granted and the device
+	// admitted, the licensed concurrent-guest slot reserved, and the session opened PENDING_ENFORCEMENT -- or
+	// none of it. This used to commit the entitlement alone and return ITS id as the session id, so the guest was
+	// sent to the success page with no session at all and nothing would ever enforce their access.
+	tx, err := p.srv.db.Begin(ctx)
+	if err != nil {
+		p.unavailable(w, "begin: "+err.Error())
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	out, err := p.store.ConvertTx(ctx, tx, poststay.ConvertRequest{
 		Tenant: dev.Tenant, Site: dev.Site,
 		Context: req.AuthContextID,
 		Presenter: authctx.Presenter{Tenant: dev.Tenant, Site: dev.Site,
@@ -235,9 +277,62 @@ func (p *phase5PostStay) convertHandler(w http.ResponseWriter, r *http.Request) 
 		p.unavailable(w, "convert_refused: "+err.Error())
 		return
 	}
-	slog.Info("phase5 post-stay: converted", "stay", out.Stay, "entitlement", out.Entitlement)
-	writeJSONScd(w, http.StatusOK, psResponse{Outcome: psOutcomeGranted, SessionID: out.Entitlement})
+	if err := reserveLicensedSlot(ctx, tx, p.srv.applID, p.srv.lic.MaxConcurrentOnlineGuests()); err != nil {
+		p.unavailable(w, "capacity: "+err.Error())
+		return
+	}
+	sessionID, err := p.p3.openSessionWithMethodTx(ctx, tx, out.Entitlement, dev, postStaySessionMethod)
+	if err != nil {
+		p.unavailable(w, "session: "+err.Error())
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		p.unavailable(w, "commit: "+err.Error())
+		return
+	}
+	// Durable, but not yet online: the guest is told GRANTED only once the enforcement owner has promoted the
+	// session, the same truthfulness rule the room grant keeps.
+	enforced, werr := p.p3.awaitEnforced(ctx, sessionID)
+	if werr != nil || !enforced {
+		slog.Warn("phase5 post-stay: converted but enforcement not confirmed",
+			"session", sessionID, "entitlement", out.Entitlement, "err", werr)
+		p.unavailable(w, "enforcement_not_confirmed")
+		return
+	}
+	slog.Info("phase5 post-stay: converted", "stay", out.Stay, "entitlement", out.Entitlement, "session", sessionID)
+	writeJSONScd(w, http.StatusOK, psResponse{
+		Outcome: psOutcomeGranted, SessionID: sessionID, EntitlementID: out.Entitlement})
 }
+
+// alreadyConverted answers "did THIS device already turn THIS post-stay context into a live session?". The
+// purchase records the consuming context (poststay.ConvertTx), the context was issued to this device, and the
+// session belongs to this device and is still live -- the same clauses as the room path's alreadyGranted.
+func (p *phase5PostStay) alreadyConverted(ctx context.Context, contextID string, dev deviceIdentity) (string, string, bool) {
+	if !validRequestID(contextID) {
+		return "", "", false
+	}
+	var sid, ent string
+	err := p.srv.db.QueryRow(ctx, `
+		SELECT s.id::text, e.id::text
+		  FROM iam_v2.purchases pu
+		  JOIN iam_v2.auth_contexts c ON c.id = pu.auth_context_id
+		  JOIN iam_v2.entitlements e ON e.purchase_id = pu.id
+		  JOIN iam_v2.sessions s ON s.entitlement_id = e.id
+		 WHERE pu.auth_context_id = $1::uuid AND pu.tenant_id = $2 AND pu.site_id = $3
+		   AND pu.trigger = 'POST_STAY_CONVERSION'
+		   AND c.consumed_at IS NOT NULL AND c.device_id = $4 AND s.device_id = $4
+		   AND s.state IN ('active','PENDING_ENFORCEMENT') AND s.ended IS NULL
+		 ORDER BY s.started DESC
+		 LIMIT 1`, contextID, dev.Tenant, dev.Site, dev.DeviceID).Scan(&sid, &ent)
+	if err != nil {
+		return "", "", false
+	}
+	return sid, ent, true
+}
+
+// postStaySessionMethod is the session's credential label (sessions.credential_method), read by the Admin
+// Console as "Post-stay access".
+const postStaySessionMethod = "POST_STAY"
 
 func ipString(d deviceIdentity) string {
 	if d.IP == nil {

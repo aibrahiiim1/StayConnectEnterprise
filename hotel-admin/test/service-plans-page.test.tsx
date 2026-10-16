@@ -14,9 +14,11 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 vi.mock("@/lib/api", () => {
   class ApiError extends Error {
     status: number;
+    code: string;
     constructor(status: number, body?: unknown) {
       super(typeof body === "object" && body && "error" in body ? String((body as { error: unknown }).error) : `HTTP ${status}`);
       this.status = status;
+      this.code = typeof body === "object" && body && "error" in body ? String((body as { error: unknown }).error) : "http_error";
     }
   }
   return { ApiError, api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() } };
@@ -57,8 +59,12 @@ const PACKAGES = [
   },
 ];
 
+// The commercial terms are the live reader's shape: a priced card + voucher package with no room charge.
 const FREEE_CURRENT = {
   code: "FREEE",
+  price_minor: 2500, currency: "USD", currency_exponent: 2,
+  settlement_methods: ["PREPAID", "ONLINE_PAYMENT"], room_charge_mappings: null,
+  package_type: "GENERAL", renewable: false,
   display: { name: "Freee" },
   duration_policy: { end_mode: "VALIDITY_WINDOW", duration_seconds: 86400 },
   eligibility_rules: [{ type: "AUTH_METHOD", value: { methods: ["pms"] } }],
@@ -125,6 +131,7 @@ describe("ServicePlansPage — stale package pin", () => {
     render(<ServicePlansPage />);
     fireEvent.click(await screen.findByTestId("apply-current-FREE"));
     fireEvent.click(screen.getByLabelText("repin-FREEE"));
+    fireEvent.change(screen.getByLabelText("Confirm your password"), { target: { value: "pw-op" } });
     fireEvent.click(screen.getByRole("button", { name: /apply to selected packages/i }));
 
     await waitFor(() => expect(p).toHaveBeenCalledTimes(1));
@@ -143,6 +150,7 @@ describe("ServicePlansPage — stale package pin", () => {
     render(<ServicePlansPage />);
     fireEvent.click(await screen.findByTestId("apply-current-FREE"));
     fireEvent.click(screen.getByLabelText("repin-FREEE"));
+    fireEvent.change(screen.getByLabelText("Confirm your password"), { target: { value: "pw-op" } });
     fireEvent.click(screen.getByRole("button", { name: /apply to selected packages/i }));
 
     await waitFor(() => expect(p).toHaveBeenCalledTimes(1));
@@ -155,6 +163,55 @@ describe("ServicePlansPage — stale package pin", () => {
     expect(body.visible_from).toBe("2026-01-01T00:00:00Z");
     // The configuration came from the package's own current revision, not from the list row.
     expect(g).toHaveBeenCalledWith("/commercial-packages/pkg-freee/current");
+    // AUDIT O-1: the price and how clients get it travel too, or the repin republishes the package as Free.
+    expect(body.price_minor).toBe(2500);
+    expect(body.currency).toBe("USD");
+    expect(body.currency_exponent).toBe(2);
+    expect(body.acquisition_methods).toEqual(["PREPAID", "ONLINE_PAYMENT"]);
+    expect(body.room_charge_mappings).toEqual([]);
+    expect(body.package_type).toBe("GENERAL");
+    expect(body.renewable).toBe(false);
+    // A plan change is a step-up: the password asked once goes with the post.
+    expect(body.password).toBe("pw-op");
+  });
+
+  it("does not post a package whose stored price cannot be read in full, and names it", async () => {
+    mockLoad();
+    g.mockImplementation((path: string) => {
+      if (path === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
+      if (path === "/commercial-packages/plans") return Promise.resolve(list(PLANS));
+      if (path === "/commercial-packages") return Promise.resolve(list(PACKAGES));
+      // A priced package whose reader returned no currency and no methods: nothing may be guessed.
+      if (path === "/commercial-packages/pkg-freee/current") {
+        return Promise.resolve({ ...FREEE_CURRENT, currency: "", settlement_methods: null, currency_exponent: undefined });
+      }
+      return Promise.resolve(list([]));
+    });
+    render(<ServicePlansPage />);
+    fireEvent.click(await screen.findByTestId("apply-current-FREE"));
+    fireEvent.click(screen.getByLabelText("repin-FREEE"));
+    fireEvent.change(screen.getByLabelText("Confirm your password"), { target: { value: "pw-op" } });
+    fireEvent.click(screen.getByRole("button", { name: /apply to selected packages/i }));
+
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Not moved: Freee"));
+    expect(screen.getByRole("status").textContent).toContain("currency");
+    expect(screen.getByRole("status").textContent).toContain("acquisition_methods");
+    expect(p).not.toHaveBeenCalled();
+  });
+
+  it("will not apply without the password, and says so when the server refuses it", async () => {
+    mockLoad();
+    const { ApiError } = await import("@/lib/api");
+    p.mockRejectedValue(new (ApiError as unknown as new (s: number, b: unknown) => Error)(401, { error: "reauth_required" }));
+    render(<ServicePlansPage />);
+    fireEvent.click(await screen.findByTestId("apply-current-FREE"));
+    fireEvent.click(screen.getByLabelText("repin-FREEE"));
+    expect(screen.getByRole("button", { name: /apply to selected packages/i })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Confirm your password"), { target: { value: "wrong" } });
+    fireEvent.click(screen.getByRole("button", { name: /apply to selected packages/i }));
+    expect(await screen.findByText("That password is not correct. Nothing was changed.")).toBeInTheDocument();
+    // The prompt stays open so the operator can try again.
+    expect(screen.getByTestId("repin-title")).toBeInTheDocument();
   });
 
   it("tells the operator that guests already connected are unaffected", async () => {
@@ -163,6 +220,7 @@ describe("ServicePlansPage — stale package pin", () => {
     render(<ServicePlansPage />);
     fireEvent.click(await screen.findByTestId("apply-current-FREE"));
     fireEvent.click(screen.getByLabelText("repin-FREEE"));
+    fireEvent.change(screen.getByLabelText("Confirm your password"), { target: { value: "pw-op" } });
     fireEvent.click(screen.getByRole("button", { name: /apply to selected packages/i }));
 
     await waitFor(() => expect(screen.getByRole("status").textContent).toContain("1 package updated"));
@@ -178,6 +236,7 @@ describe("ServicePlansPage — stale package pin", () => {
     render(<ServicePlansPage />);
     fireEvent.click(await screen.findByTestId("apply-current-FREE"));
     fireEvent.click(screen.getByLabelText("repin-FREEE"));
+    fireEvent.change(screen.getByLabelText("Confirm your password"), { target: { value: "pw-op" } });
     fireEvent.click(screen.getByRole("button", { name: /apply to selected packages/i }));
 
     await waitFor(() => expect(p).toHaveBeenCalledTimes(1));
@@ -243,6 +302,7 @@ describe("ServicePlansPage — editing an existing plan", () => {
     const { container } = render(<ServicePlansPage />);
     fireEvent.click(await screen.findByRole("button", { name: /^edit$/i }));
     fireEvent.change(document.querySelector('[name="max_concurrent_devices"]')!, { target: { value: "6" } });
+    fireEvent.change(document.querySelector('[name="password"]')!, { target: { value: "pw-op" } });
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
 
     await waitFor(() => expect(p).toHaveBeenCalledTimes(1));
@@ -251,6 +311,32 @@ describe("ServicePlansPage — editing an existing plan", () => {
     expect(body.time_quota_seconds).toBe(86400);
     expect(body.down_kbps).toBe(10000000);
     expect(body.up_kbps).toBe(10000000);
+  });
+
+  it("keeps an online-time plan's time accounting when it is edited (audit O-20)", async () => {
+    mockLoad([], [{ ...ONEDAY, time_accounting_mode: "AGGREGATE_ONLINE_TIME" }]);
+    p.mockResolvedValue({ current_revision_id: "rev-od-2" });
+    render(<ServicePlansPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /^edit$/i }));
+    // Shown as it is, not offered as a choice that could convert it.
+    const mode = document.getElementById("plan-time-mode") as HTMLSelectElement;
+    expect(mode.disabled).toBe(true);
+    expect(mode.value).toBe("AGGREGATE_ONLINE_TIME");
+    fireEvent.change(document.querySelector('[name="password"]')!, { target: { value: "pw-op" } });
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    await waitFor(() => expect(p).toHaveBeenCalledTimes(1));
+    expect(p.mock.calls[0][1].time_accounting_mode).toBe("AGGREGATE_ONLINE_TIME");
+  });
+
+  it("says a refused password in words when an existing plan is saved", async () => {
+    mockLoad([], [ONEDAY]);
+    const { ApiError } = await import("@/lib/api");
+    p.mockRejectedValue(new (ApiError as unknown as new (s: number, b: unknown) => Error)(401, { error: "reauth_required" }));
+    render(<ServicePlansPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /^edit$/i }));
+    fireEvent.change(document.querySelector('[name="password"]')!, { target: { value: "wrong" } });
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    expect(await screen.findByText("That password is not correct. The plan was not saved.")).toBeInTheDocument();
   });
 
   it("stops an over-limit speed at the field, with the ceiling stated on screen", async () => {
@@ -289,9 +375,13 @@ describe("ServicePlansPage — add, record and delete", () => {
     expect(p.mock.calls[0][1].create_only).toBe(true);
 
     fireEvent.click(await screen.findByRole("button", { name: /^edit$/i }));
+    fireEvent.change(document.querySelector('[name="password"]')!, { target: { value: "pw-op" } });
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
     await waitFor(() => expect(p).toHaveBeenCalledTimes(2));
     expect(p.mock.calls[1][1]).not.toHaveProperty("create_only");
+    // Revising an existing plan is a step-up; adding one is not.
+    expect(p.mock.calls[1][1].password).toBe("pw-op");
+    expect(p.mock.calls[0][1]).not.toHaveProperty("password");
   });
 
   it("shows the server's code_exists refusal inside the form", async () => {

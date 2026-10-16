@@ -278,6 +278,64 @@ describe("Payment methods — Card payment configuration", () => {
   });
 });
 
+// AUDIT O-12 and O-24: only the DEFAULT active account takes card checkouts.
+describe("Payment methods — the default account decides", () => {
+  const SECOND = { ...ACCOUNT, id: "acc-2", display_name: "Spare Stripe", merchant_account_ref: "acct_456", currency: "EUR", is_default: false, conversion_supported: true, provider_converts: false };
+  function withAccounts(accounts: unknown[], packages: unknown[] = [], current: Record<string, unknown> = {}) {
+    g.mockImplementation((path: string) => {
+      switch (path) {
+        case "/auth/whoami": return Promise.resolve({ roles: ["site_admin"] });
+        case "/modules": return Promise.resolve({ site_type: "hotel", license_state: "ACTIVE", modules: { card_payment: mod("card_payment"), room_charge: mod("room_charge") }, deployment: {} });
+        case "/payment-providers/providers": return Promise.resolve(PROVIDERS);
+        case "/payment-providers/accounts": return Promise.resolve({ accounts, ready: true, readiness: [], extra_domains: [] });
+        case "/payment-providers/settings": return Promise.resolve(SETTINGS);
+        case "/payment-providers/changes": return Promise.resolve({ changes: [] });
+        case "/commercial-packages": return Promise.resolve({ data: packages });
+      }
+      if (path in current) return Promise.resolve(current[path]);
+      return Promise.reject(new Error(`unexpected GET ${path}`));
+    });
+  }
+
+  it("offers provider conversion only on the default account, and says why on the others", async () => {
+    withAccounts([{ ...ACCOUNT, conversion_supported: true, provider_converts: false }, SECOND]);
+    render(<PaymentMethodsPage />);
+    const note = await screen.findByTestId("convert-default-only-acc-2");
+    expect(note.textContent).toBe("Applies only to the default account, which every card checkout uses.");
+    const buttons = screen.getAllByRole("button", { name: "Let the provider convert" });
+    expect(buttons).toHaveLength(2);
+    expect(buttons.filter((b) => (b as HTMLButtonElement).disabled)).toHaveLength(1);
+    expect(screen.queryByTestId("convert-default-only-acc-1")).toBeNull();
+  });
+
+  it("names a live card package whose currency only a NON-default account settles", async () => {
+    // A EUR package, a default USD account and a spare EUR one: checkouts use the USD account, so EUR is not
+    // offered by card. The old check looked at every active account and stayed silent.
+    withAccounts([ACCOUNT, SECOND],
+      [{ package_id: "pk-eur", code: "EURDAY", name: "Euro day", active: true, current_revision_id: "r1", price_minor: 900, currency: "EUR" },
+       { package_id: "pk-usd", code: "USDDAY", name: "Dollar day", active: true, current_revision_id: "r2", price_minor: 900, currency: "USD" }],
+      {
+        "/commercial-packages/pk-eur/current": { settlement_methods: ["ONLINE_PAYMENT"], currency: "EUR" },
+        "/commercial-packages/pk-usd/current": { settlement_methods: ["ONLINE_PAYMENT"], currency: "USD" },
+      });
+    render(<PaymentMethodsPage />);
+    const notice = await screen.findByTestId("card-currency-mismatch");
+    expect(notice.textContent).toContain("Euro day (EUR)");
+    expect(notice.textContent).not.toContain("Dollar day");
+    expect(notice.textContent).toContain("default account, which settles USD");
+  });
+
+  it("says nothing when the default account lets Stripe convert the package currency", async () => {
+    withAccounts([{ ...ACCOUNT, provider_converts: true, conversion_supported: true }],
+      [{ package_id: "pk-eur", code: "EURDAY", name: "Euro day", active: true, current_revision_id: "r1", price_minor: 900, currency: "EUR" }],
+      { "/commercial-packages/pk-eur/current": { settlement_methods: ["ONLINE_PAYMENT"], currency: "EUR" } });
+    render(<PaymentMethodsPage />);
+    await screen.findByText("Main Stripe");
+    await waitFor(() => expect(g).toHaveBeenCalledWith("/commercial-packages/pk-eur/current"));
+    expect(screen.queryByTestId("card-currency-mismatch")).toBeNull();
+  });
+});
+
 describe("hosted payment domain validation", () => {
   it("accepts exact domain names and refuses IPs and every wildcard (a wildcard cannot be opened before sign-in)", () => {
     expect(domainProblem("pay.example.com")).toBeNull();

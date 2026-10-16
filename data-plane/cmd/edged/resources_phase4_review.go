@@ -68,6 +68,17 @@ func (s *server) financialReviewRoutes() http.Handler {
 	return r
 }
 
+// cardCasesRoutes is the card-dispute part of financial review ALONE, mounted when the PMS financial review
+// surface is off. Card disputes and chargebacks are opened by scd whenever card payment is in use (0115) and
+// never end access by themselves; behind the review flag, a site taking cards with review off had cases that
+// nobody could reach, so a chargeback could be neither kept nor ended.
+func (s *server) cardCasesRoutes() http.Handler {
+	r := chi.NewRouter()
+	r.Get("/card-cases", s.listCardCases)
+	r.Post("/card-cases/{id}/resolve", s.resolveCardCase)
+	return r
+}
+
 // ---------------------------------------------------------------- catalog
 
 type reviewActionDoc struct {
@@ -437,6 +448,12 @@ func (s *server) postReviewAction(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "the decision could not be recorded")
 		return
 	}
+	// The console's audit trail records the decision too. The review ledger is the financial authority; the
+	// audit log is where an operator looks for "who did what on this appliance", and a money decision that
+	// appears in one and not the other is a gap someone will fall into.
+	s.audit(r, "financial_review.decided", "pms_posting", id, map[string]any{
+		"action": in.Action, "action_id": actionID, "reason": reason, "applied": applied,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"action_id": actionID,
 		"action":    in.Action,
