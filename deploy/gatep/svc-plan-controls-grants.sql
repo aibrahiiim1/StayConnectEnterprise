@@ -14,7 +14,7 @@
 -- and svc_acctd already execute.
 --
 -- GUARDED on the migration being present: a reconcile run after 0122 was rolled back must not fail on a grant of
--- something that no longer exists (the 0116-0118 files are not guarded, and that is a known reconcile trap).
+-- something that no longer exists (every file granting on 0116-0125 objects is guarded the same way, audit B-20).
 DO $g$
 BEGIN
   IF to_regprocedure('iam_v2.p6_end_sessions_over_plan_limits(uuid,uuid,timestamptz,boolean)') IS NULL THEN
@@ -27,6 +27,6 @@ BEGIN
 
   GRANT EXECUTE ON FUNCTION iam_v2.accounting_retention_get(uuid,uuid) TO svc_edged;
   GRANT EXECUTE ON FUNCTION iam_v2.accounting_retention_set(uuid,uuid,integer,text,text) TO svc_edged;
-  GRANT SELECT ON iam_v2.accounting_retention_changes, iam_v2.accounting_purge_runs,
-                  iam_v2.device_limit_disconnections TO svc_edged;
+  -- device_limit_disconnections is read by no edged statement (audit B-7, migration 0124), so it is not granted.
+  GRANT SELECT ON iam_v2.accounting_retention_changes, iam_v2.accounting_purge_runs TO svc_edged;
 END $g$;

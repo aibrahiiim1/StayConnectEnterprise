@@ -10,7 +10,9 @@
 --
 -- INSERT and UPDATE only, no DELETE: a service reports its own state and never
 -- removes another's row.
-GRANT INSERT, UPDATE, SELECT ON public.appliance_service_health TO svc_scd;
+--
+-- ONE WRITER TODAY (audit B-7, migration 0124). The per-service producers that wrote this row from scd, acctd and
+-- netd were removed with the cloud service-health producer (2026-09-27); every service now reports through the
+-- health directory, and edged alone upserts and reads the table (cmd/edged/health.go). The three grants that
+-- served the removed producers are gone.
 GRANT INSERT, UPDATE, SELECT ON public.appliance_service_health TO svc_edged;
-GRANT INSERT, UPDATE, SELECT ON public.appliance_service_health TO svc_acctd;
-GRANT INSERT, UPDATE, SELECT ON public.appliance_service_health TO svc_netd;
