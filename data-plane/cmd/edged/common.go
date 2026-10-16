@@ -199,10 +199,23 @@ func (s *server) licenseInstall(w http.ResponseWriter, r *http.Request) {
 
 // ----- health -----------------------------------------------------------------------
 
+// health is the unauthenticated liveness answer, and the dashboard's summary for a signed-in operator.
+//
+// WHO SEES WHAT (audit C-21). Anyone who can reach the management address gets liveness only -- service, status,
+// db, scd -- which is what an uptime check needs. The site id, the version and the licence state go only to a
+// signed-in operator (the dashboard and the top-bar status) and to a caller on the appliance itself that
+// connects to edged directly (the acceptance and reboot scripts curl 127.0.0.1:8090): through Caddy and the
+// console every request carries X-Forwarded-For / X-Real-IP, so "loopback with no forwarding header" means a
+// process on this machine, which can read all of this anyway.
 func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
-	out := map[string]any{"service": "edged", "version": version, "site_id": s.siteID}
+	full := s.healthCallerMaySeeDetail(r)
+	out := map[string]any{"service": "edged"}
+	if full {
+		out["version"] = version
+		out["site_id"] = s.siteID
+	}
 	dbOK := s.db.Ping(ctx) == nil
 	out["db"] = dbOK
 
@@ -218,9 +231,11 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 		scdOK = true
 	}
 	out["scd"] = scdOK
-	out["license_state"] = licState
-	out["license_installed"] = licState != nil && licState != "none"
-	out["activation"] = activation
+	if full {
+		out["license_state"] = licState
+		out["license_installed"] = licState != nil && licState != "none"
+		out["activation"] = activation
+	}
 
 	code := http.StatusOK
 	if !dbOK {
@@ -228,6 +243,23 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	}
 	out["status"] = map[bool]string{true: "ok", false: "degraded"}[dbOK && scdOK]
 	writeJSON(w, code, out)
+}
+
+func (s *server) healthCallerMaySeeDetail(r *http.Request) bool {
+	if ck, err := r.Cookie(sessionCookie); err == nil && ck.Value != "" && s.sessions != nil && s.sessions.peek(ck.Value) != nil {
+		return true
+	}
+	for _, h := range []string{"X-Forwarded-For", "X-Real-IP", "X-Forwarded-Host", "True-Client-IP", "Forwarded"} {
+		if r.Header.Get(h) != "" {
+			return false
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // ----- seed-admin -------------------------------------------------------------------
@@ -239,7 +271,7 @@ func runSeedAdmin(args []string) error {
 	email := fs.String("email", "", "site admin email / username")
 	password := fs.String("password", "", "password (min 10 chars unless --allow-weak)")
 	name := fs.String("name", "Site Admin", "display name")
-	allowWeak := fs.Bool("allow-weak", false, "permit a password shorter than 10 chars — deliberate per-appliance provisioning only, NOT for production")
+	allowWeak := fs.Bool("allow-weak", false, "permit a password shorter than 10 chars — deliberate per-appliance provisioning only, NOT for production; the operator must change it at first sign-in")
 	_ = fs.Parse(args)
 	if *email == "" || *password == "" {
 		return fmt.Errorf("--email and --password are required")
@@ -247,8 +279,10 @@ func runSeedAdmin(args []string) error {
 	if len(*password) < 10 && !*allowWeak {
 		return fmt.Errorf("--password must be >= 10 chars (pass --allow-weak to override; not for production)")
 	}
+	// A weak seeded password is usable exactly once: the first sign-in can only replace it (0119).
+	mustChange := *allowWeak || len(*password) < 10
 	if len(*password) < 10 {
-		slog.Warn("seeding a WEAK site-admin password via --allow-weak — management-network use only", "email", *email)
+		slog.Warn("seeding a WEAK site-admin password via --allow-weak — it must be changed at first sign-in", "email", *email)
 	}
 	c := loadCfg()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -270,13 +304,13 @@ func runSeedAdmin(args []string) error {
 	defer tx.Rollback(ctx)
 	var id string
 	if err := tx.QueryRow(ctx, `
-        INSERT INTO operators (email, display_name, password_hash, status)
-        VALUES ($1, $2, $3, 'active')
+        INSERT INTO operators (email, display_name, password_hash, status, must_change_password)
+        VALUES ($1, $2, $3, 'active', $4)
         ON CONFLICT (email) DO UPDATE
           SET password_hash = EXCLUDED.password_hash, display_name = EXCLUDED.display_name,
-              status = 'active', updated_at = now()
+              status = 'active', must_change_password = EXCLUDED.must_change_password, updated_at = now()
         RETURNING id
-    `, *email, *name, hash).Scan(&id); err != nil {
+    `, *email, *name, hash, mustChange).Scan(&id); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `

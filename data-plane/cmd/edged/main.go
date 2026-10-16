@@ -347,13 +347,18 @@ func main() {
 	r.Use(middleware.Timeout(15 * time.Second))
 
 	r.Route("/edge/v1", func(r chi.Router) {
+		// Every state-changing request must come from the console's own origin (N-23), the login included.
+		r.Use(sameOrigin)
 		r.Get("/health", s.health)
 		r.Post("/auth/login", s.login)
+		// logout needs the caller's session and ends only that one (operator_signin.go).
 		r.Post("/auth/logout", s.logout)
 
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
 			r.Get("/auth/whoami", s.whoami)
+			// The operator's own password: the current one is a step-up; every session is ended (N-8).
+			r.Post("/auth/password", s.changeOwnPassword)
 
 			// ALWAYS-PRESENT SURFACES THAT DO NOT GO THROUGH mountResource.
 			//
@@ -539,6 +544,9 @@ func main() {
 			mountResource(r, s, "audit", s.auditRoutes)
 			mountResource(r, s, "reports", s.reportsRoutes)
 			mountResource(r, s, "backups", s.backupsRoutes)
+			// DOWNLOADING A FULL DATABASE DUMP is its own key (decision D-B): site_admin and the IT manager only,
+			// behind the password step-up. Every role that reads backups still sees the list.
+			mountResource(r, s, "backup-download", s.backupDownloadRoutes)
 			mountResource(r, s, "network", s.networkRoutes)
 			// PORTAL HTTPS (contract §8): the portal address, the hotel portal domain, the hostnames and certificates
 			// scd installed, Check now and Renew now. Its own key -- portal_https.read / portal_https.manage -- rather

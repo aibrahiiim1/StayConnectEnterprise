@@ -334,7 +334,7 @@ func (s *server) publishBranding(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if !s.reauth(req, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, req, "password confirmation required")
 		return
 	}
 	doc, err := s.loadBranding(req)
@@ -395,7 +395,7 @@ func (s *server) rollbackBranding(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if !s.reauth(req, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, req, "password confirmation required")
 		return
 	}
 	var want int
@@ -520,7 +520,7 @@ func (s *server) saveBrandingSettings(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 	if advancedChanged(in.Design, doc.Design) && !s.reauth(req, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required",
+		s.reauthRefused(w, req,
 			"confirm your password to change the portal's custom CSS or HTML. This page collects room numbers "+
 				"and voucher codes, so the styling and markup injected into it are confirmed separately.")
 		return

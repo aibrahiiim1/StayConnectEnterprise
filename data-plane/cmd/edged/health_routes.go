@@ -22,7 +22,10 @@ func (s *server) healthRoutes() http.Handler {
 	r.Get("/services/{name}", s.healthService)
 	r.Post("/services/{name}/recheck", s.healthRecheck)
 	r.Post("/services/{name}/restart", s.healthRestart)
-	r.Get("/services/{name}/logs", s.healthLogs)
+	// LOGS ARE FOR THE PEOPLE WHO FIX THINGS (audit N-22): diagnostics WRITE -- site_admin and the IT manager --
+	// not every role that can read the health page. Journal lines carry what services logged, which can include
+	// a guest's name or room, so they are redacted as well (sanitizeLog).
+	r.With(s.requireRole("diagnostics", permWrite)).Get("/services/{name}/logs", s.healthLogs)
 	r.Get("/recovery-events", s.healthRecoveryEvents)
 	return r
 }
@@ -107,7 +110,7 @@ func (s *server) healthRestart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
 	s.audit(r, "health.restart_requested", "service", name, map[string]any{"reason": in.Reason})
@@ -131,6 +134,12 @@ var (
 	reEmail  = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+`)
 	reMAC    = regexp.MustCompile(`(?i)\b([0-9a-f]{2}:){5}[0-9a-f]{2}\b`)
 	reSecret = regexp.MustCompile(`(?i)(password|token|secret|authorization|api[_-]?key)\s*[=:]\s*\S+`)
+	// Guest identity in structured log fields: "room":"1203", room=1203, guest_name="..", last_name=.., etc.
+	reGuestField = regexp.MustCompile(`(?i)("?\b(?:room(?:_?(?:number|no|num))?|rn|guest(?:_?name)?|(?:first|last|full|display|given|family|sur)_?name|surname|name|username|user|phone|msisdn|mobile|email|reservation(?:_?(?:id|number|no))?)"?\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s,}]+)`)
+	// FIAS records: RN room, GN guest name, GF first name, GT title, G# reservation, GS share flag, GV VIP.
+	reFIASField = regexp.MustCompile(`\|(RN|GN|GF|GT|G#|GV|GG|GL)[^|]*`)
+	// Free text: "room 1203", "Room #1203".
+	reRoomText = regexp.MustCompile(`(?i)\broom\s*#?\s*[0-9][0-9A-Za-z-]*`)
 )
 
 // sanitizeLog strips IPs, emails, MACs and secret-looking assignments from a log
@@ -138,6 +147,9 @@ var (
 func sanitizeLog(line string) string {
 	line = reSecret.ReplaceAllString(line, "$1=[redacted]")
 	line = reEmail.ReplaceAllString(line, "[email]")
+	line = reFIASField.ReplaceAllString(line, "|$1[redacted]")
+	line = reGuestField.ReplaceAllString(line, "${1}[redacted]")
+	line = reRoomText.ReplaceAllString(line, "room [redacted]")
 	line = reMAC.ReplaceAllString(line, "[mac]")
 	line = reIP.ReplaceAllString(line, "[ip]")
 	if len(line) > 500 {

@@ -73,7 +73,7 @@ func (s *server) hotelAdminCertRotate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation failed")
+		s.reauthRefused(w, r, "password confirmation failed")
 		return
 	}
 	sess := sessFrom(r.Context())

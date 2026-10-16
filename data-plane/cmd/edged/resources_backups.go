@@ -40,8 +40,9 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// backupRoot is where the appliance already keeps its artefacts; the retention sweep owns the same tree.
-const backupRoot = "/opt/stayconnect/backups"
+// backupRoot is where the appliance already keeps its artefacts; the retention sweep owns the same tree. A var
+// only so the download tests can point it at a temporary directory; nothing in the product assigns it.
+var backupRoot = "/opt/stayconnect/backups"
 
 // retentionStatusPath is written by stayconnect-backup-cleanup on every run. It is the appliance's OWN
 // account of its retention posture -- reading it is why this screen can report real numbers instead of
@@ -64,7 +65,8 @@ func (s *server) backupsRoutes() http.Handler {
 	r.Put("/settings", s.backupSettingsSet)
 	r.Get("/artifacts", s.listBackupArtifacts)
 	r.Post("/run", s.runDatabaseBackup)
-	r.Get("/artifacts/{name}/download", s.downloadBackupArtifact)
+	// Download is NOT here any more: it is the backup-download resource (backup_download.go), site_admin and
+	// the IT manager only, behind the password step-up (decision D-B).
 	r.Post("/artifacts/{name}/verify", s.verifyBackupArtifact)
 	// THE DESTRUCTIVE ONE. Password step-up and a typed confirmation inside the handler; see
 	// restoreDatabaseBackup. Only a backup that has passed Verify is accepted, enforced again by scd.
@@ -104,7 +106,7 @@ func (s *server) backupSettingsSet(w http.ResponseWriter, r *http.Request) {
 	// Step-up: retention decides how far back this appliance can recover, and a schedule that never fires is
 	// indistinguishable from a backup policy that works right up until it is needed.
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
 	code, body, err := s.scd.call(r.Context(), http.MethodPost, "/v1/backup/settings",
@@ -353,30 +355,6 @@ func resolveArtifact(name string) (string, bool) {
 	return "", false
 }
 
-func (s *server) downloadBackupArtifact(w http.ResponseWriter, r *http.Request) {
-	name := chi.URLParam(r, "name")
-	path, ok := resolveArtifact(name)
-	if !ok {
-		jsonErr(w, http.StatusNotFound, "not_found", "no such backup artifact")
-		return
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "internal", "the artifact could not be opened")
-		return
-	}
-	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "internal", "the artifact could not be measured")
-		return
-	}
-	s.audit(r, "backup.downloaded", "backup", name, map[string]any{"size_bytes": fi.Size()})
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
-	http.ServeContent(w, r, name, fi.ModTime(), f)
-}
-
 // ------------------------------------------------------------------------------------- taking a backup
 
 type runBackupReq struct {
@@ -386,7 +364,7 @@ type runBackupReq struct {
 // runDatabaseBackup takes a real pg_dump of the site database and records it.
 //
 // STEP-UP IS REQUIRED even though a backup destroys nothing: the artefact it produces is a complete copy of
-// the site's data, and the download endpoint above will hand it to whoever asks next. Producing one is
+// the site's data, and the download endpoint (backup_download.go) will hand it to whoever may download next. Producing one is
 // therefore a privileged act, and it is attributed.
 func (s *server) runDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 	var in runBackupReq
@@ -395,7 +373,7 @@ func (s *server) runDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
 	// NAME THE PATH AND THE REASON. edged runs as the unprivileged `stayconnect` user while
@@ -564,7 +542,7 @@ func (s *server) restoreDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required",
+		s.reauthRefused(w, r,
 			"confirm your password. Restoring replaces this site's data with the contents of the backup.")
 		return
 	}

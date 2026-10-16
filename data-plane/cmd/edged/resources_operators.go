@@ -20,6 +20,8 @@ type edgeOperator struct {
 	Status      string    `json:"status"`
 	Roles       []string  `json:"roles"`
 	CreatedAt   time.Time `json:"created_at"`
+	// MustChangePassword: the operator's next sign-in can only set a new password (0119).
+	MustChangePassword bool `json:"must_change_password"`
 }
 
 // isValidEdgeRole accepts site_admin plus every role in the rolePerms matrix
@@ -35,6 +37,11 @@ func isValidEdgeRole(role string) bool {
 func (s *server) operatorsRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", s.listEdgeOperators)
+	// Admin Console sign-in protection (0119): read with the operators list, changed by whoever may change
+	// operators, under step-up. Registered before /{id} so the literal path wins.
+	r.Get("/signin-protection", s.getSigninProtection)
+	r.Put("/signin-protection", s.setSigninProtection)
+	r.Get("/signin-protection/changes", s.listSigninProtectionChanges)
 	r.Post("/", s.createEdgeOperator)
 	r.Delete("/{id}", s.disableEdgeOperator)
 	r.Post("/{id}/set-password", s.setEdgeOperatorPassword)
@@ -47,12 +54,13 @@ func (s *server) loadEdgeOperator(ctx context.Context, id string) (*edgeOperator
 	var op edgeOperator
 	err := s.db.QueryRow(ctx, `
         SELECT o.id, o.email, COALESCE(o.display_name,''), o.status, o.created_at,
-               COALESCE(array_agg(r.role ORDER BY r.role) FILTER (WHERE r.role IS NOT NULL), '{}'::text[])
+               COALESCE(array_agg(r.role ORDER BY r.role) FILTER (WHERE r.role IS NOT NULL), '{}'::text[]),
+               o.must_change_password
           FROM operators o
           LEFT JOIN operator_roles r ON r.operator_id = o.id
          WHERE o.id = $1
          GROUP BY o.id
-    `, id).Scan(&op.ID, &op.Email, &op.DisplayName, &op.Status, &op.CreatedAt, &op.Roles)
+    `, id).Scan(&op.ID, &op.Email, &op.DisplayName, &op.Status, &op.CreatedAt, &op.Roles, &op.MustChangePassword)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +72,8 @@ func (s *server) listEdgeOperators(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	rows, err := s.db.Query(ctx, `
         SELECT o.id, o.email, COALESCE(o.display_name,''), o.status, o.created_at,
-               COALESCE(array_agg(r.role ORDER BY r.role) FILTER (WHERE r.role IS NOT NULL), '{}'::text[])
+               COALESCE(array_agg(r.role ORDER BY r.role) FILTER (WHERE r.role IS NOT NULL), '{}'::text[]),
+               o.must_change_password
           FROM operators o
           LEFT JOIN operator_roles r ON r.operator_id = o.id
          GROUP BY o.id
@@ -78,7 +87,7 @@ func (s *server) listEdgeOperators(w http.ResponseWriter, r *http.Request) {
 	var out []edgeOperator
 	for rows.Next() {
 		var op edgeOperator
-		if err := rows.Scan(&op.ID, &op.Email, &op.DisplayName, &op.Status, &op.CreatedAt, &op.Roles); err != nil {
+		if err := rows.Scan(&op.ID, &op.Email, &op.DisplayName, &op.Status, &op.CreatedAt, &op.Roles, &op.MustChangePassword); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
 			return
 		}
@@ -93,6 +102,8 @@ func (s *server) createEdgeOperator(w http.ResponseWriter, r *http.Request) {
 		DisplayName string `json:"display_name"`
 		Password    string `json:"password"`
 		Role        string `json:"role"`
+		// RequireChange: the new operator must choose their own password at first sign-in (0119).
+		RequireChange bool `json:"require_change"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
@@ -103,8 +114,8 @@ func (s *server) createEdgeOperator(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "valid email required")
 		return
 	}
-	if len(in.Password) < 10 {
-		jsonErr(w, http.StatusBadRequest, "bad_request", "password must be at least 10 characters")
+	if msg := operatorPasswordProblem(in.Password, in.Email); msg != "" {
+		jsonErr(w, http.StatusBadRequest, "bad_request", msg)
 		return
 	}
 	if in.Role == "" {
@@ -138,10 +149,10 @@ func (s *server) createEdgeOperator(w http.ResponseWriter, r *http.Request) {
 
 	var id string
 	err = tx.QueryRow(ctx, `
-        INSERT INTO operators (email, display_name, password_hash, status)
-        VALUES ($1, NULLIF($2,''), $3, 'active')
+        INSERT INTO operators (email, display_name, password_hash, status, must_change_password)
+        VALUES ($1, NULLIF($2,''), $3, 'active', $4)
         RETURNING id
-    `, in.Email, in.DisplayName, hash).Scan(&id)
+    `, in.Email, in.DisplayName, hash, in.RequireChange).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
 			jsonErr(w, http.StatusConflict, "conflict", "email already exists")
@@ -167,7 +178,8 @@ func (s *server) createEdgeOperator(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "post-commit load failed")
 		return
 	}
-	s.audit(r, "operator.created", "operator", id, map[string]any{"email": in.Email, "role": in.Role})
+	s.audit(r, "operator.created", "operator", id, map[string]any{"email": in.Email, "role": in.Role,
+		"must_change_password": in.RequireChange})
 	writeJSON(w, http.StatusCreated, op)
 }
 
@@ -196,17 +208,35 @@ func (s *server) disableEdgeOperator(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// setEdgeOperatorPassword is an ADMINISTRATOR resetting somebody else's password (N-8). It ends every live
+// session of that operator -- a reset is how a suspected compromise is closed, and a session opened with the
+// old password must not outlive it -- and ends the account's sign-in lockout. require_change makes the operator
+// choose their own password at the next sign-in. An operator changes their OWN password at POST
+// /edge/v1/auth/password, which asks for the current one; resetting yourself here would skip that.
 func (s *server) setEdgeOperatorPassword(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var in struct {
-		Password string `json:"password"`
+		Password      string `json:"password"`
+		RequireChange bool   `json:"require_change"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
 	}
-	if len(in.Password) < 10 {
-		jsonErr(w, http.StatusBadRequest, "bad_request", "password must be at least 10 characters")
+	if sess := sessFrom(r.Context()); sess != nil && sess.OperatorID == id {
+		jsonErr(w, http.StatusConflict, "use_change_password",
+			"Change your own password with Change my password, which asks for your current password.")
+		return
+	}
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	var email string
+	if err := s.db.QueryRow(ctx, `SELECT email FROM operators WHERE id = $1`, id).Scan(&email); err != nil {
+		jsonErr(w, http.StatusNotFound, "not_found", "operator not found")
+		return
+	}
+	if msg := operatorPasswordProblem(in.Password, email); msg != "" {
+		jsonErr(w, http.StatusBadRequest, "bad_request", msg)
 		return
 	}
 	hash, err := hashPassword(in.Password)
@@ -214,10 +244,9 @@ func (s *server) setEdgeOperatorPassword(w http.ResponseWriter, r *http.Request)
 		jsonErr(w, http.StatusInternalServerError, "internal", "hash failed")
 		return
 	}
-	ctx, cancel := dbCtx(r)
-	defer cancel()
 	ct, err := s.db.Exec(ctx,
-		`UPDATE operators SET password_hash=$2, updated_at=now() WHERE id = $1`, id, hash)
+		`UPDATE operators SET password_hash=$2, must_change_password=$3, updated_at=now() WHERE id = $1`,
+		id, hash, in.RequireChange)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "update failed")
 		return
@@ -226,7 +255,12 @@ func (s *server) setEdgeOperatorPassword(w http.ResponseWriter, r *http.Request)
 		jsonErr(w, http.StatusNotFound, "not_found", "operator not found")
 		return
 	}
-	s.audit(r, "operator.password_reset", "operator", id, nil)
+	s.sessions.destroyOperator(id)
+	_ = s.throttleClear(ctx, scopeAccount, strings.ToLower(strings.TrimSpace(email)))
+	_ = s.throttleClear(ctx, scopeReauth, id)
+	s.audit(r, "operator.password_reset", "operator", id, map[string]any{
+		"sessions_ended": true, "must_change_password": in.RequireChange,
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 

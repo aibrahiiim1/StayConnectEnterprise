@@ -70,7 +70,8 @@ the keys are unchanged, [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md)). Legen
 | portal-https | W | W | – | – | – | – | R |
 | audit | W(R) | R | R | R | – | R | R |
 | reports | R | R | R | R | – | R | R |
-| backups (view/trigger) | W | W | R | R | – | R | R |
+| backups | W | R | R | R | – | – | R |
+| backup-download | W | W | – | – | – | – | – |
 
 **portal-https** (`portal_https.read` = R, `portal_https.manage` = W) is the Portal HTTPS screen under
 Networking ([ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md](architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md)
@@ -79,6 +80,14 @@ Renew now. It follows `network`: the portal address is a network change and the 
 the address or the domain and Renew now additionally require the operator's password (step-up); Check now
 changes nothing and needs only **W**. Applying a new address still goes through the Client networks
 validate/apply/confirm flow, which needs `network` **W**.
+
+**backups** and **backup-download** are two keys (Product-Owner decision D-B, 2026-10-16). `backups` **R** sees
+the list, the retention policy and recovery readiness; **W** (site_admin) also takes, verifies and restores a
+backup and changes retention, each under the password step-up. `backup-download` is the only way to take a full
+database dump off the appliance: **site_admin and the IT manager only**, the operator's password every time
+(a single-use ticket valid for 60 seconds), and both the authorization and the download are audited. Every
+other role that reads backups sees the list and cannot download. Until 2026-10-16 every role with `backups`
+**R** could download without a password; this row and the code changed together.
 
 **The four guest sign-in keys (Room sign-in, in the Hotel module) are four keys on purpose, and none implies another.**
 

@@ -154,7 +154,7 @@ func (s *server) setPMSInterfaceLifecycle(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
 
@@ -534,7 +534,7 @@ func (s *server) publishPMSInterfaceRevision(w http.ResponseWriter, r *http.Requ
 	}
 	// Step-up, for the same reason the reason code is required.
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
 	sess := sessFrom(r.Context())
@@ -669,7 +669,7 @@ func (s *server) rotatePMSInterfaceSecret(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
 	sess := sessFrom(r.Context())

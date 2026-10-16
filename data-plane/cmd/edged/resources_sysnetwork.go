@@ -13,22 +13,7 @@ import (
 	"time"
 )
 
-// reauth re-verifies the logged-in operator's password before a high-risk change.
-func (s *server) reauth(r *http.Request, password string) bool {
-	sess := sessFrom(r.Context())
-	if sess == nil || password == "" {
-		return false
-	}
-	ctx, cancel := dbCtx(r)
-	defer cancel()
-	var hash, status string
-	if err := s.db.QueryRow(ctx,
-		`SELECT COALESCE(password_hash,''), status FROM operators WHERE id=$1`, sess.OperatorID).
-		Scan(&hash, &status); err != nil {
-		return false
-	}
-	return status == "active" && hash != "" && verifyPassword(password, hash)
-}
+// reauth (the password step-up, throttled and audited) lives in operator_signin.go.
 
 func (s *server) sysNetGet(w http.ResponseWriter, r *http.Request) {
 	s.netd.proxy(w, r, http.MethodGet, "/v1/system-network", nil)
@@ -53,7 +38,7 @@ func (s *server) sysNetApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation failed")
+		s.reauthRefused(w, r, "password confirmation failed")
 		return
 	}
 	sess := sessFrom(r.Context())
@@ -89,7 +74,7 @@ func (s *server) sysNetRollback(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&in)
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation failed")
+		s.reauthRefused(w, r, "password confirmation failed")
 		return
 	}
 	sess := sessFrom(r.Context())
