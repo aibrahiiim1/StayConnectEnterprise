@@ -22,7 +22,7 @@ this box. Add it to the other role's file instead.
 
 | Unit source | Install as | Reload |
 |---|---|---|
-| `stayconnect-caddy.edge.service` | `/etc/systemd/system/stayconnect-caddy.service` on the appliance | **supported** — the Edge Caddyfile leaves the admin API on `127.0.0.1:2019`, so `systemctl reload` genuinely applies the new config |
+| `stayconnect-caddy.edge.service` | `/etc/systemd/system/stayconnect-caddy.service` on the appliance | **supported** — the Edge Caddyfile serves the admin API on the owner-only unix socket `/run/caddy/admin.sock` (never TCP), so `systemctl reload` -- running as `caddy` -- genuinely applies the new config |
 | `stayconnect-caddy.central.service` | `/etc/systemd/system/stayconnect-caddy.service` on Central | **not supported, deliberately** — no `ExecReload` at all |
 
 **The Central reload contract.** Central runs Caddy with `admin off`, which disables the API `caddy reload`

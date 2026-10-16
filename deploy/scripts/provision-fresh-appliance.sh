@@ -117,6 +117,19 @@ say "layout ok"
 
 # ---------------------------------------------------------------- 3. infra containers
 say "infra containers"
+# THE DATABASE SUPERUSER GETS A RANDOM PASSWORD, NOT "stayconnect" (audit N-10). Postgres listens on loopback
+# only, but every local account can reach loopback, and the compose file's default password was the same on
+# every appliance. A fresh install generates one here, keeps it 0600 in the secrets directory, and hands it to
+# compose (POSTGRES_PASSWORD only takes effect when the cluster is first initialised). An existing database
+# volume is left exactly as it is: its password was fixed at its initdb, and changing it is an operation of its
+# own (docs/SECURITY_HARDENING.md, "Database superuser password").
+PG_SECRET="$ETC/secrets/pg-superuser.env"
+if [ ! -s "$PG_SECRET" ] && ! docker volume inspect stayconnect-infra_pgdata >/dev/null 2>&1; then
+  ( umask 077; printf 'STAYCONNECT_PG_PASSWORD=%s\n' "$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')" > "$PG_SECRET" )
+  say "generated a random database superuser password ($PG_SECRET)"
+fi
+if [ -s "$PG_SECRET" ]; then set -a; . "$PG_SECRET"; set +a; fi
+[ -n "${STAYCONNECT_PG_PASSWORD:-}" ] || say "NOTE: this appliance's database predates the generated superuser password; see docs/SECURITY_HARDENING.md"
 ( cd "$DEPLOY/compose" && docker compose -f infra.yml up -d )
 for _ in $(seq 1 60); do
   docker exec stayconnect-pg pg_isready -U stayconnect >/dev/null 2>&1 && break
@@ -165,7 +178,7 @@ fi
 # keybootstrap creates the durable-throttle key, the OTP generation-1 key AND the voucher code-encryption
 # key. The last one is not optional on a production build: IAM-v2 VOUCHER cannot be configured off there, so
 # scd refuses to start without it and crash-loops on first boot.
-KEYBOOTSTRAP_DSN="postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect_site?sslmode=disable" \
+KEYBOOTSTRAP_DSN="postgres://stayconnect:${STAYCONNECT_PG_PASSWORD:-stayconnect}@127.0.0.1:5432/stayconnect_site?sslmode=disable" \
   "$SC/bin/keybootstrap" >/dev/null
 for k in throttle.key voucher_dek.key otp_hmac_1.key; do
   [ -s "$ETC/secrets/$k" ] || die "keybootstrap did not produce $k"

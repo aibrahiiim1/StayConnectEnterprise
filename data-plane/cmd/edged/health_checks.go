@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -170,15 +171,29 @@ func checkHotelAdmin(ctx context.Context, s *server) (bool, string, string) {
 }
 
 func checkCaddy(ctx context.Context, s *server) (bool, string, string) {
-	// Caddy's admin API answering means the proxy is loaded and routes are live.
-	code, err := tcpGet(ctx, "http://127.0.0.1:2019/config/")
-	if err != nil {
-		return false, "caddy admin not responding: " + errShort(err), ""
+	// THE PROXY IS ASKED THE QUESTION OPERATORS CARE ABOUT: does it answer TLS on 443? Its admin API is a unix
+	// socket only Caddy's own account can open (audit N-10), so it is no longer edged's to probe -- and a loaded
+	// admin API never proved the console's vhost was being served anyway.
+	return caddyServesTLS(ctx, "127.0.0.1:443")
+}
+
+// caddyServesTLS reports whether a TLS server answers at addr. A completed handshake, or a TLS alert (which only
+// a TLS server sends -- e.g. no certificate for the name), both mean Caddy is serving; a refused or silent
+// connection means it is not. Certificate validity is the TLS-certificate check's job, not this one's.
+func caddyServesTLS(ctx context.Context, addr string) (bool, string, string) {
+	dctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	d := tls.Dialer{Config: &tls.Config{ServerName: "hotel.stayconnect.local", InsecureSkipVerify: true}} //nolint:gosec // liveness only
+	c, err := d.DialContext(dctx, "tcp", addr)
+	if err == nil {
+		_ = c.Close()
+		return true, "Caddy answering TLS on " + addr, ""
 	}
-	if code == 200 {
-		return true, "caddy admin responsive; routes loaded", ""
+	var alert tls.AlertError
+	if errors.As(err, &alert) {
+		return true, "Caddy answering TLS on " + addr + " (" + alert.Error() + ")", ""
 	}
-	return false, fmt.Sprintf("caddy admin http %d", code), ""
+	return false, "Caddy is not answering TLS on " + addr + ": " + errShort(err), ""
 }
 
 // keaView is netd's answer to both Kea questions: is it configured to run here yet, and is it healthy.

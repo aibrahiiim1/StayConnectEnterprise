@@ -44,6 +44,27 @@ loopback-bound. Acceptable only on the single-box pilot.
   runbook, Phase 3, and is what makes the one-instance pilot topology
   acceptable). (Neither Central nor the appliance runs or connects to a message bus — CLAUDE.md §0E.)
 
+### Database superuser password (appliance, audit N-10)
+
+A **fresh** provision now generates a random superuser password, keeps it in
+`/etc/stayconnect/secrets/pg-superuser.env` (0600) and hands it to compose; the service roles already
+had generated passwords (`gatep-set-passwords.sh`). An appliance whose database volume existed before
+keeps the password it was initialised with: `POSTGRES_PASSWORD` acts only at `initdb`, and provisioning
+never changes a running cluster.
+
+Migrating an existing appliance (a deliberate operation, not done by any deploy):
+
+1. Generate a password and write `STAYCONNECT_PG_PASSWORD=<value>` to `/etc/stayconnect/secrets/pg-superuser.env` (0600 root).
+2. `docker exec -i stayconnect-pg psql -U stayconnect -c "ALTER ROLE stayconnect PASSWORD '<value>'"` (local socket, no password needed).
+3. Anything that connects as the superuser over TCP must use it: on the appliance that is only `keybootstrap` at provisioning; service DSNs in `/etc/stayconnect/*.env` use their own roles. Check `grep -l 'stayconnect:stayconnect@' /etc/stayconnect/*.env` returns nothing.
+4. Export the file before any later `docker compose -f infra.yml up` so a recreated container is initialised consistently.
+
+### Caddy admin API (appliance, audit N-10)
+
+The Edge Caddyfile serves the admin API on `unix//run/caddy/admin.sock`, inside `/run/caddy` (0700
+`caddy`), instead of `127.0.0.1:2019`: no other local account can rewrite routing. `systemctl reload`
+still works (`caddy reload` runs as `caddy`). edged's Caddy health check probes TLS on 443 instead.
+
 ## 4. IPv6 client bypass — OPEN (must drop v6 on client LAN)
 
 The nftables table is `inet` family, so the **filter** chains do cover IPv6 —
