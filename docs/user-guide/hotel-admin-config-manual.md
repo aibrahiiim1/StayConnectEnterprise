@@ -272,7 +272,9 @@ password sign-in, an alternative to vouchers:
      three, and refuses sign-in rather than guess if it matches more than one
      guest in the room;
    - **Room number + surname**, **Room number + first name** or **Room number +
-     reservation number** — only that detail is accepted.
+     reservation number** — only that detail is accepted. The appliance enforces
+     this itself: a sign-in that sends any other detail is refused, whatever
+     sent it.
 
    The choice saves immediately. A site still on the older *either* setting
    sees a warning; choosing one of the options replaces it.

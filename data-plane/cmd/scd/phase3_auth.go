@@ -406,18 +406,23 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// Room sign-in switched off in Hotel Admin is refused here as well as hidden on the portal. It answers as
 	// the service not being available -- which it is not -- and looks up no room.
-	if !p.srv.guestMethodEnabled(ctx, guestMethodPMS) {
+	//
+	// The same read supplies the configured sign-in mode (phase3_auth_mode.go), so the switch and the mode a
+	// request is judged by come from one record, read once.
+	methods, methodsOK := p.srv.guestMethodSwitches(ctx)
+	if !methodsOK || !methodSwitchOn(methods, guestMethodPMS) {
 		at.Result = signinattempt.ServiceUnavailable
 		notVerified(w, at.Result, "pms_method_disabled")
 		return
 	}
 
 	room := normalizeRoom(req.Room)
-	last := normalizeName(req.LastName)
-	first := normalizeName(req.FirstName)
-	res := strings.TrimSpace(req.ReservationNumber)
-
-	last, first, res = combineVerification(req.Verification, last, first, res)
+	// THE SITE'S MODE DECIDES WHICH FIELDS MAY BE COMPARED. A request carrying a field the mode does not
+	// accept is refused below -- after the protection gate, so a restricted device is answered as restricted --
+	// and none of its values is compared against anything.
+	evidence := applyRoomSignInMode(roomSignInMode(methods), req.Verification,
+		normalizeName(req.LastName), normalizeName(req.FirstName), strings.TrimSpace(req.ReservationNumber))
+	last, first, res := evidence.Last, evidence.First, evidence.Res
 
 	// WHAT THE GUEST TYPED, recorded before anything is decided about it. The raw value and the normalized
 	// form sit side by side because the difference between them is frequently the whole answer at the desk:
@@ -428,7 +433,7 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 	at.Sensitive.SubmittedVerifier = submitted
 	at.Sensitive.NormalizedVerifier = normalizedVerifier(last, first, res)
 
-	if room == "" || (last == "" && first == "" && res == "") {
+	if room == "" || (!evidence.Violation && last == "" && first == "" && res == "") {
 		// Incomplete evidence is a non-success like any other: telling the guest WHICH field was missing is
 		// a small oracle, and the portal already knows what it asked for.
 		at.Result = signinattempt.MalformedSubmission
@@ -473,6 +478,24 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 			notVerifiedRetryAfter(w, at.Result, "restricted", gate.RemainingSeconds)
 			return
 		}
+	}
+
+	// A REQUEST THE SITE'S MODE DOES NOT ACCEPT -- a reservation number on a surname site, a surname and a
+	// reservation number together, a first name on the legacy setting. The real portal never builds one, so it
+	// comes from something that is not the portal.
+	//
+	// IT COUNTS ONCE, as a wrong credential from that device. It is evidence submitted for a room that is not
+	// the evidence the site accepts, which is what a wrong credential is; recording it as malformed (which never
+	// counts) would let a client probe the mode -- or keep submitting -- for free while every honest wrong guess
+	// is counted. It is recorded as CREDENTIAL_MISMATCH because that is the counted code that names the
+	// submission rather than the room (ROOM_NOT_IN_MIRROR would claim a lookup that never happened); no room is
+	// looked up, so the record shows no room in the mirror and no candidates, and the log line names the mode.
+	// One request is one attempt row and therefore at most one count, however many fields it carried: the
+	// record is written once, by the deferred recordAttempt above, and the policy counts rows.
+	if evidence.Violation {
+		at.Result = signinattempt.CredentialMismatch
+		notVerified(w, at.Result, "evidence_not_accepted_by_room_sign_in_mode")
+		return
 	}
 
 	// CAN THE MIRROR ANSWER FOR ANYBODY? Asked BEFORE the room is looked at, and refused on before the
