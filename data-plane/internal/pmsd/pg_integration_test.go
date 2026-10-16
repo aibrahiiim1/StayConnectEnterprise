@@ -5,6 +5,7 @@ package pmsd
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -648,18 +649,18 @@ func TestIntegration_ZeroRuntimeGrantsWhileDark(t *testing.T) {
 		"svc_scd|sessions|SELECT":                     true,
 		"svc_scd|sessions|INSERT":                     true,
 		"svc_edged|appliance_product_settings|SELECT": true,
-		// svc_acctd's reads for the aggregate accrual sweep (migration 0039). It holds no write
-		// anywhere in iam_v2, which the Phase-6 privilege gate asserts directly.
-		"svc_acctd|entitlements|SELECT":              true,
-		"svc_acctd|service_plan_revisions|SELECT":    true,
-		"svc_acctd|sessions|SELECT":                  true,
-		"svc_acctd|session_online_watermarks|SELECT": true,
-		// ...and the reads the expiry sweep performs, added by 0040 with the sanctioned expiry writer. Still
-		// SELECT-only: acctd's single write capability is one definer function, not a table.
-		"svc_acctd|accounting_records|SELECT":               true,
-		"svc_acctd|session_entitlement_bindings|SELECT":     true,
-		"svc_acctd|entitlement_devices|SELECT":              true,
-		"svc_acctd|entitlement_termination_evidence|SELECT": true,
+		// svc_acctd's reads for the enforcement plan and the expiry sweep (migrations 0039/0040). It holds no
+		// write anywhere in iam_v2, which the Phase-6 privilege gate and gatep-grants.sql's B-7 assertion check.
+		// session_online_watermarks, entitlement_devices and entitlement_termination_evidence used to be listed
+		// here: no acctd statement reads them (the tick and the expiry writer are definers and read them as their
+		// owner), so audit B-7 / migration 0124 withdrew them and this floor no longer requires them.
+		"svc_acctd|entitlements|SELECT":           true,
+		"svc_acctd|service_plan_revisions|SELECT": true,
+		"svc_acctd|sessions|SELECT":               true,
+		// The pre-Phase-6 data-crossing expression (internal/enforce dataCrossingLegacy). Still SELECT-only:
+		// acctd's write capabilities are definer functions, not tables.
+		"svc_acctd|accounting_records|SELECT":           true,
+		"svc_acctd|session_entitlement_bindings|SELECT": true,
 	}
 	expected := gatepIamV2TableGrants(t)
 	// The historical Phase-6 allow-list is kept as a floor: every grant it names must still be a Gate-P grant.
@@ -683,9 +684,23 @@ func TestIntegration_ZeroRuntimeGrantsWhileDark(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
+	// A grant on a table this database does not have is not a missing grant: every Gate-P grant on an object a
+	// later migration creates is guarded on that object (audit B-20), so a database built or rolled back short of
+	// that migration legitimately lacks both the table and the grant. Only a PRESENT table must carry its grants.
 	for k := range expected {
-		if !seen[k] {
-			t.Errorf("deploy/gatep grants %s (grantee|table|privilege) but the database does not hold it", k)
+		if seen[k] {
+			continue
 		}
+		table := strings.Split(k, "|")[1]
+		var present bool
+		if err := pool.QueryRow(context.Background(),
+			`SELECT to_regclass('iam_v2.' || quote_ident($1)) IS NOT NULL`, table).Scan(&present); err != nil {
+			t.Fatal(err)
+		}
+		if !present {
+			t.Logf("deploy/gatep grants %s; iam_v2.%s is not in this schema (migration not applied), so neither is the grant", k, table)
+			continue
+		}
+		t.Errorf("deploy/gatep grants %s (grantee|table|privilege) but the database does not hold it", k)
 	}
 }

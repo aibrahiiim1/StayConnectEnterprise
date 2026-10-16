@@ -401,6 +401,16 @@ production build (`-tags stayconnect_production`); the Hotel-Admin Next build an
    The reconcile is one transaction. It re-asserts least privilege and ends in fail-closed assertions; a
    failure rolls back the revoke along with everything else, so the effective privilege set is exactly what it
    was beforehand. A failure here is still a stop, not a warning — but it is no longer an outage.
+
+   Two of those closing assertions matter when reading a failure. The **B-7 assertion** (migration 0124)
+   refuses the reconcile if any runtime role regains a privilege its binary does not use: the entitlement state
+   writer outside `svc_scd`/`svc_pmsd`, any `iam_v2` table write for `svc_netd` or `svc_acctd`, table-level
+   UPDATE on `iam_v2.entitlements` or `iam_v2.sessions` (column-level only: `status` for the row lock that
+   `svc_scd`/`svc_pmsd` take, the three session columns the checkout conversion sets, the one the transfer
+   re-points), the PMS settings writers outside `svc_edged`, or PUBLIC EXECUTE on the invoker adjustment
+   writers. Each `deploy/gatep` file names the statement that uses every grant it keeps. And every grant on an
+   object created by migrations 0116–0125 is **guarded on that object** (audit B-20), so the reconcile also
+   runs on a database rolled back below any of them: the grant is skipped with a NOTICE, not failed.
 6. **Build the binaries with `scripts/build-appliance-binaries.sh`** — it is the recipe, and it is the recipe
    precisely because typing `go build` by hand is what went wrong. An audit of the PRE-LIVE appliance found
    five of its six binaries built WITHOUT the production tag, one carrying no VCS stamp at all and built with

@@ -137,9 +137,12 @@ GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_scd;
 -- two different functions, and granting only the opener leaves the write failing with
 -- "permission denied for function p3_controlled_operation_open" -- an error that names a function the
 -- application never calls directly, which is why it reads as a schema fault rather than a missing grant.
--- Both Phase-3 and Phase-5 checkers exist and the auth_context family may be guarded by either.
+-- The checker a trigger calls is the one for ITS table: every family scd writes directly (auth_contexts,
+-- auth_resolutions, offer_quotes, purchases) is guarded by p3_controlled_writer_only, so scd needs the Phase-3
+-- checker only. The Phase-5 checker (p5_controlled_writer_only, on entitlement_transfers, post_stay_profiles and
+-- stay_links) never runs as scd, which writes none of those tables -- its EXECUTE was removed (audit B-7,
+-- migration 0124).
 GRANT EXECUTE ON FUNCTION iam_v2.p3_controlled_operation_open(text) TO svc_scd;
-GRANT EXECUTE ON FUNCTION iam_v2.p5_controlled_operation_open(text) TO svc_scd;
 GRANT EXECUTE ON FUNCTION iam_v2.p5_begin_controlled_operation(text) TO svc_scd;
 
 -- ---------------------------------------------------------------------------
@@ -340,9 +343,8 @@ GRANT SELECT, INSERT, UPDATE ON iam_v2.notification_provider_secret_generations 
 GRANT SELECT, INSERT, DELETE ON iam_v2.otp_device_bindings TO svc_scd;
 
 -- ---- 0111: the temporary verification window an issued email code earns ---------------------------------
--- scd opens, meters and ends the windows and restores the kernel from the live rows; the Admin Console reads
--- them for reporting and never writes one.
-GRANT SELECT, INSERT, UPDATE ON iam_v2.verification_access_grants TO svc_scd;
+-- REMOVED with the email code it served (cmd/scd/temp_access_admin.go): the history rows are kept and nothing
+-- reads or writes them, so scd holds no privilege on verification_access_grants any more (audit B-7, migration 0124).
 
 -- ---- 0113: staff may clear a window history, and read a live code -------------------------------------
 -- scd seals a copy of each sent code, opens it for an operator holding the code-reveal permission, and deletes

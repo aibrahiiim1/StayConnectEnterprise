@@ -94,12 +94,20 @@ GRANT INSERT, SELECT ON iam_v2.guest_access_accounts TO svc_edged;
 -- reset, lockout clear) and DELETE (revoke) on the credential itself.
 GRANT UPDATE, DELETE ON iam_v2.guest_access_accounts TO svc_edged;
 
--- Disconnect ends the account's live IAM-v2 sessions and the list/get views
--- report how many devices are currently online for it. Read-only on
--- entitlements: edged resolves which entitlement belongs to the account but
--- never alters the grant itself.
-GRANT SELECT, UPDATE ON iam_v2.sessions     TO svc_edged;
-GRANT SELECT         ON iam_v2.entitlements TO svc_edged;
+-- The list/get views report how many devices are currently online for an
+-- account. Read-only on entitlements: edged resolves which entitlement belongs to
+-- the account but never alters the grant itself.
+--
+-- ONE COLUMN of sessions, not the table (audit B-7, migration 0124). Disconnect no
+-- longer writes the row -- it asks scd (POST /v1/sessions/revoke), which withdraws
+-- enforcement and ends the session through end_session_enforcement. The only
+-- session write left in edged is the cross-PMS transfer (internal/transfer), which
+-- moves a live session onto the destination entitlement: `SET entitlement_id`.
+-- A table-wide UPDATE let edged rewrite a session's state, addressing and usage
+-- totals as well.
+GRANT SELECT                   ON iam_v2.sessions     TO svc_edged;
+GRANT UPDATE (entitlement_id)  ON iam_v2.sessions     TO svc_edged; -- transfer re-points a live session
+GRANT SELECT                   ON iam_v2.entitlements TO svc_edged;
 
 -- ---------------------------------------------------------------------------
 -- D32: the grace POLICY path (Hotel Admin controls policy only)

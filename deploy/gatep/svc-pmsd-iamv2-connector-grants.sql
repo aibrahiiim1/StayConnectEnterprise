@@ -96,7 +96,11 @@ GRANT SELECT,INSERT,UPDATE ON iam_v2.stay_guests                       TO svc_pm
 -- This and site_checkout_grace_config are the two places where UPDATE means "may lock", not "may write".
 -- Both were missed by the pre-flight rehearsal because it issued plain SELECTs; both then failed on real
 -- checkouts, mid-transaction, leaving the GO PENDING and the ordered stream stalled behind it.
-GRANT SELECT,INSERT,UPDATE ON iam_v2.entitlements                      TO svc_pmsd;
+-- Since audit B-7 (migration 0124) the lock is granted as what it is: UPDATE on the ONE column status, which a
+-- row lock needs and the controlled-writer guard refuses to change outside apply_entitlement_transition. A
+-- table-wide UPDATE also let pmsd rewrite every other term of the grant -- the window, the quota, the plan.
+GRANT SELECT,INSERT        ON iam_v2.entitlements                      TO svc_pmsd;
+GRANT UPDATE (status)      ON iam_v2.entitlements                      TO svc_pmsd; -- row lock only
 GRANT SELECT,INSERT,UPDATE ON iam_v2.entitlement_devices               TO svc_pmsd;
 GRANT SELECT,INSERT,UPDATE ON iam_v2.entitlement_device_authorizations TO svc_pmsd; -- capability-scoped: device_auth
 GRANT SELECT,INSERT        ON iam_v2.entitlement_boundary_watermarks   TO svc_pmsd; -- capability-scoped: checkout_conversion
@@ -112,7 +116,11 @@ GRANT SELECT,INSERT        ON iam_v2.purchases                         TO svc_pm
 -- lifecycle; the conversion writes state/ended/end_reason on an already-active session, which the guard
 -- classifies as unchanged and permits. A pmsd that tried to move usage totals or promote a session out of
 -- PENDING_ENFORCEMENT would still be refused by the trigger, holding this grant or not.
-GRANT SELECT,UPDATE        ON iam_v2.sessions                          TO svc_pmsd;
+--
+-- Column-level since audit B-7 (migration 0124): exactly the three columns the conversion sets
+-- (internal/checkout revokeAtBoundary) -- which also lets `SELECT ... FOR UPDATE OF s` take its row lock.
+GRANT SELECT               ON iam_v2.sessions                          TO svc_pmsd;
+GRANT UPDATE (state, ended, end_reason) ON iam_v2.sessions             TO svc_pmsd;
 
 -- Read-only inputs the conversion consults to decide the boundary and what grace, if any, it may grant.
 --
@@ -266,15 +274,11 @@ END $$;
 -- generation. edged's two call sites both pass false and there is deliberately no apply route.
 GRANT EXECUTE ON FUNCTION iam_v2.pms_roster_reconcile(uuid, uuid, uuid, bigint, text, boolean, text)            TO svc_pmsd;
 GRANT EXECUTE ON FUNCTION iam_v2.pms_record_resync_coverage(uuid, uuid, uuid, bigint, text[], integer, integer, integer) TO svc_pmsd;
-GRANT EXECUTE ON FUNCTION iam_v2.pms_roster_of_generation(uuid, uuid, uuid, bigint)                             TO svc_pmsd;
-GRANT EXECUTE ON FUNCTION iam_v2.pms_known_room_inventory(uuid, uuid, uuid, bigint, integer)                    TO svc_pmsd;
 GRANT EXECUTE ON FUNCTION iam_v2.pms_connection_settings_get(uuid, uuid, uuid)                                  TO svc_pmsd;
-GRANT EXECUTE ON FUNCTION iam_v2.pms_reconciliation_settings_get(uuid, uuid)                                    TO svc_pmsd;
-
--- The two reads behind the coverage evidence. SELECT only: the coverage rows are written through
--- pms_record_resync_coverage above, never by a direct INSERT, so the connector needs no write here.
-GRANT SELECT ON iam_v2.pms_resync_coverage TO svc_pmsd;
-GRANT SELECT ON iam_v2.pms_room_inventory  TO svc_pmsd;
+-- NOT granted any more (audit B-7, migration 0124): pms_roster_of_generation, pms_known_room_inventory and
+-- pms_reconciliation_settings_get, and SELECT on pms_resync_coverage and pms_room_inventory. internal/pmsd calls
+-- exactly the three above (pg.go: record coverage, reconcile, connection settings); pms_roster_reconcile is a
+-- definer and reads the roster, the inventory, the coverage and its settings as its owner.
 
 -- ROOM CHARGE ON THE ONE FIAS LINK (migration 0098, decision D45). pmsd carries a posting command only after
 -- this read-only definer confirms a SENDING attempt with the same interface, P# and SHA-256. pmsd holds no
@@ -287,5 +291,14 @@ GRANT EXECUTE ON FUNCTION iam_v2.p4_financial_resync_due(uuid,uuid,uuid) TO svc_
 -- 0123 (audit H-8, H-15): whether a DRAINING connection still has room charges to finish (wind down keeps the
 -- link while it does), and the bounded sweep that records review messages expired by the site's expiry setting
 -- (off by default; only messages received after it was switched on). Both read-only or append-only definers.
-GRANT EXECUTE ON FUNCTION iam_v2.pms_interface_has_undrained_postings(uuid, uuid, uuid) TO svc_pmsd;
-GRANT EXECUTE ON FUNCTION iam_v2.pms_review_expire_due(uuid, uuid, integer)            TO svc_pmsd;
+-- GUARDED on 0123 being present (audit B-20), so the reconcile runs on a database rolled back below it.
+DO $g0123p$
+BEGIN
+  IF to_regprocedure('iam_v2.pms_review_expire_due(uuid,uuid,integer)') IS NULL
+     OR to_regprocedure('iam_v2.pms_interface_has_undrained_postings(uuid,uuid,uuid)') IS NULL THEN
+    RAISE NOTICE 'migration 0123 is not applied -- PMS wind-down and review-expiry grants skipped';
+    RETURN;
+  END IF;
+  GRANT EXECUTE ON FUNCTION iam_v2.pms_interface_has_undrained_postings(uuid, uuid, uuid) TO svc_pmsd;
+  GRANT EXECUTE ON FUNCTION iam_v2.pms_review_expire_due(uuid, uuid, integer)            TO svc_pmsd;
+END $g0123p$;
