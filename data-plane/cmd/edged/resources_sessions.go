@@ -381,9 +381,13 @@ func (s *server) getGuestSession(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	var e edgeSessionRow
+	if !uuidRe.MatchString(id) {
+		jsonErr(w, http.StatusNotFound, "not_found", "session not found")
+		return
+	}
 	err := scanEdgeSession(s.db.QueryRow(ctx,
-		`SELECT `+sessionCols+` `+sessionFrom+` WHERE s.id = $1 AND s.tenant_id = $2`,
-		id, s.tenantID), &e)
+		`SELECT `+sessionCols+` `+sessionFrom+` WHERE s.id = $1 AND s.tenant_id = $2 AND s.site_id = $3`,
+		id, s.tenantID, s.siteID), &e)
 	if isNoRows(err) {
 		jsonErr(w, http.StatusNotFound, "not_found", "session not found")
 		return
@@ -400,10 +404,16 @@ func (s *server) disconnectGuestSession(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 
-	var ip, state string
+	// The id is checked before it reaches SQL or scd, and the session must be THIS site's.
+	if !uuidRe.MatchString(id) {
+		jsonErr(w, http.StatusNotFound, "not_found", "session not found")
+		return
+	}
+	var ip *string
+	var state string
 	err := s.db.QueryRow(ctx,
-		`SELECT host(ip), state FROM iam_v2.sessions WHERE id = $1 AND tenant_id = $2`,
-		id, s.tenantID).Scan(&ip, &state)
+		`SELECT host(ip), state FROM iam_v2.sessions WHERE id = $1 AND tenant_id = $2 AND site_id = $3`,
+		id, s.tenantID, s.siteID).Scan(&ip, &state)
 	if isNoRows(err) {
 		jsonErr(w, http.StatusNotFound, "not_found", "session not found")
 		return
@@ -412,13 +422,23 @@ func (s *server) disconnectGuestSession(w http.ResponseWriter, r *http.Request) 
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
 	}
-	if state != "active" {
-		jsonErr(w, http.StatusConflict, "conflict", "session is "+state+"; only active sessions can be disconnected")
+	// A session still being switched on (PENDING_ENFORCEMENT) is disconnected like an active one: scd's revoke
+	// ends both, which is also what an account's Disconnect does. An ended one says so in words.
+	switch {
+	case state == "ended":
+		jsonErr(w, http.StatusConflict, "already_ended", "this session has already ended; the device is not online on it")
+		return
+	case state != "active" && state != "PENDING_ENFORCEMENT":
+		jsonErr(w, http.StatusConflict, "conflict", "this session cannot be disconnected in its current state ("+state+")")
+		return
+	case ip == nil || *ip == "":
+		jsonErr(w, http.StatusConflict, "no_address",
+			"this session has no recorded address, so its network access cannot be withdrawn from here")
 		return
 	}
 
 	st, raw, err := s.scd.call(r.Context(), http.MethodPost, "/v1/sessions/revoke",
-		map[string]string{"ip": ip, "reason": "admin"})
+		map[string]string{"ip": *ip, "reason": "admin"})
 	if err != nil {
 		jsonErr(w, http.StatusBadGateway, "scd_unreachable", err.Error())
 		return
@@ -430,6 +450,6 @@ func (s *server) disconnectGuestSession(w http.ResponseWriter, r *http.Request) 
 		_, _ = w.Write(raw)
 		return
 	}
-	s.audit(r, "session.disconnected", "session", id, map[string]any{"ip": ip})
+	s.audit(r, "session.disconnected", "session", id, map[string]any{"ip": *ip, "state": state})
 	writeJSON(w, http.StatusOK, map[string]string{"session_id": id, "status": "disconnected"})
 }

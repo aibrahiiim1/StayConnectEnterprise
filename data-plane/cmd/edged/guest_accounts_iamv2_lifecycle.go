@@ -700,6 +700,11 @@ const scdResendVerificationPath = "/v1/admin/accounts/%s/resend-verification"
 
 func (s *server) resendGuestAccountVerification(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	// Checked before it is placed in scd's path.
+	if !uuidRe.MatchString(id) {
+		jsonErr(w, http.StatusNotFound, "not_found", "account not found")
+		return
+	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	var username string

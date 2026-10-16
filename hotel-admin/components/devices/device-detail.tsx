@@ -9,6 +9,7 @@
 //   Prepare for a test     all three, for a device reused in a sign-in test.
 // None deletes a record, resets a quota, or lets the device take a one-time free package again.
 
+import { reasonOk as reasonWithinBounds } from "@/lib/reason";
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError, type ClientDeviceDetail, type DevicePackage } from "@/lib/api";
 import {
@@ -115,7 +116,7 @@ export function DeviceDetailDialog({ deviceId, mayWrite, onClose, onChanged }: {
 
   const d = data?.device;
   const action = pending ? ACTIONS[pending.kind] : null;
-  const reasonOk = !action?.reason || (reason.trim().length >= 4 && reason.trim().length <= 500);
+  const reasonOk = !action?.reason || reasonWithinBounds(reason);
 
   return (
     <Dialog open={deviceId !== null} onOpenChange={(v) => !v && !busy && onClose()}>

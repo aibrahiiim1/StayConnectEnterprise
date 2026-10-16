@@ -288,6 +288,10 @@ var rolePerms = map[string]map[string]perm{
 		// be able to make "five" into "twenty" for everybody as the quickest way to help one person.
 		"guest-signin-restrictions": permWrite, "guest-signin-protection": permRead,
 		"guest-accounts": permWrite, "sessions": permWrite,
+		// THE USAGE EXPLORER is the sessions this role already reads and disconnects, summed: "how much did room
+		// 412 use" is a desk question. It was in the console's table and not here, so the menu offered a screen
+		// that answered 403 (audit L-2); the documented intent ("read-only elsewhere") is the grant.
+		"usage": permRead,
 		// Phase 3 (DARK): front desk reads stays/events and triages alerts, but never edits the grace policy.
 		"pms-stays": permRead, "pms-events": permRead, "operational-alerts": permWrite, "checkout-grace": permRead,
 		// Read-only on the integration: the front desk needs to see whether the PMS is reachable before
@@ -325,7 +329,7 @@ var rolePerms = map[string]map[string]perm{
 		// Same desk, same conversation with the guest, same need.
 		"guest-signin-attempts": permRead, "guest-signin-credentials": permRead,
 		"guest-signin-restrictions": permWrite, "guest-signin-protection": permRead,
-		"guest-accounts": permWrite, "sessions": permWrite,
+		"guest-accounts": permWrite, "sessions": permWrite, "usage": permRead,
 		"pms-stays": permRead, "pms-events": permRead, "operational-alerts": permWrite, "checkout-grace": permRead,
 		// Read-only on the integration: the front desk needs to see whether the PMS is reachable before
 		// telling a guest to try again, but must not be able to publish or rotate anything.
@@ -366,6 +370,10 @@ var rolePerms = map[string]map[string]perm{
 		"financial-ops":    permWrite,
 		"sessions":         permRead, "reports": permRead, "audit": permRead, "license": permRead,
 		"diagnostics": permRead,
+		// Read-only on everything that is not money is this role's documented semantic: the usage behind a
+		// disputed charge, and the packages and their prices that the Payment methods screen lists. Both were
+		// missing, so the menu offered Usage explorer and Payment methods and both answered 403 (audit L-2).
+		"usage": permRead, "commercial-packages": permRead,
 		// A voucher is a commercial instrument, so this role reads the list -- and reads no code and
 		// cancels nothing, which is its established relationship with everything that is not money.
 		"vouchers": permRead,

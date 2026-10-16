@@ -47,6 +47,8 @@ the keys are unchanged, [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md)). Legen
 | voucher-code-settings | W | **W** | R | R | R | – | R |
 | account-password-settings | W | **W** | R | R | R | – | R |
 | sessions (incl. disconnect) | W | W | **W** | **W** | – | R | R |
+| usage | W | R | **R** | **R** | – | **R** | R |
+| commercial-packages | W | **W** | – | – | – | **R** | R |
 | guests | W | W | **W** | **W** | – | R | R |
 | pms-providers (+test/cache/health) | W | W | R | R | – | R | R |
 | auth-methods | W | W | R | R | – | R | R |
@@ -71,6 +73,14 @@ the keys are unchanged, [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md)). Legen
 | audit | W(R) | R | R | R | – | R | R |
 | reports | R | R | R | R | – | R | R |
 | backups (view/trigger) | W | W | R | R | – | R | R |
+
+**usage** is the Usage explorer: the sessions a role already reads, summed per room, account, voucher or
+device. It is read-only for every role. **commercial-packages** is Internet packages and Service plans; the
+Payment methods screen also lists packages and their prices, which is why the payments role reads it. Both rows
+were added on 2026-10-16 when the Admin Console's role table was found to have drifted from edged's (it offered
+Usage explorer to three roles edged refused, and hid the package editors from the Site IT manager). The console
+no longer keeps its own copy: `hotel-admin/lib/role-permissions.generated.json` is generated from edged's
+`rolePerms` and a test fails when the two differ.
 
 **portal-https** (`portal_https.read` = R, `portal_https.manage` = W) is the Portal HTTPS screen under
 Networking ([ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md](architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md)

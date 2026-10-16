@@ -41,7 +41,7 @@ states) is defined once in the [OneGate design system](../../design-system/READM
   refused. The appliance enforces the same rules on every request. The role for each page is listed below;
   a summary table is at the end of this document.
 - **"Not enabled on this appliance".** Some features are switched on per appliance (for example the Hotel
-  charge pages, Post-stay access, Online-time budgets or Client devices). A switched-off feature is left out of the menu;
+  charge pages, Post-stay access or Online-time budgets). A switched-off feature is left out of the menu;
   if you open it by address, the page says **"Not enabled on this appliance"**, explains that this is a
   configuration and not a fault, and states that client internet, sign-in, the PMS connection, sessions and
   accounting are unaffected. Turning a feature on is a deployment decision for Semantics support, not an
@@ -209,18 +209,26 @@ recorded.
 A username and password a client can sign in with, instead of a room number or voucher. Which package the
 client may take is decided by the rules on Internet packages.
 
-- **Shows:** tiles *Accounts*, *Able to sign in*, *Devices online*, *Locked out*; the switch **Offer
-  username-and-password sign-in** on the portal; search; table Account, Devices (active of max, *At the
-  limit*), Status, Valid until, Last sign-in, Sign-ins.
+- **Shows:** tiles *Accounts*, *Able to sign in*, *Devices online*; the switch **Offer
+  username-and-password sign-in** on the portal (part of Sign-in methods: only the roles that may change sign-in
+  methods can flip it; it governs the accounts staff create, while self-service Email accounts follow the Email
+  accounts switch); search; table Account, Devices (active of max, *At the limit*), Status, Valid until, Last
+  sign-in, Sign-ins.
 - **Add account:** Username (what the client types; one character is allowed), Name (staff reference only),
   Password (typed, with show/hide and a soft warning for short passwords, or generated), Valid from, Valid
   until, Notes.
-- **Row actions:** **Edit**, **Password** (type or generate a new one; optionally *Disconnect this account's
-  devices now*), **Disable / Enable**, **Disconnect** (when devices are online — confirmation dialog),
-  **Delete** (confirmation dialog that suggests Disable instead).
+- **Row actions:** **Edit** (emptying Name, Notes or a date clears it; *Valid until* must be later than *Valid
+  from*), **Password** (type or generate a new one; optionally *Disconnect this account's devices now*),
+  **Disable** (confirmation dialog: the devices online are disconnected and the package is paused) / **Enable**
+  (resumes a package Disable paused, if it has not ended — its end date does not move while paused),
+  **Disconnect** (when devices are online — confirmation dialog), **Remove** (confirmation dialog with your
+  password; suggests Disable instead). A removed account cannot be enabled, renamed or edited again.
+- **Manage:** verification state, packages and their devices. **Mark email verified** asks for a reason and your
+  password and is offered only to roles that may vouch for an address (Site admin, Site IT manager, Client
+  services). **Device** opens the device view for roles that can see Devices; its actions need Active sessions
+  write.
 - **One-time reveal:** after creating an account or setting a password, *"Password for {username}"* is shown
-  once with **Copy** and **I have it**. It cannot be looked up again. No reason or password confirmation is
-  asked on this page.
+  once with **Copy** and **I have it**. It cannot be looked up again.
 - **Who can change it:** Site admin, Site IT manager, Client services, Client relations, Voucher operator.
   **Read-only:** Site viewer.
 
@@ -252,21 +260,21 @@ accounting samples behind them.
   for the heaviest users; the table shows each source's downloaded, uploaded and total data and its
   allowance. Email, phone and social sign-ins are not listed as sources; the devices that used them still
   appear under **By device**. Room and stay detail appears only for a Hotel room/stay.
+- **Period:** *Last 7 days*, *Last 30 days* (default), *Last 90 days*, *Last 12 months* or two dates. Every total
+  on the page — the list, a source's detail and a device — covers that period; the allowance is the whole
+  package's, and it is the allowance the appliance enforces (the package's own, else its service plan's).
 - **By device:** look up a MAC address; a note reminds you that a device is not a person.
 - **Drill-down:** the source's totals and allowance, the devices used, the sessions, and **Show evidence**
-  to load the raw samples, with their own total next to the session's. Read-only.
+  to load the raw samples, with their own total next to the session's (the first 2,000 of a very long session,
+  said as such). Read-only.
 - **Who can see it:** Site admin, Site IT manager, Client services, Client relations, Payments operator, Site
   viewer.
 
-### Client devices — `/guest-device-self-service`
-Whether a signed-in client may remove one of their own devices that is not connected, to free its place for
-another, from the portal's *"You're online"* page.
-
-- **Shows:** two tiles kept separate — **This site offers it** (On/Off) and **Available in this
-  release** (Yes/Not yet) — and a sentence explaining what clients can do with that combination.
-- **Switch on / Switch off** — an inline confirmation with an **optional reason**.
-- **Who can change it:** Site admin, Site IT manager. **Read-only:** Client services, Client relations,
-  Payments operator, Site viewer. May be *Not enabled on this appliance*.
+### Client devices — retired
+The former *Client devices* screen (`/guest-device-self-service`) is no longer in the menu (2026-10-16). Its switch
+controlled nothing since clients manage their devices under *Your devices* on the portal, which is always on.
+Client devices are managed on **Devices**, where the number of device changes a client may make per day is set;
+an old bookmark to the retired address says so and links there.
 
 ### Online-time budgets — `/online-time`
 For packages sold as an amount of connected time: how much time is left. Time counts down only while a
@@ -291,9 +299,12 @@ disconnect clients already online.
   to the page where what the guest types is chosen (see **Hotel → Room sign-in**); **Email code** and **SMS code** (*Not available* until
   a sender exists and is switched on under Email & SMS); **Social login** (a checkbox per configured
   provider).
-- **Client sign-in protection:** *Maximum failed attempts*, *Observation window*, *Wait after too many
-  attempts* — each with its default and allowed range — the last change (who, when, from → to), **Save** and
-  **Discard**.
+- **Client sign-in protection** (counts wrong Room sign-in details only): *Maximum failed attempts*,
+  *Observation window*, *Wait after too many attempts* — each with its default and allowed range — the last
+  change (who, when, from → to, why), **Save** (asks for a reason and your password) and **Discard**.
+- A code method whose sender is missing shows *Not available* and cannot be switched on, but can always be
+  switched off. A *Test only* sender does not count as a sender in the installed console. An identity provider
+  whose switch is on but whose application is gone is still listed, so it can be switched off.
 - Which methods can be offered is also limited by the license.
 - **Who can change it:**
   - Methods: Site admin, Site IT manager. **Read-only:** Client services, Client relations, Site viewer.
@@ -746,14 +757,13 @@ W = can change, R = read-only, — = not shown. The appliance enforces these on 
 | Page | Site admin | Site IT manager | Client services | Client relations | Voucher operator | Payments operator | Site viewer |
 |---|---|---|---|---|---|---|---|
 | Overview | R | R | R | R | R | R | R |
-| Internet packages, Service plans | W | — | — | — | — | — | R |
+| Internet packages, Service plans | W | W | — | — | — | R | R |
 | Vouchers (cards) | W | W | W | W | W | R | R |
 | Vouchers (show / export codes) | W | — | W | W | W | — | — |
 | Vouchers (code format, keys) | W | W | R | R | R | — | R |
 | Client accounts | W | W | W | W | W | — | R |
 | Active sessions | W | W | W | W | R | R | R |
 | Usage explorer | R | R | R | R | — | R | R |
-| Client devices | W | W | R | R | — | R | R |
 | Online-time budgets | R | R | R | R | R | R | R |
 | Sign-in methods | W | W | R | R | — | — | R |
 | Sign-in protection thresholds | W | W | R | R | — | — | R |
@@ -795,6 +805,9 @@ W = can change, R = read-only, — = not shown. The appliance enforces these on 
 | Retire a code key | Vouchers → Code security | Reason + password |
 | Issue vouchers | Vouchers | One-time reveal of the codes (no password) |
 | Create an account / set a password | Client accounts | One-time reveal of the password |
+| Remove a client account | Client accounts | Password |
+| Mark an email address verified | Client accounts → Manage | Reason + password |
+| Change client sign-in protection | Sign-in methods | Reason + password |
 | Reset a post-stay PIN | Post-stay access | Reason + password, then one-time reveal |
 | End post-stay access | Post-stay access | Reason + type `REVOKE` + password |
 | Put a PMS configuration live | PMS connection | Reason (from a list) + password |

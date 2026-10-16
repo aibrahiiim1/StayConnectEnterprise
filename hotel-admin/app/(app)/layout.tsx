@@ -12,6 +12,8 @@ import { api } from "@/lib/api";
 import { useSidebarCollapsed } from "@/lib/sidebar-state";
 import { useCapabilities, surfaceAvailable } from "@/lib/capabilities";
 import { SurfaceNotEnabled } from "@/components/surface-not-enabled";
+import { NotPermitted } from "@/components/not-permitted";
+import { canRead } from "@/lib/roles";
 import { ToastProvider } from "@/components/ui/toast";
 import { WhoamiProvider, useWhoamiSession } from "@/lib/whoami-context";
 
@@ -105,6 +107,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (!me) return null;
 
   const roles = me.roles ?? [];
+  // WHETHER THE OPERATOR'S ROLE MAY READ THE SCREEN THEY ARE ON (audit L-2). The menu hides it; a URL or a
+  // bookmark still reaches it, and the page used to open as a shell of 403 banners. The same table the menu
+  // uses decides, and the page does not mount, so it sends nothing that would be refused.
+  const activeItem = NAV_ITEMS.find((i) => i.href === activeNavHref(pathname));
+  const notPermitted = activeItem && !canRead(activeItem.resource, roles) ? activeItem.label : null;
 
   return (
     // THE SIDEBAR "JUMPING BACK TO THE TOP" WAS THE WINDOW SCROLLING, NOT THE MENU MOVING.
@@ -208,7 +215,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           */}
           <main ref={mainRef} className="min-w-0 flex-1 overflow-y-auto">
             <div className="mx-auto w-full max-w-[104rem] px-4 py-5 sm:px-6 sm:py-6 lg:px-8">
-              {!capsKnown ? <Skeleton className="h-64" /> : unavailable ? <SurfaceNotEnabled label={unavailable} /> : children}
+              {!capsKnown ? <Skeleton className="h-64" />
+                : unavailable ? <SurfaceNotEnabled label={unavailable} />
+                : notPermitted ? <NotPermitted label={notPermitted} />
+                : children}
             </div>
           </main>
         </div>

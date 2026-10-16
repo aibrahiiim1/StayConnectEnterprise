@@ -96,6 +96,9 @@ type usageStayRow struct {
 	EndReason     string      `json:"end_reason,omitempty"`
 }
 
+// usageSearchHeader carries the access-source search text (see listUsageSources).
+const usageSearchHeader = "X-Usage-Search"
+
 // parseWindow reads an explicit from/to, defaulting to the last 30 days.
 //
 // A DISPUTE HAS A PERIOD, and it is usually not "all time". Defaulting to everything would make the first
@@ -719,7 +722,16 @@ func (s *server) listUsageSources(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	q := likeEscape(normaliseSourceQuery(r.URL.Query().Get("q")))
+	// THE SEARCH TEXT TRAVELS IN A HEADER (X-Usage-Search): it is a username or a room number, and edged logs
+	// request lines. ?q= is still read for an older console.
+	raw, ok := readSearch(w, r, usageSearchHeader)
+	if !ok {
+		return
+	}
+	if raw == "" {
+		raw = r.URL.Query().Get("q")
+	}
+	q := likeEscape(normaliseSourceQuery(raw))
 
 	rows, err := s.db.Query(r.Context(), usageSourceListSQL(pg.Fetch(), pg.Offset()),
 		s.tenantID, s.siteID, from, to, kind, q)

@@ -22,6 +22,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { canRead } from "@/lib/roles";
+import { useOperatorRoles } from "@/lib/whoami-context";
 import { PageShell, PageHeader, Toolbar } from "@/components/ui/page";
 import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -130,11 +132,17 @@ export default function ActivityPage() {
   // one -- nobody scanning for "who changed the retention policy" can read a uuid. The exact id stays in the
   // expandable record; this is what puts a name on the summary line. Failure is silent on purpose: an
   // activity trail that would not render because a second request failed is worse than one showing ids.
+  //
+  // ONLY FOR A ROLE THAT MAY READ THE DIRECTORY. Every other role was refused (403) on every visit -- a console
+  // error on load for each of them (audit L-2) -- and sees the ids, which is all it may see.
+  const roles = useOperatorRoles();
+  const mayReadOperators = roles !== null && canRead("operators", roles);
   useEffect(() => {
+    if (!mayReadOperators) return;
     api.get<{ data: { id: string; display_name?: string; email?: string }[] }>("/operators")
       .then((r) => setNames(new Map((r.data ?? []).map((o) => [o.id, o.display_name || o.email || o.id]))))
       .catch(() => {});
-  }, []);
+  }, [mayReadOperators]);
 
   // Counts per filter, over the WHOLE period -- the server counted every entry, not the page on screen. Read
   // straight from the current answer when there is one, so the counts arrive with the rows rather than a

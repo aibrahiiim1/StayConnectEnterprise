@@ -53,7 +53,7 @@ const RULE_KINDS: { type: ClientGroupRuleType; label: string; assurance: string;
     type: "EMAIL_DOMAIN",
     label: "Verified email address domain",
     assurance: "Verified email address",
-    hint: "Suitable for commercial benefits such as partner pricing. Anyone who can receive mail at the domain qualifies. The address is verified by a one-time code, or by a Google, Apple or Microsoft sign-in that asserts it.",
+    hint: "Suitable for commercial benefits such as partner pricing. Anyone who can receive mail at the domain qualifies. The address must be proven: a verified Email account (the client confirmed it from the verification email), or a Google, Apple or Microsoft sign-in that asserts it. An unverified Email account, and an account staff created, are not placed in the group.",
   },
   {
     type: "IDP_TENANT",

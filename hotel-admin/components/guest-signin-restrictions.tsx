@@ -14,6 +14,7 @@
 // the confirmation, because "release this guest" is exactly the phrase a desk would expect to mean "let them
 // in", and the difference matters when the person at the desk is not the person who was guessing.
 
+import { REASON_HINT, REASON_MAX_CHARS, reasonOk } from "@/lib/reason";
 import { useCallback, useEffect, useState } from "react";
 import { ShieldCheck, Timer } from "lucide-react";
 import { api, GuestSignInRestriction } from "@/lib/api";
@@ -208,7 +209,7 @@ export function ActiveRestrictions({
         busy={releasing}
         busyLabel="Releasing…"
         error={releaseErr}
-        disabled={reason.trim().length < 3}
+        disabled={!reasonOk(reason)}
         onSubmit={release}
       >
         {target && (
@@ -232,12 +233,12 @@ export function ActiveRestrictions({
             <Field
               label="Reason"
               required
-              hint="Recorded with your name. At least 3 characters. Who released the restriction, which device, when and why are all recorded."
+              hint={`${REASON_HINT} Who released the restriction, which device, when and why are all recorded.`}
             >
               <Input
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
-                maxLength={200}
+                maxLength={REASON_MAX_CHARS}
                 placeholder="e.g. guest at the desk, identity confirmed from their passport"
               />
             </Field>

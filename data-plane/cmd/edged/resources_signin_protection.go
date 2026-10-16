@@ -177,12 +177,6 @@ func (s *server) putSignInProtection(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	reason, ok := reasonText(in.Reason)
-	if !ok {
-		jsonErr(w, http.StatusBadRequest, "reason_required", reasonBoundsMessage)
-		return
-	}
-	in.Reason = reason
 	p := signinattempt.Policy{
 		MaxFailedAttempts:  in.MaxFailedAttempts,
 		WindowSeconds:      in.ObservationWindowSeconds,
@@ -195,6 +189,12 @@ func (s *server) putSignInProtection(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "invalid_policy", err.Error())
 		return
 	}
+	reason, ok := reasonText(in.Reason)
+	if !ok {
+		jsonErr(w, http.StatusBadRequest, "reason_required", reasonBoundsMessage)
+		return
+	}
+	in.Reason = reason
 
 	if _, ok := s.stepUpActor(w, r, in.Password); !ok {
 		return

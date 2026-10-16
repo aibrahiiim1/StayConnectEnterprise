@@ -463,6 +463,11 @@ func (s *server) revokeVoucher(w http.ResponseWriter, r *http.Request) {
 		label = sess.Email
 	}
 	id := chi.URLParam(r, "id")
+	// Checked before it is placed in scd's path: an id is a uuid, never a path fragment.
+	if !uuidRe.MatchString(id) {
+		jsonErr(w, http.StatusNotFound, "not_found", "voucher not found")
+		return
+	}
 	st, resp, err := s.scd.call(r.Context(), http.MethodPost, "/v1/vouchers/"+id+"/revoke",
 		map[string]any{"operator_id": actor, "operator_label": label, "reason": in.Reason})
 	if err != nil {
@@ -534,6 +539,10 @@ func (s *server) revealVoucherCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
+	if !uuidRe.MatchString(id) {
+		jsonErr(w, http.StatusNotFound, "not_found", "voucher not found")
+		return
+	}
 	st, resp, err := s.scd.call(r.Context(), http.MethodPost, "/v1/vouchers/"+id+"/reveal",
 		map[string]any{"operator_id": actor, "operator_label": label, "reason": in.Reason})
 	if err != nil {
@@ -704,6 +713,10 @@ func (s *server) rotateVoucherKeyGeneration(w http.ResponseWriter, r *http.Reque
 		label = sess.Email
 	}
 	id := chi.URLParam(r, "id")
+	if !uuidRe.MatchString(id) {
+		jsonErr(w, http.StatusNotFound, "not_found", "key generation not found")
+		return
+	}
 	st, resp, err := s.scd.call(r.Context(), http.MethodPost,
 		"/v1/voucher-key-generations/"+id+"/supersede",
 		map[string]any{"operator_id": actor, "operator_label": label, "reason": in.Reason})
