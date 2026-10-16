@@ -17,6 +17,7 @@ import { useEffect, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
 import { Switch } from "@/components/ui/misc";
+import { Callout } from "@/components/ui/error-banner";
 import { Trash2, Plus, ChevronDown, ChevronRight } from "lucide-react";
 import { durationToSeconds } from "@/lib/units";
 import {
@@ -30,6 +31,9 @@ import {
   END_MODE_LABELS,
   RULE_TYPE_LABELS,
   buildPublishPayload,
+  SPEED_STEPS_REFUSAL,
+  tiersArePlain,
+  plainTiers,
   buildAcquisition,
   newAcquisitionForm,
   type AcquisitionForm,
@@ -201,7 +205,6 @@ export function PackageForm({
   const planHeadingID = `${ids}-plan`;
   const endHeadingID = `${ids}-end`;
   const allocHeadingID = `${ids}-alloc`;
-  const stepsHeadingID = `${ids}-steps`;
 
   const selected = plans.find((p) => p.plan_id === planID);
   // Recomputed on every render, so it follows the plan, the mode and the three numbers immediately.
@@ -238,8 +241,6 @@ export function PackageForm({
 
   const setRule = (i: number, patch: Partial<EligibilityRuleForm>) =>
     setRules((rs) => rs.map((r, j) => (j === i ? ({ ...r, ...patch } as EligibilityRuleForm) : r)));
-  const setTier = (i: number, patch: Partial<GrantTierForm>) =>
-    setTiers((ts) => ts.map((t, j) => (j === i ? { ...t, ...patch } : t)));
 
   // THE AUDIENCE AND THE FREE ALLOWANCE ARE RULES LIKE ANY OTHER -- one CLIENT_GROUP rule and one
   // forbids-prior PRIOR_PURCHASE rule in the same list the generic rows edit. Each dedicated control finds its
@@ -700,9 +701,22 @@ export function PackageForm({
         )}
       </div>
 
-      {/* ADVANCED. Sale window and speed steps are real controls and stay available, but they are not part of
-          creating an ordinary package, and putting them in the main flow is what made this form feel like
-          configuration rather than administration. */}
+      {/* SPEED STEPS WERE NEVER APPLIED (audit O-5): clients always got the service plan's speed. They are no
+          longer offered. A package that still carries them says so, and one click replaces them with the single
+          plain step every package has; the appliance refuses to save them otherwise. */}
+      {!tiersArePlain(tiers) && (
+        <div data-testid="speed-steps-notice">
+          <Callout tone="warning" title="Speed steps are not applied">
+            <p>{SPEED_STEPS_REFUSAL}</p>
+            <Button type="button" variant="outline" size="sm" className="mt-2" data-testid="remove-speed-steps"
+              onClick={() => setTiers((ts) => plainTiers(ts))}>Remove speed steps</Button>
+          </Callout>
+        </div>
+      )}
+
+      {/* ADVANCED. The sale window is a real control and stays available, but it is not part of creating an
+          ordinary package, and putting it in the main flow is what made this form feel like configuration
+          rather than administration. */}
       <div>
         <button type="button" className="text-sm text-muted flex items-center gap-1"
           onClick={() => setAdvanced((v) => !v)} aria-expanded={advanced}>
@@ -713,23 +727,6 @@ export function PackageForm({
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Offer from"><Input data-testid="visible-from" type="datetime-local" value={visFrom} onChange={(e) => setVisFrom(e.target.value)} /></Field>
               <Field label="Offer until"><Input data-testid="visible-until" type="datetime-local" value={visUntil} onChange={(e) => setVisUntil(e.target.value)} /></Field>
-            </div>
-            <div role="group" aria-labelledby={stepsHeadingID}>
-              <div className="flex items-center justify-between mb-1">
-                <span id={stepsHeadingID} className="block text-label text-foreground">Speed steps (applied in order, kbps)</span>
-                <Button type="button" variant="ghost" onClick={() => setTiers((ts) => [...ts, { order: (ts.length + 1) * 10 }])}><Plus size={14} /> Add step</Button>
-              </div>
-              {tiers.map((t, i) => (
-                <div key={i} className="flex gap-2 items-center mb-2" data-testid={`tier-${i}`}>
-                  <Input data-testid={`tier-order-${i}`} aria-label={`Step ${i + 1}: order`} type="number" className="w-24" value={String(t.order)} onChange={(e) => setTier(i, { order: e.target.value })} />
-                  <Input data-testid={`tier-down-${i}`} aria-label={`Step ${i + 1}: download kbps`} type="number" min={0} placeholder="down kbps" value={String(t.down_kbps ?? "")} onChange={(e) => setTier(i, { down_kbps: e.target.value })} />
-                  <Input data-testid={`tier-up-${i}`} aria-label={`Step ${i + 1}: upload kbps`} type="number" min={0} placeholder="up kbps" value={String(t.up_kbps ?? "")} onChange={(e) => setTier(i, { up_kbps: e.target.value })} />
-                  <Button type="button" variant="ghost" data-testid={`remove-tier-${i}`} aria-label={`Remove step ${i + 1}`} onClick={() => setTiers((ts) => ts.filter((_, j) => j !== i))}><Trash2 size={14} /></Button>
-                </div>
-              ))}
-              <p className="text-xs text-muted-foreground">
-                Leave a single step with no speeds unless you need different speeds for different clients.
-              </p>
             </div>
           </div>
         )}

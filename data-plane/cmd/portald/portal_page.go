@@ -737,6 +737,9 @@ type scdStatus struct {
 	TimeMode               string   `json:"time_mode"`
 	RemainingOnlineSeconds *float64 `json:"remaining_online_seconds"`
 	HardExpiry             string   `json:"hard_expiry"`
+	// OnlineTimeAllowance is scd's statement that remaining_online_seconds is a time allowance to show. It is
+	// set for the aggregate mode and, since migration 0122, for a validity-window plan with a time allowance.
+	OnlineTimeAllowance bool `json:"online_time_allowance"`
 }
 
 // onlinePageHref is the way back to "You're online": the page the guest came from, rebuilt from the two values
@@ -763,7 +766,7 @@ func (h *handler) renderStatus(w http.ResponseWriter, r *http.Request, st scdSta
 	nonce := setPortalCSP(w)
 	p := h.newGuestPage(r, nonce)
 	v := statusView{guestPage: p, BackHref: onlinePageHref(r, st.SessionID)}
-	if st.TimeMode == "AGGREGATE_ONLINE_TIME" && st.RemainingOnlineSeconds != nil {
+	if (st.TimeMode == "AGGREGATE_ONLINE_TIME" || st.OnlineTimeAllowance) && st.RemainingOnlineSeconds != nil {
 		v.HasTime = true
 		v.TimeLeft = humanSpan(p.T, time.Duration(*st.RemainingOnlineSeconds)*time.Second)
 		if v.TimeLeft == "" {

@@ -501,21 +501,19 @@ func (s *server) revoke(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "revoked"})
 }
 
-// denyAtGate is the kernel half of an operator disconnect: the address leaves the guest authorization set on its
-// ingress bridge and its shaping class goes. The session row is ended by the caller, with the caller's reason --
-// /v1/sessions/revoke by address, the Email accounts sweep and password reset by session (self_service.go).
-// Both kernel steps are best effort and logged: netd also converges the set from iam_v2.sessions, so an ended
-// session cannot stay admitted for longer than its next pass.
+// denyAtGate runs after the caller has ended the session row -- /v1/sessions/revoke by address, the Email
+// accounts sweep and password reset by session (self_service.go). It removes the address from the LEGACY
+// authorization set, best effort (netd also drains that set to empty).
+//
+// It no longer touches tc (audit B-14). The per-session class belongs to netd, the single Phase-3 shaping
+// writer: deleting it here, outside netd's inventory, dropped the guest's flows into the bridge default class
+// (unshaped, uncounted) and made netd re-create the class under a new epoch if the session was still live. The
+// Phase-3 authorization and class are torn down by netd from the ended row on its next pass, about a second.
 func (s *server) denyAtGate(ctx context.Context, ip net.IP) {
 	nc := s.resolveNetwork(ctx, ip)
 	if s.nft != nil && s.nft.client != nil {
 		if err := s.nft.Deny(ctx, nc.Bridge, ip); err != nil {
 			slog.Error("nft deny", "err", err)
-		}
-	}
-	if s.shp != nil {
-		if err := s.shp.DeleteSession(ctx, nc.Bridge, ip); err != nil {
-			slog.Warn("shape delete", "err", err)
 		}
 	}
 }
@@ -537,12 +535,16 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 		"session_id": id,
 		"active":     active,
 	}
-	// PHASE 6 (DARK by default): a guest on an aggregate package needs both of their clocks. With the flag
-	// off nothing is queried and nothing is added, so this endpoint answers byte-for-byte as it did before.
-	if s.p6cfg.AggregateTimeOn() {
-		if agg := s.aggregateStatusFor(r.Context(), id); agg != nil {
+	// A guest with an online-time budget needs both of their clocks. For the Phase-6 aggregate mode that stays
+	// behind its (DARK by default) flag, exactly as before. A VALIDITY_WINDOW plan's time allowance is enforced
+	// on every appliance since 0122, so its remaining time is answered whatever the flag says: the portal must
+	// show the same number the accrual is spending.
+	if id != "" {
+		if agg := s.aggregateStatusFor(r.Context(), id); agg != nil &&
+			(agg.TimeMode != "AGGREGATE_ONLINE_TIME" || s.p6cfg.AggregateTimeOn()) {
 			out["time_mode"] = agg.TimeMode
 			out["remaining_online_seconds"] = agg.RemainingOnlineSeconds
+			out["online_time_allowance"] = agg.OnlineTimeAllowance
 			if agg.HardExpiry != "" {
 				out["hard_expiry"] = agg.HardExpiry
 			}

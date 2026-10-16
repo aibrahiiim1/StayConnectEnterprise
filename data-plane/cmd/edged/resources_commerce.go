@@ -606,6 +606,13 @@ func (s *server) publishCommercialPackage(w http.ResponseWriter, r *http.Request
 	for _, ti := range in.GrantTiers {
 		spec.GrantTiers = append(spec.GrantTiers, iamv2.GrantTier{Order: ti.Order, Value: ti.Grant})
 	}
+	// Speed steps were shown to clients and never applied (audit O-5): an operator saving a package may give it
+	// one grant step, with no overrides. See iamv2.GrantTiersEnforceableRefusal for why this refuses rather than
+	// guessing at a threshold model.
+	if msg := iamv2.GrantTiersEnforceableRefusal(spec.GrantTiers); msg != "" {
+		jsonErr(w, http.StatusBadRequest, "validation", msg)
+		return
+	}
 	res, err := s.commerce.PublishRevision(r.Context(), spec)
 	if errors.Is(err, iamv2.ErrCodeExists) {
 		jsonErr(w, http.StatusConflict, "code_exists",

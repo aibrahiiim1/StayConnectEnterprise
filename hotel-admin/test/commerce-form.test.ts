@@ -9,6 +9,9 @@ import {
   serializeDuration,
   validateSaleWindow,
   tiersInOrder,
+  SPEED_STEPS_REFUSAL,
+  tiersArePlain,
+  plainTiers,
   buildPublishPayload,
   validateRuleSet,
   validateTiers,
@@ -160,7 +163,7 @@ describe("buildPublishPayload — free-only, no PMS/settlement fields", () => {
   const base: PublishFormState = {
     code: "FREEWIFI", name: "Free WiFi", service_plan_revision_id: "plan-rev-1",
     rules: [{ type: "AUTH_METHOD", methods: "account,voucher" }],
-    tiers: [{ order: 10, down_kbps: 5000 }],
+    tiers: [{ order: 10 }],
     duration: { end_mode: "MANUAL_END" },
   };
   it("builds a valid payload with no price/settlement/PMS keys anywhere", () => {
@@ -170,13 +173,17 @@ describe("buildPublishPayload — free-only, no PMS/settlement fields", () => {
     for (const forbidden of ["price", "settlement", "pms", "tax", "amount", "currency"]) {
       expect(json.toLowerCase()).not.toContain(forbidden);
     }
-    expect(payload!.grant_tiers).toEqual([{ order: 10, grant: { down_kbps: 5000 } }]);
+    expect(payload!.grant_tiers).toEqual([{ order: 10, grant: {} }]);
     expect(payload!.eligibility_rules).toEqual([{ type: "AUTH_METHOD", value: { methods: ["account", "voucher"] } }]);
   });
   it("rejects missing code / plan / tiers / bad duration / bad window", () => {
     expect(buildPublishPayload({ ...base, code: "" }).error).toBeTruthy();
     expect(buildPublishPayload({ ...base, service_plan_revision_id: "" }).error).toBeTruthy();
     expect(buildPublishPayload({ ...base, tiers: [] }).error).toBeTruthy();
+    // Speed steps were never applied (audit O-5): more than one step, or a step with speeds, is refused.
+    expect(buildPublishPayload({ ...base, tiers: [{ order: 10 }, { order: 20 }] }).error).toBe(SPEED_STEPS_REFUSAL);
+    expect(buildPublishPayload({ ...base, tiers: [{ order: 10, down_kbps: 5000 }] }).error).toBe(SPEED_STEPS_REFUSAL);
+    expect(buildPublishPayload({ ...base, tiers: [{ order: 10, down_kbps: "" }] }).error).toBeUndefined();
     expect(buildPublishPayload({ ...base, duration: { end_mode: "VALIDITY_WINDOW" } }).error).toMatch(/positive/);
     expect(buildPublishPayload({ ...base, visible_from: "2026-08-02T00:00", visible_until: "2026-08-01T00:00" }).error).toMatch(/before/);
   });
@@ -241,5 +248,18 @@ describe("describePublishRefusal — the server's reason is kept (audit O-18)", 
   });
   it("leaves a sentence it does not recognise alone, so the caller shows it unchanged", () => {
     expect(describePublishRefusal("Speed steps 10 and 10 have the same order.")).toBeNull();
+  });
+});
+
+describe("speed steps — one plain step per package (audit O-5)", () => {
+  it("recognises the plain step", () => {
+    expect(tiersArePlain([{ order: 10 }])).toBe(true);
+    expect(tiersArePlain([{ order: 10, down_kbps: "", up_kbps: "" }])).toBe(true);
+    expect(tiersArePlain([{ order: 10, up_kbps: 1000 }])).toBe(false);
+    expect(tiersArePlain([{ order: 10 }, { order: 20 }])).toBe(false);
+  });
+  it("replaces speed steps with the lowest-order plain step", () => {
+    expect(plainTiers([{ order: 30, down_kbps: 1 }, { order: 5, up_kbps: 2 }])).toEqual([{ order: 5 }]);
+    expect(plainTiers([])).toEqual([{ order: 10 }]);
   });
 });
