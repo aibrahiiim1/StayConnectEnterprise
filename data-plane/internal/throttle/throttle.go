@@ -66,6 +66,11 @@ type Rule struct {
 	Method string // account|otp|voucher|social|pms|* (defaults to "*")
 	Limit  int
 	Block  time.Duration // if >0, once the cap is exceeded, hard-block for this long (across windows)
+	// Global marks a shared, appliance-wide damper (e.g. the endpoint-wide rule). A global rule is charged
+	// ONLY when every non-global rule in the same Allow call allowed the attempt: a client its own rules
+	// refuse (or that is hard-blocked) never consumes the budget every other client shares, so one client
+	// cannot exhaust it and lock everybody out (audit B-10).
+	Global bool
 }
 
 // Decision is the result of charging an attempt.
@@ -120,6 +125,7 @@ type chargeable struct {
 	method string
 	limit  int
 	block  time.Duration
+	global bool
 }
 
 // normalizeRules validates every rule, resolves its scope key, drops no-op rules (empty non-endpoint
@@ -156,15 +162,22 @@ func (s *Store) normalizeRules(rules []Rule) ([]chargeable, error) {
 			if r.Block > e.block {
 				e.block = r.Block
 			}
+			// A scope both global and client-scoped in one call is treated as client-scoped (always charged).
+			e.global = e.global && r.Global
 			continue
 		}
-		merged[id] = &chargeable{kind: r.Kind, sk: sk, method: method, limit: r.Limit, block: r.Block}
+		merged[id] = &chargeable{kind: r.Kind, sk: sk, method: method, limit: r.Limit, block: r.Block, global: r.Global}
 	}
 	out := make([]chargeable, 0, len(merged))
 	for _, e := range merged {
 		out = append(out, *e)
 	}
 	sort.Slice(out, func(i, j int) bool {
+		// Client-scoped rules first, global ones last: a global rule's charge depends on the others' verdict.
+		// The order stays total and deterministic, so concurrent calls still take row locks in one sequence.
+		if out[i].global != out[j].global {
+			return !out[i].global
+		}
 		if out[i].kind != out[j].kind {
 			return out[i].kind < out[j].kind
 		}
@@ -200,6 +213,9 @@ func (s *Store) Allow(ctx context.Context, rules ...Rule) (Decision, error) {
 	for _, r := range entries {
 		method := r.method
 		sk := r.sk
+		if r.global && !allowed {
+			continue // refused by its own rules: the shared damper is not charged
+		}
 
 		// Cross-window active block: the greatest blocked_until for this throttle identity across ALL
 		// windows. A long block therefore stays effective after the fixed window rolls over.

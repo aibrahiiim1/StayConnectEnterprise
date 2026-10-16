@@ -21,6 +21,29 @@ import (
 // authWindow is the durable-throttle fixed window length.
 const authWindow = time.Minute
 
+// The durable throttle's limits (per authWindow). Named constants rather than settings: they sit behind the
+// operator-visible sign-in protection settings (migration 0068) as an abuse damper, and making them settings
+// needs a schema change (recorded in the audit-remediation report).
+const (
+	throttleEndpointPerWindow = 600              // appliance-wide, all methods, all clients (global)
+	throttleClientPerWindow   = 30               // one source IP, or one device, for one method
+	throttleIdentityPerWindow = 10               // one identity from one client, for one method
+	throttleBlock             = 15 * time.Minute // a client-scoped cap, once exceeded, blocks this long
+)
+
+// identityPerClient is the identity throttle's scope value: the identity together with the client making the
+// attempt (its device when known, otherwise its address). The store HMACs it before storage.
+func identityPerClient(identity string, ip net.IP, mac net.HardwareAddr) string {
+	client := ""
+	switch {
+	case len(mac) != 0:
+		client = "mac=" + mac.String()
+	case ip != nil:
+		client = "ip=" + ip.String()
+	}
+	return identity + "\x00" + client
+}
+
 // initAuthSecurity constructs the Phase 1B dark-auth machinery and attaches it to the server. It is
 // FAIL-CLOSED for anything explicitly enabled: an enabled feature whose key material is missing or
 // disagrees with the database aborts startup rather than running with weakened enforcement. When a
@@ -215,17 +238,25 @@ func (s *server) throttleGuard(ctx context.Context, method string, ip net.IP, ma
 		return true, 0
 	}
 	rules := []throttle.Rule{
-		// endpoint-wide damper shared across methods (deliberate MethodAny)
-		{Kind: throttle.ScopeEndpoint, Value: "auth", Method: throttle.MethodAny, Limit: 600},
+		// Endpoint-wide damper shared across methods (deliberate MethodAny). GLOBAL: charged only when this
+		// client's own rules allowed the attempt, so one client -- refused or blocked by its own caps -- cannot
+		// use up the budget every guest shares (audit B-10).
+		{Kind: throttle.ScopeEndpoint, Value: "auth", Method: throttle.MethodAny, Limit: throttleEndpointPerWindow, Global: true},
 	}
 	if ip != nil {
-		rules = append(rules, throttle.Rule{Kind: throttle.ScopeIP, Value: ip.String(), Method: method, Limit: 30, Block: 15 * time.Minute})
+		rules = append(rules, throttle.Rule{Kind: throttle.ScopeIP, Value: ip.String(), Method: method, Limit: throttleClientPerWindow, Block: throttleBlock})
 	}
 	if len(mac) != 0 {
-		rules = append(rules, throttle.Rule{Kind: throttle.ScopeDevice, Value: mac.String(), Method: method, Limit: 30, Block: 15 * time.Minute})
+		rules = append(rules, throttle.Rule{Kind: throttle.ScopeDevice, Value: mac.String(), Method: method, Limit: throttleClientPerWindow, Block: throttleBlock})
 	}
 	if identity != "" {
-		rules = append(rules, throttle.Rule{Kind: throttle.ScopeIdentity, Value: identity, Method: method, Limit: 10, Block: 15 * time.Minute})
+		// THE IDENTITY IS COUNTED PER CLIENT (audit B-10). Keyed on the identity alone, eleven wrong attempts at
+		// somebody else's address from any device blocked THAT PERSON's sign-ins on every device for fifteen
+		// minutes -- a lock-out anyone could aim. Keyed on (identity, this device) -- or this IP when no device
+		// is known -- the block lands on the client making the attempts. Spreading guesses over many devices is
+		// bounded by the per-device and per-IP caps above and by the account's own failed-attempt lockout.
+		rules = append(rules, throttle.Rule{Kind: throttle.ScopeIdentity, Value: identityPerClient(identity, ip, mac),
+			Method: method, Limit: throttleIdentityPerWindow, Block: throttleBlock})
 	}
 	d, err := s.authThrottle.Allow(ctx, rules...)
 	if err != nil {
