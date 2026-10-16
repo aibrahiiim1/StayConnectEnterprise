@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -48,6 +51,28 @@ func raiseAlertOnce(ctx context.Context, db alertDB, applianceID, serial, kind s
         VALUES (NULLIF($1,'')::uuid, $2, $3, $4::jsonb, $5) RETURNING id::text`,
 		applianceID, serial, kind, string(raw), ip).Scan(&id)
 	return err == nil, err
+}
+
+// publicError is what an operator may be shown of an error: a validation sentence is passed through, but a
+// database error never is -- its text names tables, constraints and values, which is not the console's
+// business. Those are logged with the request's trace id and replaced by a sentence.
+func publicError(r *http.Request, err error) string {
+	if err == nil {
+		return ""
+	}
+	var pe *pgconn.PgError
+	if errors.As(err, &pe) || errors.Is(err, pgx.ErrNoRows) || errors.Is(err, pgx.ErrTxClosed) ||
+		errors.Is(err, context.DeadlineExceeded) || pgconn.Timeout(err) {
+		slog.Warn("request failed on a database error", "path", r.URL.Path, "trace_id", middleware.GetReqID(r.Context()), "err", err)
+		return "Central hit a database error (see its log)"
+	}
+	return err.Error()
+}
+
+// failInternal answers 500 with msg and logs the cause, which is never sent to the client.
+func failInternal(w http.ResponseWriter, r *http.Request, msg string, err error) {
+	slog.Warn(msg, "path", r.URL.Path, "trace_id", middleware.GetReqID(r.Context()), "err", err)
+	Fail(w, r, http.StatusInternalServerError, CodeInternal, msg)
 }
 
 // isUniqueViolation reports a Postgres unique-constraint violation (23505).

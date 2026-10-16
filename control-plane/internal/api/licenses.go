@@ -112,7 +112,7 @@ func (b *Base) setLicense(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	doc, _, err := b.Lic.Issue(ctx, p)
 	if err != nil {
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "licence not issued: "+err.Error())
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "licence not issued: "+publicError(r, err))
 		return
 	}
 	audit.Op(r.Context(), b.DB, r, "license.issued", "appliance", id, map[string]any{
@@ -193,7 +193,7 @@ func (b *Base) licenseAction(action string) http.HandlerFunc {
 			Fail(w, r, http.StatusNotFound, CodeNotFound, "no current licence with that id")
 			return
 		case err != nil:
-			Fail(w, r, http.StatusBadRequest, CodeBadRequest, err.Error())
+			Fail(w, r, http.StatusBadRequest, CodeBadRequest, publicError(r, err))
 			return
 		}
 		verb := map[string]string{"suspend": "suspended", "resume": "resumed", "revoke": "revoked"}[action]
@@ -249,10 +249,18 @@ func (b *LicensesBase) ApplianceLicenseHandler(w http.ResponseWriter, r *http.Re
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"license_id":  licenseID,
 		"envelope":    json.RawMessage(envelope),
 		"revoked":     revoked,
 		"server_time": time.Now().UTC(),
-	})
+	}); err != nil || len(revoked) == 0 {
+		return
+	}
+	// The revocations reached the appliance over its authenticated channel, and the appliance keeps every
+	// revocation it is told about (license.Store.AddRevocation). From here on the licence row is no longer
+	// what holds the revocation, so deleting the site it was issued for cannot undo it (deleteSite).
+	_, _ = b.DB.Exec(ctx, `UPDATE licenses SET revocation_delivered_at = now()
+         WHERE $1::uuid = ANY(appliance_ids) AND status = 'revoked' AND id::text = ANY($2) AND revocation_delivered_at IS NULL`,
+		ident.ApplianceID, revoked)
 }

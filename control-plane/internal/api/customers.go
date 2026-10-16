@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -290,7 +291,7 @@ func (b *Base) postCustomer(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	id, slug, err := createCustomer(ctx, b.DB, in.Name, in.Slug)
 	if err != nil {
-		Fail(w, r, http.StatusConflict, CodeConflict, err.Error())
+		Fail(w, r, http.StatusConflict, CodeConflict, publicError(r, err))
 		return
 	}
 	audit.Op(r.Context(), b.DB, r, "customer.created", "customer", id, map[string]any{
@@ -415,7 +416,8 @@ func (b *Base) deleteCustomer(w http.ResponseWriter, r *http.Request) {
 		`DELETE FROM tenants WHERE id=$1`,
 	} {
 		if _, err := tx.Exec(ctx, stmt, id); err != nil {
-			Fail(w, r, http.StatusConflict, CodeConflict, "delete failed: "+err.Error())
+			slog.Warn("delete failed", "err", err)
+			Fail(w, r, http.StatusConflict, CodeConflict, "The delete could not be completed; nothing was deleted. Try again.")
 			return
 		}
 	}
@@ -599,7 +601,7 @@ func (b *Base) patchSite(w http.ResponseWriter, r *http.Request) {
 	if newName != oldName || newType != oldType {
 		if reissued, err = b.reissueSiteAssignmentsTx(ctx, tx, id); err != nil {
 			Fail(w, r, http.StatusServiceUnavailable, "assignment_unsignable",
-				"The site was not changed: the appliances placed there could not receive a newly signed assignment: "+err.Error())
+				"The site was not changed: the appliances placed there could not receive a newly signed assignment: "+publicError(r, err))
 			return
 		}
 	}
@@ -707,17 +709,29 @@ func (b *Base) deleteSite(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "reason is required")
 		return
 	}
-	var apps, current int
+	// A REVOCATION THE APPLIANCE HAS NOT YET RECEIVED LIVES ONLY IN ITS LICENCE ROW. The appliance learns that a
+	// licence was revoked from the revoked-id list of its next licence fetch; deleting the row first would
+	// erase the revocation and leave the licence valid on the box. So the site is not deleted while a licence
+	// issued for it is revoked, not yet delivered, and bound to an appliance that can still fetch (it exists
+	// and is not retired -- a retired identity is refused by the API and has had its authority cleared).
+	var apps, current, undelivered int
 	if err := b.DB.QueryRow(ctx, `SELECT (SELECT count(*) FROM appliances WHERE site_id=$1),
-                                         (SELECT count(*) FROM licenses WHERE site_id=$1 AND status IN ('active','suspended'))`,
-		id).Scan(&apps, &current); err != nil {
+                                         (SELECT count(*) FROM licenses WHERE site_id=$1 AND status IN ('active','suspended')),
+                                         (SELECT count(*) FROM licenses l JOIN appliances a ON a.id = l.appliance_ids[1]
+                                           WHERE l.site_id=$1 AND l.status='revoked' AND l.revocation_delivered_at IS NULL
+                                             AND a.lifecycle_state NOT IN ('revoked','decommissioned'))`,
+		id).Scan(&apps, &current, &undelivered); err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "Central could not check what the site still has, so it was not deleted.")
 		return
 	}
-	if blocking := blockers(blocker{"appliance", "Appliances", apps}, blocker{"license", "Current licences", current}); len(blocking) > 0 {
-		Fail(w, r, http.StatusConflict, CodeConflict,
-			"the site still has appliances or a current licence; move or delete them first",
-			map[string]any{"blocking": blocking})
+	if blocking := blockers(blocker{"appliance", "Appliances", apps}, blocker{"license", "Current licences", current},
+		blocker{"revocation", "Licence revocations not yet received by the appliance", undelivered}); len(blocking) > 0 {
+		msg := "the site still has appliances or a current licence; move or delete them first"
+		if apps == 0 && current == 0 {
+			msg = "a licence issued for this site was revoked and the appliance has not received the revocation yet; " +
+				"try again once it has connected to Central"
+		}
+		Fail(w, r, http.StatusConflict, CodeConflict, msg, map[string]any{"blocking": blocking})
 		return
 	}
 	tx, err := b.DB.Begin(ctx)
@@ -732,7 +746,8 @@ func (b *Base) deleteSite(w http.ResponseWriter, r *http.Request) {
 		`DELETE FROM sites WHERE id=$1`,
 	} {
 		if _, err := tx.Exec(ctx, stmt, id); err != nil {
-			Fail(w, r, http.StatusConflict, CodeConflict, "delete failed: "+err.Error())
+			slog.Warn("delete failed", "err", err)
+			Fail(w, r, http.StatusConflict, CodeConflict, "The delete could not be completed; nothing was deleted. Try again.")
 			return
 		}
 	}

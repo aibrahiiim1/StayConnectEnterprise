@@ -38,6 +38,12 @@ func ApplianceFromContext(ctx context.Context) *ApplianceIdent {
 	return a
 }
 
+// ContextWithAppliance attaches an appliance identity the way RequireAppliance does, for callers that drive
+// a handler without the middleware (tests).
+func ContextWithAppliance(ctx context.Context, a *ApplianceIdent) context.Context {
+	return context.WithValue(ctx, applianceCtxKey, a)
+}
+
 // RequireAppliance verifies an Ed25519-signed request JWT that BINDS the
 // method, path, body hash, audience and signing-key id (see applianceauth).
 // It blocks replay via the shared ReplayCache, rejects suspended/revoked/
