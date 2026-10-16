@@ -24,6 +24,7 @@ import { HelpList, HelpSection } from "@/components/help";
 import {
   ApplyResults, DhcpModeBadge, networkTypeLabel, useNetworkAccess,
 } from "@/components/network/shared";
+import { isReauth, useNetworkChangeStepUp } from "@/components/network/change-step-up";
 
 function poolSummary(net: GuestNetwork): string {
   if (!net.pools || net.pools.length === 0) return "—";
@@ -134,10 +135,17 @@ export default function NetworkPage() {
     finally { setBusy(null); }
   }
 
-  async function onApply() {
+  // Apply, Keep and Roll back need the operator's password (the server requires it).
+  const stepUp = useNetworkChangeStepUp();
+
+  function onApply() {
+    stepUp.ask("apply", (password) => doApply(password));
+  }
+
+  async function doApply(password: string) {
     setBusy("apply"); setErr(null);
     try {
-      const r = await api.post<ApplyResult>("/network/apply", { summary: "apply from client networks" });
+      const r = await api.post<ApplyResult>("/network/apply", { summary: "apply from client networks", password });
       setValidation(r.validation ?? null);
       setHealth(r.health ?? null);
       if (r.state === "pending_confirmation") {
@@ -150,22 +158,26 @@ export default function NetworkPage() {
         toast.success(r.message || `Apply state: ${r.state}`);
       }
       reload();
-    } catch (e) { setErr(errMsg(e)); }
+    } catch (e) { if (isReauth(e)) throw e; setErr(errMsg(e)); }
     finally { setBusy(null); }
   }
 
-  async function onConfirm(id: string) {
-    setBusy("confirm"); setErr(null);
-    try { await api.post(`/network/revisions/${id}/confirm`); toast.success("Configuration confirmed", "The applied change is now the active configuration."); reload(); }
-    catch (e) { setErr(errMsg(e)); }
-    finally { setBusy(null); }
+  function onConfirm(id: string) {
+    stepUp.ask("confirm", async (password) => {
+      setBusy("confirm"); setErr(null);
+      try { await api.post(`/network/revisions/${id}/confirm`, { password }); toast.success("Configuration confirmed", "The applied change is now the active configuration."); reload(); }
+      catch (e) { if (isReauth(e)) throw e; setErr(errMsg(e)); }
+      finally { setBusy(null); }
+    });
   }
 
-  async function onRollback(id: string) {
-    setBusy("rollback"); setErr(null);
-    try { await api.post(`/network/revisions/${id}/rollback`); toast.success("Configuration rolled back", "The previous configuration is back in place."); reload(); }
-    catch (e) { setErr(errMsg(e)); }
-    finally { setBusy(null); }
+  function onRollback(id: string) {
+    stepUp.ask("rollback", async (password) => {
+      setBusy("rollback"); setErr(null);
+      try { await api.post(`/network/revisions/${id}/rollback`, { password }); toast.success("Configuration rolled back", "The previous configuration is back in place."); reload(); }
+      catch (e) { if (isReauth(e)) throw e; setErr(errMsg(e)); }
+      finally { setBusy(null); }
+    });
   }
 
   const enabledCount = (rows ?? []).filter((n) => n.enabled).length;
@@ -398,6 +410,7 @@ export default function NetworkPage() {
         error={confirmErr}
         onConfirm={applyStagedRemoval}
       />
+      {stepUp.dialog}
     </PageShell>
   );
 }

@@ -518,9 +518,16 @@ func (s *server) netValidate(w http.ResponseWriter, r *http.Request) {
 // undone here, in the same request: the database and the appliance never disagree about which network is live.
 func (s *server) netApply(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Summary string `json:"summary"`
+		Summary  string `json:"summary"`
+		Password string `json:"password"`
 	}
 	_ = decodeJSON(r, &in)
+	// STEP-UP (audit N-15). An apply changes what every client network forwards; like a WAN / LAN change it
+	// needs the operator's password, checked before anything is staged or sent to netd.
+	if !s.reauth(r, in.Password) {
+		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation failed")
+		return
+	}
 	ctx, cancel := dbCtx(r)
 
 	// ONE APPLY AT A TIME, FOR THIS SITE.
@@ -597,9 +604,28 @@ func (s *server) netApply(w http.ResponseWriter, r *http.Request) {
 		staged = append(staged, m.ReplacementID)
 	}
 
-	s.audit(r, "network.apply", "network", "", map[string]any{"summary": in.Summary, "replacements": staged})
 	st, raw, err := s.netd.call(r.Context(), http.MethodPost, "/v1/apply",
 		map[string]string{"actor": s.actor(r), "summary": in.Summary})
+	// THE AUDIT FOLLOWS THE OUTCOME (audit N-15), as confirm and rollback already do: it used to be written
+	// before the netd call, so an apply that never reached the appliance or was rolled back by its health checks
+	// read in Activity as an apply.
+	{
+		detail := map[string]any{"summary": in.Summary, "replacements": staged, "status": st}
+		var out struct {
+			RevisionID string `json:"revision_id"`
+			State      string `json:"state"`
+		}
+		if err != nil {
+			detail["error"] = err.Error()
+		} else if json.Unmarshal(raw, &out) == nil {
+			detail["revision_id"], detail["state"] = out.RevisionID, out.State
+		}
+		action := "network.apply"
+		if err != nil || st >= 300 || out.State == "failed" || out.State == "rolled_back" {
+			action = "network.apply_failed"
+		}
+		s.audit(r, action, "network", out.RevisionID, detail)
+	}
 
 	// EVERYTHING BELOW RUNS ON A FRESH CONTEXT OF ITS OWN, NOT ON THE ONE THE MATERIALISE USED.
 	//
@@ -946,6 +972,15 @@ func (s *server) getRevision(w http.ResponseWriter, r *http.Request) {
 // successor, so eligibility keeps meaning what the hotel intended.
 func (s *server) confirmRevision(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	var in struct {
+		Password string `json:"password"`
+	}
+	_ = decodeJSON(r, &in)
+	// STEP-UP (audit N-15): keeping a configuration makes it permanent.
+	if !s.reauth(r, in.Password) {
+		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation failed")
+		return
+	}
 	// FAIL-CLOSED, BEFORE THE WIRE IS MADE PERMANENT. Confirming tells netd to keep this configuration; after
 	// that the retired client network is gone for good. So the packages that depend on it are pre-flighted
 	// first, writing nothing: if one could not be carried forward, the confirm is refused and the appliance is
@@ -1004,6 +1039,15 @@ func (s *server) confirmRevision(w http.ResponseWriter, r *http.Request) {
 // original client network enabled and the request waiting for another attempt.
 func (s *server) rollbackRevision(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	var in struct {
+		Password string `json:"password"`
+	}
+	_ = decodeJSON(r, &in)
+	// STEP-UP (audit N-15): a rollback changes what every client network forwards, now.
+	if !s.reauth(r, in.Password) {
+		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation failed")
+		return
+	}
 	st, raw, err := s.netd.call(r.Context(), http.MethodPost, "/v1/rollback",
 		map[string]string{"revision_id": id, "actor": s.actor(r)})
 	if err != nil {

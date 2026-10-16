@@ -124,7 +124,37 @@ describe("Client networks", () => {
     const box = banner.closest("section")!;
     expect(within(box).getByLabelText(/seconds left/)).toBeTruthy();
     fireEvent.click(within(box).getByRole("button", { name: "Keep this change" }));
-    await waitFor(() => expect(post).toHaveBeenCalledWith("/network/revisions/rev-9/confirm"));
+    // Keeping a configuration needs the operator's password (N-15), typed into the dialog -- not sent without it.
+    const dialog = await screen.findByRole("dialog");
+    expect(post).not.toHaveBeenCalled();
+    fireEvent.change(within(dialog).getByLabelText(/Confirm your password/), { target: { value: "s3cret-pass" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Keep this change" }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("/network/revisions/rev-9/confirm", { password: "s3cret-pass" }));
+  });
+
+  it("Apply changes asks for the password and sends it with the apply; a wrong one keeps the dialog open", async () => {
+    route({
+      "/auth/whoami": IT,
+      "/network/guest-networks": list([NET]),
+      "/network/guest-networks/net-1/status": { id: "net-1", bridge_name: "br-g20", enabled: true, active_clients: 0 },
+      "/network/revisions": list([]),
+    });
+    const { ApiError } = await import("@/lib/api");
+    post.mockRejectedValueOnce(new (ApiError as unknown as new (s: number, b: unknown) => Error)(401, { error: "reauth_required" }));
+    post.mockResolvedValue({ state: "pending_confirmation", revision_id: "rev-10" });
+    render(<GuestNetworksPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Apply changes/ }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/Confirm your password/), { target: { value: "wrong" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Apply changes" }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("/network/apply", { summary: "apply from client networks", password: "wrong" }));
+    expect(await within(dialog).findByText(/That password is not correct/)).toBeTruthy();
+
+    fireEvent.change(within(dialog).getByLabelText(/Confirm your password/), { target: { value: "right" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Apply changes" }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("/network/apply", { summary: "apply from client networks", password: "right" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
   it("taking a network offline is a staged change, confirmed in a dialog that says so", async () => {
