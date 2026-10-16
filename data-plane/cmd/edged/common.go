@@ -91,12 +91,14 @@ func (s *server) audit(r *http.Request, action, targetType, targetID string, pay
 }
 
 func clientIP(r *http.Request) string {
-	// edged sits behind Caddy on loopback, so prefer the forwarded client IP.
+	// edged sits behind Caddy on loopback, so prefer the forwarded client IP. X-Real-IP first: the Admin Console
+	// vhost SETS it from the connection Caddy accepted (header_up X-Real-IP {remote_host}), so a browser cannot
+	// choose it -- and the sign-in throttle counts per source address with this value (operator_signin.go).
+	if rip := strings.TrimSpace(r.Header.Get("X-Real-IP")); rip != "" {
+		return rip
+	}
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		return strings.TrimSpace(strings.Split(xff, ",")[0])
-	}
-	if rip := r.Header.Get("X-Real-IP"); rip != "" {
-		return rip
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

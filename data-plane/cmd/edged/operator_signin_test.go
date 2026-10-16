@@ -379,3 +379,18 @@ func TestSigninProtectionBoundsMatchTheMigration(t *testing.T) {
 		t.Fatal("a lockout over a day is above the ceiling")
 	}
 }
+
+// The per-address throttle counts the address Caddy accepted the connection from (X-Real-IP, which the vhost
+// sets), not a value a browser could put first in X-Forwarded-For.
+func TestClientIPPrefersTheAddressCaddySets(t *testing.T) {
+	r := httptest.NewRequest("POST", "/edge/v1/auth/login", nil)
+	r.Header.Set("X-Forwarded-For", "10.9.9.9, 198.51.100.7")
+	r.Header.Set("X-Real-IP", "198.51.100.7")
+	if got := clientIP(r); got != "198.51.100.7" {
+		t.Fatalf("clientIP = %q, want the X-Real-IP Caddy set", got)
+	}
+	r.Header.Del("X-Real-IP")
+	if got := clientIP(r); got != "10.9.9.9" {
+		t.Fatalf("without X-Real-IP the first forwarded address is used, got %q", got)
+	}
+}
