@@ -474,3 +474,14 @@ GRANT SELECT ON iam_v2.card_reversal_reviews, iam_v2.refund_access_terminations 
 GRANT EXECUTE ON FUNCTION iam_v2.p4_resolve_reversal_review(uuid, uuid, uuid, text, text, text) TO svc_edged;
 GRANT SELECT ON iam_v2.payment_account_conversion, iam_v2.payment_account_conversion_changes,
                 iam_v2.payment_settlement_reports TO svc_edged;
+
+-- ---- 0123: PMS review decisions and the roster settings writer ---------------------------------------------
+-- One decision per review message (acknowledge with a reason, or link to a re-matchable stay), the stays a
+-- message can be linked to, the versioned roster-settings writer, and the review-expiry setting (read, versioned
+-- write, change log). Every write is a definer that appends its own record; edged writes no table.
+GRANT EXECUTE ON FUNCTION iam_v2.pms_reconciliation_settings_set_checked(uuid, uuid, bigint, integer, integer, integer, integer, text, text) TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_review_link_candidates(uuid, uuid, uuid)                          TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_review_decide(uuid, uuid, uuid, text, uuid, text, text)           TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_review_expiry_settings_get(uuid, uuid)                            TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_review_expiry_settings_set(uuid, uuid, bigint, boolean, integer, text, text) TO svc_edged;
+GRANT SELECT ON iam_v2.pms_review_expiry_settings, iam_v2.pms_review_expiry_settings_changes           TO svc_edged;

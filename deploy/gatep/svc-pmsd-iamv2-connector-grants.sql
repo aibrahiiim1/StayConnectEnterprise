@@ -283,3 +283,9 @@ GRANT EXECUTE ON FUNCTION iam_v2.p4_posting_command_authorised(uuid, text, text)
 -- Whether the financial mirror must be proven again by a read-only resync (migration 0103, D48). One boolean;
 -- pmsd adds its own serialization and backoff.
 GRANT EXECUTE ON FUNCTION iam_v2.p4_financial_resync_due(uuid,uuid,uuid) TO svc_pmsd;
+
+-- 0123 (audit H-8, H-15): whether a DRAINING connection still has room charges to finish (wind down keeps the
+-- link while it does), and the bounded sweep that records review messages expired by the site's expiry setting
+-- (off by default; only messages received after it was switched on). Both read-only or append-only definers.
+GRANT EXECUTE ON FUNCTION iam_v2.pms_interface_has_undrained_postings(uuid, uuid, uuid) TO svc_pmsd;
+GRANT EXECUTE ON FUNCTION iam_v2.pms_review_expire_due(uuid, uuid, integer)            TO svc_pmsd;
