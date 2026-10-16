@@ -45,7 +45,7 @@ func (s *server) paymentProvidersRoutes() http.Handler {
 // paymentStepUp checks the password and returns the operator label the change is recorded under.
 func (s *server) paymentStepUp(w http.ResponseWriter, r *http.Request, password string) (string, bool) {
 	if !s.reauth(r, password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return "", false
 	}
 	actor := protectionActor(sessFrom(r.Context()))
@@ -449,7 +449,7 @@ func (s *server) recordAnswerConfirmation(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
 	sess := sessFrom(r.Context())
@@ -485,7 +485,7 @@ func (s *server) stayAdminBlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
 	sess := sessFrom(r.Context())
@@ -521,7 +521,7 @@ func (s *server) setFinancialMirrorMaxAge(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
 	sess := sessFrom(r.Context())
@@ -561,7 +561,7 @@ func (s *server) approveFinancialOnboarding(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
 	sess := sessFrom(r.Context())

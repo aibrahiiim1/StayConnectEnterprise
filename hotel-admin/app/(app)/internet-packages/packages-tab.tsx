@@ -8,10 +8,11 @@
 // is unchanged and still immutable — lib/package-save decides which revision a save pins, and a save always
 // records a new permanent version.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, Ban, CheckCircle2, Gauge, Package, Pencil, Plus, Trash2, Users } from "lucide-react";
-import { api, ListResp } from "@/lib/api";
+import { api, ApiError, ListResp } from "@/lib/api";
+import { defaultCardAccount, type CardAccountView } from "@/lib/card-currency";
 import type { AccountsResp } from "@/lib/payment-admin";
 import {
   getActivity, getPackageDeletability, deletePackage, priceText, type PackageSummary, type RevisionInfo,
@@ -38,11 +39,23 @@ import { formatSpeed, formatData, formatDuration, formatDevices, DEVICE_LIMIT_PO
 import { allocationFromPolicy, stayLengthWarnings, readStayLength, type PackageStayRange } from "@/lib/stay-packages";
 import { formatDate } from "@/lib/utils";
 import {
-  rulesToForm, tiersToForm, durationToForm, toLocalInput, acquisitionToForm, type PackageCurrent,
+  rulesToForm, tiersToForm, durationToForm, toLocalInput, acquisitionToForm, preservedRulesOf,
+  revisionCarryOf, revisionTermsOf, type PackageCurrent, type RevisionCarry,
 } from "./form-mapping";
-import { describePublishRefusal, type ModulesReport, type RoomChargeInterface } from "@/lib/commerce-form";
+import {
+  describePublishRefusal, revisionNeedsPassword, type ModulesReport, type RevisionTerms, type RoomChargeInterface,
+} from "@/lib/commerce-form";
 
 type PlanSummary = PlanOption & { used_by_active_packages?: number };
+
+// A refusal of the price section arrives as "invalid_currency: …" (and a duration one as
+// "invalid_duration_policy: …"); it is shown naming the part of the form it concerns, followed by the server's
+// own reason. Every other refusal -- module_not_enabled, commercial_fields_required, a validation sentence --
+// already reads as a sentence and is shown exactly as the server wrote it, never swallowed.
+function readableRefusal(e: unknown): unknown {
+  const readable = e instanceof Error ? describePublishRefusal(e.message) : null;
+  return readable ?? e;
+}
 type Chip = "active" | "disabled" | "all";
 
 export type TabProps = { guard: (e: unknown) => boolean; setErr: (s: string | null) => void };
@@ -82,15 +95,24 @@ export function PackagesTab({
   // THE CLIENT GROUPS AN AUDIENCE CAN NAME, read with the module state for the same reason: a group created in
   // another tab must be offered the next time the form opens, not the next time the page loads.
   const [clientGroups, setClientGroups] = useState<ClientGroupOption[] | "error" | null>(null);
-  // THE CURRENCIES AN ACTIVE PAYMENT ACCOUNT SETTLES. A card payment is never converted, so a package priced in
-  // any other currency is not offered by card; the form says so beside the price instead of letting the
-  // operator find out from a client. null = unknown (not licensed, or not readable): no claim is made.
-  const [cardCurrencies, setCardCurrencies] = useState<string[] | null>(null);
+  // THE DEFAULT ACTIVE PAYMENT ACCOUNT -- the one every card checkout uses. A package is offered by card only in
+  // its currency, or in one its provider converts when it is marked provider-converts (lib/card-currency, the
+  // rule scd applies). null = unknown (not licensed, or not readable): no claim is made.
+  const [cardAccount, setCardAccount] = useState<CardAccountView | "none" | null>(null);
+  // WHAT THE PACKAGE BEING EDITED CHARGES AND GRANTS TODAY, and the fields the form does not edit. A save that
+  // changes the terms needs the operator's password; the carried fields go back exactly as loaded.
+  const [editBase, setEditBase] = useState<{ terms: RevisionTerms; carry: RevisionCarry } | null>(null);
+  // A SAVE WAITING FOR THE PASSWORD. Set when the revision changes price, currency, methods or plan (or when
+  // the server asks for the password anyway); the dialog then sends the same body with the password.
+  const [pendingSave, setPendingSave] = useState<{ body: Record<string, unknown>; planChanged: boolean } | null>(null);
+  const [pendingErr, setPendingErr] = useState<unknown>(null);
+  // REACTIVATION is a step-up too: switching a package back on offers it to clients again.
+  const [enabling, setEnabling] = useState<PackageSummary | null>(null);
   const formOpen = adding || editing !== null;
   useEffect(() => {
     if (!formOpen) return;
     let live = true;
-    setModules(null); setRoomIfaces(null); setClientGroups(null); setCardCurrencies(null);
+    setModules(null); setRoomIfaces(null); setClientGroups(null); setCardAccount(null);
     api.get<ListResp<ClientGroupOption>>("/client-groups")
       .then((g) => { if (live) setClientGroups(g?.data ?? []); })
       .catch(() => { if (live) setClientGroups("error"); });
@@ -109,13 +131,7 @@ export function PackagesTab({
         }
         if (m?.modules?.card_payment?.licensed) {
           api.get<AccountsResp>("/payment-providers/accounts")
-            .then((a) => {
-              if (!live) return;
-              // A default account the provider converts for takes other currencies: make no claim (the
-              // provider is the authority on which it supports).
-              if ((a?.accounts ?? []).some((x) => x.status === "ACTIVE" && x.is_default && x.provider_converts)) { setCardCurrencies(null); return; }
-              setCardCurrencies(Array.from(new Set((a?.accounts ?? []).filter((x) => x.status === "ACTIVE").map((x) => (x.currency ?? "").trim().toUpperCase()).filter(Boolean))));
-            })
+            .then((a) => { if (live) setCardAccount(defaultCardAccount(a?.accounts ?? [])); })
             .catch(() => { /* unknown: the form makes no claim about card currencies */ });
         }
       })
@@ -203,12 +219,16 @@ export function PackagesTab({
     setErr(null); setNotice(null); setFormErr(null);
     try {
       const cur = await api.get<PackageCurrent>(`/commercial-packages/${p.package_id}/current`);
+      setEditBase({ terms: revisionTermsOf(cur), carry: revisionCarryOf(cur) });
       setEditing({
         code: p.code,
         name: (cur.display?.name as string) ?? p.name ?? p.code,
         planID: p.service_plan_id ?? "",
         planRevisionID: cur.service_plan_revision_id,
         rules: rulesToForm(cur.eligibility_rules),
+        // Kept verbatim: conditions of a type the form has no control for, and the whole display object.
+        preservedRules: preservedRulesOf(cur.eligibility_rules),
+        display: cur.display ?? null,
         tiers: tiersToForm(cur.grant_tiers),
         duration: durationToForm(cur.duration_policy),
         visibleFrom: toLocalInput(cur.visible_from),
@@ -238,35 +258,92 @@ export function PackagesTab({
         selected: chosen,
         currentPlanID: mode === "edit" ? editing?.planID : undefined,
       });
-      await api.post("/commercial-packages", {
+      const body: Record<string, unknown> = {
         ...v.payload,
         service_plan_revision_id: decision.pinPlanRevisionID,
         ...(mode === "add" ? { create_only: true } : {}),
-      });
-      setAdding(false); setEditing(null);
-      const msg = saveOutcomeMessage(decision);
-      setNotice(msg);
-      toast.success(mode === "add" ? "Package added" : "Package saved", msg);
-      await load();
+      };
+      if (mode === "edit") {
+        // A REVISION OF AN EXISTING PACKAGE STATES ITS COMMERCIAL TERMS IN FULL. The server refuses one that
+        // leaves any out (commercial_fields_required) rather than defaulting it to Free; room-charge mappings
+        // are sent as [] when the package has none.
+        body.room_charge_mappings = v.payload.room_charge_mappings ?? [];
+        Object.assign(body, editBase?.carry ?? {});
+        const after: RevisionTerms = {
+          price_minor: v.payload.price_minor ?? 0,
+          currency: v.payload.currency ?? "",
+          currency_exponent: v.payload.currency_exponent ?? 2,
+          acquisition_methods: v.payload.acquisition_methods ?? [],
+          service_plan_revision_id: decision.pinPlanRevisionID,
+        };
+        if (revisionNeedsPassword(editBase?.terms, after)) {
+          // Changing what clients pay or receive is a step-up: ask for the password, then send this body.
+          setPendingErr(null); setPendingSave({ body, planChanged: decision.planChanged });
+          return;
+        }
+      }
+      await publish(body, mode, decision.planChanged);
     } catch (e) {
       if (guard(e)) return;
-      // A refusal of the price section arrives as "invalid_currency: …"; it is shown naming the part of the
-      // form it concerns. A module refusal (409 module_not_enabled) already reads as a sentence and is shown
-      // as the server wrote it, like every other refusal.
-      const readable = e instanceof Error ? describePublishRefusal(e.message) : null;
-      setFormErr(readable ?? e);
+      if (mode === "edit" && e instanceof ApiError && e.code === "reauth_required" && lastBody.current) {
+        // The server judged this save a change of terms after all: ask for the password and send it again.
+        setPendingErr(null); setPendingSave({ body: lastBody.current, planChanged: lastPlanChanged.current });
+        return;
+      }
+      setFormErr(readableRefusal(e));
     }
     finally { setBusy(false); }
   }
 
-  async function enable(p: PackageSummary) {
-    setBusy(true); setErr(null); setNotice(null);
+  // The body of the last publish attempt, so a step-up the server asks for can resend exactly the same thing.
+  const lastBody = useRef<Record<string, unknown> | null>(null);
+  const lastPlanChanged = useRef(false);
+
+  async function publish(body: Record<string, unknown>, mode: "add" | "edit", planChanged: boolean) {
+    lastBody.current = body; lastPlanChanged.current = planChanged;
+    await api.post("/commercial-packages", body);
+    lastBody.current = null;
+    setAdding(false); setEditing(null); setEditBase(null); setPendingSave(null);
+    const msg = saveOutcomeMessage({ pinPlanRevisionID: String(body.service_plan_revision_id ?? ""), planChanged, publishesPackageRevision: true });
+    setNotice(msg);
+    toast.success(mode === "add" ? "Package added" : "Package saved", msg);
+    await load();
+  }
+
+  async function confirmPendingSave({ password }: { password: string }) {
+    if (!pendingSave) return;
+    const { body, planChanged } = pendingSave;
+    setBusy(true); setPendingErr(null);
     try {
-      await api.post(`/commercial-packages/${p.package_id}/active`, { active: true });
+      await publish({ ...body, password }, "edit", planChanged);
+    } catch (e) {
+      if (guard(e)) return;
+      if (e instanceof ApiError && e.code === "reauth_required") {
+        setPendingErr(new Error("That password is not correct. Nothing was saved."));
+        return;
+      }
+      // Any other refusal concerns the form, not the password: close the prompt and show it there.
+      setPendingSave(null);
+      setFormErr(readableRefusal(e));
+    } finally { setBusy(false); }
+  }
+
+  async function enable({ password }: { password: string }) {
+    if (!enabling) return;
+    const p = enabling;
+    setBusy(true); setActionErr(null); setNotice(null);
+    try {
+      await api.post(`/commercial-packages/${p.package_id}/active`, { active: true, password });
       const msg = `${p.name || p.code} is being offered to clients again.`;
       setNotice(msg); toast.success("Package enabled", msg);
+      setEnabling(null);
       await load();
-    } catch (e) { if (!guard(e)) setErr((e as Error)?.message ?? "Could not update this package"); }
+    } catch (e) {
+      if (guard(e)) return;
+      setActionErr(e instanceof ApiError && e.code === "reauth_required"
+        ? new Error("That password is not correct. The package was not switched on.")
+        : e);
+    }
     finally { setBusy(false); }
   }
 
@@ -383,7 +460,7 @@ export function PackagesTab({
                         <>
                           <Button size="sm" variant="ghost" disabled={busy} onClick={() => startEdit(p)}>Edit</Button>
                           <Button size="sm" variant="ghost" disabled={busy}
-                            onClick={() => { setActionErr(null); if (p.active) setDisabling(p); else void enable(p); }}>
+                            onClick={() => { setActionErr(null); if (p.active) setDisabling(p); else setEnabling(p); }}>
                             {p.active ? "Disable" : "Enable"}
                           </Button>
                         </>
@@ -496,7 +573,7 @@ export function PackagesTab({
                       <Trash2 /> Delete…
                     </Button>
                     <Button variant="secondary" disabled={busy}
-                      onClick={() => { setActionErr(null); if (p.active) setDisabling(p); else void enable(p); }}>
+                      onClick={() => { setActionErr(null); if (p.active) setDisabling(p); else setEnabling(p); }}>
                       {p.active ? <><Ban /> Disable</> : <><CheckCircle2 /> Enable</>}
                     </Button>
                     <Button disabled={busy} onClick={() => startEdit(p)}><Pencil /> Edit</Button>
@@ -518,12 +595,12 @@ export function PackagesTab({
           <DialogBody className="space-y-4">
             <ErrorBanner err={formErr} />
             <PackageForm mode="add" plans={plans} busy={busy} onSave={(v) => save(v, "add")} onCancel={() => setAdding(false)}
-              modules={modules} roomChargeInterfaces={roomIfaces} clientGroups={clientGroups} cardCurrencies={cardCurrencies} />
+              modules={modules} roomChargeInterfaces={roomIfaces} clientGroups={clientGroups} cardAccount={cardAccount} />
           </DialogBody>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={editing !== null} onOpenChange={(v) => { if (!v && !busy) setEditing(null); }}>
+      <Dialog open={editing !== null} onOpenChange={(v) => { if (!v && !busy) { setEditing(null); setEditBase(null); } }}>
         <DialogContent size="xl">
           <DialogHeader>
             <DialogTitle>{editing ? `Edit ${editing.name || editing.code}` : "Edit package"}</DialogTitle>
@@ -537,11 +614,38 @@ export function PackagesTab({
             {editing && (
               <PackageForm mode="edit" initial={editing} plans={plans} busy={busy} onSave={(v) => save(v, "edit")}
                 onCancel={() => setEditing(null)} modules={modules} roomChargeInterfaces={roomIfaces} clientGroups={clientGroups}
-                cardCurrencies={cardCurrencies} />
+                cardAccount={cardAccount} />
             )}
           </DialogBody>
         </DialogContent>
       </Dialog>
+
+      {/* THE STEP-UP FOR A CHANGE OF TERMS. Changing the price, currency, how clients get the package or the
+          service plan it hands out changes what future clients pay or receive, so the server asks for the
+          operator's password. Asked once, here, and sent with the same body the form produced. */}
+      <ConfirmDialog
+        open={pendingSave !== null}
+        onOpenChange={(v) => { if (!v && !busy) { setPendingSave(null); setPendingErr(null); } }}
+        title="Confirm the change of terms"
+        description="This change alters what future clients pay for this package or what it gives them (its price, currency, how clients get it, or its service plan). Clients already online keep the terms they connected under."
+        confirmLabel="Save changes"
+        busy={busy}
+        error={pendingErr}
+        requirePassword
+        onConfirm={confirmPendingSave}
+      />
+
+      <ConfirmDialog
+        open={enabling !== null}
+        onOpenChange={(v) => !v && !busy && setEnabling(null)}
+        title={`Offer ${enabling?.name || enabling?.code || "this package"} again?`}
+        description="Clients will be offered it again straight away, on the terms of its current version."
+        confirmLabel="Offer it again"
+        busy={busy}
+        error={actionErr}
+        requirePassword
+        onConfirm={enable}
+      />
 
       <ConfirmDialog
         open={disabling !== null}

@@ -72,7 +72,26 @@ async function renderPage() {
   return userEvent.setup();
 }
 
-const calls = () => get.mock.calls.map((c) => String(c[0]));
+// THE PERIOD (audit C-8) travels as from/to on every request, and the search text in the X-Usage-Search header
+// (never the URL). The paths below are compared with the period removed, and the search folded back in as q= so
+// each assertion still says what was asked for.
+const calls = () => get.mock.calls.map((c) => {
+  const [path, query = ""] = String(c[0]).split("?");
+  const params = new URLSearchParams(query);
+  const hasPeriod = params.has("from") && params.has("to");
+  params.delete("from"); params.delete("to");
+  const header = (c[1] as Record<string, string> | undefined)?.["X-Usage-Search"];
+  if (path === "/usage/sources") {
+    const out = new URLSearchParams();
+    out.set("type", params.get("type") ?? "");
+    out.set("q", header ? decodeURIComponent(header) : "");
+    out.set("page", params.get("page") ?? "");
+    out.set("page_size", params.get("page_size") ?? "");
+    return `${path}?${out.toString()}${hasPeriod ? "" : "#no-period"}`;
+  }
+  const rest = params.toString();
+  return `${path}${rest ? `?${rest}` : ""}${hasPeriod ? "" : "#no-period"}`;
+});
 
 beforeEach(() => { get.mockReset(); window.history.replaceState(null, "", "/usage"); });
 afterEach(() => vi.resetModules());
@@ -167,6 +186,32 @@ describe("usage explorer by access source", () => {
     expect(screen.getByText("Service plan: Free Internet")).toBeTruthy();
     // The samples drill-down is still one click from each session.
     expect(screen.getByRole("button", { name: "Show evidence" })).toBeTruthy();
+  });
+
+  it("reads the list and a source's detail over the SAME period, and the search never goes in the URL (C-8)", async () => {
+    wire();
+    const user = await renderPage();
+    await user.type(await screen.findByRole("textbox", { name: /card reference/i }), "alex");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await user.click(await screen.findByRole("button", { name: "Details for alex.morgan" }));
+    await screen.findByText("Devices used under this access");
+    const raw = get.mock.calls.map((c) => String(c[0]));
+    const period = (u: string) => {
+      const q = new URLSearchParams(u.split("?")[1] ?? "");
+      return `${q.get("from")}|${q.get("to")}`;
+    };
+    const list = raw.filter((u) => u.startsWith("/usage/sources?"));
+    const detail = raw.find((u) => u.startsWith("/usage/sources/account/"))!;
+    expect(list.length).toBeGreaterThan(0);
+    for (const u of list) expect(u).not.toMatch(/[?&]q=/);
+    // Same length of period on both: the list and the detail are not computed over different windows.
+    const span = (u: string) => {
+      const q = new URLSearchParams(u.split("?")[1] ?? "");
+      return Math.round((Date.parse(q.get("to")!) - Date.parse(q.get("from")!)) / 86_400_000);
+    };
+    expect(span(detail)).toBe(30);
+    expect(span(list[list.length - 1])).toBe(30);
+    expect(period(detail)).not.toBe("null|null");
   });
 
   it("still opens a stay from the /usage?stay=<id> deep link", async () => {

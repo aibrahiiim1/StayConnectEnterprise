@@ -76,3 +76,26 @@ describe("Devices", () => {
     expect(within(dialog).getByText(/remaining time, data and owner do not change/)).toBeTruthy();
   });
 });
+
+describe("Devices for a role that cannot read the device setting (C-18)", () => {
+  it("does not ask for it, shows no error, and offers no device action it cannot take", async () => {
+    get.mockImplementation((path: string) => {
+      if (path === "/auth/whoami") return Promise.resolve({ roles: ["voucher_operator"] });
+      if (path === "/device-settings/") return Promise.reject(new Error("forbidden"));
+      if (path.startsWith("/client-devices?")) return Promise.resolve({ data: [ROW], meta: { has_more: false } });
+      if (path === "/client-devices/d1") return Promise.resolve({ device: ROW, packages: [PKG], sessions: [],
+        restriction: { restricted: false }, remembered_signins: 1, free_packages_used: 1, actions: [] });
+      return Promise.resolve({});
+    });
+    await renderPage();
+    expect(get).not.toHaveBeenCalledWith("/device-settings/");
+    expect(screen.queryByText(/device changes a client may make per day/i)).toBeNull();
+    expect(screen.queryByText(/forbidden/i)).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: /manage/i }));
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText("Free package already used on this device");
+    for (const action of [/disconnect/i, /require fresh sign-in/i, /prepare for a sign-in test/i, /release this place/i]) {
+      expect(within(dialog).queryByRole("button", { name: action })).toBeNull();
+    }
+  });
+});

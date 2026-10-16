@@ -679,9 +679,27 @@ Auxiliary tables — all with tenant (and site where site-operational) columns a
 
 **6.1 Quota semantics.** VALIDITY_WINDOW is v1's only implemented time mode: the window opens at first activation (or configured start); `window_ends_at` is stamped once and never moves; all allowed devices share it; new sessions receive only the remainder. AGGREGATE_ONLINE_TIME is schema-present and deferred (shared device-minute balance: 2 devices online 10 minutes consume 20; pauses when no eligible session is online; idle-reaped sessions stop consuming). Data quota is an aggregate across devices from monotonic counters. Precedence: the first reached of {window end, data cap, hard expiry, checkout, admin} triggers one atomic terminal transition; all sessions are revoked once; new sessions are refused; the portal shows eligible renewal offers.
 
+> **Amendment, Product-Owner decision D-C (2026-10-16, migration 0122).** A VALIDITY_WINDOW plan revision may carry a
+> **time allowance** (`time_quota_seconds`). It is ONLINE time across the entitlement's sessions, measured exactly as
+> the aggregate mode measures it (two devices online for ten minutes spend twenty; unobserved time is never
+> charged), with the validity window still the hard outer end. Running out is a terminal condition like the others
+> (reason TIME; evidence cause `ONLINE_TIME_ALLOWANCE_EXHAUSTED`), and the earliest of window, data and allowance
+> wins. The plan's **idle timeout** and **maximum continuous session** end only the SESSION (end reasons
+> `IDLE_TIMEOUT`, `MAX_SESSION_DURATION`, at the true instant); the entitlement, its window, allowances and the
+> device's place are untouched and the device may sign in again. Idle is judged from the session's own metered
+> traffic and only when the accounting pass is healthy.
+
 **6.2 One live entitlement per subject; supersession.** Enforced by partial unique indexes (stay, account, voucher; guest principal **per site**). Any grant to a subject holding a live entitlement supersedes it in one transaction: old → TERMINATED(SUPERSEDED — or CHECKOUT for grace), new row records `supersedes_entitlement_id`, device bindings re-created, live sessions rebound in place (session rows re-pointed; nft entries untouched; tc rates adjusted). Supersession never crosses subjects (trigger-enforced). Cross-PMS movement uses `entitlement_transfers` (typed, cycle-safe) with old → TERMINATED(TRANSFERRED) and a no-posting grace entitlement under the destination Stay.
 
 **6.3 Devices and license capacity.** Device identity is `(tenant, site, appliance, MAC)`; MACs identify devices only. Per-entitlement distinct-device slots under the entitlement lock; same-device reconnect replaces its own session; default limit policy REJECT_NEW_DEVICE with a device-management surface. License capacity counts **distinct active devices per appliance** and is the logically outermost gate: pre-checked cheaply, re-verified last inside the transaction; on failure the entire transaction rolls back — no session/device/binding rows survive.
+
+> **Amendment, D-C (2026-10-16, migration 0122).** `DISCONNECT_OLDEST` is implemented: admitting a device over the
+> limit first disconnects the entitlement's oldest device (the open place admitted first) — its sessions end with
+> `DEVICE_LIMIT_OLDEST_DISCONNECTED`, its place is closed through `deauthorize_entitlement_device`, and the move is
+> recorded in the append-only `iam_v2.device_limit_disconnections`. `ADMIN_APPROVAL` has no approval workflow: it
+> stays in the enum for history, cannot be published, and an existing revision that names it refuses the new
+> device. Package grant tiers carry no per-tier speed/quota/device overrides any more (they were never enforced;
+> enforcement reads the pinned plan revision), and a package is saved with one grant tier.
 
 **6.4 Idempotent accounting.** Traffic sources are cumulative counters. Per session, a durable watermark row carries `(tenant, site, source_epoch, last_up, last_down, sample_seq)`. Each tick, one transaction per session: insert the ledger row (`UNIQUE(session_id, sample_seq)` makes any replay a no-op), advance the watermark, update session totals, and update entitlement counters (`consumed += delta`, `usage_version++`). `current < watermark` ⇒ counter reset detected ⇒ `source_epoch++` and re-baseline (reboot/class-rebuild safe). A reconciliation job rebuilds and verifies counters from the ledger; decreases happen only through audited `entitlement_adjustments`. Late samples are ledgered and counted but never reopen a terminal entitlement.
 

@@ -93,6 +93,8 @@ export const MODULE_SURFACES: readonly string[] = [
   "pms-interfaces", "pms-routing", "pms-source-conflicts", "pms-reconciliation", "pms-roster-reconciliation",
   "post-stay-profiles", "stay-transfers", "pms-financial-onboarding", "payment-providers",
   "financial-review", "financial-ops",
+  // The provider screens behind the optional sign-in methods (audit C-15): served only where the method's module is.
+  "social-providers", "notification-providers",
 ];
 
 /** Whether a nav resource is served here.

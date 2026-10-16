@@ -7,7 +7,7 @@ import {
   type GuestAccountManage, type GuestAccountRemoveResp,
 } from "@/lib/api";
 import { ManageAccountDialog } from "@/components/guest-accounts/manage-account";
-import { canWrite } from "@/lib/roles";
+import { canRead, canWrite } from "@/lib/roles";
 import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody } from "@/components/ui/card";
@@ -30,6 +30,7 @@ import { useToast } from "@/components/ui/toast";
 import { Plus, KeyRound, Eye, EyeOff, Pencil, Power, Users, Send, Settings2 } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
 import { isRemovedAccount, verificationStatus } from "@/lib/account-verification";
+import { ACCOUNT_NAME_MAX, ACCOUNT_NOTES_MAX, accountEditBody, validityWindow } from "@/lib/account-form";
 import { useOperatorRoles } from "@/lib/whoami-context";
 import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 
@@ -47,6 +48,11 @@ const STATUS_FILTERS: { value: string; label: string }[] = [
   { value: "disabled", label: "Disabled" },
   { value: "removed", label: "Removed" },
 ];
+
+type GuestAccountToggleResp = GuestAccount & {
+  packages_suspended?: number; packages_resumed?: number;
+  disconnected_sessions?: number; disconnect_failures?: number;
+};
 
 function weakPassword(pw: string): boolean {
   return pw.length > 0 && pw.length < 8;
@@ -104,6 +110,14 @@ export default function GuestAccountsPage() {
   // The generated-password FORMAT is a separate key: the desk creates accounts, it does not decide how strong
   // every generated password is.
   const mayEditFormat = roles === null ? false : canWrite("account-password-settings", roles);
+  // THE PORTAL SWITCH IS A SIGN-IN METHOD, so it follows auth-methods (edged refuses it otherwise): the desk
+  // creates accounts, it does not decide which ways clients may sign in.
+  const mayOfferOnPortal = roles === null ? false : canWrite("auth-methods", roles);
+  // What the Manage dialog may offer: device actions follow the sessions key, vouching for an address follows
+  // code-reveal -- the voucher station holds neither.
+  const mayReadDevices = roles === null ? false : canRead("sessions", roles);
+  const mayActOnDevices = roles === null ? false : canWrite("sessions", roles);
+  const mayVouch = roles === null ? false : canWrite("code-reveal", roles);
 
   // THERE IS NO AUTHORITY DIMENSION ANY MORE.
   //
@@ -179,6 +193,8 @@ export default function GuestAccountsPage() {
     const form = new FormData(e.currentTarget);
     const generate = form.get("generate") === "on";
     const password = (form.get("password") as string) || "";
+    const win = validityWindow(form);
+    if (win.error) { setFormErr(win.error); setBusy(false); return; }
     try {
       const resp = await api.post<GuestAccountCreateResp>("/guest-accounts", {
         username: (form.get("username") as string).trim(),
@@ -208,13 +224,9 @@ export default function GuestAccountsPage() {
     setBusy(true); setFormErr(null);
     const form = new FormData(e.currentTarget);
     try {
-      await api.patch(`/guest-accounts/${editing.id}`, {
-        username: (form.get("username") as string).trim(),
-        display_name: (form.get("display_name") as string) || undefined,
-        notes: (form.get("notes") as string) || undefined,
-        valid_from: (form.get("valid_from") as string) ? new Date(form.get("valid_from") as string).toISOString() : undefined,
-        valid_until: (form.get("valid_until") as string) ? new Date(form.get("valid_until") as string).toISOString() : undefined,
-      });
+      const win = validityWindow(form);
+      if (win.error) { setFormErr(win.error); return; }
+      await api.patch(`/guest-accounts/${editing.id}`, accountEditBody(form, editing.self_registered === true));
       setEditing(null);
       toast.success("Account updated.");
       load();
@@ -263,13 +275,34 @@ export default function GuestAccountsPage() {
     } finally { setBusy(false); }
   }
 
+  // DISABLE ENDS THE ACCOUNT'S SESSIONS AND PAUSES ITS PACKAGE (decision D-A), so it is confirmed first and the
+  // toast says what the appliance actually did. Enable needs no confirmation: it gives back what Disable paused.
+  const [disabling, setDisabling] = useState<GuestAccount | null>(null);
   async function onToggle(a: GuestAccount) {
+    setActionErr(null);
     try {
-      await api.patch(`/guest-accounts/${a.id}`, { enabled: !a.enabled });
-      toast.success(a.enabled ? `"${a.username}" disabled.` : `"${a.username}" can sign in again.`);
+      const r = await api.patch<GuestAccountToggleResp>(`/guest-accounts/${a.id}`, { enabled: !a.enabled });
+      if (a.enabled) {
+        const ended = r?.disconnected_sessions ?? 0;
+        const paused = r?.packages_suspended ?? 0;
+        toast.success(`"${a.username}" disabled.`,
+          `${ended} device${ended === 1 ? "" : "s"} disconnected; ${paused === 0 ? "no package was active" : "its package is paused"}.`);
+        if (r?.disconnect_failures) {
+          toast.error(`${r.disconnect_failures} device${r.disconnect_failures === 1 ? "" : "s"} could not be disconnected.`,
+            "The account is disabled. End those sessions from Active sessions.");
+        }
+        setDisabling(null);
+      } else {
+        const resumed = r?.packages_resumed ?? 0;
+        toast.success(`"${a.username}" can sign in again.`,
+          resumed > 0 ? "Its package is active again; its end date did not move." : undefined);
+      }
       load();
     }
-    catch (e: any) { setErr(e?.message ?? "Update failed"); }
+    catch (e: any) {
+      if (a.enabled) setActionErr(e);
+      else setErr(e?.message ?? "Update failed");
+    }
   }
 
   async function onDisconnect() {
@@ -314,11 +347,11 @@ export default function GuestAccountsPage() {
     } finally { setResending(null); }
   }
 
-  async function onDelete() {
+  async function onDelete({ password }: { password: string }) {
     if (!deleting) return;
     setBusy(true); setActionErr(null);
     try {
-      const r = await api.del<GuestAccountRemoveResp>(`/guest-accounts/${deleting.id}`);
+      const r = await api.del<GuestAccountRemoveResp>(`/guest-accounts/${deleting.id}`, { password });
       if (r?.status === "removed") {
         toast.success(`The account "${deleting.username}" has been removed.`,
           "Its history is kept, and the address can be used to register again.");
@@ -328,7 +361,9 @@ export default function GuestAccountsPage() {
       setDeleting(null);
       setManaging(null);
       load();
-    } catch (e) { setActionErr(e); }
+    } catch (e) {
+      setActionErr(e instanceof ApiError && e.code === "reauth_required" ? new Error("Your password was not accepted.") : e);
+    }
     finally { setBusy(false); }
   }
 
@@ -366,10 +401,10 @@ export default function GuestAccountsPage() {
             </HelpSection>
             <HelpSection title="Good to know">
               <HelpList items={[
-                "Accounts can only be used while username-and-password sign-in is offered on the Client Portal.",
+                "Accounts staff create can only be used while username-and-password sign-in is offered on the Client Portal (the switch below, which is part of Sign-in methods). Self-service accounts follow the Email accounts switch on Sign-in methods instead.",
                 "A password is shown once, when it is set. It cannot be looked up again; if it is lost, set a new one.",
                 "Repeated failed sign-ins restrict the DEVICE that is guessing, not the account. See Client sign-in protection under Sign-in methods.",
-                "Disable an account to stop it being used for now; that can be reversed. Removing cannot.",
+                "Disable stops an account being used for now: its devices are disconnected and its package is paused. Enable resumes the package if it has not ended — its end date does not move while it is paused. Removing cannot be undone.",
                 "Remove deletes an account that was never used. An account with packages or sign-ins is removed instead: its devices are disconnected, it can no longer sign in, its history is kept, and its email address or username can be used again.",
                 "Manage shows an account's verification state, its packages and the devices on each package. For a self-service account staff can mark the email verified or start a new verification period.",
                 "Accounts marked Self-service were opened by the client on the portal with their email address (Email accounts). Staff cannot set or show their password: the client resets it from the reset email. If the verification email did not arrive, use Resend verification email.",
@@ -415,15 +450,17 @@ export default function GuestAccountsPage() {
             </div>
             <p className="text-caption text-muted-foreground">
               {portalOn
-                ? "Clients see a Username & Password tab and can sign in with these accounts."
-                : "The tab is hidden, so these accounts cannot be used even though they exist."}
+                ? "Clients see a Username & Password tab and can sign in with the accounts staff created here."
+                : "The tab is hidden, so accounts staff created cannot be used even though they exist."}
+              {" "}Self-service accounts follow the Email accounts switch on Sign-in methods.
+              {roles !== null && !mayOfferOnPortal && " Your role cannot change which sign-in methods are offered."}
             </p>
           </div>
           <Switch
             id="portal-offer"
             checked={portalOn}
             onCheckedChange={onTogglePortal}
-            disabled={!mayWrite}
+            disabled={!mayOfferOnPortal}
             label="Offer username-and-password sign-in"
           />
         </CardBody>
@@ -567,7 +604,8 @@ export default function GuestAccountsPage() {
                               <Send /> {resending === a.id ? "Sending…" : "Resend verification email"}
                             </Button>
                           )}
-                          <Button size="sm" variant="ghost" onClick={() => onToggle(a)}>
+                          <Button size="sm" variant="ghost"
+                            onClick={() => (a.enabled ? (setActionErr(null), setDisabling(a)) : void onToggle(a))}>
                             {a.enabled ? "Disable" : "Enable"}
                           </Button>
                           {(a.active_devices ?? 0) > 0 && (
@@ -667,6 +705,22 @@ export default function GuestAccountsPage() {
       />
 
       <ConfirmDialog
+        open={disabling !== null}
+        onOpenChange={(v) => !v && setDisabling(null)}
+        title="Disable this client account?"
+        description={disabling ? `"${disabling.username}" will not be able to sign in until it is enabled again.` : undefined}
+        consequences={disabling ? [
+          `${disabling.active_devices ?? 0} device${(disabling.active_devices ?? 0) === 1 ? " that is" : "s that are"} online now will be disconnected.`,
+          "Its package is paused. Enable resumes it; the time it was bought for keeps running while it is paused.",
+        ] : undefined}
+        confirmLabel="Disable account"
+        confirmVariant="danger"
+        busy={busy}
+        error={actionErr}
+        onConfirm={() => (disabling ? onToggle(disabling) : undefined)}
+      />
+
+      <ConfirmDialog
         open={deleting !== null}
         onOpenChange={(v) => !v && setDeleting(null)}
         title={removal === "delete" ? "Delete this client account?" : "Remove this client account?"}
@@ -692,6 +746,7 @@ export default function GuestAccountsPage() {
         }
         confirmLabel={removal === "delete" ? "Delete account" : "Remove account"}
         confirmVariant="danger"
+        requirePassword
         busy={busy}
         error={actionErr}
         onConfirm={onDelete}
@@ -700,6 +755,9 @@ export default function GuestAccountsPage() {
       <ManageAccountDialog
         account={managing}
         mayWrite={mayWrite}
+        mayReadDevices={mayReadDevices}
+        mayActOnDevices={mayActOnDevices}
+        mayVouch={mayVouch}
         onClose={() => setManaging(null)}
         onChanged={() => void load()}
         onRemove={(acc, how) => { setActionErr(null); setRemoval(how); setDeleting(acc); }}
@@ -726,7 +784,7 @@ function AccountForm({ account, onSubmit, busy, withPassword, onCancel }: {
           <Input name="username" required minLength={1} maxLength={64} defaultValue={account?.username} placeholder="alex.morgan" />
         </Field>
         <Field label="Name" hint="For your own reference; the client never sees it.">
-          <Input name="display_name" defaultValue={account?.display_name ?? ""} placeholder="Visitor pass" />
+          <Input name="display_name" maxLength={ACCOUNT_NAME_MAX} defaultValue={account?.display_name ?? ""} placeholder="Visitor pass" />
         </Field>
       </div>
 
@@ -778,13 +836,13 @@ function AccountForm({ account, onSubmit, busy, withPassword, onCancel }: {
         <Field label="Valid from" hint="Leave empty to work immediately.">
           <Input name="valid_from" type="datetime-local" defaultValue={dt(account?.valid_from)} />
         </Field>
-        <Field label="Valid until" hint="Leave empty for no end date.">
+        <Field label="Valid until" hint="Leave empty for no end date. Must be later than Valid from.">
           <Input name="valid_until" type="datetime-local" defaultValue={dt(account?.valid_until)} />
         </Field>
       </div>
 
       <Field label="Notes">
-        <Input name="notes" defaultValue={account?.notes ?? ""} placeholder="Optional" />
+        <Input name="notes" maxLength={ACCOUNT_NOTES_MAX} defaultValue={account?.notes ?? ""} placeholder="Optional" />
       </Field>
 
       {/*

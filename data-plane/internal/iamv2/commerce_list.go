@@ -197,7 +197,7 @@ func (e *CommerceEngine) evalPackageForSubject(ctx context.Context, tx CommerceT
 	if err != nil {
 		return GrantSnapshot{}, nil, false, "", err
 	}
-	if pol := PriorPurchasePolicyOf(rules, pkg.PriceMinor); pol.Present {
+	if pol := PriorPurchasePolicyOf(rules, pkg.PriceMinor).ForSubject(ac.Subject.Kind); pol.Present {
 		prior, err := tx.HasPriorPurchase(ctx, req.TenantID, req.SiteID, PriorPurchaseQuery{PackageID: pkg.PackageID, Subject: ac.Subject, Policy: pol})
 		if err != nil {
 			return GrantSnapshot{}, nil, false, "", err

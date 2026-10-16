@@ -85,15 +85,18 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 	err = pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
 		// The entitlement must be ours, live, and still within its window. Checked inside the transaction so
 		// a revocation racing this activation cannot slip a session in behind it.
-		var maxDevices int
-		var status string
+		// maxDevices NULL = no device limit (audit B-24), as authorize_entitlement_device and 0118 read it.
+		// devicePolicy: DISCONNECT_OLDEST (0122) admits over the limit by disconnecting the oldest device.
+		var maxDevices *int
+		var status, devicePolicy string
 		if err := tx.QueryRow(ctx, `
-		    SELECT e.status, COALESCE(spr.max_concurrent_devices, 1)
+		    SELECT e.status, spr.max_concurrent_devices,
+		           COALESCE(spr.device_limit_policy, 'REJECT_NEW_DEVICE')
 		      FROM iam_v2.entitlements e
 		      LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
 		     WHERE e.id=$1 AND e.tenant_id=$2 AND e.site_id=$3
 		       AND (e.window_ends_at IS NULL OR e.window_ends_at > now())
-		     FOR UPDATE OF e`, req.EntitlementID, s.tenID, s.siteID).Scan(&status, &maxDevices); err != nil {
+		     FOR UPDATE OF e`, req.EntitlementID, s.tenID, s.siteID).Scan(&status, &maxDevices, &devicePolicy); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return errEntitlementUnusable
 			}
@@ -223,15 +226,31 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 		// RECONNECT / IDEMPOTENCY. The same device returning to the same entitlement gets the session it
 		// already has rather than a second one. Without this, a retried request -- a lost response, a guest
 		// reloading the page -- would consume another device slot against its own limit.
-		if err := tx.QueryRow(ctx, `
-		    SELECT id::text FROM iam_v2.sessions
-		     WHERE entitlement_id=$1 AND device_id=$2 AND ended IS NULL
-		       AND state IN ('active','PENDING_ENFORCEMENT')
-		     LIMIT 1`, req.EntitlementID, req.DeviceID).Scan(&sessionID); err == nil {
-			reused = true
-			return nil
-		} else if !errors.Is(err, pgx.ErrNoRows) {
+		//
+		// ...BUT ONLY AT THE SAME ADDRESS (audit B-19). A session is pinned to its IP and ingress bridge: that is
+		// what nft authorizes and what the shaping class and the accounting checkpoint are keyed on. A device that
+		// comes back with a NEW address (a DHCP change, a different network) used to be handed its old session,
+		// which still authorized the OLD address -- so the device stayed offline at its new one while the old
+		// address stayed admitted for whoever holds it next. The pinned columns are accounting identity and are not
+		// rewritten in place (the sessions guard refuses that, rightly); the old session is ended through the
+		// controlled writer instead and a fresh one is opened below at the current address. The device keeps its
+		// place on the package (the authorization binding is untouched) and no extra licensed slot is used.
+		stale, err := s.liveSessionsOfDevice(ctx, tx, req.EntitlementID, req.DeviceID)
+		if err != nil {
 			return err
+		}
+		for _, ls := range stale {
+			if sessionID == "" && ls.ip == ip.String() && ls.iface == nc.Bridge {
+				sessionID = ls.id
+				reused = true
+				continue
+			}
+			if _, err := s.endSessionControlled(ctx, tx, ls.id, endReasonAddressChanged); err != nil {
+				return err
+			}
+		}
+		if reused {
+			return nil
 		}
 
 		// LICENSED CONCURRENT-GUEST CAP. Scope, serialization and rationale live with the function.
@@ -248,8 +267,11 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 			req.EntitlementID).Scan(&inUse); err != nil {
 			return err
 		}
-		if inUse >= maxDevices {
-			return &maxDevicesError{Limit: maxDevices, Current: inUse}
+		// DISCONNECT_OLDEST (0122) admits the new device by disconnecting the entitlement's oldest one, inside
+		// authorize_entitlement_device under the entitlement lock -- so a full plan with that policy is not a
+		// refusal here. Every other policy refuses at the limit, as before.
+		if maxDevices != nil && inUse >= *maxDevices && devicePolicy != "DISCONNECT_OLDEST" {
+			return &maxDevicesError{Limit: *maxDevices, Current: inUse}
 		}
 
 		// DEVICE ADMISSION. A session's device must first hold an authorization binding on the entitlement --
@@ -265,7 +287,11 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 			// device on a 1-device account passed the session count and this refusal surfaced as "could not bring your
 			// device online" (2026-10-15). Answer it as the device limit it is.
 			if strings.Contains(err.Error(), "MAX_DEVICES_REACHED") {
-				return &maxDevicesError{Limit: maxDevices, Current: maxDevices}
+				limit := 0
+				if maxDevices != nil {
+					limit = *maxDevices
+				}
+				return &maxDevicesError{Limit: limit, Current: limit}
 			}
 			return err
 		}
@@ -364,6 +390,36 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 		"authority":  "iam_v2",
 		"bridge":     nc.Bridge,
 	})
+}
+
+// endReasonAddressChanged ends a device's session when it comes back to the same package at a different address
+// (or on a different bridge): the old session's pinned address is no longer this device's (audit B-19).
+const endReasonAddressChanged = "ADDRESS_CHANGED"
+
+type liveDeviceSession struct{ id, ip, iface string }
+
+// liveSessionsOfDevice lists the device's live sessions on the entitlement with the address and bridge each is
+// pinned to. Read inside the activation transaction, which already holds the entitlement row lock.
+func (s *server) liveSessionsOfDevice(ctx context.Context, tx pgx.Tx, entitlementID, deviceID string) ([]liveDeviceSession, error) {
+	rows, err := tx.Query(ctx, `
+	    SELECT id::text, COALESCE(host(ip), ''), COALESCE(ingress_interface, '')
+	      FROM iam_v2.sessions
+	     WHERE entitlement_id=$1 AND device_id=$2 AND ended IS NULL
+	       AND state IN ('active','PENDING_ENFORCEMENT')
+	     ORDER BY started DESC`, entitlementID, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []liveDeviceSession
+	for rows.Next() {
+		var l liveDeviceSession
+		if err := rows.Scan(&l.id, &l.ip, &l.iface); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
 }
 
 var errEntitlementUnusable = errors.New("entitlement not usable")

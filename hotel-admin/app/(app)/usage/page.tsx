@@ -37,7 +37,8 @@ import { PageHeader, PageShell } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Field, Input, Select } from "@/components/ui/input";
+import { PERIODS, periodQuery, type Period } from "@/lib/usage-period";
 import { Badge } from "@/components/ui/badge";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Meter, MonoId, SkeletonRows } from "@/components/ui/misc";
@@ -84,6 +85,8 @@ type SourceRow = {
 type SourceDetail = {
   source: SourceRow; service_plan?: string; access_status?: string;
   devices: DeviceRow[]; sessions: SessionRow[];
+  // The period the totals cover -- the same one the list used.
+  from?: string; to?: string;
 };
 
 type Tab = "sources" | "devices";
@@ -172,7 +175,11 @@ export default function UsageExplorerPage() {
   const [device, setDevice] = useState<DeviceDetail | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [samples, setSamples] = useState<Record<string, { bytes_total: number; sample_count: number } | "loading">>({});
+  const [samples, setSamples] = useState<Record<string, { bytes_total: number; sample_count: number; truncated?: boolean } | "loading">>({});
+  const [period, setPeriod] = useState<Period>("30");
+  const [fromDay, setFromDay] = useState("");
+  const [toDay, setToDay] = useState("");
+  const range = periodQuery(period, fromDay, toDay);
 
   // PAGED ON THE SERVER: one page of access sources at a time, heaviest first. A new search or type starts at
   // the first page; only the newest request's answer is applied.
@@ -180,13 +187,18 @@ export default function UsageExplorerPage() {
   const [hasMore, setHasMore] = useState(false);
   const latest = useRef(0);
   const search = useCallback(async (type: TypeFilter = typeFilter, at = 0) => {
+    if (range.error) { setErr(range.error); return; }
     const mine = ++latest.current;
     setBusy(true); setErr(null);
     try {
       const t = type === "all" ? "" : type;
       const page = Math.floor(at / USAGE_PAGE) + 1;
+      // The search text travels in a header, not the URL: edged logs request lines, and this is a username or
+      // a room number.
+      const needle = q.trim();
       const r = await api.get<{ data: SourceRow[]; meta?: { has_more?: boolean } }>(
-        `/usage/sources?type=${encodeURIComponent(t)}&q=${encodeURIComponent(q)}&page=${page}&page_size=${USAGE_PAGE}`,
+        `/usage/sources?type=${encodeURIComponent(t)}&page=${page}&page_size=${USAGE_PAGE}&${range.qs}`,
+        needle ? { "X-Usage-Search": encodeURIComponent(needle) } : undefined,
       );
       if (mine !== latest.current) return; // superseded
       setRows(r.data ?? []);
@@ -196,13 +208,13 @@ export default function UsageExplorerPage() {
       if (mine !== latest.current) return;
       setErr(e instanceof ApiError ? e.message : "the usage records could not be read");
     } finally { if (mine === latest.current) setBusy(false); }
-  }, [q, typeFilter]);
+  }, [q, typeFilter, range.qs, range.error]);
 
   useEffect(() => { if (tab === "sources" && rows === null) search(); }, [tab, rows, search]);
 
   async function openSource(type: SourceType, id: string) {
     setBusy(true); setErr(null);
-    try { setSource(await api.get<SourceDetail>(`/usage/sources/${type}/${encodeURIComponent(id)}`)); }
+    try { setSource(await api.get<SourceDetail>(`/usage/sources/${type}/${encodeURIComponent(id)}?${range.qs}`)); }
     catch (e) { setErr(e instanceof ApiError ? e.message : "that access source could not be read"); }
     finally { setBusy(false); }
   }
@@ -218,7 +230,7 @@ export default function UsageExplorerPage() {
 
   async function lookUpDevice(mac: string) {
     setBusy(true); setErr(null); setSource(null);
-    try { setDevice(await api.get<DeviceDetail>(`/usage/devices/${encodeURIComponent(mac)}`)); setTab("devices"); }
+    try { setDevice(await api.get<DeviceDetail>(`/usage/devices/${encodeURIComponent(mac)}?${range.qs}`)); setTab("devices"); }
     catch (e) { setErr(e instanceof ApiError ? e.message : "that device could not be read"); setDevice(null); }
     finally { setBusy(false); }
   }
@@ -228,7 +240,7 @@ export default function UsageExplorerPage() {
   async function openSamples(sessionID: string) {
     setSamples((p) => ({ ...p, [sessionID]: "loading" }));
     try {
-      const r = await api.get<{ bytes_total: number; sample_count: number }>(`/usage/sessions/${sessionID}/samples`);
+      const r = await api.get<{ bytes_total: number; sample_count: number; truncated?: boolean }>(`/usage/sessions/${sessionID}/samples`);
       setSamples((p) => ({ ...p, [sessionID]: r }));
     } catch {
       setSamples((p) => { const n = { ...p }; delete n[sessionID]; return n; });
@@ -293,6 +305,23 @@ export default function UsageExplorerPage() {
       />
 
       <ErrorBanner err={err} />
+
+      <Card>
+        <CardBody className="flex flex-wrap items-end gap-3 py-3">
+          <Field label="Period" hint="Every total on this page covers this period.">
+            <Select aria-label="Period" value={period} onChange={(e) => { setPeriod(e.target.value as Period); setRows(null); setSource(null); setDevice(null); }}>
+              {PERIODS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+            </Select>
+          </Field>
+          {period === "custom" && (
+            <>
+              <Field label="From"><Input type="date" aria-label="From" value={fromDay} onChange={(e) => setFromDay(e.target.value)} /></Field>
+              <Field label="To"><Input type="date" aria-label="To" value={toDay} onChange={(e) => setToDay(e.target.value)} /></Field>
+              <Button variant="secondary" disabled={!!range.error} onClick={() => { setRows(null); setSource(null); setDevice(null); }}>Apply</Button>
+            </>
+          )}
+        </CardBody>
+      </Card>
 
       <Tabs
         value={tab}
@@ -464,6 +493,12 @@ export default function UsageExplorerPage() {
                       },
                     ]}
                   />
+                  {source.from && source.to && (
+                    <p className="text-caption text-muted-foreground">
+                      Totals for {formatDate(source.from)} – {formatDate(source.to)}, the period chosen above. The
+                      allowance is the whole package&apos;s.
+                    </p>
+                  )}
                   <div className="flex flex-wrap gap-2">
                     {source.service_plan && <Badge tone="neutral">Service plan: {source.service_plan}</Badge>}
                     <Badge tone="default">{src.totals.sessions} sessions</Badge>
@@ -593,7 +628,7 @@ export default function UsageExplorerPage() {
  *  total so the two can be seen to agree rather than taken on trust. */
 function SessionsCard({ sessions, samples, onOpenSamples }: {
   sessions: SessionRow[];
-  samples: Record<string, { bytes_total: number; sample_count: number } | "loading">;
+  samples: Record<string, { bytes_total: number; sample_count: number; truncated?: boolean } | "loading">;
   onOpenSamples: (id: string) => void;
 }) {
   return (
@@ -633,7 +668,8 @@ function SessionsCard({ sessions, samples, onOpenSamples }: {
                     {formatBytes(s.bytes_total)}
                     {sm && sm !== "loading" && (
                       <div className="text-caption text-muted-foreground">
-                        {sm.sample_count.toLocaleString()} samples · {formatBytes(sm.bytes_total)}
+                        {sm.truncated ? "The first " : ""}{sm.sample_count.toLocaleString()} samples · {formatBytes(sm.bytes_total)}
+                        {sm.truncated ? " — the session has more; this is not its whole total" : ""}
                       </div>
                     )}
                   </TD>

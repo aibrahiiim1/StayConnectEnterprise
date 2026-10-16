@@ -178,6 +178,12 @@ their natural end* in every state, and DHCP, DNS, the portal and the Admin Conso
 keep running — only **new** authorization is refused
 (`State.AllowsNewSessions`).
 
+*Natural end* means the client's own package rules: its duration, data and time allowances, the plan's
+inactivity disconnect and maximum session (all enforced by the appliance since migration 0122), checkout, or
+staff ending it. A licence change adds no end of its own — re-confirmed against this contract in the 2026-10
+audit (B-27) and kept. A package with no end of its own (*Until staff end it*) therefore keeps running after an
+expiry or revocation until staff end it; no new client is admitted meanwhile.
+
 `FeatureEnabled(state, entitled)`: a feature works iff it is entitled in the
 document **and** the state is Active/GracePeriod.
 

@@ -607,8 +607,15 @@ var sentRe = regexp.MustCompile(`^\s*Sent\s+(\d+)\s+bytes\s+(\d+)\s+pkt\b`)
 func (c *Client) ReadClasses(ctx context.Context, device string) (map[int]ClassBytes, error) {
 	out, err := c.exec(ctx, c.TCPath, "-s", "class", "show", "dev", device)
 	if err != nil {
-		// Device may not exist yet (no sessions on this bridge) — treat as empty.
-		return map[int]ClassBytes{}, nil
+		// A device that does not exist yet (an IFB not created because the bridge has had no session) truly has
+		// no classes, and only that is answered as empty. ANY OTHER FAILURE IS AN ERROR (audit B-18): treating a
+		// failed read as "no classes" made reconciliation re-create every class -- a new epoch, a restarted
+		// counter series and the bytes since the last reading lost -- and made accounting see every counter at
+		// zero. Every caller already treats an error as "unknown, try next tick".
+		if deviceAbsent(out) {
+			return map[int]ClassBytes{}, nil
+		}
+		return nil, fmt.Errorf("tc class show dev %s: %w — %s", device, err, strings.TrimSpace(string(out)))
 	}
 	res := map[int]ClassBytes{}
 	sc := bufio.NewScanner(bytes.NewReader(out))
@@ -647,6 +654,12 @@ func (c *Client) ReadClasses(ctx context.Context, device string) (map[int]ClassB
 		return nil, err
 	}
 	return res, nil
+}
+
+// deviceAbsent reports whether tc's output says the network device does not exist (iproute2 prints
+// `Cannot find device "X"`).
+func deviceAbsent(out []byte) bool {
+	return bytes.Contains(out, []byte("Cannot find device"))
 }
 
 func (c *Client) run(ctx context.Context, args ...string) error {

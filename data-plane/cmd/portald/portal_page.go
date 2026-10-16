@@ -749,6 +749,9 @@ type scdStatus struct {
 	HardExpiry             string   `json:"hard_expiry"`
 	// AccessEndsAt is the entitlement's calendar end, for any package that has one.
 	AccessEndsAt string `json:"access_ends_at"`
+	// OnlineTimeAllowance is scd's statement that remaining_online_seconds is a time allowance to show. It is
+	// set for the aggregate mode and, since migration 0122, for a validity-window plan with a time allowance.
+	OnlineTimeAllowance bool `json:"online_time_allowance"`
 }
 
 // remaining is how long this device's access has left: the earliest of the online time left, the hard expiry and
@@ -820,7 +823,7 @@ func (h *handler) renderStatus(w http.ResponseWriter, r *http.Request, st scdSta
 	nonce := setPortalCSP(w)
 	p := h.newGuestPage(r, nonce)
 	v := statusView{guestPage: p, BackHref: onlinePageHref(r, st.SessionID)}
-	if st.TimeMode == "AGGREGATE_ONLINE_TIME" && st.RemainingOnlineSeconds != nil {
+	if (st.TimeMode == "AGGREGATE_ONLINE_TIME" || st.OnlineTimeAllowance) && st.RemainingOnlineSeconds != nil {
 		v.HasTime = true
 		v.TimeLeft = humanSpan(p.T, time.Duration(*st.RemainingOnlineSeconds)*time.Second)
 		if v.TimeLeft == "" {

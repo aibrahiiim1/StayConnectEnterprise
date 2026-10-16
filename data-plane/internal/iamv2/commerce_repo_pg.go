@@ -142,13 +142,13 @@ func (t *pgCommerceTx) ResolveActivePackageRevision(ctx context.Context, tenantI
 		`SELECT r.id::text, r.package_id::text, r.service_plan_revision_id::text, r.package_type,
 		        r.price_minor, r.currency, r.currency_exponent, r.settlement_methods,
 		        r.visible_from, r.visible_until, p.active, (p.current_revision_id = r.id) AS is_current,
-		        r.display, r.duration_policy
+		        r.display, r.duration_policy, COALESCE(r.data_allocation_policy->>'mode','FIXED')
 		   FROM iam_v2.internet_packages p
 		   JOIN iam_v2.internet_package_revisions r ON r.id = p.current_revision_id
 		  WHERE p.tenant_id=$1 AND p.site_id=$2 AND p.id=$3`,
 		tenantID, siteID, packageID).Scan(&row.ID, &row.PackageID, &row.PlanRevisionID, &row.PackageType,
 		&row.PriceMinor, &cur, &cexp, &settlement, &row.VisibleFrom, &row.VisibleUntil,
-		&row.PackageActive, &row.IsCurrent, &display, &duration)
+		&row.PackageActive, &row.IsCurrent, &display, &duration, &row.DataAllocationMode)
 	if err == pgx.ErrNoRows {
 		return PackageRevisionRow{}, &Error{Code: ErrInvalidInput, Msg: "package_not_found"}
 	}
@@ -179,7 +179,7 @@ func (t *pgCommerceTx) ListActivePackageRevisions(ctx context.Context, tenantID,
 		`SELECT r.id::text, r.package_id::text, r.service_plan_revision_id::text, r.package_type,
 		        r.price_minor, r.currency, r.currency_exponent, r.settlement_methods,
 		        r.visible_from, r.visible_until, p.active, (p.current_revision_id = r.id) AS is_current,
-		        r.display, r.duration_policy
+		        r.display, r.duration_policy, COALESCE(r.data_allocation_policy->>'mode','FIXED')
 		   FROM iam_v2.internet_packages p
 		   JOIN iam_v2.internet_package_revisions r ON r.id = p.current_revision_id
 		  WHERE p.tenant_id=$1 AND p.site_id=$2 AND p.active
@@ -201,7 +201,7 @@ func (t *pgCommerceTx) ListActivePackageRevisions(ctx context.Context, tenantID,
 		var cur *string
 		if err := rows.Scan(&row.ID, &row.PackageID, &row.PlanRevisionID, &row.PackageType,
 			&row.PriceMinor, &cur, &cexp, &settlement, &row.VisibleFrom, &row.VisibleUntil,
-			&row.PackageActive, &row.IsCurrent, &display, &duration); err != nil {
+			&row.PackageActive, &row.IsCurrent, &display, &duration, &row.DataAllocationMode); err != nil {
 			return nil, err
 		}
 		if cur != nil {
@@ -373,10 +373,11 @@ func (t *pgCommerceTx) HasPriorPurchase(ctx context.Context, tenantID, siteID st
 	if useDevice {
 		dev = nullable(q.Subject.DeviceID)
 	}
-	sql := `SELECT EXISTS(` + bySubject + `)`
-	if useDevice {
-		sql = `SELECT EXISTS(` + bySubject + `) OR EXISTS(` + byDevice + `)`
-	}
+	// ONE STATEMENT, every parameter referenced. The device branch used to be left out of the text when the
+	// policy did not count the device, which left $7 unreferenced -- and PostgreSQL refuses a statement with a
+	// parameter whose type it cannot determine (42P18), so every package whose free-access rule had the device
+	// switch OFF failed the listing outright. A NULL device simply never matches.
+	sql := `SELECT EXISTS(` + bySubject + `) OR EXISTS(` + byDevice + `)`
 	var exists bool
 	err := t.tx.QueryRow(ctx, sql, tenantID, siteID, q.PackageID, v, a, p, dev, since).Scan(&exists)
 	return exists, err
@@ -402,13 +403,13 @@ func (t *pgCommerceTx) LoadPackageRevisionByID(ctx context.Context, tenantID, si
 		`SELECT r.id::text, r.package_id::text, r.service_plan_revision_id::text, r.package_type,
 		        r.price_minor, r.currency, r.currency_exponent, r.settlement_methods,
 		        r.visible_from, r.visible_until, p.active, (p.current_revision_id = r.id) AS is_current,
-		        r.display, r.duration_policy
+		        r.display, r.duration_policy, COALESCE(r.data_allocation_policy->>'mode','FIXED')
 		   FROM iam_v2.internet_package_revisions r
 		   JOIN iam_v2.internet_packages p ON p.tenant_id = r.tenant_id AND p.site_id = r.site_id AND p.id = r.package_id
 		  WHERE r.tenant_id=$1 AND r.site_id=$2 AND r.id=$3`,
 		tenantID, siteID, revID).Scan(&row.ID, &row.PackageID, &row.PlanRevisionID, &row.PackageType,
 		&row.PriceMinor, &cur, &cexp, &settlement, &row.VisibleFrom, &row.VisibleUntil,
-		&row.PackageActive, &row.IsCurrent, &display, &duration)
+		&row.PackageActive, &row.IsCurrent, &display, &duration, &row.DataAllocationMode)
 	if err == pgx.ErrNoRows {
 		return PackageRevisionRow{}, &Error{Code: ErrInvalidInput, Msg: "package_revision_not_found"}
 	}

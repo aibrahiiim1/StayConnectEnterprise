@@ -24,7 +24,9 @@ package main
 // each device listed here carries its id for it.
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -167,8 +169,22 @@ func (s *server) getGuestAccountManage(w http.ResponseWriter, r *http.Request) {
 }
 
 // deleteGuestAccountIAMv2 deletes an account that was never used, and removes (retires) one with history.
+//
+// REMOVING CANNOT BE UNDONE, so it carries the password step-up, as cancelling a voucher does. The body is
+// {"password": "..."}.
 func (s *server) deleteGuestAccountIAMv2(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	var in struct {
+		Password string `json:"password"`
+	}
+	// An empty body is answered as a missing password, not a malformed request.
+	if err := decodeJSON(r, &in); err != nil && !errors.Is(err, io.EOF) {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
+		return
+	}
+	if _, ok := s.stepUpActor(w, r, in.Password); !ok {
+		return
+	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	var username string
@@ -264,8 +280,34 @@ func (s *server) selfServiceTarget(w http.ResponseWriter, r *http.Request, ctx c
 
 // markGuestAccountEmailVerified: staff vouch for the address (for example, the client showed it to the desk).
 // Restores normal status at once; the package is untouched.
+//
+// VOUCHING FOR AN ADDRESS IS THE code-reveal POWER, not the guest-accounts one. Both let staff stand in for proof
+// the client did not give (docs/ROLE_AND_SCOPE_MATRIX.md, code-reveal: "lets the desk vouch for an address the
+// client did not prove"), so this needs code-reveal WRITE -- which the voucher print station does not hold -- and,
+// like a code reveal, the operator's password and a bounded reason, recorded in the audit.
 func (s *server) markGuestAccountEmailVerified(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if !permFor(sessRoles(r), "code-reveal", permWrite) {
+		jsonErr(w, http.StatusForbidden, "forbidden",
+			"role lacks access to code-reveal: marking an address verified vouches for it on the client's behalf")
+		return
+	}
+	var in struct {
+		Password string `json:"password"`
+		Reason   string `json:"reason"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
+		return
+	}
+	reason, okReason := reasonText(in.Reason)
+	if !okReason {
+		jsonErr(w, http.StatusBadRequest, "reason_required", reasonBoundsMessage)
+		return
+	}
+	if _, ok := s.stepUpActor(w, r, in.Password); !ok {
+		return
+	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	username, verified, ok := s.selfServiceTarget(w, r, ctx, id)
@@ -284,7 +326,7 @@ func (s *server) markGuestAccountEmailVerified(w http.ResponseWriter, r *http.Re
 		return
 	}
 	s.audit(r, "guest_account.email_marked_verified", "guest_account", id,
-		map[string]any{"username": username, "authority": "iam_v2", "by": "staff"})
+		map[string]any{"username": username, "authority": "iam_v2", "by": "staff", "reason": reason})
 	writeJSON(w, http.StatusOK, map[string]any{"status": "verified"})
 }
 

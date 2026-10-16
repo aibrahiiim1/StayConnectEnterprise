@@ -165,8 +165,10 @@ The Admin Console's one status card ([CENTRAL_CONTROL_PLANE.md §8](CENTRAL_CONT
 | Licence: Expired / Suspended / Revoked / Wrong appliance | No new client sessions |
 | OneGate Central: Connected / Temporarily unreachable / Not configured | Link to Central only; clients are unaffected by it |
 
-**A deleted record.** Every 5 minutes (and at boot) the appliance asks Central `hello`. When Central twice
-answers that it does not know the appliance, an appliance that **never held a customer** clears its identity
+**A deleted record.** Every 5 minutes (and at boot) the appliance asks Central `hello`. When Central answers
+that it does not know the appliance **in a sustained way** — at least three consecutive replies, the first and
+the last at least ten minutes apart, with any other reply from Central starting the count again (a reply that
+never arrives counts for nothing either way) — an appliance that **never held a customer** clears its identity
 and registers again as waiting; one that **has held a customer** — a granting or terminal assignment on disk,
 or tenant data in its database — enters the *Removed from OneGate Central* state above instead. There is no
 in-place path to a different customer: changing customer is retire → factory-clean install → registration →

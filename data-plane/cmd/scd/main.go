@@ -478,9 +478,8 @@ func (s *server) revoke(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "bad ip")
 		return
 	}
-	s.denyAtGate(r.Context(), ip)
-	// Clamp to a reason the sessions_end_reason_check CHECK constraint allows, so a
-	// caller passing an unexpected reason ends the session cleanly instead of 500.
+	// Clamp to a known reason, so a caller passing an unexpected one ends the session cleanly instead of 500.
+	// The metric keeps these lower-case labels; the session row records the upper-case code (sessionEndCode).
 	switch req.Reason {
 	// "logout" is the guest's own sign-out from the portal (audit P-30): it used to be recorded as "admin", so a
 	// guest who tapped Disconnect read in the console as if staff had disconnected them.
@@ -488,8 +487,15 @@ func (s *server) revoke(w http.ResponseWriter, r *http.Request) {
 	default:
 		req.Reason = "admin"
 	}
-	if err := s.endActiveSessionByIP(r.Context(), ip, req.Reason); err != nil {
-		slog.Error("session end", "err", err)
+	// THE ROW ENDS FIRST, then the kernel (audit F-14). The shaping class is netd's; deleting it while the row
+	// still said active/PENDING_ENFORCEMENT left a session claiming enforcement that no longer existed (and, for
+	// a pending one the guard refused to end, kept it that way). Ended first, netd's convergence can only agree.
+	_, endErr := s.endActiveSessionByIP(r.Context(), ip, req.Reason)
+	// The kernel step runs either way: an operator asked for this address to be off the network, and a database
+	// failure is not a reason to leave it admitted until netd's next pass.
+	s.denyAtGate(r.Context(), ip)
+	if endErr != nil {
+		slog.Error("session end", "err", endErr)
 		httpErr(w, http.StatusInternalServerError, "session end failed")
 		return
 	}
@@ -497,21 +503,19 @@ func (s *server) revoke(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "revoked"})
 }
 
-// denyAtGate is the kernel half of an operator disconnect: the address leaves the guest authorization set on its
-// ingress bridge and its shaping class goes. The session row is ended by the caller, with the caller's reason --
-// /v1/sessions/revoke by address, the Email accounts sweep and password reset by session (self_service.go).
-// Both kernel steps are best effort and logged: netd also converges the set from iam_v2.sessions, so an ended
-// session cannot stay admitted for longer than its next pass.
+// denyAtGate runs after the caller has ended the session row -- /v1/sessions/revoke by address, the Email
+// accounts sweep and password reset by session (self_service.go). It removes the address from the LEGACY
+// authorization set, best effort (netd also drains that set to empty).
+//
+// It no longer touches tc (audit B-14). The per-session class belongs to netd, the single Phase-3 shaping
+// writer: deleting it here, outside netd's inventory, dropped the guest's flows into the bridge default class
+// (unshaped, uncounted) and made netd re-create the class under a new epoch if the session was still live. The
+// Phase-3 authorization and class are torn down by netd from the ended row on its next pass, about a second.
 func (s *server) denyAtGate(ctx context.Context, ip net.IP) {
 	nc := s.resolveNetwork(ctx, ip)
 	if s.nft != nil && s.nft.client != nil {
 		if err := s.nft.Deny(ctx, nc.Bridge, ip); err != nil {
 			slog.Error("nft deny", "err", err)
-		}
-	}
-	if s.shp != nil {
-		if err := s.shp.DeleteSession(ctx, nc.Bridge, ip); err != nil {
-			slog.Warn("shape delete", "err", err)
 		}
 	}
 }
@@ -544,12 +548,16 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 			out["access_ends_at"] = ends.UTC().Format(time.RFC3339)
 		}
 	}
-	// PHASE 6 (DARK by default): a guest on an aggregate package needs both of their clocks. With the flag
-	// off nothing is queried and nothing is added, so this endpoint answers byte-for-byte as it did before.
-	if s.p6cfg.AggregateTimeOn() {
-		if agg := s.aggregateStatusFor(r.Context(), id); agg != nil {
+	// A guest with an online-time budget needs both of their clocks. For the Phase-6 aggregate mode that stays
+	// behind its (DARK by default) flag, exactly as before. A VALIDITY_WINDOW plan's time allowance is enforced
+	// on every appliance since 0122, so its remaining time is answered whatever the flag says: the portal must
+	// show the same number the accrual is spending.
+	if id != "" {
+		if agg := s.aggregateStatusFor(r.Context(), id); agg != nil &&
+			(agg.TimeMode != "AGGREGATE_ONLINE_TIME" || s.p6cfg.AggregateTimeOn()) {
 			out["time_mode"] = agg.TimeMode
 			out["remaining_online_seconds"] = agg.RemainingOnlineSeconds
+			out["online_time_allowance"] = agg.OnlineTimeAllowance
 			if agg.HardExpiry != "" {
 				out["hard_expiry"] = agg.HardExpiry
 			}
@@ -1181,7 +1189,7 @@ func main() {
 	// Signed hello against ctrlapi — on boot AND periodically. Besides smoke-
 	// testing signed-auth, this provides ORPHAN RECOVERY: if Central no longer
 	// knows this appliance (its row was deleted from the control panel), our
-	// identity is orphaned. We confirm with a second call, then self-reset so the
+	// identity is orphaned. We require the reply to be SUSTAINED (orphanTracker), then self-reset so the
 	// box re-registers as a fresh Pending and STOPS serving on its now-stale
 	// cached license — no manual factory reset needed.
 	//
@@ -1191,14 +1199,19 @@ func main() {
 	// manual restart. Offline-safety is preserved — a transient Central outage
 	// yields connection errors / 5xx / timeouts, never a definitive 401
 	// "not enrolled", so a reset can only ever be triggered by a real deletion
-	// (and only after a second confirming call).
+	// (and only after several consecutive replies over at least orphanConfirmWindow).
 	if ident != nil && talksToCentral {
 		orphan := func(code int, b []byte) bool {
 			l := strings.ToLower(string(b))
 			return code == 401 && (strings.Contains(l, "not enrolled") || strings.Contains(l, "unknown appliance") || strings.Contains(l, "not found"))
 		}
+		// A deletion is acted on only when it is SUSTAINED (orphanTracker, removed_from_central.go): several
+		// consecutive "not found" replies over a minimum window, reset by any other reply.
+		tracker := &orphanTracker{}
 		helloProbe := func() {
 			code, body, err := s.helloRaw(rootCtx)
+			notFound := err != nil && orphan(code, body)
+			confirmed := tracker.observe(time.Now(), code != 0, notFound)
 			if err == nil {
 				return
 			}
@@ -1207,15 +1220,15 @@ func main() {
 				return
 			}
 			slog.Warn("hello: unexpected status", "status", code, "body", string(body))
-			if c.AutoRegister && orphan(code, body) {
-				time.Sleep(3 * time.Second)
-				if code2, b2, _ := s.helloRaw(context.Background()); orphan(code2, b2) {
-					// Whether it may register again depends on whether it ever held a customer.
-					s.handleConfirmedOrphan(rootCtx, orphanPaths{
-						IdentityDir: c.IdentityDir, AssignmentDir: envOr("SCD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment"),
-						LicenseDir: c.LicenseDir, CertDir: c.CertDir, Marker: removedMarkerPath(),
-					})
-				}
+			if c.AutoRegister && confirmed {
+				// Whether it may register again depends on whether it ever held a customer.
+				s.handleConfirmedOrphan(rootCtx, orphanPaths{
+					IdentityDir: c.IdentityDir, AssignmentDir: envOr("SCD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment"),
+					LicenseDir: c.LicenseDir, CertDir: c.CertDir, Marker: removedMarkerPath(),
+				})
+			} else if notFound {
+				slog.Warn("hello: Central does not know this appliance; waiting for the reply to be sustained before acting",
+					"replies_needed", orphanConfirmReplies, "window", orphanConfirmWindow.String())
 			}
 		}
 		go func() {

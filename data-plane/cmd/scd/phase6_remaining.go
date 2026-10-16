@@ -33,10 +33,21 @@ type aggregateStatus struct {
 	// HardExpiry is the outer window, RFC3339, empty when the package has none. It is the immutable instant
 	// stamped at grant and never moved.
 	HardExpiry string `json:"hard_expiry,omitempty"`
+	// OnlineTimeAllowance is always true when this view is present: it tells the portal that
+	// remaining_online_seconds is a time allowance to show, whatever the time mode.
+	OnlineTimeAllowance bool `json:"online_time_allowance"`
 }
 
-// aggregateStatusFor returns the aggregate view of a session, or nil when the session's entitlement is not in
-// that mode -- which is every entitlement today, and which is why the caller emits nothing extra by default.
+// countsOnlineTime mirrors iam_v2.p6_counts_online_time (0122): the aggregate mode always, and a validity window
+// when its plan carries a positive time allowance.
+func countsOnlineTime(mode string, budget int64) bool {
+	return mode == "AGGREGATE_ONLINE_TIME" || (mode == "VALIDITY_WINDOW" && budget > 0)
+}
+
+// aggregateStatusFor returns the online-time view of a session, or nil when the session's entitlement is not
+// accounted in online time. That is an AGGREGATE_ONLINE_TIME entitlement, or -- since 0122 -- a VALIDITY_WINDOW
+// one whose plan carries a time allowance: the same budget-minus-consumption the accrual enforces, so the
+// portal's "time left" and the moment access ends agree. TimeMode stays the entitlement's real mode.
 //
 // A failure to read returns nil rather than an error: the status endpoint's job is to tell the guest whether
 // they are online, and losing the extra detail must not cost them that answer.
@@ -56,14 +67,14 @@ func (s *server) aggregateStatusFor(ctx context.Context, sessionID string) *aggr
 		  JOIN iam_v2.entitlements e ON e.id = se.entitlement_id
 		  LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
 		 WHERE se.id = $1::uuid`, sessionID).Scan(&mode, &budget, &consumed, &window)
-	if err != nil || mode != "AGGREGATE_ONLINE_TIME" {
+	if err != nil || !countsOnlineTime(mode, budget) {
 		return nil
 	}
 	remaining := budget - consumed
 	if remaining < 0 {
 		remaining = 0
 	}
-	out := &aggregateStatus{TimeMode: mode, RemainingOnlineSeconds: remaining}
+	out := &aggregateStatus{TimeMode: mode, RemainingOnlineSeconds: remaining, OnlineTimeAllowance: true}
 	if window != nil {
 		out.HardExpiry = window.UTC().Format(time.RFC3339)
 	}

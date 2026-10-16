@@ -88,3 +88,21 @@ export function useOperatorRoles(): string[] | null {
 
   return me ? me.roles ?? [] : fetched;
 }
+
+/** The signed-in operator's email (their account name), or null while unknown. */
+export function useOperatorEmail(): string | null {
+  const me = useContext(WhoamiContext);
+  const [fetched, setFetched] = useState<string | null>(null);
+  useEffect(() => {
+    if (me) return;
+    let alive = true;
+    api
+      .get<Whoami>("/auth/whoami")
+      .then((m) => alive && setFetched(m.email ?? null))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [me]);
+  return me ? me.email ?? null : fetched;
+}

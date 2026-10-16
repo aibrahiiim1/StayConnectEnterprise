@@ -189,6 +189,8 @@ func main() {
 		// the accountable tc class — so no other daemon can admit a guest while this one is still preparing to
 		// meter them. It writes ONLY the Phase-3 set, never legacy auth_ipv4.
 		gate: newNFTGate(),
+		// ...and the legacy auth_ipv4 set, which nothing writes any more, is kept EMPTY (audit B-15).
+		legacy: newNFTLegacySet(),
 		// The confirmed kernel result, recorded through the controlled writers, so a Session only ever claims
 		// `active` once both halves are actually in force.
 		enforcement: &pgEnforcement{pool: pool, tenant: p3mode.TenantID, site: p3mode.SiteID},

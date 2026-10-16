@@ -41,13 +41,52 @@ func (a *Authenticator) authAccount(ctx context.Context, req Request) (Result, e
 			res = deny(MethodAccount, "invalid_credentials")
 			return nil
 		}
-		res, err = a.finalize(ctx, tx, MethodAccount, Subject{GuestAccountID: id}, req, now)
+		pin, err := accountGroupPin(ctx, tx, req, id)
+		if err != nil {
+			return err
+		}
+		res, err = a.finalizeWithPin(ctx, tx, MethodAccount, Subject{GuestAccountID: id}, req, now, pin)
 		return err
 	})
 	if err != nil {
 		return Result{}, &Error{Code: ErrRepo, Msg: "account"}
 	}
 	return res, nil
+}
+
+// accountEmailReader is the optional repository capability behind an Email account's group decision.
+type accountEmailReader interface {
+	AccountVerifiedEmail(ctx context.Context, tenantID, siteID, accountID string) (string, error)
+}
+
+// accountGroupPin decides an Email account client's Client Group from its VERIFIED address.
+//
+// An Email account (contract ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE) is a client account whose username is the
+// address its owner registered and then proved from the verification email. EMAIL_DOMAIN rules were evaluated
+// only for principal sign-ins (code, identity provider), so a group "everyone @partner.example" never matched a
+// partner's employee who signed in with their Email account -- the one sign-in method whose whole identity IS
+// an email address. The verified address is now the factor; an unverified one, and a staff-created account's
+// username, are not evidence and decide nothing (the client is then in no group, i.e. Public). A lookup
+// failure is a repository error, never "Public".
+func accountGroupPin(ctx context.Context, tx Tx, req Request, accountID string) (groupPin, error) {
+	r, ok := tx.(accountEmailReader)
+	if !ok {
+		return groupPin{}, nil
+	}
+	email, err := r.AccountVerifiedEmail(ctx, req.TenantID, req.SiteID, accountID)
+	if err != nil || email == "" {
+		return groupPin{}, err
+	}
+	groups, err := tx.LoadClientGroups(ctx, req.TenantID, req.SiteID)
+	if err != nil {
+		return groupPin{}, err
+	}
+	d, ok := EvaluateClientGroup(groups, []FactorClaim{{Type: "EMAIL", Value: email,
+		Attrs: map[string]string{"source": "email_account"}}})
+	if !ok {
+		return groupPin{}, nil
+	}
+	return groupPin{id: d.GroupID, name: d.GroupName, evidence: d.Evidence}, nil
 }
 
 // authVoucher validates a voucher code (blind-index HMAC) against iam_v2.vouchers and creates a

@@ -75,6 +75,10 @@ type Enforcer struct {
 	// exhaustedAt is the stamped online-time exhaustion instant, or a typed NULL on a schema without the
 	// column. Referencing a column that does not exist fails the whole statement, so it is a fragment too.
 	exhaustedAt string
+	// incrementalCrossing records whether the schema has the durable data-crossing checkpoint (0122). When it
+	// does, the sweep advances it before the candidate read, so p6_data_crossing answers from the checkpoint plus
+	// the records since it instead of re-summing every record an entitlement ever had.
+	incrementalCrossing bool
 }
 
 // The two forms. They answer the same question; the first is the single sanctioned implementation the expiry
@@ -103,13 +107,15 @@ const dataCrossingLegacy = `LEFT JOIN LATERAL (
 // because a migration can be applied or rolled back under a running process, and a flag decided at startup
 // would then be wrong for the rest of the process's life -- in the direction that stops every expiry.
 func (e *Enforcer) resolveDataCrossing(ctx context.Context, tx pgx.Tx) error {
-	var present bool
+	var present, incremental bool
 	if err := tx.QueryRow(ctx,
 		`SELECT to_regprocedure('iam_v2.p6_data_crossing(uuid)') IS NOT NULL
-		    AND to_regprocedure('iam_v2.p6_expire_entitlement(uuid)') IS NOT NULL`).Scan(&present); err != nil {
+		    AND to_regprocedure('iam_v2.p6_expire_entitlement(uuid)') IS NOT NULL,
+		        to_regprocedure('iam_v2.p6_advance_data_crossing(uuid,uuid)') IS NOT NULL`).Scan(&present, &incremental); err != nil {
 		return err
 	}
 	e.phase6Writers = present
+	e.incrementalCrossing = present && incremental
 	if present {
 		e.dataCrossing = dataCrossingPhase6
 		e.exhaustedAt = "e.online_time_exhausted_at"
@@ -342,6 +348,17 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 	// answer on a Phase-6 database, correct behaviour on one without it, and no version flag to keep in sync.
 	if err := e.resolveDataCrossing(ctx, tx); err != nil {
 		return nil, err
+	}
+
+	// THE CROSSING IS COUNTED INCREMENTALLY (0122). The checkpoint advances by the records that arrived since the
+	// last sweep -- one index probe per binding -- and, once a running total reaches its quota, the exact crossing
+	// instant is derived ONCE and stored. The candidate read below then calls the same p6_data_crossing as
+	// before, which answers from that state. Before 0122 every sweep re-summed every accounting record of every
+	// live entitlement, which grows without bound and, past the statement timeout, silently stopped expiry.
+	if e.incrementalCrossing {
+		if _, err := tx.Exec(ctx, `SELECT iam_v2.p6_advance_data_crossing($1,$2)`, tenant, site); err != nil {
+			return nil, err
+		}
 	}
 
 	// THE CANDIDATE READ DOES NOT LOCK, and that is deliberate rather than an omission.

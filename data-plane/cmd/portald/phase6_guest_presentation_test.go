@@ -215,7 +215,7 @@ func TestRemainingTimePanelIsHiddenForOrdinaryPackages(t *testing.T) {
 	if !strings.Contains(head, "hidden") {
 		t.Fatalf("the remaining-time panel is not hidden by default: %s", head)
 	}
-	if !strings.Contains(panel, "st.time_mode !== 'AGGREGATE_ONLINE_TIME'") {
+	if !strings.Contains(panel, "st.time_mode !== 'AGGREGATE_ONLINE_TIME' && !st.online_time_allowance") {
 		t.Fatal("the panel is revealed without checking the package's time mode")
 	}
 	if !strings.Contains(panel, "box.hidden = false") {

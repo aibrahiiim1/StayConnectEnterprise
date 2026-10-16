@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -144,14 +145,59 @@ func TestCommerceAdminPublishRejectsInvalid(t *testing.T) {
 		{"foreign-plan", func(s *PackagePublishSpec) {
 			s.ServicePlanRevisionID = "99999999-9999-9999-9999-999999999999"
 		}, "plan_revision_not_found"},
+		// O-16: two speed steps with one order were a 500 from the insert; now a reason.
+		{"duplicate-step-order", func(s *PackagePublishSpec) {
+			s.GrantTiers = []GrantTier{{Order: 10, Value: map[string]any{}}, {Order: 10, Value: map[string]any{}}}
+		}, "invalid_grant_tier"},
+		// O-9: free access once AND requires an earlier purchase -- offered to nobody.
+		{"contradictory-prior-purchase", func(s *PackagePublishSpec) {
+			s.EligibilityRules = []EligibilityRule{
+				{Type: "PRIOR_PURCHASE", Value: map[string]any{"forbids_prior": true}},
+				{Type: "PRIOR_PURCHASE", Value: map[string]any{"requires_prior": true}},
+			}
+		}, "invalid_eligibility_rule"},
+		// O-19: interface ids are ids, not free text.
+		{"pms-interface-not-uuid", func(s *PackagePublishSpec) {
+			s.EligibilityRules = []EligibilityRule{{Type: "PMS_INTERFACE", Value: map[string]any{"pms_interface_ids": []any{"protel"}}}}
+		}, "invalid_eligibility_rule"},
+		// O-17: a three-decimal price a card provider refuses.
+		{"three-decimal-card", func(s *PackagePublishSpec) {
+			s.PriceMinor, s.Currency, s.CurrencyExponent = 1005, "KWD", 3
+			s.AcquisitionMethods = []string{AcquireCard}
+		}, "invalid_currency"},
+		// O-18: a NEW fixed end in the past is refused, with its reason.
+		{"past-fixed-end", func(s *PackagePublishSpec) {
+			s.DurationPolicy = map[string]any{"end_mode": "FIXED_AT", "ends_at": "2020-01-01T00:00:00Z"}
+		}, "invalid_duration_policy"},
 	}
 	for _, c := range cases {
 		spec := base
 		c.mut(&spec)
 		res, err := a.PublishRevision(ctx, spec)
-		if err != nil || res.Reason != c.reason {
+		// The REASON travels with its detail (O-18): "label" or "label: why".
+		if err != nil || (res.Reason != c.reason && !strings.HasPrefix(res.Reason, c.reason+": ")) {
 			t.Fatalf("%s: want reason %q, got %+v err=%v", c.name, c.reason, res, err)
 		}
+	}
+	// The duration refusal says why.
+	spec := base
+	spec.DurationPolicy = map[string]any{"end_mode": "FIXED_AT", "ends_at": "2020-01-01T00:00:00Z"}
+	if res, _ := a.PublishRevision(ctx, spec); !strings.Contains(res.Reason, "must be in the future") {
+		t.Fatalf("duration refusal lost its reason: %q", res.Reason)
+	}
+	// ...but a republish that CARRIES the package's existing, now-past end is not a duration decision.
+	spec.PriorDurationPolicy = map[string]any{"end_mode": "FIXED_AT", "ends_at": "2020-01-01T00:00:00Z"}
+	spec.DryRun = true
+	if res, err := a.PublishRevision(ctx, spec); err != nil || res.Reason != "validated" {
+		t.Fatalf("an unchanged past end blocked a republish: %+v err=%v", res, err)
+	}
+	// A three-decimal price in steps of ten is fine.
+	spec = base
+	spec.PriceMinor, spec.Currency, spec.CurrencyExponent = 1010, "KWD", 3
+	spec.AcquisitionMethods = []string{AcquireCard}
+	spec.DryRun = true
+	if res, err := a.PublishRevision(ctx, spec); err != nil || res.Reason != "validated" {
+		t.Fatalf("KWD 1.010 by card refused: %+v err=%v", res, err)
 	}
 	// no partial package/revision persisted by any rejected publish
 	if n := count(t, db, `SELECT count(*) FROM iam_v2.internet_packages WHERE code='BAD'`); n != 0 {

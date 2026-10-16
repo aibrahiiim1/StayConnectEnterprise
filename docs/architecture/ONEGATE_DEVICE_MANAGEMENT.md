@@ -31,7 +31,9 @@ Common rules:
 * The package is **derived from proof**, never named by the caller. A device id that is not the client's matches
   nothing and answers like an id that never existed.
 * The target must be **offline**. scd/edged first take it off the network by the operator-disconnect path
-  (session ended `DEVICE_REPLACED` / `DEVICE_RELEASED` / `admin`, nft deny, shaping class removed), then call the
+  (session ended `DEVICE_REPLACED` / `DEVICE_RELEASED` / `ADMIN` through the controlled session-end writer
+  `end_session_enforcement` — which can also end a session still `PENDING_ENFORCEMENT` — then nft deny and shaping
+  class removed), then call the
   function. A session that came back in between makes the function refuse (`REFUSED_ONLINE`).
 * **Daily limit** (clients only): at most `client_device_changes_per_day` successful changes per package per 24 h
   (setting, default 3, hard bounds 1–10 — the protection against passing one package around cannot be switched

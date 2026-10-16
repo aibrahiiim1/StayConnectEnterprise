@@ -94,6 +94,9 @@ type phase3Shaping struct {
 	// gate is the PACKET-AUTHORIZATION half of enforcement (see phase3_gate.go). netd owns both halves, so
 	// there is no schedule on which one daemon admits a guest while another is still preparing to meter it.
 	gate gate
+	// legacy, when wired, is drained to empty on every pass (phase3_gate.go): nothing writes the legacy
+	// auth_ipv4 set any more, so anything in it is access no session accounts for.
+	legacy legacySet
 	// enforcement records the confirmed kernel result durably, so a Session is only ever reported ACTIVE
 	// after both halves are actually in force (see phase3_enforcement.go).
 	enforcement enforcementRecorder
@@ -467,6 +470,20 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 				delete(view.byKey, gateKey(el.Bridge, el.IP))
 				res.StraysRemoved++
 			}
+		}
+	}
+
+	// 2c. THE LEGACY SET IS RECONCILED TO EMPTY. No component writes auth_ipv4 any more, so every element in it
+	// is a grant outside the IAM-v2 domain. It is removed and counted as a stray, and said loudly.
+	if p.legacy != nil {
+		n, err := p.legacy.Drain(ctx)
+		if n > 0 {
+			res.StraysRemoved += n
+			slog.Warn("phase3: removed authorizations from the legacy auth_ipv4 set; nothing should write it", "count", n)
+		}
+		if err != nil {
+			res.Failed++
+			res.Problems = append(res.Problems, "legacy authorization set not drained: "+err.Error())
 		}
 	}
 

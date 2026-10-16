@@ -56,6 +56,32 @@ export function auditCategoriesFor(hasHistory: (module: string) => boolean): Aud
 const WORDS: Record<string, AuditWords> = {
   // ---- sign-in & access ---------------------------------------------------------------------------------
   "operator.login": { title: "Signed in to Admin Console", category: "Sign-in & access", severity: "notice" },
+  "operator.logout": { title: "Signed out of Admin Console", category: "Sign-in & access", severity: "notice" },
+  "operator.login_failed": {
+    title: "A sign-in to Admin Console failed", category: "Sign-in & access", severity: "security",
+    note: "The reason and the address it came from are recorded; the password typed never is.",
+  },
+  "operator.login_locked": {
+    title: "Admin Console sign-in locked after repeated failures", category: "Sign-in & access", severity: "security",
+    note: "An account or an address reached the limit set under Operators → Sign-in protection.",
+  },
+  "operator.reauth_failed": {
+    title: "A password confirmation failed", category: "Sign-in & access", severity: "security",
+    note: "Someone signed in typed the wrong password when an action asked them to confirm it.",
+  },
+  "operator.reauth_locked": {
+    title: "Password confirmations locked after repeated failures", category: "Sign-in & access", severity: "security",
+  },
+  "operator.password_changed": { title: "Changed their own password", category: "Sign-in & access", severity: "security" },
+  "operator.password_reset": {
+    title: "Reset an operator's password", category: "Sign-in & access", severity: "security",
+    note: "The operator was signed out everywhere.",
+  },
+  "operator.password_change_required": {
+    title: "Required a new password at sign-in", category: "Sign-in & access", severity: "security",
+    note: "The password used was shorter than the policy, so it must be replaced before the console can be used.",
+  },
+  "operator.signin_protection_changed": { title: "Changed Admin Console sign-in protection", category: "Sign-in & access", severity: "security" },
   "session.disconnected": {
     title: "Disconnected a client device", category: "Sign-in & access", severity: "change",
     note: "A member of staff ended a client's internet session from Active sessions.",
@@ -138,6 +164,9 @@ const WORDS: Record<string, AuditWords> = {
   "backup.failed": {
     title: "A backup failed", category: "Backups", severity: "security",
     note: "Recovery readiness was reduced until a later backup succeeded.",
+  },
+  "backup.download_authorized": {
+    title: "Confirmed a password to download a backup", category: "Backups", severity: "security",
   },
   "backup.downloaded": {
     title: "Downloaded a backup", category: "Backups", severity: "security",

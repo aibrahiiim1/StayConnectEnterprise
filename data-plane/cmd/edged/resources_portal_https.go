@@ -362,7 +362,7 @@ func (s *server) portalHTTPSGet(w http.ResponseWriter, r *http.Request) {
 // portalStepUp re-authenticates the operator and returns the name the change is recorded under.
 func (s *server) portalStepUp(w http.ResponseWriter, r *http.Request, password string) (string, bool) {
 	if !s.reauth(r, password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return "", false
 	}
 	actor := protectionActor(sessFrom(r.Context()))

@@ -919,7 +919,7 @@ main.card { display: block; }
     fetch('/status', {headers:{'Accept':'application/json'}})
       .then(function(r){ return r.ok ? r.json() : null; })
       .then(function(st){
-        if(!st || st.time_mode !== 'AGGREGATE_ONLINE_TIME') return;  
+        if(!st || (st.time_mode !== 'AGGREGATE_ONLINE_TIME' && !st.online_time_allowance)) return;  
         main.textContent = fill(t('tl.left'), 't', human(st.remaining_online_seconds));
         if(st.hard_expiry){
           var when = day(st.hard_expiry);

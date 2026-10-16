@@ -90,7 +90,16 @@ export type EligibilityRuleForm =
   | { type: "TRAVEL_AGENT"; travel_agents: string[] }
   | { type: "PMS_INTERFACE"; pms_interface_ids: string };
 
-export type GrantTierForm = { order: number | string; down_kbps?: number | string; up_kbps?: number | string };
+// `extra` is everything else the stored tier's grant object carries -- above all its `match` condition --
+// which the form does not edit. It is handed back unchanged on save; dropping it would turn a conditional
+// speed step into an unconditional one (audit O-15).
+export type GrantTierForm = {
+  order: number | string; down_kbps?: number | string; up_kbps?: number | string;
+  extra?: Record<string, unknown>;
+};
+
+/** A stored eligibility rule of a type this console does not edit, kept and republished exactly as loaded. */
+export type PreservedRule = { type: string; value: Record<string, unknown> };
 
 export type DurationForm = { end_mode: EndMode; duration_seconds?: number | string; ends_at?: string };
 
@@ -103,6 +112,10 @@ export type PublishFormState = {
   duration: DurationForm;
   visible_from?: string;
   visible_until?: string;
+  /** Rules of a type the form does not edit (e.g. STAY_STATUS), republished verbatim. */
+  preserved_rules?: PreservedRule[];
+  /** The package's loaded display object. The edited name is merged INTO it, so any other key survives. */
+  display?: Record<string, unknown> | null;
 };
 
 // nameList keeps each name whole (never split): trimmed, empties dropped, and a name repeated in another case
@@ -228,11 +241,31 @@ export function validateSaleWindow(from?: string, until?: string): string | null
   return null;
 }
 
+// SPEED STEPS WERE NEVER APPLIED (audit O-5). A package's grant tiers are a first-match list with optional speed
+// overrides and no threshold; the override was shown to clients while the network always applied the service
+// plan's speed. The appliance now refuses to save more than one step, or a step with speeds, and so does the form,
+// in the same words. (The server message starts "speed_steps_not_supported"; this is the operator sentence.)
+export const SPEED_STEPS_REFUSAL =
+  "This package has speed steps, which were never applied: clients always get the speed of the package's service " +
+  "plan. Remove the speed steps, and choose a service plan with the speed you want.";
+
+/** Whether the tiers are the one plain step a package may carry: one step, no speeds of its own. */
+export function tiersArePlain(tiers: GrantTierForm[]): boolean {
+  const set = (v: number | string | undefined) => v !== undefined && v !== "";
+  return tiers.length <= 1 && tiers.every((t) => !set(t.down_kbps) && !set(t.up_kbps));
+}
+
+/** The one plain step that replaces speed steps: the lowest order, nothing else. */
+export function plainTiers(tiers: GrantTierForm[]): GrantTierForm[] {
+  const orders = tiers.map((t) => Number(t.order)).filter((n) => Number.isFinite(n));
+  return [{ order: orders.length ? Math.min(...orders) : 10 }];
+}
+
 // tiersInOrder returns the tiers sorted by ascending order (deterministic), each with numeric fields.
-export function tiersInOrder(tiers: GrantTierForm[]): { order: number; grant: Record<string, number> }[] {
+export function tiersInOrder(tiers: GrantTierForm[]): { order: number; grant: Record<string, unknown> }[] {
   return tiers
     .map((t) => {
-      const grant: Record<string, number> = {};
+      const grant: Record<string, unknown> = { ...(t.extra ?? {}) };
       if (t.down_kbps !== undefined && t.down_kbps !== "") grant.down_kbps = Number(t.down_kbps);
       if (t.up_kbps !== undefined && t.up_kbps !== "") grant.up_kbps = Number(t.up_kbps);
       return { order: Number(t.order), grant };
@@ -243,10 +276,10 @@ export function tiersInOrder(tiers: GrantTierForm[]): { order: number; grant: Re
 export type PublishPayload = {
   code: string;
   service_plan_revision_id: string;
-  display: { name: string };
+  display: Record<string, unknown> & { name: string };
   duration_policy: Record<string, unknown>;
   eligibility_rules: { type: string; value: Record<string, unknown> }[];
-  grant_tiers: { order: number; grant: Record<string, number> }[];
+  grant_tiers: { order: number; grant: Record<string, unknown> }[];
   visible_from?: string;
   visible_until?: string;
   /** Absent means FIXED: the pinned service plan's allowance, used unchanged. */
@@ -257,7 +290,41 @@ export type PublishPayload = {
   currency_exponent?: number;
   acquisition_methods?: AcquisitionMethod[];
   room_charge_mappings?: RoomChargeMappingWire[];
+  // CARRIED ON A REVISION, sent back exactly as loaded (absent = the server carries the current value).
+  package_type?: string;
+  plan_overrides?: Record<string, unknown> | null;
+  renewable?: boolean;
+  max_purchases_per_stay?: number | null;
+  /** Step-up: required when a revision changes the price, currency, methods or service plan. */
+  password?: string;
 };
+
+// THE FREE-ACCESS LIMIT AND "ONLY CLIENTS WHO ALREADY HAD A PACKAGE" CONTRADICT EACH OTHER. The first offers
+// the package only to a client with no earlier purchase; the second only to a client with one. Together they
+// offer it to nobody, and the server refuses the pair (audit O-9).
+export const CONTRADICTORY_PRIOR_PURCHASE =
+  "Free access is limited to clients who have not had this package before, and a condition also requires an earlier purchase, so no client can meet both. Remove the \"Only clients who already had a package here\" condition, or set Free access to No limit.";
+
+/** validateRuleSet checks the conditions against each other; validateRule checks each one alone. */
+export function validateRuleSet(rules: EligibilityRuleForm[]): string | null {
+  const prior = rules.filter((r): r is Extract<EligibilityRuleForm, { type: "PRIOR_PURCHASE" }> => r.type === "PRIOR_PURCHASE");
+  if (prior.some((r) => r.mode === "forbids_prior") && prior.some((r) => r.mode === "requires_prior")) {
+    return CONTRADICTORY_PRIOR_PURCHASE;
+  }
+  return null;
+}
+
+/** Two speed steps with the same order have no defined order between them; the server refuses them. */
+export function validateTiers(tiers: GrantTierForm[]): string | null {
+  const seen = new Set<number>();
+  for (const t of tiers) {
+    const o = Number(t.order);
+    if (!Number.isInteger(o)) return "Speed steps: each step's order must be a whole number.";
+    if (seen.has(o)) return `Speed steps: two steps have the order ${o}. Give each step its own order.`;
+    seen.add(o);
+  }
+  return null;
+}
 
 // buildPublishPayload validates the whole form and returns { payload } or { error }. It emits no price or
 // acquisition field of its own: on its own it publishes a Free package, which is what the server makes of a
@@ -266,6 +333,7 @@ export function buildPublishPayload(s: PublishFormState): { payload?: PublishPay
   if (!s.code.trim()) return { error: "code is required" };
   if (!s.service_plan_revision_id) return { error: "a service plan is required" };
   if (s.tiers.length === 0) return { error: "at least one grant tier is required" };
+  if (!tiersArePlain(s.tiers)) return { error: SPEED_STEPS_REFUSAL };
   const durErr = validateDuration(s.duration);
   if (durErr) return { error: durErr };
   const winErr = validateSaleWindow(s.visible_from, s.visible_until);
@@ -275,12 +343,20 @@ export function buildPublishPayload(s: PublishFormState): { payload?: PublishPay
     const err = validateRule(r);
     if (err) return { error: err };
   }
+  const setErr = validateRuleSet(s.rules);
+  if (setErr) return { error: setErr };
+  const tierErr = validateTiers(s.tiers);
+  if (tierErr) return { error: tierErr };
   const payload: PublishPayload = {
     code: s.code.trim(),
     service_plan_revision_id: s.service_plan_revision_id,
-    display: { name: s.name.trim() || s.code.trim() },
+    // MERGED, not replaced: a display object carrying more than the name keeps the rest (audit O-15).
+    display: { ...(s.display ?? {}), name: s.name.trim() || s.code.trim() },
     duration_policy: serializeDuration(s.duration),
-    eligibility_rules: s.rules.map(serializeRule),
+    eligibility_rules: [
+      ...s.rules.map(serializeRule),
+      ...(s.preserved_rules ?? []).map((r) => ({ type: r.type, value: r.value ?? {} })),
+    ],
     grant_tiers: tiersInOrder(s.tiers),
   };
   if (s.visible_from) payload.visible_from = new Date(s.visible_from).toISOString();
@@ -535,11 +611,18 @@ const REFUSAL_PREFIXES: Record<string, string> = {
   invalid_acquisition_methods: "How clients get this package",
   invalid_currency: "Currency",
   invalid_room_charge_mapping: "Room charge",
+  // THE DURATION REFUSAL KEEPS ITS REASON (audit O-18): "invalid_duration_policy: the end time is in the past"
+  // is shown as the part of the form it concerns followed by the server's reason, never as a bare code.
+  invalid_duration_policy: "How long access lasts",
+  invalid_eligibility_rules: "Conditions",
+  invalid_grant_tiers: "Speed steps",
+  invalid_data_allocation_policy: "Data allowance",
 };
+const REFUSAL_RE = new RegExp(`^(${Object.keys(REFUSAL_PREFIXES).join("|")})(?::\\s*([\\s\\S]*))?$`);
 export function describePublishRefusal(message: string): string | null {
-  const m = /^(invalid_acquisition_methods|invalid_currency|invalid_room_charge_mapping):\s*([\s\S]*)$/.exec(message.trim());
+  const m = REFUSAL_RE.exec(message.trim());
   if (!m) return null;
-  const rest = m[2].trim();
+  const rest = (m[2] ?? "").trim();
   const sentence = rest ? rest.charAt(0).toUpperCase() + rest.slice(1) : "The server refused this setting";
   return `${REFUSAL_PREFIXES[m[1]]}: ${sentence}${/[.!?]$/.test(sentence) ? "" : "."}`;
 }
@@ -624,4 +707,30 @@ export const ROOM_CHARGE_NOT_READY: Record<string, string> = {
 };
 export function roomChargeNotReadyText(reason: string | null | undefined): string {
   return (reason && ROOM_CHARGE_NOT_READY[reason]) || "Not ready for room charge";
+}
+
+// ------------------------------------------------------------- WHEN A REVISION NEEDS THE PASSWORD ---------
+//
+// Revising an existing package so that what clients PAY or RECEIVE changes is a step-up action: the server
+// answers 401 reauth_required unless the operator's password comes with it (audit O-21). A rename, a new
+// condition or a sale window does not need it, so the editor asks only when one of these changed.
+
+/** The money-and-plan terms of a revision, as compared for the step-up. */
+export type RevisionTerms = {
+  price_minor: number;
+  currency: string;
+  currency_exponent: number;
+  acquisition_methods: readonly string[];
+  service_plan_revision_id: string;
+};
+
+/** revisionNeedsPassword reports whether going from `before` to `after` changes price, currency, methods or plan. */
+export function revisionNeedsPassword(before: RevisionTerms | null | undefined, after: RevisionTerms): boolean {
+  if (!before) return false;
+  const set = (xs: readonly string[]) => Array.from(new Set(xs)).sort().join(",");
+  return before.price_minor !== after.price_minor
+    || before.currency.trim().toUpperCase() !== after.currency.trim().toUpperCase()
+    || before.currency_exponent !== after.currency_exponent
+    || set(before.acquisition_methods) !== set(after.acquisition_methods)
+    || before.service_plan_revision_id !== after.service_plan_revision_id;
 }

@@ -11,13 +11,18 @@
 // out and a password, and it tells the operator what the appliance will do before it does it -- take a safety
 // copy, stop serving, swap, check, and put everything back if the check fails. It then stays open, showing
 // progress, until the appliance reports the outcome.
+//
+// DOWNLOAD IS NARROWER THAN THE PAGE (decision D-B). A backup is a complete copy of the site's data, so taking
+// one off the appliance is for the site admin and the IT manager only, and asks for the password every time:
+// edged answers the password with a single-use ticket valid for a minute, and the file is fetched with it.
+// Every other role that can open this page sees the list and no Download button.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, ListResp, BackupHealth, BackupSettings, Whoami } from "@/lib/api";
 import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
 import { Card, CardBody, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/ui/dialog";
@@ -30,6 +35,7 @@ import { useToast } from "@/components/ui/toast";
 import { canWrite } from "@/lib/roles";
 import { cn, errMsg, formatDate } from "@/lib/utils";
 import { formatBytes } from "@/lib/bytes";
+import { AccountingRetentionCard } from "./accounting-retention-card";
 import {
   Archive, ShieldCheck, Download, RotateCcw, AlertTriangle, CheckCircle2, Loader2, HardDrive, ChevronRight,
 } from "lucide-react";
@@ -58,6 +64,24 @@ export default function BackupsPage() {
   const [restoring, setRestoring] = useState<Artifact | null>(null);
 
   const writable = roles ? canWrite("backups", roles) : false;
+  const canDownload = roles ? canWrite("backup-download", roles) : false;
+  const [downloading, setDownloading] = useState<Artifact | null>(null);
+  const [downloadBusy, setDownloadBusy] = useState(false);
+  const [downloadErr, setDownloadErr] = useState<string | null>(null);
+
+  // THE PASSWORD BUYS A ONE-MINUTE, ONE-USE TICKET; the file is then fetched with it as a form post, so the
+  // browser saves it without leaving the page and the ticket never appears in a URL.
+  async function download({ password }: { password: string }) {
+    if (!downloading) return;
+    setDownloadBusy(true); setDownloadErr(null);
+    try {
+      const name = downloading.name;
+      const t = await api.post<{ ticket: string }>(`/backup-download/${encodeURIComponent(name)}/ticket`, { password });
+      submitDownload(name, t.ticket);
+      setDownloading(null);
+      toast.success("Download started", "The download is recorded in Activity.");
+    } catch (e) { setDownloadErr(errMsg(e)); } finally { setDownloadBusy(false); }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -128,7 +152,7 @@ export default function BackupsPage() {
                 items={[
                   <><strong>Back up now</strong> writes a complete copy of this site&rsquo;s data to the appliance. It takes a moment and clients are not affected. A nightly job also takes one.</>,
                   <><strong>Verify</strong> proves a backup can actually be loaded back. Only a verified backup can be restored.</>,
-                  <><strong>Download</strong> keeps a copy off the appliance. Every role that can open this page can download.</>,
+                  <><strong>Download</strong> keeps a copy off the appliance. Only a site admin or the IT manager can download, and it asks for your password every time. Every download is recorded.</>,
                   <><strong>Restore</strong> replaces the current data with the backup. It asks for the backup&rsquo;s name typed out and your password.</>,
                 ]}
               />
@@ -158,7 +182,11 @@ export default function BackupsPage() {
       />
 
       {roles !== null && !writable && (
-        <ReadOnlyNotice>Your role can see and download backups, but not take, verify or restore them.</ReadOnlyNotice>
+        <ReadOnlyNotice>
+          {canDownload
+            ? "Your role can see and download backups, but not take, verify or restore them."
+            : "Your role can see the backups, but not download, take, verify or restore them. A backup is a complete copy of this site’s data."}
+        </ReadOnlyNotice>
       )}
 
       {/* MAINTENANCE IS THE MOST IMPORTANT THING ON THE PAGE WHEN IT IS TRUE. */}
@@ -289,11 +317,12 @@ export default function BackupsPage() {
                           {verifying === a.name ? "Checking…" : a.verified_at ? "Re-verify" : "Verify"}
                         </Button>
                       )}
-                      <a href={`/api/edge/v1/backups/artifacts/${encodeURIComponent(a.name)}/download`}
-                        aria-label={`Download ${a.name}`}
-                        className={buttonVariants({ variant: "outline", size: "sm" })}>
-                        <Download /> Download
-                      </a>
+                      {canDownload && (
+                        <Button size="sm" variant="outline" aria-label={`Download ${a.name}`}
+                          onClick={() => { setDownloadErr(null); setDownloading(a); }}>
+                          <Download /> Download
+                        </Button>
+                      )}
                       {writable && a.verified_at && (
                         <Button size="sm" variant="danger" aria-label={`Restore ${a.name}`} onClick={() => setRestoring(a)}>
                           <RotateCcw /> Restore
@@ -310,6 +339,7 @@ export default function BackupsPage() {
 
       {/* ---- 3. THE SETTINGS THAT GOVERN THEM: present, and not in the way ------------------------- */}
       <StorageAndRetention writable={writable} />
+      <AccountingRetentionCard writable={writable} />
 
       {/* ---- Back up now: password confirmation ------------------------------------------------------ */}
       <ConfirmDialog
@@ -322,6 +352,19 @@ export default function BackupsPage() {
         error={backupErr}
         requirePassword
         onConfirm={backupNow}
+      />
+
+      {/* ---- Download: password confirmation ---------------------------------------------------------- */}
+      <ConfirmDialog
+        open={downloading !== null}
+        onOpenChange={(v) => { if (!v) { setDownloading(null); setDownloadErr(null); } }}
+        title="Download this backup?"
+        description="A backup is a complete copy of this site’s data: client accounts, stays, sessions and the activity trail. Keep the file somewhere only authorised people can reach. The download is recorded against your account."
+        confirmLabel="Download"
+        busy={downloadBusy}
+        error={downloadErr}
+        requirePassword
+        onConfirm={download}
       />
 
       {restoring && (
@@ -663,4 +706,19 @@ function StorageAndRetention({ writable }: { writable: boolean }) {
       </details>
     </Card>
   );
+}
+
+/** Posts the ticket as a form so the browser saves the file in place (Content-Disposition: attachment). */
+export function submitDownload(name: string, ticket: string) {
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = `/api/edge/v1/backup-download/${encodeURIComponent(name)}`;
+  form.style.display = "none";
+  const input = document.createElement("input");
+  input.type = "hidden";
+  input.name = "ticket";
+  input.value = ticket;
+  form.appendChild(input);
+  document.body.appendChild(form);
+  try { form.submit(); } finally { form.remove(); }
 }

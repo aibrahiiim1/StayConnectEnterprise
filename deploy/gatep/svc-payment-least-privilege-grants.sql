@@ -48,3 +48,13 @@ GRANT EXECUTE ON FUNCTION iam_v2.pms_reconciliation_settings_set(uuid,uuid,integ
 GRANT EXECUTE ON FUNCTION iam_v2.pms_record_resync_coverage(uuid,uuid,uuid,bigint,text[],integer,integer,integer) TO svc_pmsd;
 GRANT EXECUTE ON FUNCTION iam_v2.pms_roster_of_generation(uuid,uuid,uuid,bigint) TO svc_pmsd;
 GRANT EXECUTE ON FUNCTION iam_v2.pms_site_blocked_after_refusals(uuid,uuid) TO svc_pmsd;
+
+-- 0121: the stranded card-purchase sweep is an outcome, applied through the outcome credential. Guarded so a
+-- reconcile still runs on a database rolled back below 0121.
+DO $g$
+BEGIN
+  IF to_regprocedure('iam_v2.p4_fail_unstarted_card_purchases(uuid,uuid,integer)') IS NOT NULL
+     AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'sc_payment_outcome') THEN
+    GRANT EXECUTE ON FUNCTION iam_v2.p4_fail_unstarted_card_purchases(uuid, uuid, integer) TO sc_payment_outcome;
+  END IF;
+END $g$;

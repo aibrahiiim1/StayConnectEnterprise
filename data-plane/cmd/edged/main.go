@@ -116,6 +116,8 @@ type server struct {
 	// The outcome of migration 0023 reconcile at startup, so the financial surface can report what the
 	// detector said rather than re-deriving it per request. Empty when it could not be established.
 	financialEpoch string
+	// Where portald listens on this appliance (portal_loopback.go); the zero value is the appliance's own.
+	portalLB portalLoopback
 }
 
 func main() {
@@ -347,13 +349,18 @@ func main() {
 	r.Use(middleware.Timeout(15 * time.Second))
 
 	r.Route("/edge/v1", func(r chi.Router) {
+		// Every state-changing request must come from the console's own origin (N-23), the login included.
+		r.Use(sameOrigin)
 		r.Get("/health", s.health)
 		r.Post("/auth/login", s.login)
+		// logout needs the caller's session and ends only that one (operator_signin.go).
 		r.Post("/auth/logout", s.logout)
 
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
 			r.Get("/auth/whoami", s.whoami)
+			// The operator's own password: the current one is a step-up; every session is ended (N-8).
+			r.Post("/auth/password", s.changeOwnPassword)
 
 			// ALWAYS-PRESENT SURFACES THAT DO NOT GO THROUGH mountResource.
 			//
@@ -415,6 +422,12 @@ func main() {
 			r.Route("/device-settings", func(r chi.Router) {
 				r.Use(s.resourcePermission("auth-methods"))
 				r.Mount("/", s.deviceSettingsRoutes())
+			})
+			// ACCOUNTING-DETAIL RETENTION (accounting_retention_admin.go, migration 0122): a data-retention
+			// decision that removes history when shortened, so the "backups" key -- site administrators write.
+			r.Route("/accounting-retention", func(r chi.Router) {
+				r.Use(s.resourcePermission("backups"))
+				r.Mount("/", s.accountingRetentionRoutes())
 			})
 			// USAGE EXPLORER. Read-only investigation over durable accounting and session data; see
 			// resources_usage.go. Under the "sessions" role because it is the same live-access state that
@@ -521,6 +534,9 @@ func main() {
 				// permission because they share a readership, and mount under the same flag so the whole
 				// financial surface appears and disappears together.
 				mountResource(r, s, "financial-ops", s.financialOpsRoutes)
+			} else {
+				// Card disputes are reachable whatever the review flag (resources_phase4_review.go cardCasesRoutes).
+				mountResource(r, s, "financial-review", s.cardCasesRoutes)
 			}
 			// THE VOUCHER SURFACE, and it is mounted UNCONDITIONALLY on purpose.
 			//
@@ -539,6 +555,9 @@ func main() {
 			mountResource(r, s, "audit", s.auditRoutes)
 			mountResource(r, s, "reports", s.reportsRoutes)
 			mountResource(r, s, "backups", s.backupsRoutes)
+			// DOWNLOADING A FULL DATABASE DUMP is its own key (decision D-B): site_admin and the IT manager only,
+			// behind the password step-up. Every role that reads backups still sees the list.
+			mountResource(r, s, "backup-download", s.backupDownloadRoutes)
 			mountResource(r, s, "network", s.networkRoutes)
 			// PORTAL HTTPS (contract §8): the portal address, the hotel portal domain, the hostnames and certificates
 			// scd installed, Check now and Renew now. Its own key -- portal_https.read / portal_https.manage -- rather

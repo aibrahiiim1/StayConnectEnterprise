@@ -87,6 +87,8 @@ type publishPlanReq struct {
 	SpeedAllocation             string `json:"speed_allocation"`
 	// CreateOnly is sent by "Add plan": refuse (409 code_exists) rather than revise an existing plan.
 	CreateOnly bool `json:"create_only"`
+	// Password is the step-up for revising an existing plan.
+	Password string `json:"password"`
 }
 
 func (s *server) publishServicePlan(w http.ResponseWriter, r *http.Request) {
@@ -94,6 +96,32 @@ func (s *server) publishServicePlan(w http.ResponseWriter, r *http.Request) {
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
+	}
+	// REVISING AN EXISTING PLAN changes the speeds and allowances of every package that moves onto it, so it is
+	// a step-up. And it keeps the plan's time accounting unless the body names one: an editor that did not
+	// send the field used to turn an AGGREGATE_ONLINE_TIME plan into VALIDITY_WINDOW on every save.
+	if !in.CreateOnly {
+		plans, disabled, perr := s.commerce.ListPlans(r.Context(), s.tenantID, s.siteID)
+		if perr != nil {
+			jsonErr(w, http.StatusInternalServerError, "internal", "the existing plans could not be read")
+			return
+		}
+		if !disabled {
+			for _, p := range plans {
+				if p.Code != strings.TrimSpace(in.Code) {
+					continue
+				}
+				if strings.TrimSpace(in.TimeAccountingMode) == "" && p.TimeAccountingMode != nil {
+					in.TimeAccountingMode = *p.TimeAccountingMode
+				}
+				if !s.reauth(r, in.Password) {
+					jsonErr(w, http.StatusUnauthorized, "reauth_required",
+						"Confirm your password: changing a service plan changes what its packages give")
+					return
+				}
+				break
+			}
+		}
 	}
 	res, err := s.commerce.PublishPlanRevision(r.Context(), iamv2.PlanPublishSpec{
 		TenantID: s.tenantID, SiteID: s.siteID, PlanCode: in.Code, Name: in.Name,
@@ -222,7 +250,7 @@ func (s *server) setGraceConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	// Step-up: publishing changes what every departing guest receives.
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
 	// The actor is taken from the authenticated SESSION, never from the body. The audited boundary records
@@ -406,24 +434,59 @@ type publishPackageReq struct {
 	// CreateOnly is sent by "Add package". Without it a code that already existed silently became a new
 	// revision of that package; with it the answer is 409 code_exists. Edit omits it and revises as before.
 	CreateOnly bool `json:"create_only"`
-	// Price and acquisition (docs/architecture/ONEGATE_MODULES_AND_ACQUISITION.md). All optional: a request
-	// that names none publishes a Free package, exactly as before.
-	PriceMinor         int64                     `json:"price_minor"`
-	Currency           string                    `json:"currency"`
-	CurrencyExponent   int                       `json:"currency_exponent"`
-	AcquisitionMethods []string                  `json:"acquisition_methods"`
-	RoomChargeMappings []iamv2.RoomChargeMapping `json:"room_charge_mappings"`
+	// Price and acquisition (docs/architecture/ONEGATE_MODULES_AND_ACQUISITION.md).
+	//
+	// POINTERS, BECAUSE ABSENT AND ZERO ARE DIFFERENT ANSWERS. A NEW package that names none of these is Free,
+	// as it always was. A REVISION of an existing package must name every one of them: "Apply current settings
+	// to packages" (the plan repin) used to post a body without them, the server read the absence as Free, and
+	// card, room-charge and voucher-only packages were republished free -- after which voucher issue was
+	// refused. A republish never infers commercial terms; it states them (commercial_fields_required).
+	PriceMinor         *int64                     `json:"price_minor"`
+	Currency           *string                    `json:"currency"`
+	CurrencyExponent   *int                       `json:"currency_exponent"`
+	AcquisitionMethods *[]string                  `json:"acquisition_methods"`
+	RoomChargeMappings *[]iamv2.RoomChargeMapping `json:"room_charge_mappings"`
+	// THE REVISION FIELDS THE EDITOR DOES NOT SHOW. Absent means "keep what the current revision has": every
+	// save used to reset them to GENERAL / NULL / false / NULL on a new immutable revision.
+	PackageType         *string         `json:"package_type"`
+	PlanOverrides       *map[string]any `json:"plan_overrides"`
+	Renewable           *bool           `json:"renewable"`
+	MaxPurchasesPerStay optionalInt     `json:"max_purchases_per_stay"`
+	// Password is the step-up, required when a revision changes what the package costs, how it is paid for,
+	// or which service-plan revision it grants (separation of duties: the console session alone is not enough
+	// to reprice the offer or move it to other speeds).
+	Password string `json:"password"`
+}
+
+// optionalInt tells "absent" from "null" from a number: absent keeps, null clears, a number sets.
+type optionalInt struct {
+	Set   bool
+	Value *int
+}
+
+func (o *optionalInt) UnmarshalJSON(b []byte) error {
+	o.Set = true
+	if string(b) == "null" {
+		o.Value = nil
+		return nil
+	}
+	var n int
+	if err := json.Unmarshal(b, &n); err != nil {
+		return err
+	}
+	o.Value = &n
+	return nil
 }
 
 // acquisitionModuleRefusal names the module a publication needs and does not have. Publishing is
 // configuration, so readiness (a provider account, an onboarded interface) is not required -- the module
 // must be licensed and switched on at this site. The client offer is gated again on all four gates.
-func (s *server) acquisitionModuleRefusal(r *http.Request, in publishPackageReq) (string, bool) {
+func (s *server) acquisitionModuleRefusal(r *http.Request, spec iamv2.PackagePublishSpec) (string, bool) {
 	need := map[string]bool{}
-	if in.PriceMinor > 0 {
+	if spec.PriceMinor > 0 {
 		need[lic.ModulePaidAccess] = true
 	}
-	for _, m := range in.AcquisitionMethods {
+	for _, m := range spec.AcquisitionMethods {
 		switch m {
 		case iamv2.AcquireCard:
 			need[lic.ModuleCardPayment] = true
@@ -467,13 +530,70 @@ func (s *server) publishCommercialPackage(w http.ResponseWriter, r *http.Request
 		VisibleFrom: in.VisibleFrom, VisibleUntil: in.VisibleUntil,
 		DataAllocationPolicy: in.DataAllocationPolicy,
 		CreateOnly:           in.CreateOnly,
-		PriceMinor:           in.PriceMinor,
-		Currency:             in.Currency,
-		CurrencyExponent:     in.CurrencyExponent,
-		AcquisitionMethods:   in.AcquisitionMethods,
-		RoomChargeMappings:   in.RoomChargeMappings,
 	}
-	if msg, ok := s.acquisitionModuleRefusal(r, in); !ok {
+	if in.PriceMinor != nil {
+		spec.PriceMinor = *in.PriceMinor
+	}
+	if in.Currency != nil {
+		spec.Currency = *in.Currency
+	}
+	if in.CurrencyExponent != nil {
+		spec.CurrencyExponent = *in.CurrencyExponent
+	}
+	if in.AcquisitionMethods != nil {
+		spec.AcquisitionMethods = *in.AcquisitionMethods
+	}
+	if in.RoomChargeMappings != nil {
+		spec.RoomChargeMappings = *in.RoomChargeMappings
+	}
+	if in.PackageType != nil {
+		spec.PackageType = *in.PackageType
+	}
+	if in.PlanOverrides != nil {
+		spec.PlanOverrides = *in.PlanOverrides
+	}
+	if in.Renewable != nil {
+		spec.Renewable = *in.Renewable
+	}
+	if in.MaxPurchasesPerStay.Set {
+		spec.MaxPurchasesPerStay = in.MaxPurchasesPerStay.Value
+	}
+
+	// A REVISION OF AN EXISTING PACKAGE: explicit commercial terms, carried non-commercial fields, and a
+	// step-up when the terms or the plan change.
+	if !in.CreateOnly {
+		cur, exists, ok := s.currentPackageByCode(w, r, in.Code)
+		if !ok {
+			return
+		}
+		if exists {
+			if missing := missingCommercialFields(in); len(missing) > 0 {
+				jsonErr(w, http.StatusBadRequest, "commercial_fields_required",
+					"A change to an existing package must state its price and how clients get it; missing: "+
+						strings.Join(missing, ", ")+". Nothing was changed.")
+				return
+			}
+			if in.PackageType == nil {
+				spec.PackageType = cur.PackageType
+			}
+			if in.PlanOverrides == nil {
+				spec.PlanOverrides = cur.PlanOverrides
+			}
+			if in.Renewable == nil {
+				spec.Renewable = cur.Renewable
+			}
+			if !in.MaxPurchasesPerStay.Set {
+				spec.MaxPurchasesPerStay = cur.MaxPurchasesPerStay
+			}
+			spec.PriorDurationPolicy = cur.DurationPolicy
+			if commercialTermsChanged(cur, spec) && !s.reauth(r, in.Password) {
+				jsonErr(w, http.StatusUnauthorized, "reauth_required",
+					"Confirm your password: this change alters the package's price, how it is paid for or its service plan")
+				return
+			}
+		}
+	}
+	if msg, ok := s.acquisitionModuleRefusal(r, spec); !ok {
 		jsonErr(w, http.StatusServiceUnavailable, "modules_unavailable", "the module state could not be read")
 		return
 	} else if msg != "" {
@@ -485,6 +605,13 @@ func (s *server) publishCommercialPackage(w http.ResponseWriter, r *http.Request
 	}
 	for _, ti := range in.GrantTiers {
 		spec.GrantTiers = append(spec.GrantTiers, iamv2.GrantTier{Order: ti.Order, Value: ti.Grant})
+	}
+	// Speed steps were shown to clients and never applied (audit O-5): an operator saving a package may give it
+	// one grant step, with no overrides. See iamv2.GrantTiersEnforceableRefusal for why this refuses rather than
+	// guessing at a threshold model.
+	if msg := iamv2.GrantTiersEnforceableRefusal(spec.GrantTiers); msg != "" {
+		jsonErr(w, http.StatusBadRequest, "validation", msg)
+		return
 	}
 	res, err := s.commerce.PublishRevision(r.Context(), spec)
 	if errors.Is(err, iamv2.ErrCodeExists) {
@@ -514,11 +641,91 @@ func (s *server) publishCommercialPackage(w http.ResponseWriter, r *http.Request
 	}
 	s.audit(r, "commercial_package.published", "commercial_package", res.PackageID, map[string]any{
 		"revision_id": res.CurrentRevisionID, "code": in.Code,
+		"price_minor": spec.PriceMinor, "currency": spec.Currency, "acquisition_methods": spec.AcquisitionMethods,
+		"service_plan_revision_id": spec.ServicePlanRevisionID,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"package_id":          res.PackageID,
 		"current_revision_id": res.CurrentRevisionID,
 	})
+}
+
+// currentPackageByCode reads the CURRENT configuration of the package that owns code, if any. ok=false means
+// the answer was written already (the package exists but cannot be read safely).
+func (s *server) currentPackageByCode(w http.ResponseWriter, r *http.Request, code string) (iamv2.PackageCurrent, bool, bool) {
+	pkgs, disabled, err := s.commerce.ListPackages(r.Context(), s.tenantID, s.siteID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "the existing packages could not be read")
+		return iamv2.PackageCurrent{}, false, false
+	}
+	if disabled {
+		return iamv2.PackageCurrent{}, false, true // PublishRevision answers phase2_disabled itself
+	}
+	for _, p := range pkgs {
+		if p.Code != strings.TrimSpace(code) {
+			continue
+		}
+		cur, _, gerr := s.commerce.GetPackageCurrent(r.Context(), s.tenantID, s.siteID, p.PackageID)
+		if gerr != nil {
+			jsonErr(w, http.StatusConflict, "conditions_unreadable",
+				"This package's current configuration cannot be read, so it cannot be changed safely here.")
+			return iamv2.PackageCurrent{}, false, false
+		}
+		return cur, true, true
+	}
+	return iamv2.PackageCurrent{}, false, true
+}
+
+// missingCommercialFields names the commercial terms a revision of an existing package left out.
+func missingCommercialFields(in publishPackageReq) []string {
+	var out []string
+	if in.PriceMinor == nil {
+		out = append(out, "price_minor")
+	}
+	if in.Currency == nil {
+		out = append(out, "currency")
+	}
+	if in.CurrencyExponent == nil {
+		out = append(out, "currency_exponent")
+	}
+	if in.AcquisitionMethods == nil {
+		out = append(out, "acquisition_methods")
+	}
+	if in.RoomChargeMappings == nil {
+		out = append(out, "room_charge_mappings")
+	}
+	return out
+}
+
+// commercialTermsChanged reports whether a revision changes the price, the currency, the set of acquisition
+// methods or the pinned service-plan revision of the package's current revision.
+func commercialTermsChanged(cur iamv2.PackageCurrent, spec iamv2.PackagePublishSpec) bool {
+	if cur.PriceMinor != spec.PriceMinor || !strings.EqualFold(strings.TrimSpace(cur.Currency), strings.TrimSpace(spec.Currency)) {
+		return true
+	}
+	if cur.CurrencyExponent != nil && *cur.CurrencyExponent != spec.CurrencyExponent {
+		return true
+	}
+	if cur.ServicePlanRevisionID != spec.ServicePlanRevisionID {
+		return true
+	}
+	set := func(ms []string) map[string]bool {
+		out := map[string]bool{}
+		for _, m := range ms {
+			out[strings.ToUpper(strings.TrimSpace(m))] = true
+		}
+		return out
+	}
+	a, b := set(cur.SettlementMethods), set(spec.AcquisitionMethods)
+	if len(a) != len(b) {
+		return true
+	}
+	for m := range a {
+		if !b[m] {
+			return true
+		}
+	}
+	return false
 }
 
 type setActiveReq struct {
@@ -542,9 +749,14 @@ func (s *server) setCommercialPackageActive(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		if !s.reauth(r, in.Password) {
-			jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+			s.reauthRefused(w, r, "password confirmation required")
 			return
 		}
+	} else if !s.reauth(r, in.Password) {
+		// REACTIVATION puts a package back in front of clients at whatever price and plan it carries, so it is
+		// the same separation-of-duties decision as changing them: a step-up, like deactivation (T30).
+		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		return
 	}
 	res, err := s.commerce.SetActive(r.Context(), s.tenantID, s.siteID, id, in.Active)
 	if err != nil {

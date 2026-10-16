@@ -135,13 +135,7 @@ type postStayActionReq struct {
 	Reason   string `json:"reason"`
 }
 
-// validReason bounds the mandatory justification. Empty is refused because an unexplained credential rotation
-// is indistinguishable afterwards from an unauthorized one; a cap keeps a free-text field from becoming a
-// place to store something else.
-func validReason(reason string) bool {
-	n := len(reason)
-	return n >= 4 && n <= 500
-}
+// validReason (reason_bounds.go) bounds the mandatory justification, in characters.
 
 // resetPostStayPIN rotates the credential of an ACTIVE profile and returns the new PIN once.
 func (s *server) resetPostStayPIN(w http.ResponseWriter, r *http.Request) {

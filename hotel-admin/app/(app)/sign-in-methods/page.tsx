@@ -43,6 +43,7 @@ import { ReadOnlyNotice, SettingField } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
+import { senderReady, type NotifyProvider } from "@/lib/sign-in-readiness";
 import { Ticket, Hotel, KeyRound, Mail, MessageSquare, Users, ArrowUpRight, LogIn, PackageOpen, Smartphone, Route } from "lucide-react";
 
 // The auth_methods document. Only the keys this screen owns are typed; everything else is preserved
@@ -79,7 +80,6 @@ const PRIMARY_LABELS: Record<Exclude<PrimaryMethod, "">, string> = {
   guest_account: "Client account", voucher: "Voucher code",
 };
 
-type NotifyProvider = { channel: string; kind: string; enabled: boolean };
 type SocialProvider = { provider: string; enabled: boolean };
 
 // WHAT THE GUEST TYPES BESIDES THE ROOM NUMBER IS NOT SET HERE. It depends on the PMS stay record, so it is
@@ -160,10 +160,16 @@ export default function SignInMethodsPage() {
     } finally { setBusy(null); }
   }, [load, toast]);
 
-  const emailReady = useMemo(() => notify.some((p) => p.channel === "email" && p.enabled), [notify]);
-  const smsReady = useMemo(() => notify.some((p) => p.channel === "sms" && p.enabled), [notify]);
-  const whatsappReady = useMemo(() => notify.some((p) => p.channel === "whatsapp" && p.enabled), [notify]);
+  const emailReady = useMemo(() => senderReady(notify, "email"), [notify]);
+  const smsReady = useMemo(() => senderReady(notify, "sms"), [notify]);
+  const whatsappReady = useMemo(() => senderReady(notify, "whatsapp"), [notify]);
   const socialReady = useMemo(() => social.filter((p) => p.enabled).map((p) => p.provider), [social]);
+  // A provider whose switch is ON is listed even when its application is gone or disabled, so the switch can be
+  // turned OFF: it used to vanish from the list and stay on in the configuration with no way to clear it.
+  const socialListed = useMemo(() => {
+    const on = Object.entries(cfg?.social ?? {}).filter(([, m]) => m?.enabled).map(([p]) => p);
+    return Array.from(new Set([...socialReady, ...on]));
+  }, [socialReady, cfg]);
 
   const header = (
     <PageHeader
@@ -376,7 +382,7 @@ export default function SignInMethodsPage() {
             </div>
           </CardHeader>
           <CardBody>
-            {socialReady.length === 0 ? (
+            {socialListed.length === 0 ? (
               <div className="flex flex-wrap items-center gap-2 text-sm">
                 <Badge tone="default">Not available</Badge>
                 <span className="text-muted-foreground">No identity provider is configured.</span>
@@ -386,8 +392,9 @@ export default function SignInMethodsPage() {
               </div>
             ) : (
               <ul className="grid gap-2 sm:grid-cols-2">
-                {socialReady.map((p) => {
+                {socialListed.map((p) => {
                   const on = !!cfg.social?.[p]?.enabled;
+                  const ready = socialReady.includes(p);
                   const name = SOCIAL_LABELS[p] ?? p;
                   return (
                     <li key={p} className="flex items-center justify-between gap-3 rounded-md border border-border px-3.5 py-2.5">
@@ -397,7 +404,8 @@ export default function SignInMethodsPage() {
                             type="checkbox"
                             className="size-4 accent-primary"
                             checked={on}
-                            disabled={busy === `Social (${p})`}
+                            // Not ready: it can be switched OFF, never on.
+                            disabled={busy === `Social (${p})` || (!ready && !on)}
                             onChange={(e) =>
                               save({ social: { ...(cfg.social ?? {}), [p]: { ...(cfg.social?.[p] ?? {}), enabled: e.target.checked } } },
                                 `Social (${p})`)}
@@ -407,7 +415,9 @@ export default function SignInMethodsPage() {
                       ) : (
                         <span className="text-sm capitalize">{name}</span>
                       )}
-                      <Badge tone={on ? "ok" : "default"} dot={on}>{on ? "Offered" : "Not offered"}</Badge>
+                      {ready
+                        ? <Badge tone={on ? "ok" : "default"} dot={on}>{on ? "Offered" : "Not offered"}</Badge>
+                        : <Badge tone="warn">Not set up — switch it off or set it up under Identity providers</Badge>}
                     </li>
                   );
                 })}
@@ -596,7 +606,9 @@ function MethodCard({
           enabled={enabled}
           extra={!ready ? <Badge tone="warn">Not available</Badge> : undefined}
         />
-        <MethodSwitch label={title} enabled={enabled} busy={busy} writable={writable} disabled={!ready} onChange={onToggle} />
+        {/* NOT READY BLOCKS SWITCHING ON, NEVER SWITCHING OFF: a method whose sender was removed used to be stuck
+            on, with a disabled switch the operator could not use to turn it off. */}
+        <MethodSwitch label={title} enabled={enabled} busy={busy} writable={writable} disabled={!ready && !enabled} onChange={onToggle} />
       </CardHeader>
       <CardBody className="flex flex-1 flex-col gap-2 pt-0">
         <p className="text-sm text-muted-foreground">{description}</p>
