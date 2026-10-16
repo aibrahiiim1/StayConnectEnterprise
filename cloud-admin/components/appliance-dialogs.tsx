@@ -160,9 +160,16 @@ export function SetLicenseDialog({
 
   useEffect(() => {
     if (!open) return;
+    // A change starts from the CURRENT terms, not Central's defaults: saving without touching the grace period
+    // or the end date keeps them (it used to reset them to 30 days and a fresh year). An end date already in
+    // the past is not offered back; a renewal then starts from the default one year.
+    const until = current?.valid_until ? current.valid_until.slice(0, 10) : "";
+    const untilInFuture = !!current?.valid_until && Date.parse(current.valid_until) > Date.now();
     setTerms({
       ...DEFAULT_TERMS,
       maxGuests: String(current?.max_concurrent_online_guests ?? DEFAULT_TERMS.maxGuests),
+      graceDays: hasLicense && current?.grace_period_days != null ? String(current.grace_period_days) : DEFAULT_TERMS.graceDays,
+      ...(hasLicense && untilInFuture ? { validMode: "date" as const, validUntil: until } : {}),
       // A change keeps the current license's modules unless the operator edits them. Only a first license
       // starts from the site type's suggestion.
       modules: hasLicense ? [...(current?.modules ?? [])] : [],

@@ -21,6 +21,7 @@ type LicenseSummary struct {
 	ValidUntil                *time.Time `json:"valid_until"`
 	GraceEndsAt               *time.Time `json:"grace_ends_at"`
 	MaxConcurrentOnlineGuests *int       `json:"max_concurrent_online_guests"`
+	GracePeriodDays           *int       `json:"grace_period_days"`
 	LicenseVersion            *int64     `json:"license_version"`
 	Modules                   []string   `json:"modules"` // null with no licence; [] = core only
 }
@@ -151,7 +152,7 @@ func (b *Base) queryAppliances(ctx context.Context, customerID, applianceID stri
 			facts.License = lf
 			ge := lf.GraceEndsAt()
 			a.License = LicenseSummary{ID: licID, ValidUntil: licUntil, GraceEndsAt: &ge,
-				MaxConcurrentOnlineGuests: licCap, LicenseVersion: licVer, Modules: licModules}
+				MaxConcurrentOnlineGuests: licCap, GracePeriodDays: licGrace, LicenseVersion: licVer, Modules: licModules}
 			if a.License.Modules == nil {
 				a.License.Modules = []string{}
 			}
