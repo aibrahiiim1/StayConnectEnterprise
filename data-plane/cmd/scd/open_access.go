@@ -58,8 +58,14 @@ func (l *recoveryLimiter) allow(mac string) bool {
 		return false
 	}
 	l.hits[mac] = append(kept, now)
+	// Bounded by PRUNING what has aged out, never by wiping the map: a wipe reset every device's count at once,
+	// so filling the map with addresses was a way to clear one's own limit (portal audit P-19).
 	if len(l.hits) > 20000 {
-		l.hits = map[string][]time.Time{}
+		for k, ts := range l.hits {
+			if len(ts) == 0 || now.Sub(ts[len(ts)-1]) >= 10*time.Minute {
+				delete(l.hits, k)
+			}
+		}
 	}
 	return true
 }

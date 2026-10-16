@@ -85,12 +85,12 @@ var (
 // PortalTLSState is what the rest of scd (OTP links; the social sign-in redirect URIs) and portald learn about
 // the portal's HTTPS state. It carries no secret.
 type PortalTLSState struct {
-	HTTPSActive        bool       `json:"https_active"`
-	Canonical          string     `json:"canonical_hostname"`
-	OneGateHostname    string     `json:"onegate_hostname"`
-	CustomDomain       string     `json:"custom_domain"`
-	CustomDomainStatus string     `json:"custom_domain_status"`
-	PortalIP           string     `json:"portal_ip"`
+	HTTPSActive        bool   `json:"https_active"`
+	Canonical          string `json:"canonical_hostname"`
+	OneGateHostname    string `json:"onegate_hostname"`
+	CustomDomain       string `json:"custom_domain"`
+	CustomDomainStatus string `json:"custom_domain_status"`
+	PortalIP           string `json:"portal_ip"`
 	// PortalIPActive: the portal address is configured AND up on this appliance, so a guest can reach the portal
 	// at http://<portal_ip>/ whatever the HTTPS state. portald uses it as the HTTP fallback's canonical origin.
 	PortalIPActive bool       `json:"portal_ip_active"`

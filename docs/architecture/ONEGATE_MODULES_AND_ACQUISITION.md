@@ -218,9 +218,15 @@ package → quote (pins interface, mapping, stay, currency) → purchase AWAITIN
   verified identity — and it carries no MAC. **MAC identifies a Device only.**
 * `auth_contexts`, `entitlements` carry `anonymous_subject_id`; the one-subject CHECKs include it; auth method
   `OPEN` requires it; one live entitlement per anonymous subject is a unique index, like every other subject.
-* **Resume and recovery:** a random 256-bit resume token (HttpOnly portal cookie) and a short recovery code shown
-  on the pending and success pages, both stored only as HMACs (`iam_v2.anonymous_subject_credentials`) and
-  rate-limited by the existing sign-in protection.
+* **Resume and recovery:** a random 256-bit resume token (HttpOnly portal cookie `og_resume`, Secure over TLS,
+  30 days, cleared on sign-out) and a short recovery code shown on the package, payment pending and success
+  pages while the sign-in lasts, both stored only as HMACs (`iam_v2.anonymous_subject_credentials`) and
+  rate-limited by the existing sign-in protection. **The resume token is bound to the device it was issued to**:
+  its HMAC covers the token and the device's MAC (from the kernel neighbour table), so a copied cookie resumes
+  nothing on another device; another device uses the recovery code. A code the client types is sent alone and
+  is never overridden by the cookie. The open-selection token never replaces the remembered-device credential
+  `og_client` (portal audit P-4, P-11, P-12). Tokens issued before this rule stop resolving; the device's own
+  live entitlement and the recovery code still bring the client back.
 * **Device bindings stay separate:** a returning device first joins the live entitlement it is bound to (purchase
   → auth context → device). Only a device with no live entitlement gets a new anonymous subject, and free-package
   limits (`PRIOR_PURCHASE`) are evaluated against the device's history, so a new subject never resets quota.
