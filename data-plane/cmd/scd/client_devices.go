@@ -60,6 +60,10 @@ type clientDeviceView struct {
 type clientDevicesOut struct {
 	Outcome     string             `json:"outcome"`
 	Limit       int                `json:"limit"`
+	// Unlimited: the package's plan sets no device limit (max_concurrent_devices NULL, which the database reads as
+	// unlimited); Limit is then 0 and means nothing. A device always joins such a package, so it never needs a
+	// replacement (audit B-24).
+	Unlimited bool `json:"unlimited,omitempty"`
 	InUse       int                `json:"in_use"`
 	ChangesLeft int                `json:"changes_left"`
 	Devices     []clientDeviceView `json:"devices"`
@@ -124,6 +128,8 @@ func (s *server) clientDevicesOn(ctx context.Context, ent, thisDevice string) (c
 	}
 	if limit != nil {
 		out.Limit = *limit
+	} else {
+		out.Unlimited = true
 	}
 	var allowed int
 	if err := s.db.QueryRow(ctx, `SELECT client_device_changes_per_day FROM iam_v2.device_settings_get($1::uuid,$2::uuid)`,

@@ -478,16 +478,22 @@ func (s *server) revoke(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "bad ip")
 		return
 	}
-	s.denyAtGate(r.Context(), ip)
-	// Clamp to a reason the sessions_end_reason_check CHECK constraint allows, so a
-	// caller passing an unexpected reason ends the session cleanly instead of 500.
+	// Clamp to a known reason, so a caller passing an unexpected one ends the session cleanly instead of 500.
+	// The metric keeps these lower-case labels; the session row records the upper-case code (sessionEndCode).
 	switch req.Reason {
 	case "quota_bytes", "quota_time", "admin", "idle", "dhcp_expired", "policy":
 	default:
 		req.Reason = "admin"
 	}
-	if err := s.endActiveSessionByIP(r.Context(), ip, req.Reason); err != nil {
-		slog.Error("session end", "err", err)
+	// THE ROW ENDS FIRST, then the kernel (audit F-14). The shaping class is netd's; deleting it while the row
+	// still said active/PENDING_ENFORCEMENT left a session claiming enforcement that no longer existed (and, for
+	// a pending one the guard refused to end, kept it that way). Ended first, netd's convergence can only agree.
+	_, endErr := s.endActiveSessionByIP(r.Context(), ip, req.Reason)
+	// The kernel step runs either way: an operator asked for this address to be off the network, and a database
+	// failure is not a reason to leave it admitted until netd's next pass.
+	s.denyAtGate(r.Context(), ip)
+	if endErr != nil {
+		slog.Error("session end", "err", endErr)
 		httpErr(w, http.StatusInternalServerError, "session end failed")
 		return
 	}
