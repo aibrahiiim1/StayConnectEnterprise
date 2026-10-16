@@ -216,10 +216,27 @@ func (b *Base) trust(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// auditRowKey is the deterministic tie-break between audit rows with the same timestamp. audit_log has no id
+// column (it is a hypertable keyed on ts), and several rows routinely share a ts -- a retirement writes its
+// events in one go -- so a cursor of the last ts alone skipped every same-instant row after a page boundary.
+const auditRowKey = `md5(actor_type || '|' || COALESCE(actor_id,'') || '|' || action || '|' || COALESCE(target_type,'') ||
+                         '|' || COALESCE(target_id,'') || '|' || COALESCE(host(ip),'') || '|' || payload::text)`
+
+// parseAuditCursor reads "<RFC3339Nano ts>|<row key>"; a bare timestamp (the old cursor) means "older than".
+func parseAuditCursor(v string) (*time.Time, string, error) {
+	tsPart, key, _ := strings.Cut(v, "|")
+	t, err := time.Parse(time.RFC3339Nano, tsPart)
+	if err != nil {
+		return nil, "", err
+	}
+	return &t, key, nil
+}
+
 // listAudit: GET /cloud/v1/audit?customer_id=&appliance_id=&action=&since=&limit=&cursor=
 //
 // Platform roles read everything, including platform events that belong to no customer. A customer-scoped
-// caller reads only its own customer's records. The cursor is the ts of the last row returned.
+// caller reads only its own customer's records. The cursor names the last row returned (its ts and row key),
+// so a page boundary inside a group of same-instant rows loses none of them.
 func (b *Base) listAudit(w http.ResponseWriter, r *http.Request) {
 	scope, ok := readScope(w, r)
 	if !ok {
@@ -227,6 +244,7 @@ func (b *Base) listAudit(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	var since, before *time.Time
+	var beforeKey string
 	if v := q.Get("since"); v != "" {
 		t, err := time.Parse(time.RFC3339, v)
 		if err != nil {
@@ -236,12 +254,12 @@ func (b *Base) listAudit(w http.ResponseWriter, r *http.Request) {
 		since = &t
 	}
 	if v := q.Get("cursor"); v != "" {
-		t, err := time.Parse(time.RFC3339Nano, v)
+		t, key, err := parseAuditCursor(v)
 		if err != nil {
 			Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad cursor")
 			return
 		}
-		before = &t
+		before, beforeKey = t, key
 	}
 	limit := ParseLimit(r, 100, 500)
 	var actions []string
@@ -253,16 +271,20 @@ func (b *Base) listAudit(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := DBCtx(r)
 	defer cancel()
 	rows, err := b.DB.Query(ctx, `
-        SELECT ts, tenant_id::text, actor_type, actor_id, action, target_type, target_id, host(ip), payload
-          FROM audit_log
-         WHERE ($1 = '' OR tenant_id::text = $1)
-           AND ($2 = '' OR (target_type = 'appliance' AND target_id = $2) OR payload->>'appliance_id' = $2)
-           AND (COALESCE(cardinality($3::text[]), 0) = 0 OR action = ANY($3) OR action LIKE ANY(
-                   SELECT a || '.%' FROM unnest($3::text[]) a))
-           AND ($4::timestamptz IS NULL OR ts >= $4)
-           AND ($5::timestamptz IS NULL OR ts < $5)
-         ORDER BY ts DESC
-         LIMIT $6`, scope.Filter(q.Get("customer_id")), q.Get("appliance_id"), actions, since, before, limit)
+        SELECT ts, tenant, actor_type, actor_id, action, target_type, target_id, ip, payload, k FROM (
+          SELECT ts, tenant_id::text AS tenant, actor_type, actor_id, action, target_type, target_id, host(ip) AS ip,
+                 payload, `+auditRowKey+` AS k
+            FROM audit_log
+           WHERE ($1 = '' OR tenant_id::text = $1)
+             AND ($2 = '' OR (target_type = 'appliance' AND target_id = $2) OR payload->>'appliance_id' = $2)
+             AND (COALESCE(cardinality($3::text[]), 0) = 0 OR action = ANY($3) OR action LIKE ANY(
+                     SELECT a || '.%' FROM unnest($3::text[]) a))
+             AND ($4::timestamptz IS NULL OR ts >= $4)
+             AND ($5::timestamptz IS NULL OR ts <= $5)
+        ) x
+         WHERE $5::timestamptz IS NULL OR (x.ts, x.k) < ($5, $7::text)
+         ORDER BY x.ts DESC, x.k DESC
+         LIMIT $6`, scope.Filter(q.Get("customer_id")), q.Get("appliance_id"), actions, since, before, limit, beforeKey)
 	if err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "query failed")
 		return
@@ -270,22 +292,23 @@ func (b *Base) listAudit(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	out := []map[string]any{}
 	var last time.Time
+	var lastKey string
 	for rows.Next() {
 		var ts time.Time
 		var tenant, actorID, targetType, targetID, ip *string
-		var actorType, action string
+		var actorType, action, key string
 		var payload json.RawMessage
-		if rows.Scan(&ts, &tenant, &actorType, &actorID, &action, &targetType, &targetID, &ip, &payload) != nil {
+		if rows.Scan(&ts, &tenant, &actorType, &actorID, &action, &targetType, &targetID, &ip, &payload, &key) != nil {
 			continue
 		}
-		last = ts
+		last, lastKey = ts, key
 		out = append(out, map[string]any{"ts": ts, "customer_id": tenant, "actor_type": actorType,
 			"actor_id": actorID, "action": action, "target_type": targetType, "target_id": targetID,
 			"ip": ip, "payload": payload})
 	}
 	var next any
 	if len(out) == limit {
-		next = last.UTC().Format(time.RFC3339Nano)
+		next = last.UTC().Format(time.RFC3339Nano) + "|" + lastKey
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"items": out, "next_cursor": next})
 }
