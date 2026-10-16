@@ -240,7 +240,9 @@ func TestTransportFailureIsAProviderError(t *testing.T) {
 func TestStubWritesItsFileAndNeverLogsTheCode(t *testing.T) {
 	logs := captureLogs(t)
 	p := filepath.Join(t.TempDir(), "wa.log")
-	if err := NewStub(p).Send(context.Background(), Message{To: "+15551234567", Code: testCode, TTLMinutes: 10}); err != nil {
+	st := NewStub(p)
+	st.redact = false // the development behaviour; the production one is TestStubInAProductionBuildWithholdsTheCode
+	if err := st.Send(context.Background(), Message{To: "+15551234567", Code: testCode, TTLMinutes: 10}); err != nil {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(p)
