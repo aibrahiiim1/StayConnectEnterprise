@@ -94,10 +94,11 @@ func TestIntegrationFinOpsAPI_RecoveryWorksUnderEdgedsOwnLogin(t *testing.T) {
 		t.Fatalf("set mirror age as svc_edged: %v", err)
 	}
 
-	// Reads other screens make: Checkout grace history and the client-network active count.
+	// Reads other screens make: Checkout grace history and the client-network active count. The financial
+	// settings CHANGE LOG is not among them: no edged code reads it, so migration 0124 (audit B-7) withdrew
+	// svc_edged's SELECT on it, and asserting it here would demand a grant the product does not use.
 	for _, q := range []string{
 		`SELECT count(*) FROM iam_v2.pms_interface_financial_settings WHERE tenant_id=$1`,
-		`SELECT count(*) FROM iam_v2.pms_interface_financial_setting_changes WHERE tenant_id=$1`,
 		`SELECT count(*) FROM iam_v2.checkout_grace_audit WHERE tenant_id=$1`,
 		`SELECT count(*) FROM iam_v2.device_network_appearances WHERE tenant_id=$1`,
 	} {

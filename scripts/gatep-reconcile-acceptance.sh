@@ -103,7 +103,6 @@ svc_acctd|iam_v2.p6_data_crossing(uuid)|fn|EXECUTE
 svc_acctd|iam_v2.p6_expire_entitlement(uuid)|fn|EXECUTE
 svc_acctd|iam_v2.p6_suspend_over_budget(uuid, uuid)|fn|EXECUTE
 svc_acctd|iam_v2.p6_tick_online_time(uuid, uuid, timestamptz, int, uuid[], timestamptz[])|fn|EXECUTE
-svc_netd|iam_v2.record_auth_context_offer(uuid, uuid, uuid, uuid, integer, bigint, timestamptz)|fn|EXECUTE
 svc_pmsd|iam_v2.p3_lock_grace_config(uuid, uuid)|fn|EXECUTE
 svc_pmsd|iam_v2.site_checkout_grace_config|tbl|SELECT
 svc_pmsd|iam_v2.stays|tbl|SELECT
