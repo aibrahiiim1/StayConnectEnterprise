@@ -123,6 +123,8 @@ export type Whoami = {
   roles: string[];
   site_id: string;
   expires_at: string;
+  /** The session can only change its password until this is false (edged 0119). */
+  must_change_password?: boolean;
 };
 
 // GuestAccessPlan — the local `ticket_templates` rows, renamed per the edge
@@ -664,6 +666,24 @@ export type EdgeOperator = {
   status: "active" | "disabled" | string;
   roles: string[];
   created_at: string;
+  /** Their next sign-in can only set a new password (edged 0119). */
+  must_change_password?: boolean;
+};
+
+/** Admin Console sign-in protection (edged /operators/signin-protection, migration 0119). */
+export type SigninProtection = {
+  account_max_failures: number;
+  account_window_seconds: number;
+  ip_max_failures: number;
+  ip_window_seconds: number;
+  lockout_seconds: number;
+  config_version: number;
+  updated_at?: string | null;
+  updated_by?: string | null;
+};
+export type SigninProtectionBound = {
+  key: keyof Pick<SigninProtection, "account_max_failures" | "account_window_seconds" | "ip_max_failures" | "ip_window_seconds" | "lockout_seconds">;
+  label: string; unit: string; min: number; max: number; default: number; explains: string;
 };
 
 export type WalledGardenRule = {

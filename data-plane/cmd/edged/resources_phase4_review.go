@@ -387,7 +387,7 @@ func (s *server) postReviewAction(w http.ResponseWriter, r *http.Request) {
 	// STEP-UP. §15 requires password re-authentication for every review action, including ESCALATE: the
 	// audit record names an operator, and it should not be possible to write one from a stolen cookie.
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
 

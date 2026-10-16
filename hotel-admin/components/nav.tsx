@@ -558,6 +558,28 @@ export function Nav({
           </div>
         )}
 
+        {/* The operator's own password (edged POST /auth/password). Next to Sign out because it is about the
+            person signed in, not the site. */}
+        {(() => {
+          const change = (
+            <Link
+              href="/account/password"
+              onClick={onNavigate}
+              aria-label={collapsed ? "Change my password" : undefined}
+              className={cn(
+                "mt-1 flex w-full items-center rounded-md text-sm text-sidebar-foreground/85",
+                "transition-colors hover:bg-sidebar-accent/60 hover:text-white",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
+                collapsed ? "h-10 justify-center px-0" : "gap-2.5 px-2.5 py-1.5",
+              )}
+            >
+              <KeyRound className="size-4 shrink-0 text-sidebar-muted" />
+              <span className={cn(collapsed ? "sr-only" : undefined)}>Change my password</span>
+            </Link>
+          );
+          return collapsed ? <Tooltip content="Change my password" side="right">{change}</Tooltip> : change;
+        })()}
+
         {(() => {
           const signOut = (
             <button

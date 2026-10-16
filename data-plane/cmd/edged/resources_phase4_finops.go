@@ -442,7 +442,7 @@ func (s *server) releaseRecovery(w http.ResponseWriter, r *http.Request) {
 // a stolen cookie alone does not.
 func (s *server) stepUpActor(w http.ResponseWriter, r *http.Request, password string) (string, bool) {
 	if !s.reauth(r, password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return "", false
 	}
 	sess := sessFrom(r.Context())

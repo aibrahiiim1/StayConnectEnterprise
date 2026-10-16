@@ -88,7 +88,7 @@ func (s *server) testPMSConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
 	id := chi.URLParam(r, "id")

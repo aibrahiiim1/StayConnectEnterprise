@@ -92,6 +92,8 @@ const MATRIX: Matrix = {
     "account-password-settings": "write",
     operators: "read", audit: "read",
     reports: "read", backups: "read", license: "read", diagnostics: "write",
+    // Downloading a full database dump (decision D-B): this role and site_admin only, behind the password.
+    "backup-download": "write",
   },
   front_office_operator: {
     // Code requests (contract §6.7): the SMS / WhatsApp list, read-only; code-reveal reads a live code.

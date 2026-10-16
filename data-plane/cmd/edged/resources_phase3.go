@@ -968,7 +968,7 @@ func (s *server) putCheckoutGraceConfig(w http.ResponseWriter, r *http.Request) 
 	}
 	// Step-up: publishing changes what every departing guest receives.
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
 	sess := sessFrom(r.Context())

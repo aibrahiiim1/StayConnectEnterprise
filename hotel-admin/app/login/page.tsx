@@ -14,6 +14,7 @@ import { Input, Field } from "@/components/ui/input";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { api } from "@/lib/api";
+import { safeNextPath } from "@/lib/safe-next";
 
 export default function LoginPage() {
   // useSearchParams must live inside a Suspense boundary for production build.
@@ -27,7 +28,9 @@ export default function LoginPage() {
 function LoginInner() {
   const router = useRouter();
   const params = useSearchParams();
-  const next = params.get("next") || "/dashboard";
+  // Only a path on this console (lib/safe-next.ts): ?next=https://elsewhere is how a sign-in became a hand-off
+  // to another site.
+  const next = safeNextPath(params.get("next"));
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -41,7 +44,9 @@ function LoginInner() {
     try {
       // POST /edge/v1/auth/login — local site operators only; the appliance
       // has no org concept and no SSO.
-      await api.post("/auth/login", { email, password });
+      // A weak or administrator-chosen password signs in to a session that can only replace it; the app layout
+      // shows that form whatever page it is asked for, so the destination is the same either way.
+      await api.post<{ must_change_password?: boolean }>("/auth/login", { email, password });
       router.replace(next);
       router.refresh();
     } catch (e) {

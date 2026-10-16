@@ -58,7 +58,7 @@ func (s *server) requestFullResync(w http.ResponseWriter, r *http.Request) {
 	// current mirror keeps serving until a new generation publishes — but it does put load on the hotel's PMS
 	// and changes what every subsequent guest resolves against.
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
 

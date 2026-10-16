@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -74,6 +73,9 @@ type session struct {
 	DisplayName string
 	Roles       []string
 	Expires     time.Time
+	// MustChangePassword confines the session to changing the password (0119): requireAuth refuses every
+	// other route until the operator has set a password that meets the policy.
+	MustChangePassword bool
 }
 
 type sessionStore struct {
@@ -119,6 +121,18 @@ func (s *sessionStore) get(tok string) *session {
 		return nil
 	}
 	sess.Expires = time.Now().Add(s.ttl) // sliding
+	return sess
+}
+
+// peek answers whether a token is a live session WITHOUT sliding its expiry -- for a caller that only wants
+// to know who is asking (the health summary), not to keep the session alive.
+func (s *sessionStore) peek(tok string) *session {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.m[tok]
+	if !ok || time.Now().After(sess.Expires) {
+		return nil
+	}
 	return sess
 }
 
@@ -233,6 +247,9 @@ var rolePerms = map[string]map[string]perm{
 		"financial-ops": permRead,
 		"operators":     permRead, "audit": permRead,
 		"reports": permRead, "backups": permRead, "license": permRead,
+		// DOWNLOADING the full database dump (decision D-B): the IT manager and site_admin only, behind the
+		// password step-up at the route. Every other role that reads backups sees the list and downloads nothing.
+		"backup-download": permWrite,
 		// Phase 6 (DARK): the per-appliance Guest Device Self-Service setting. WRITE belongs here for the
 		// same reason auth-methods does -- it decides which capabilities the property offers its guests,
 		// which is a configuration decision rather than a daily desk action. No new ROLE is introduced: the
@@ -449,7 +466,16 @@ func (s *server) requireAuth(next http.Handler) http.Handler {
 			jsonErr(w, http.StatusUnauthorized, "unauthenticated", "session expired")
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), sessKey, sess)))
+		// A SESSION THAT MUST CHANGE ITS PASSWORD CAN DO NOTHING ELSE (0119). Enforced here, for every route, so
+		// no screen can be reached by URL or by API before the weak or administrator-chosen password is replaced.
+		if sess.MustChangePassword && !mustChangeAllowed(r) {
+			jsonErr(w, http.StatusForbidden, "password_change_required",
+				"Set a new password before using the Admin Console.")
+			return
+		}
+		ctx := context.WithValue(r.Context(), sessKey, sess)
+		ctx = context.WithValue(ctx, reauthNoteKey, &reauthNote{})
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -496,43 +522,8 @@ func (s *server) requireRole(resource string, want perm) func(http.Handler) http
 }
 
 // ----- login/logout/whoami -----------------------------------------------------
-
-func (s *server) login(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Email == "" || in.Password == "" {
-		jsonErr(w, http.StatusBadRequest, "bad_request", "email and password required")
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
-	defer cancel()
-
-	var id, display, hash, status string
-	err := s.db.QueryRow(ctx, `
-        SELECT id, COALESCE(display_name,''), COALESCE(password_hash,''), status
-          FROM operators WHERE lower(email) = lower($1)
-    `, in.Email).Scan(&id, &display, &hash, &status)
-	if err != nil || status != "active" || hash == "" || !verifyPassword(in.Password, hash) {
-		// Constant-shape failure; do not reveal which check failed.
-		jsonErr(w, http.StatusUnauthorized, "unauthenticated", "invalid credentials")
-		return
-	}
-	roles, err := s.loadRoles(ctx, id)
-	if err != nil || len(roles) == 0 {
-		jsonErr(w, http.StatusForbidden, "forbidden", "no roles assigned")
-		return
-	}
-	tok := s.sessions.create(&session{OperatorID: id, Email: in.Email, DisplayName: display, Roles: roles})
-	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookie, Value: tok, Path: "/", HttpOnly: true,
-		SameSite: http.SameSiteLaxMode, Secure: s.secure,
-		Expires: time.Now().Add(12 * time.Hour),
-	})
-	s.audit(r, "operator.login", "operator", id, nil)
-	writeJSON(w, http.StatusOK, map[string]any{"operator_id": id, "roles": roles})
-}
+//
+// login, logout and the password change live in operator_signin.go with the throttle they use.
 
 func (s *server) loadRoles(ctx context.Context, operatorID string) ([]string, error) {
 	rows, err := s.db.Query(ctx,
@@ -552,14 +543,6 @@ func (s *server) loadRoles(ctx context.Context, operatorID string) ([]string, er
 	return out, rows.Err()
 }
 
-func (s *server) logout(w http.ResponseWriter, r *http.Request) {
-	if ck, err := r.Cookie(sessionCookie); err == nil {
-		s.sessions.destroy(ck.Value)
-	}
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1})
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
 func (s *server) whoami(w http.ResponseWriter, r *http.Request) {
 	sess := sessFrom(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -569,6 +552,8 @@ func (s *server) whoami(w http.ResponseWriter, r *http.Request) {
 		"roles":        sess.Roles,
 		"site_id":      s.siteID,
 		"expires_at":   sess.Expires.UTC(),
+		// The console shows only the change-password form while this is true (0119).
+		"must_change_password": sess.MustChangePassword,
 	})
 }
 

@@ -222,7 +222,7 @@ func (s *server) setGraceConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	// Step-up: publishing changes what every departing guest receives.
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
 	// The actor is taken from the authenticated SESSION, never from the body. The audited boundary records
@@ -542,7 +542,7 @@ func (s *server) setCommercialPackageActive(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		if !s.reauth(r, in.Password) {
-			jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+			s.reauthRefused(w, r, "password confirmation required")
 			return
 		}
 	}

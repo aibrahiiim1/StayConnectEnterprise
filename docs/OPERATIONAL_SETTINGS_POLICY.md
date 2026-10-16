@@ -88,5 +88,7 @@ implementation of every row in the table above:
 * Guest device self-service — whether guests may remove their own devices.
 * Access plans — duration, data cap, device limits.
 * Portal branding, walled garden, notification and social providers.
+* Admin Console sign-in protection (`public.operator_signin_protection`, migration 0119) — wrong passwords per
+  account and per address, their windows and the lockout; System → Operators → Sign-in protection.
 
 When you add the next one, add it to this list.

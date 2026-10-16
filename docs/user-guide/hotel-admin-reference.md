@@ -18,8 +18,20 @@ states) is defined once in the [OneGate design system](../../design-system/READM
 
 - **Sign-in.** The login page is titled *OneGate Admin Console*: **Email or username**, **Password**,
   **Sign in**. There is no single sign-on, no multi-factor step and no "forgot password"; an operator with
-  the Site admin role changes passwords under **System → Operators**. The session is re-checked every
-  30 seconds; if it has ended you are returned to the login page.
+  the Site admin role resets other operators' passwords under **System → Operators**, and every operator
+  changes their own with **Change my password** at the foot of the sidebar (current password required; every
+  other place they are signed in is signed out). The session is re-checked every 30 seconds; if it has ended
+  you are returned to the login page. After signing in you are returned only to a page of this console.
+- **Wrong passwords are limited.** From the second wrong password each attempt waits longer (1 s, 2 s, 4 s
+  ...); 5 wrong passwords for one account, or 20 from one address, within 15 minutes lock that account or
+  address for 15 minutes (*"Too many failed sign-in attempts. Wait … and try again."*). The same applies to
+  every password confirmation. An unknown account name is treated exactly like a known one. Every failure and
+  every lockout is recorded in **Activity** with the address it came from, never the password. The numbers
+  are a setting: **System → Operators → Sign-in protection**. Resetting an operator's password ends their
+  lockout.
+- **A password that must be replaced.** If you sign in with a password shorter than 10 characters (such as a
+  provisioning default) or one an administrator set for you with *Must choose their own password*, the
+  console shows only **Set a new password** until you have replaced it.
 - **The sidebar and "Find a screen…".** The menu has seven groups: **Overview · Internet offering ·
   Clients · Client Portal · Hotel · Networking · System** (*Clients* and *Client Portal* were formerly *Guests* and
   *Guest portal*; **Hotel** replaces the former *Property management system* and *Charges* groups and also holds
@@ -652,11 +664,12 @@ Whether each service on the appliance is running.
 
 - **Shows:** live status (refreshed every 10 seconds), a *"still starting after boot"* banner when relevant,
   count tiles by state, and the services table (state, health check, restarts, backoff, last failure,
-  uptime). A service opens a panel with details, recent logs (secrets and client details removed) and
-  recovery history.
+  uptime). A service opens a panel with details, recent logs and recovery history. Logs have secrets,
+  addresses, email addresses, client names, room numbers and PMS guest fields removed by the appliance.
 - **Actions:** **Recheck**; **Logs**; **Restart** — a dialog describing the impact for that service,
   **reason + password confirmation**.
-- **Who can change it:** Site admin, Site IT manager. **Read-only:** every other role.
+- **Who can change it:** Site admin, Site IT manager (including reading **Logs**). **Read-only:** every other
+  role, without the logs.
 
 ### Alerts — `/operational-alerts`
 Checkouts the configured policy could not handle on its own (for example when an emergency grace was used).
@@ -718,21 +731,33 @@ A complete copy of the site's data, taken nightly and on demand.
   up now** — **password confirmation**.
 - **Available backups:** date, Verified / Not checked, size; **Verify** (or Re-verify), **Download**, and
   **Restore** (verified backups only).
+- **Download** — **password confirmation**, every time; recorded in Activity twice (the confirmation and the
+  download). Offered only to the Site admin and the Site IT manager: a backup is a complete copy of the
+  site's data.
 - **Restore** — a dialog listing what is replaced and the six steps the appliance takes, **typed backup name +
   password confirmation**. Progress is shown until it finishes, then a *Last restore* card.
 - **Storage and retention** (collapsed): disk used, backups kept, nightly sweep time and how long things are
   kept; changing them needs **password confirmation**.
 - **Who can change it:** Site admin. **Read-only:** Site IT manager, Client services, Client relations, Site
-  viewer. (Download is offered to every role that can see the page.)
+  viewer. **Download:** Site admin and Site IT manager only; the other roles see the list and no Download.
 
 ### Operators — `/operators`
 Site staff accounts for this appliance.
 
-- **Table:** operator (with a *you* marker), role badges (remove with ×; add with **+ role**), status (*Can
-  sign in* / *Disabled*). **Change password** (typed twice, at least 10 characters) and **Disable**.
-  Adding a role, removing a role and disabling an operator are each confirmed in a dialog first.
+- **Table:** operator (with a *you* marker and *Must set a new password* where it applies), role badges
+  (remove with ×; add with **+ role**), status (*Can sign in* / *Disabled*). **Reset password** (typed twice,
+  at least 10 characters, not the account name) signs the operator out everywhere, ends a sign-in lockout on
+  their account and, by default, makes them choose their own password at the next sign-in (*Must choose their
+  own password at the next sign-in*). On your own row it is **Change my password**, which asks for your
+  current password. **Disable** signs the operator out at once. Adding a role, removing a role and disabling
+  an operator are each confirmed in a dialog first.
 - **Add operator:** email or username, name, password (at least 10 characters), role (the seven roles;
-  *Site viewer* by default).
+  *Site viewer* by default), and *Must choose their own password at the next sign-in* (on by default).
+- **Sign-in protection** (collapsed): wrong passwords before an account is locked (3–20, default 5), counting
+  window per account (60–86 400 s, default 900), wrong passwords from one address before it is locked (5–500,
+  default 20), counting window per address (60–86 400 s, default 900), lockout (60–86 400 s, default 900).
+  Changing them needs a **reason + password confirmation** and applies to the next attempt; a lockout already
+  running keeps its expiry.
 - You cannot remove your own Site admin role or disable yourself. There is no action to re-enable a disabled
   operator.
 - **Who can change it:** Site admin. **Read-only:** Site IT manager.
@@ -778,7 +803,9 @@ W = can change, R = read-only, — = not shown. The appliance enforces these on 
 | Activity | R | R | R | R | — | R | R |
 | Appliance & licence | W | W | R | R | R | R | R |
 | Backups | W | R | R | R | — | — | R |
-| Operators | W | R | — | — | — | — | — |
+| Backups (download) | W | W | — | — | — | — | — |
+| Diagnostics (service logs) | W | W | — | — | — | — | — |
+| Operators, Sign-in protection | W | R | — | — | — | — | — |
 
 ---
 
@@ -810,4 +837,8 @@ W = can change, R = read-only, — = not shown. The appliance enforces these on 
 | Rotate the TLS certificate | TLS certificate | Reason + type `ROTATE` + password |
 | Restart a service | Diagnostics | Reason + password |
 | Back up now / change retention | Backups | Password |
+| Download a backup | Backups | Password (Site admin, Site IT manager) |
+| Change my password | Sidebar → Change my password | Current password |
+| Reset another operator's password | Operators | New password typed twice; they are signed out |
+| Change sign-in protection | Operators → Sign-in protection | Reason + password |
 | Restore a backup | Backups | Type the backup name + password |

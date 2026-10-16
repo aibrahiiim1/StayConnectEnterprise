@@ -5,8 +5,9 @@
 // The page polls every 10 seconds. It dims rather than blanks while it refreshes, and a failed refresh keeps the
 // last answer on screen (LiveStatus says so) instead of emptying the table under the operator.
 //
-// Actions follow the server's permissions exactly: reading logs is a read, so every role that can open this
-// page can read them; Recheck and Restart are writes, so they are only offered to a role that may use them.
+// Actions follow the server's permissions exactly. Reading service logs needs diagnostics WRITE (site admin and
+// IT manager): journal lines record what services did, which can include a client's details, so edged serves them
+// only to the people who fix things, redacted (audit N-22). Recheck and Restart are writes too.
 // Restart additionally requires a reason and password confirmation, which the server enforces.
 
 import Link from "next/link";
@@ -255,7 +256,7 @@ export default function HealthPage() {
       />
 
       {me && !writable && (
-        <ReadOnlyNotice>Your role can view diagnostics and read logs, but not recheck or restart services.</ReadOnlyNotice>
+        <ReadOnlyNotice>Your role can view diagnostics, but not read service logs, recheck or restart services.</ReadOnlyNotice>
       )}
 
       <ErrorBanner err={sum === null ? loadErr : null} className="mb-0" />
@@ -392,15 +393,17 @@ export default function HealthPage() {
                             <RefreshCw /> <span className="hidden sm:inline">Recheck</span>
                           </Button>
                         )}
-                        <Button
-                          size="xs"
-                          variant="ghost"
-                          aria-label={`Logs for ${s.service}`}
-                          disabled={busy === "logs:" + s.service}
-                          onClick={() => { openDetail(s.service); viewLogs(s.service); }}
-                        >
-                          <FileText /> <span className="hidden sm:inline">Logs</span>
-                        </Button>
+                        {writable && (
+                          <Button
+                            size="xs"
+                            variant="ghost"
+                            aria-label={`Logs for ${s.service}`}
+                            disabled={busy === "logs:" + s.service}
+                            onClick={() => { openDetail(s.service); viewLogs(s.service); }}
+                          >
+                            <FileText /> <span className="hidden sm:inline">Logs</span>
+                          </Button>
+                        )}
                         {writable && (
                           <Button
                             size="xs"
@@ -464,7 +467,7 @@ export default function HealthPage() {
                   )}
                 </SheetSection>
 
-                <SheetSection
+                {writable && <SheetSection
                   title="Recent logs"
                   description="Sanitised: secrets and client details are removed by the appliance."
                   actions={
@@ -485,7 +488,7 @@ export default function HealthPage() {
                   ) : busy === "logs:" + sel ? (
                     <Skeleton className="h-24 w-full" />
                   ) : null}
-                </SheetSection>
+                </SheetSection>}
 
                 <SheetSection title="Recovery history">
                   <Timeline

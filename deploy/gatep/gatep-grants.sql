@@ -153,6 +153,15 @@ GRANT SELECT,INSERT,UPDATE,DELETE ON public.social_oauth_providers     TO svc_ed
 GRANT SELECT,UPDATE               ON public.tenants                    TO svc_edged;
 GRANT SELECT,INSERT,UPDATE        ON public.tenant_effective_limits    TO svc_edged;
 GRANT SELECT,INSERT,DELETE        ON public.walled_garden_rules        TO svc_edged;
+-- Admin Console sign-in protection (0119): the policy is read and changed ONLY through its definer functions
+-- (the setter appends the change row), and the live counters ONLY through fail/state/clear -- no table write,
+-- so the policy cannot change without a record and a lockout cannot be wiped except by a correct password.
+GRANT EXECUTE ON FUNCTION public.operator_signin_protection_get()                                         TO svc_edged;
+GRANT EXECUTE ON FUNCTION public.operator_signin_protection_set(integer,integer,integer,integer,integer,text,text) TO svc_edged;
+GRANT EXECUTE ON FUNCTION public.operator_signin_throttle_state(text,text)                                TO svc_edged;
+GRANT EXECUTE ON FUNCTION public.operator_signin_throttle_fail(text,text)                                 TO svc_edged;
+GRANT EXECUTE ON FUNCTION public.operator_signin_throttle_clear(text,text)                                TO svc_edged;
+GRANT SELECT  ON public.operator_signin_protection_changes                                                 TO svc_edged;
 
 -- ---------------------------------------------------------------------------
 -- svc_acctd : accounting (append usage; update session usage)

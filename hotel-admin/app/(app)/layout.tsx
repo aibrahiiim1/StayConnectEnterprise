@@ -14,6 +14,7 @@ import { useCapabilities, surfaceAvailable } from "@/lib/capabilities";
 import { SurfaceNotEnabled } from "@/components/surface-not-enabled";
 import { ToastProvider } from "@/components/ui/toast";
 import { WhoamiProvider, useWhoamiSession } from "@/lib/whoami-context";
+import { ForcedPasswordChange } from "@/components/forced-password-change";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -103,6 +104,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     );
   }
   if (!me) return null;
+
+  // A SESSION THAT MUST REPLACE ITS PASSWORD SEES NOTHING ELSE. edged refuses every other call for it, so the
+  // shell would only render a screen of refusals. Once the password is changed the page reloads into the console.
+  if (me.must_change_password) {
+    return (
+      <ForcedPasswordChange email={me.email} onLogout={onLogout} onChanged={() => window.location.reload()} />
+    );
+  }
 
   const roles = me.roles ?? [];
 
