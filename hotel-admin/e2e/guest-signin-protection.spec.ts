@@ -153,8 +153,15 @@ test.describe("guest sign-in protection settings", () => {
     // Correcting it makes the save available again, and the value that leaves the browser is the one typed.
     await attempts.fill("8");
     await page.getByRole("button", { name: /save protection settings/i }).click();
+    // The change applies to every client on the site, so it is confirmed with a reason and the password (C-16).
+    const confirm = page.getByRole("dialog", { name: /change client sign-in protection/i });
+    await confirm.getByLabel(/reason/i).fill("conference floor, frequent typos");
+    await confirm.getByLabel(/confirm your password/i).fill("operatorpw");
+    await confirm.getByRole("button", { name: /save protection settings/i }).click();
     await expect.poll(() => mutations.length).toBeGreaterThan(0);
     expect(mutations[0].body.max_failed_attempts).toBe(8);
+    expect(mutations[0].body.reason).toBe("conference floor, frequent typos");
+    expect(mutations[0].body.password).toBe("operatorpw");
     await expect(page.getByText(/nothing needs restarting/i)).toBeVisible();
   });
 
