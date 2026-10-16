@@ -28,7 +28,9 @@ days=(0 1 2 35 36 37 38 40 41 44 50 60)
 for d in "${days[@]}"; do
   stamp="$(date -u -d "-$d days" +%Y%m%d-%H%M%S)"
   for f in "site-$stamp.dump" "site-$stamp.dump.meta.json" "site-$stamp-etc.tgz"; do
-    echo x > "$SITE/$f"; chmod 0644 "$SITE/$f"; touch -d "-$d days" "$SITE/$f"
+    echo x > "$SITE/$f"; chmod 0644 "$SITE/$f"
+    # The 60-day set is COPIED BACK: its stamp says 60 days, its mtime says now. Age comes from the stamp.
+    if [ "$d" = 60 ]; then touch "$SITE/$f"; else touch -d "-$d days" "$SITE/$f"; fi
   done
   echo "$d $stamp" >> "$T/stamps"
 done

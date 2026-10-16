@@ -359,6 +359,17 @@ else
   # read SupplementaryGroups= and silently granted them would be a script that escalates whatever a future
   # unit file asks for. systemd applies SupplementaryGroups= itself at start time, so nothing needs to be
   # done here -- what IS checked is that the group exists, because systemd fails the start if it does not.
+  #
+  # THE PRODUCT'S OWN GROUPS ARE CREATED ON THE UPGRADE PATH (audit N-26). A group that exists only to own one
+  # of the product's sockets is created here, EMPTY, by name from this fixed list -- never read from a unit
+  # file. Creating an empty group grants nobody anything: membership still comes only from the units'
+  # SupplementaryGroups=, applied by systemd to that one service. Without this an appliance provisioned before
+  # stayconnect-scd existed could not receive the edged and portald units at all.
+  for g in stayconnect-scd; do
+    if ! getent group "$g" >/dev/null 2>&1; then
+      groupadd --system "$g" && say "created system group $g (the product's socket group; empty, membership is per unit)"
+    fi
+  done
   for u in "$UNITSRC"/stayconnect-*.service; do
     [ -f "$u" ] || continue
     for g in $(sed -n 's/^[[:space:]]*SupplementaryGroups=[[:space:]]*\(.*\)/\1/p' "$u" | tr ',' ' '); do

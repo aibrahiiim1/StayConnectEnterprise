@@ -140,7 +140,9 @@ retain_site_backups() {
     if [ "$kept" -lt "$SITE_BACKUP_KEEP" ]; then
       R_KEEP+=("site-backup|$dump|within newest $SITE_BACKUP_KEEP"); kept=$((kept+1)); continue
     fi
-    mtime="$(stat -c %Y "$dump" 2>/dev/null || echo "$now_s")"
+    # AGE FROM THE STAMP TOO, not from mtime: a set copied back or touched would otherwise look new and be kept
+    # for ever. The stamp is UTC (site-YYYYMMDD-HHMMSS); an unparsable one keeps the set rather than guessing.
+    mtime="$(date -u -d "${stamp:0:8} ${stamp:9:2}:${stamp:11:2}:${stamp:13:2}" +%s 2>/dev/null || echo "$now_s")"
     if [ $((now_s - mtime)) -le "$age_limit" ]; then
       R_KEEP+=("site-backup|$dump|younger than $SITE_BACKUP_DAYS days"); continue
     fi
