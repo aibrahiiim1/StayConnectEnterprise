@@ -36,6 +36,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 
@@ -177,6 +178,9 @@ const (
 	accountsPageSizeMax     = 200
 	accountSearchHeader     = "X-Account-Search"
 	accountSearchMaxLen     = 100
+	// The free-text fields staff type, in characters. The Admin Console mirrors them as maxLength.
+	accountDisplayNameMax = 120
+	accountNotesMax       = 1000
 )
 
 // accountsSummary counts only what this domain can actually answer for. There is deliberately no "locked"
@@ -359,19 +363,47 @@ func (s *server) iamv2ActiveDeviceCount(ctx contextT, accountID string) int {
 	return n
 }
 
+// accountPatchOut is the edited account, plus what the edit did beyond the row when it disabled or enabled it.
+// The account fields are embedded, so the response is the same object the Admin Console already reads.
+type accountPatchOut struct {
+	iamv2Account
+	// Disable / Enable (decision D-A, migration 0120). Present only when the enabled flag changed.
+	PackagesSuspended    *int `json:"packages_suspended,omitempty"`
+	PackagesResumed      *int `json:"packages_resumed,omitempty"`
+	DisconnectedSessions *int `json:"disconnected_sessions,omitempty"`
+	DisconnectFailures   *int `json:"disconnect_failures,omitempty"`
+}
+
+// accountValidityError is the one rule a validity window must satisfy: it must not end before it starts.
+func accountValidityError(from, until *time.Time) string {
+	if from != nil && until != nil && !until.After(*from) {
+		return "valid until must be later than valid from"
+	}
+	return ""
+}
+
+// errAccountRemoved is the answer to any edit of a removed account (contract: Remove cannot be undone).
+const accountRemovedMessage = "this account has been removed; it cannot be enabled, renamed or edited again"
+
 func (s *server) patchGuestAccountIAMv2(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	// The optional fields can be CLEARED by an explicit null (optional_json.go); username and enabled cannot be
+	// null, because an account always has both.
 	var in struct {
-		Username    *string    `json:"username,omitempty"`
-		DisplayName *string    `json:"display_name,omitempty"`
-		Notes       *string    `json:"notes,omitempty"`
-		TemplateID  *string    `json:"template_id,omitempty"`
-		Enabled     *bool      `json:"enabled,omitempty"`
-		ValidFrom   *time.Time `json:"valid_from,omitempty"`
-		ValidUntil  *time.Time `json:"valid_until,omitempty"`
+		Username    *string             `json:"username,omitempty"`
+		DisplayName optional[string]    `json:"display_name"`
+		Notes       optional[string]    `json:"notes"`
+		TemplateID  *string             `json:"template_id,omitempty"`
+		Enabled     optional[bool]      `json:"enabled"`
+		ValidFrom   optional[time.Time] `json:"valid_from"`
+		ValidUntil  optional[time.Time] `json:"valid_until"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
+		return
+	}
+	if in.Enabled.cleared() {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "enabled must be true or false")
 		return
 	}
 	if in.Username != nil {
@@ -382,6 +414,27 @@ func (s *server) patchGuestAccountIAMv2(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
+	for _, f := range []*optional[string]{&in.DisplayName, &in.Notes} {
+		if f.Value != nil {
+			v := strings.TrimSpace(*f.Value)
+			if v == "" {
+				// An emptied text box clears the field rather than storing an empty string.
+				f.Value = nil
+			} else {
+				f.Value = &v
+			}
+		}
+	}
+	if in.DisplayName.Value != nil && utf8.RuneCountInString(*in.DisplayName.Value) > accountDisplayNameMax {
+		jsonErr(w, http.StatusBadRequest, "bad_request",
+			fmt.Sprintf("the name is limited to %d characters", accountDisplayNameMax))
+		return
+	}
+	if in.Notes.Value != nil && utf8.RuneCountInString(*in.Notes.Value) > accountNotesMax {
+		jsonErr(w, http.StatusBadRequest, "bad_request",
+			fmt.Sprintf("notes are limited to %d characters", accountNotesMax))
+		return
+	}
 	// template_id is accepted by the UI form but has no IAM-v2 meaning. Refuse it explicitly rather than
 	// ignoring it: silently accepting a field that does nothing is how the legacy dependency survived.
 	if in.TemplateID != nil {
@@ -391,34 +444,76 @@ func (s *server) patchGuestAccountIAMv2(w http.ResponseWriter, r *http.Request) 
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
+
+	var cur struct {
+		username        string
+		selfReg, enable bool
+		from, until     *time.Time
+	}
+	if err := s.db.QueryRow(ctx, `SELECT username, self_registered, enabled, valid_from, valid_until
+	     FROM iam_v2.guest_access_accounts WHERE id=$1 AND tenant_id=$2 AND site_id=$3`, id, s.tenantID, s.siteID).
+		Scan(&cur.username, &cur.selfReg, &cur.enable, &cur.from, &cur.until); err != nil {
+		jsonErr(w, http.StatusNotFound, "not_found", "account not found")
+		return
+	}
+	// A REMOVED ACCOUNT IS FINAL (contract "Remove"). Every edit is refused -- not only enabling or renaming it,
+	// which the database also refuses (migration 0120), but its notes and dates too: the record is history.
+	if !cur.enable && isRemovedUsername(cur.username) {
+		jsonErr(w, http.StatusConflict, "removed", accountRemovedMessage)
+		return
+	}
 	// A SELF-SERVICE ACCOUNT'S USERNAME IS THE CLIENT'S EMAIL ADDRESS (contract ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE
 	// §2, §5): renaming it would move the account -- and every entitlement it owns -- to an address its owner never
 	// proved, and send the next reset link there. Staff may enable, disable, annotate or set validity; never rename.
-	if in.Username != nil {
-		var selfReg bool
-		var current string
-		if err := s.db.QueryRow(ctx, `SELECT self_registered, username FROM iam_v2.guest_access_accounts
-		     WHERE id=$1 AND tenant_id=$2 AND site_id=$3`, id, s.tenantID, s.siteID).Scan(&selfReg, &current); err == nil &&
-			selfReg && !strings.EqualFold(current, *in.Username) {
-			jsonErr(w, http.StatusForbidden, "self_service_account",
-				"a self-service account's username is the client's email address and cannot be changed by staff")
+	if in.Username != nil && cur.selfReg && !strings.EqualFold(cur.username, *in.Username) {
+		jsonErr(w, http.StatusForbidden, "self_service_account",
+			"a self-service account's username is the client's email address and cannot be changed by staff")
+		return
+	}
+	if msg := accountValidityError(in.ValidFrom.or(cur.from), in.ValidUntil.or(cur.until)); msg != "" {
+		jsonErr(w, http.StatusBadRequest, "bad_request", msg)
+		return
+	}
+
+	disabling := in.Enabled.Value != nil && !*in.Enabled.Value && cur.enable
+	enabling := in.Enabled.Value != nil && *in.Enabled.Value && !cur.enable
+
+	// DISABLE ENDS THE ACCOUNT'S SESSIONS (decision D-A). The refusals come FIRST, before anything is written:
+	// an appliance that cannot take a device off the network leaves the account exactly as it was, enabled and
+	// online, rather than disabled on paper with its devices still connected.
+	var live []liveAccountSession
+	if disabling {
+		var st int
+		var code, msg string
+		if live, st, code, msg = s.accountLiveSessions(ctx, id); st != 0 {
+			jsonErr(w, st, code, msg)
 			return
 		}
 	}
-	// COALESCE keeps every omitted field at its current value, so a partial PATCH cannot blank a column.
-	var a iamv2Account
-	err := scanIAMv2Account(s.db.QueryRow(ctx, `
+
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "the account could not be updated")
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Each optional field is written only when present; an explicit null clears it.
+	var out accountPatchOut
+	err = scanIAMv2Account(tx.QueryRow(ctx, `
 	    UPDATE iam_v2.guest_access_accounts
 	       SET username     = COALESCE($4, username),
-	           display_name = COALESCE($5, display_name),
-	           notes        = COALESCE($6, notes),
-	           enabled      = COALESCE($7, enabled),
-	           valid_from   = COALESCE($8, valid_from),
-	           valid_until  = COALESCE($9, valid_until)
+	           display_name = CASE WHEN $5 THEN $6 ELSE display_name END,
+	           notes        = CASE WHEN $7 THEN $8 ELSE notes END,
+	           enabled      = COALESCE($9, enabled),
+	           valid_from   = CASE WHEN $10 THEN $11 ELSE valid_from END,
+	           valid_until  = CASE WHEN $12 THEN $13 ELSE valid_until END
 	     WHERE id=$1 AND tenant_id=$2 AND site_id=$3
 	 RETURNING `+iamv2AccountCols,
-		id, s.tenantID, s.siteID, in.Username, in.DisplayName, in.Notes,
-		in.Enabled, in.ValidFrom, in.ValidUntil), &a)
+		id, s.tenantID, s.siteID, in.Username,
+		in.DisplayName.Set, in.DisplayName.Value, in.Notes.Set, in.Notes.Value,
+		in.Enabled.Value,
+		in.ValidFrom.Set, in.ValidFrom.Value, in.ValidUntil.Set, in.ValidUntil.Value), &out.iamv2Account)
 	if err != nil {
 		if isUniqueViolation(err) {
 			jsonErr(w, http.StatusConflict, "conflict", "username already exists")
@@ -427,9 +522,53 @@ func (s *server) patchGuestAccountIAMv2(w http.ResponseWriter, r *http.Request) 
 		jsonErr(w, http.StatusNotFound, "not_found", "account not found")
 		return
 	}
-	s.audit(r, "guest_account.updated", "guest_account", a.ID,
-		map[string]any{"username": a.Username, "authority": "iam_v2"})
-	writeJSON(w, http.StatusOK, a)
+	// THE PACKAGE FOLLOWS THE ACCOUNT, in the same transaction: disabled -> ACTIVE becomes SUSPENDED; enabled ->
+	// a package Disable suspended, still inside its window, is ACTIVE again. Through the audited transition writer
+	// (iam_v2.account_entitlements_follow_access, migration 0120); the window keeps running either way.
+	if disabling || enabling {
+		var suspended, resumed int
+		if err := tx.QueryRow(ctx, `SELECT suspended, resumed
+		      FROM iam_v2.account_entitlements_follow_access($1::uuid,$2::uuid,$3::uuid)`,
+			s.tenantID, s.siteID, id).Scan(&suspended, &resumed); err != nil {
+			verb := "resumed"
+			if disabling {
+				verb = "suspended"
+			}
+			jsonErr(w, http.StatusInternalServerError, "internal",
+				"the account's package could not be "+verb+"; nothing was changed")
+			return
+		}
+		if disabling {
+			out.PackagesSuspended = &suspended
+		} else {
+			out.PackagesResumed = &resumed
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "the account could not be updated")
+		return
+	}
+
+	payload := map[string]any{"username": out.Username, "authority": "iam_v2"}
+	if disabling {
+		// The account is disabled and its package suspended, so nothing can sign in again; now the devices
+		// already online come off, through scd, and what actually ended is read back.
+		res, _, _, _ := s.revokeAccountSessions(r, ctx, id, out.Username, live)
+		out.DisconnectedSessions = &res.Ended
+		if res.Failed > 0 {
+			out.DisconnectFailures = &res.Failed
+		}
+		payload["packages_suspended"] = *out.PackagesSuspended
+		payload["disconnected_sessions"] = res.Ended
+		payload["failed_sessions"] = res.Failed
+		s.audit(r, "guest_account.disabled", "guest_account", id, payload)
+	} else if enabling {
+		payload["packages_resumed"] = *out.PackagesResumed
+		s.audit(r, "guest_account.enabled", "guest_account", id, payload)
+	}
+	s.audit(r, "guest_account.updated", "guest_account", out.ID,
+		map[string]any{"username": out.Username, "authority": "iam_v2"})
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *server) setGuestAccountPasswordIAMv2(w http.ResponseWriter, r *http.Request) {
@@ -455,10 +594,16 @@ func (s *server) setGuestAccountPasswordIAMv2(w http.ResponseWriter, r *http.Req
 	// address by registering with it, and recovers it only by the reset link sent there; a staff-set password -- or
 	// a generated one revealed at the desk -- would be a second recovery path that proves nothing about the address.
 	// Checked before a password is generated, so nothing is produced or revealed for it.
-	var selfRegistered bool
-	if err := s.db.QueryRow(ctx, `SELECT self_registered FROM iam_v2.guest_access_accounts
-	     WHERE id=$1 AND tenant_id=$2 AND site_id=$3`, id, s.tenantID, s.siteID).Scan(&selfRegistered); err != nil {
+	var selfRegistered, enabledNow bool
+	var currentName string
+	if err := s.db.QueryRow(ctx, `SELECT self_registered, enabled, username FROM iam_v2.guest_access_accounts
+	     WHERE id=$1 AND tenant_id=$2 AND site_id=$3`, id, s.tenantID, s.siteID).
+		Scan(&selfRegistered, &enabledNow, &currentName); err != nil {
 		jsonErr(w, http.StatusNotFound, "not_found", "account not found")
+		return
+	}
+	if !enabledNow && isRemovedUsername(currentName) {
+		jsonErr(w, http.StatusConflict, "removed", accountRemovedMessage)
 		return
 	}
 	if st, code, msg := selfServicePasswordRefusal(selfRegistered); st != 0 {
@@ -558,11 +703,15 @@ func (s *server) resendGuestAccountVerification(w http.ResponseWriter, r *http.R
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	var username string
-	var selfRegistered, verified bool
-	if err := s.db.QueryRow(ctx, `SELECT username, self_registered, email_verified_at IS NOT NULL
+	var selfRegistered, verified, enabledNow bool
+	if err := s.db.QueryRow(ctx, `SELECT username, self_registered, email_verified_at IS NOT NULL, enabled
 	      FROM iam_v2.guest_access_accounts WHERE id=$1 AND tenant_id=$2 AND site_id=$3`,
-		id, s.tenantID, s.siteID).Scan(&username, &selfRegistered, &verified); err != nil {
+		id, s.tenantID, s.siteID).Scan(&username, &selfRegistered, &verified, &enabledNow); err != nil {
 		jsonErr(w, http.StatusNotFound, "not_found", "account not found")
+		return
+	}
+	if !enabledNow && isRemovedUsername(username) {
+		jsonErr(w, http.StatusConflict, "removed", accountRemovedMessage)
 		return
 	}
 	if !selfRegistered {
@@ -655,8 +804,17 @@ type liveAccountSession struct {
 // account. A non-zero HTTP status is a REFUSAL, and a refusal is always issued before anything is ended.
 func (s *server) endAccountSessions(r *http.Request, ctx contextT, accountID, username string) (
 	accountDisconnectResult, int, string, string) {
-	var res accountDisconnectResult
+	live, st, code, msg := s.accountLiveSessions(ctx, accountID)
+	if st != 0 {
+		return accountDisconnectResult{}, st, code, msg
+	}
+	return s.revokeAccountSessions(r, ctx, accountID, username, live)
+}
 
+// accountLiveSessions reads one account's live sessions and decides, BEFORE anything is changed, whether they
+// can be ended from here. A non-zero status is the refusal, with nothing ended. Split from the revoke so Disable
+// can refuse first, then commit the account and its package, then end the sessions.
+func (s *server) accountLiveSessions(ctx contextT, accountID string) ([]liveAccountSession, int, string, string) {
 	// SCOPED THREE WAYS. The entitlement join is what links a session to an account (an Entitlement has
 	// exactly one subject, by the ent_one_subject constraint), and tenant_id/site_id are compared on BOTH
 	// sides so a session can never be reached through an Entitlement of another site.
@@ -669,31 +827,31 @@ func (s *server) endAccountSessions(r *http.Request, ctx contextT, accountID, us
 	       AND s.ended IS NULL AND s.state IN ('active','PENDING_ENFORCEMENT')
 	     ORDER BY s.started`, s.tenantID, s.siteID, accountID)
 	if err != nil {
-		return res, http.StatusInternalServerError, "internal", "could not read this account's sessions"
+		return nil, http.StatusInternalServerError, "internal", "could not read this account's sessions"
 	}
 	var live []liveAccountSession
 	for rows.Next() {
 		var ls liveAccountSession
 		if err := rows.Scan(&ls.id, &ls.ip); err != nil {
 			rows.Close()
-			return res, http.StatusInternalServerError, "internal", "could not read this account's sessions"
+			return nil, http.StatusInternalServerError, "internal", "could not read this account's sessions"
 		}
 		live = append(live, ls)
 	}
 	rows.Close()
 	if rows.Err() != nil {
-		return res, http.StatusInternalServerError, "internal", "could not read this account's sessions"
+		return nil, http.StatusInternalServerError, "internal", "could not read this account's sessions"
 	}
 	if len(live) == 0 {
 		// A NO-OP IS A SUCCESS WITH A COUNT OF ZERO, not a refusal. Nothing is audited for a disconnect that
 		// disconnected nothing.
-		return res, 0, "", ""
+		return nil, 0, "", ""
 	}
 
 	// REFUSAL 1: no enforcement channel. Without scd nothing can be taken off the network, and ending the
 	// rows alone would be exactly the lie this replaces.
 	if s.scd == nil {
-		return res, http.StatusServiceUnavailable, "enforcement_unavailable",
+		return nil, http.StatusServiceUnavailable, "enforcement_unavailable",
 			"this appliance cannot withdraw network access right now, so no device was disconnected"
 	}
 	// REFUSAL 2: a live session with no recorded address. Enforcement is keyed on the address, so there is no
@@ -705,9 +863,19 @@ func (s *server) endAccountSessions(r *http.Request, ctx contextT, accountID, us
 		}
 	}
 	if noAddr > 0 {
-		return res, http.StatusConflict, "conflict", fmt.Sprintf(
+		return nil, http.StatusConflict, "conflict", fmt.Sprintf(
 			"%d of this account's live sessions have no recorded address, so their network access cannot be "+
 				"withdrawn from here. Nothing was disconnected; end them from Active sessions.", noAddr)
+	}
+	return live, 0, "", ""
+}
+
+// revokeAccountSessions ends the sessions accountLiveSessions found, through scd, and reads back what ended.
+func (s *server) revokeAccountSessions(r *http.Request, ctx contextT, accountID, username string,
+	live []liveAccountSession) (accountDisconnectResult, int, string, string) {
+	var res accountDisconnectResult
+	if len(live) == 0 {
+		return res, 0, "", ""
 	}
 
 	// One revoke per ADDRESS: scd revokes by address, and two sessions on one address would otherwise be

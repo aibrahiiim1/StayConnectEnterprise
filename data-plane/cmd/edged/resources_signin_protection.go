@@ -168,11 +168,21 @@ func (s *server) putSignInProtection(w http.ResponseWriter, r *http.Request) {
 		ObservationWindowSeconds int    `json:"observation_window_seconds"`
 		RestrictionSeconds       int    `json:"restriction_seconds"`
 		Reason                   string `json:"reason"`
+		// THE PASSWORD STEP-UP. A policy change weakens or strengthens a control for every guest on the site
+		// until somebody changes it back, so it carries the same proof every other site-wide control change
+		// carries: the operator's password and a bounded reason, both checked before anything is read.
+		Password string `json:"password"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	reason, ok := reasonText(in.Reason)
+	if !ok {
+		jsonErr(w, http.StatusBadRequest, "reason_required", reasonBoundsMessage)
+		return
+	}
+	in.Reason = reason
 	p := signinattempt.Policy{
 		MaxFailedAttempts:  in.MaxFailedAttempts,
 		WindowSeconds:      in.ObservationWindowSeconds,
@@ -186,6 +196,9 @@ func (s *server) putSignInProtection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if _, ok := s.stepUpActor(w, r, in.Password); !ok {
+		return
+	}
 	sess := sessFrom(r.Context())
 	actor := protectionActor(sess)
 	if actor == "" {
@@ -367,14 +380,11 @@ func (s *server) releaseSignInRestriction(w http.ResponseWriter, r *http.Request
 		jsonErr(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	reason := strings.TrimSpace(in.Reason)
-	if len([]rune(reason)) < 3 {
+	// The shared bounds (reason_bounds.go), in characters, like every other staff reason.
+	reason, ok := reasonText(in.Reason)
+	if !ok {
 		jsonErr(w, http.StatusBadRequest, "reason_required",
-			"a short reason is required, so the record says why this device was allowed to try again")
-		return
-	}
-	if len([]rune(reason)) > 200 {
-		jsonErr(w, http.StatusBadRequest, "reason_too_long", "keep the reason under 200 characters")
+			reasonBoundsMessage+", so the record says why this device was allowed to try again")
 		return
 	}
 	sess := sessFrom(r.Context())

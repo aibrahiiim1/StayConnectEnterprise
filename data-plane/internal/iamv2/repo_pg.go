@@ -99,6 +99,21 @@ func (t *pgTx) LookupAccount(ctx context.Context, tenantID, siteID, username str
 	return id, passwordHash, enabled, vf, vu, locked, e
 }
 
+// AccountVerifiedEmail returns the PROVEN email address of a client account, or "" when it has none: the
+// username of a self-registered Email account whose owner verified it. A staff-created account's username is
+// whatever staff typed, and an unverified registration has proved nothing, so neither is evidence.
+func (t *pgTx) AccountVerifiedEmail(ctx context.Context, tenantID, siteID, accountID string) (string, error) {
+	var email string
+	err := t.tx.QueryRow(ctx,
+		`SELECT lower(username) FROM iam_v2.guest_access_accounts
+		  WHERE tenant_id=$1 AND site_id=$2 AND id=$3 AND self_registered AND email_verified_at IS NOT NULL`,
+		tenantID, siteID, accountID).Scan(&email)
+	if err == pgx.ErrNoRows {
+		return "", nil
+	}
+	return email, err
+}
+
 // resolveExistingPrincipal returns the principal for an existing identity, or "" if none.
 func (t *pgTx) resolveExistingPrincipal(ctx context.Context, tenantID, factorType, issuer, valueNorm string) (string, error) {
 	var pid string

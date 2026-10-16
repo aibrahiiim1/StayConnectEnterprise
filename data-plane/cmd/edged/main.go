@@ -116,6 +116,8 @@ type server struct {
 	// The outcome of migration 0023 reconcile at startup, so the financial surface can report what the
 	// detector said rather than re-deriving it per request. Empty when it could not be established.
 	financialEpoch string
+	// Where portald listens on this appliance (portal_loopback.go); the zero value is the appliance's own.
+	portalLB portalLoopback
 }
 
 func main() {
