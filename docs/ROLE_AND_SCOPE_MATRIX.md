@@ -57,6 +57,8 @@ the keys are unchanged, [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md)). Legen
 | guest-signin-credentials (`View_Guest_SignIn_Credentials`) | W | R | **R** | **R** | – | – | **–** |
 | guest-signin-protection (`Manage_Guest_SignIn_Protection`) | W | **W** | R | R | – | – | R |
 | pms-reconciliation (`View_PMS_Reconciliation`) | R | R | R | R | – | – | R |
+| pms-event-decisions (decide a PMS message in review; review-expiry setting) | W | **W** | – | – | – | – | – |
+| pms-stay-identity (guest names and reservation numbers on Stays, PMS activity, transfers) | R | R | **R** | **R** | – | – | **–** |
 
 | guest-signin-restrictions (`Release_Guest_SignIn_Restriction`) | W | **W** | **W** | **W** | – | – | R |
 | walled-garden | W | W | R | R | – | R | R |
@@ -91,6 +93,16 @@ validate/apply/confirm flow, which needs `network` **W**.
   that can be applied. A PMS event is one-way once terminal, and a checkout boundary must be an *applied*
   departure event, so replaying an old one is not something the product can do — and a write permission would
   promise a power it does not have.
+* `pms-event-decisions` — **W** answers ONE PMS message waiting in review: *acknowledge* (no action needed) or
+  *link* (it concerns this stay, chosen from the stays it is re-matchable to). Both need the operator's
+  password and a reason, write one append-only disposition and an audit_log row, and change no stay or
+  entitlement. The same key sets the review-expiry setting (off by default; when on, only messages received
+  after it was switched on and waiting longer than the set days are recorded as expired). Site admin and IT
+  manager only (audit H-15, decision D-D).
+* `pms-stay-identity` — a field-level key, not a screen: whether Stays, PMS activity and the transfer lineage
+  show guest names and reservation numbers. With the room these are the room sign-in credential, so a site
+  viewer sees rooms, statuses and access but not who is staying (audit H-7); the desk roles keep them because
+  they identify the guest in front of them (and already read `guest-signin-credentials`).
 * `guest-signin-restrictions` — **W** releases ONE device's wait early, with a mandatory reason.
 * `code-requests` — **R** lists recent SMS / WhatsApp code requests (2026-10-12). Read-only for every role since 2026-10-15: its only write, letting a device try again by clearing its temporary-internet windows, was removed with the email code and its temporary internet (Email + Password self-service contract §1).
 * `code-reveal` — **W** reads a LIVE one-time code to the client it was sent to, with password and reason. Separate from `code-requests` because it lets the desk vouch for an address the client did not prove (contract §6.7).

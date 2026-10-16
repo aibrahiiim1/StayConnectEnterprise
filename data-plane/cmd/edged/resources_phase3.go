@@ -91,6 +91,14 @@ type stayRow struct {
 	AccessMaxDevices  *int32  `json:"access_max_devices,omitempty"`
 	// Devices currently online under that entitlement, so "the family says the Wi-Fi is full" is answerable.
 	AccessActiveDevices int `json:"access_active_devices"`
+	// Devices HOLDING A PLACE on the entitlement (entitlement_devices AUTHORIZED). This, not the online count, is
+	// what the device limit is enforced against: a device keeps its place after it signs out, so a stay can be
+	// "at the limit" with nobody online (audit H-14).
+	AccessAuthorizedDevices int `json:"access_authorized_devices"`
+
+	// IdentityHidden is true when the caller lacks pms-stay-identity: the guest names and the reservation number
+	// -- with the room, the room sign-in credential -- are withheld (audit H-7).
+	IdentityHidden bool `json:"identity_hidden,omitempty"`
 }
 
 const stayCols = `s.id::text, s.pms_interface_id::text, COALESCE(i.display_label,''),
@@ -106,7 +114,9 @@ const stayCols = `s.id::text, s.pms_interface_id::text, COALESCE(i.display_label
        ent.status, pkg.code, NULLIF(pkgr.display->>'name',''),
        plan.code, planr.down_kbps, planr.up_kbps, planr.max_concurrent_devices,
        COALESCE((SELECT count(DISTINCT d.mac) FROM iam_v2.sessions d
-                  WHERE d.entitlement_id = ent.id AND d.state = 'active'), 0)::int`
+                  WHERE d.entitlement_id = ent.id AND d.state = 'active'), 0)::int,
+       COALESCE((SELECT count(*) FROM iam_v2.entitlement_devices ed
+                  WHERE ed.entitlement_id = ent.id AND ed.status = 'AUTHORIZED'), 0)::int`
 
 // stayFrom is the FROM clause every stay query shares. Every join is LEFT so a Stay whose interface row is
 // somehow missing — or which has no internet entitlement at all — still lists rather than vanishing from the
@@ -139,7 +149,21 @@ func scanStay(row interface{ Scan(...any) error }, e *stayRow) error {
 		&e.VIP, &e.RoomType, &e.RatePlan, &e.TravelAgent,
 		&e.AccessStatus, &e.AccessPackageCode, &e.AccessPackageName,
 		&e.AccessPlanCode, &e.AccessDownKbps, &e.AccessUpKbps, &e.AccessMaxDevices,
-		&e.AccessActiveDevices)
+		&e.AccessActiveDevices, &e.AccessAuthorizedDevices)
+}
+
+// canSeeStayIdentity: may this caller see guest names and reservation numbers (audit H-7)? The IT manager and
+// the desk roles may; a site viewer may not. site_admin always may.
+func canSeeStayIdentity(r *http.Request) bool {
+	sess := sessFrom(r.Context())
+	return sess != nil && permFor(sess.Roles, "pms-stay-identity", permRead)
+}
+
+// hideStayIdentity withholds the room-credential fields from a stay row.
+func hideStayIdentity(e *stayRow) {
+	e.Reservation = ""
+	e.PrimaryGuest = nil
+	e.IdentityHidden = true
 }
 
 func (s *server) pmsStaysRoutes() http.Handler {
@@ -199,6 +223,18 @@ const stayFilter = `WHERE s.tenant_id=$1 AND ($2::text IS NULL OR s.status=$2)
 		                   WHERE g.stay_id = s.id
 		                     AND (g.display_name ILIKE $3 OR g.last_name_norm ILIKE $3)))`
 
+// stayFilterNoIdentity is stayFilter for a caller who may not see names or reservations: searching by them
+// would answer "is a guest called X staying here" without ever showing the name, so the search covers only
+// what the caller can see.
+const stayFilterNoIdentity = `WHERE s.tenant_id=$1 AND ($2::text IS NULL OR s.status=$2)
+		  AND ($4::bool IS NOT TRUE OR s.vip IS TRUE)
+		  AND ($5::text IS NULL OR s.travel_agent = $5)
+		  AND ($3::text IS NULL
+		       OR s.normalized_room_number ILIKE $3
+		       OR s.travel_agent ILIKE $3
+		       OR pkgr.display->>'name' ILIKE $3
+		       OR pkg.code ILIKE $3)`
+
 func (s *server) listStays(w http.ResponseWriter, r *http.Request) {
 	qv := r.URL.Query()
 	var statusArg any
@@ -245,6 +281,11 @@ func (s *server) listStays(w http.ResponseWriter, r *http.Request) {
 		agentArg = v
 	}
 	args := []any{s.tenantID, statusArg, searchArg, vipArg, agentArg}
+	identity := canSeeStayIdentity(r)
+	filter := stayFilter
+	if !identity {
+		filter = stayFilterNoIdentity
+	}
 
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -258,7 +299,7 @@ func (s *server) listStays(w http.ResponseWriter, r *http.Request) {
 		       count(*) FILTER (WHERE s.status = 'RESERVED')::int,
 		       count(*) FILTER (WHERE s.vip IS TRUE)::int
 		`+stayFrom+`
-		`+stayFilter, args...).Scan(&sum.Total, &sum.WithInternet, &sum.DevicesOnline, &sum.Arriving, &sum.VIP); err != nil {
+		`+filter, args...).Scan(&sum.Total, &sum.WithInternet, &sum.DevicesOnline, &sum.Arriving, &sum.VIP); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
 	}
@@ -266,7 +307,7 @@ func (s *server) listStays(w http.ResponseWriter, r *http.Request) {
 	// ORDERED BY ARRIVAL, because iam_v2.stays HAS NO updated_at (an earlier query ordered by that missing
 	// column and failed on every request). Room number breaks ties so a page boundary is stable.
 	rows, err := s.db.Query(ctx, `SELECT `+stayCols+` `+stayFrom+`
-		`+stayFilter+`
+		`+filter+`
 		ORDER BY s.arrival DESC NULLS LAST, s.normalized_room_number, s.id
 		LIMIT $6 OFFSET $7`, append(args, size+1, (page-1)*size)...)
 	if err != nil {
@@ -280,6 +321,9 @@ func (s *server) listStays(w http.ResponseWriter, r *http.Request) {
 		if err := scanStay(rows, &e); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
 			return
+		}
+		if !identity {
+			hideStayIdentity(&e)
 		}
 		out = append(out, e)
 	}
@@ -360,6 +404,12 @@ type stayDetail struct {
 
 func (s *server) getStay(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	// A malformed id is "no such stay", not a database cast error rendered as a 500 (audit H-22).
+	if !uuidRe.MatchString(id) {
+		jsonErr(w, http.StatusNotFound, "not_found", "stay not found")
+		return
+	}
+	identity := canSeeStayIdentity(r)
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	var d stayDetail
@@ -380,6 +430,9 @@ func (s *server) getStay(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var o stayOccupant
 			if rows.Scan(&o.Display, &o.IsPrimary) == nil {
+				if !identity {
+					o.Display = nil
+				}
 				d.Occupants = append(d.Occupants, o)
 			}
 		}
@@ -404,6 +457,9 @@ func (s *server) getStay(w http.ResponseWriter, r *http.Request) {
 		brows.Close()
 	}
 	_ = s.db.QueryRow(ctx, `SELECT iam_v2.p4_stay_room_charge_open($1::uuid)`, id).Scan(&d.RoomChargeOpen)
+	if !identity {
+		hideStayIdentity(&d.stayRow)
+	}
 	writeJSON(w, http.StatusOK, d)
 }
 
@@ -439,6 +495,15 @@ type stayEventRow struct {
 	Reservation    *string `json:"external_reservation_id,omitempty"`
 	PrimaryGuest   *string `json:"primary_guest,omitempty"`
 	StayStatus     *string `json:"stay_status,omitempty"`
+
+	// Decided: a review message that carries a decision (acknowledged, linked, expired, or answered by the
+	// roster) -- it no longer needs one (audit H-15). Decision is that disposition.
+	Decided  bool    `json:"decided"`
+	Decision *string `json:"decision,omitempty"`
+	// Matchable: the reservation or room this message names, so an operator can link it (empty when hidden).
+	MessageReservation *string `json:"message_reservation,omitempty"`
+	MessageRoom        *string `json:"message_room,omitempty"`
+	IdentityHidden     bool    `json:"identity_hidden,omitempty"`
 }
 
 func (s *server) pmsEventsRoutes() http.Handler {
@@ -465,21 +530,28 @@ const stayEventFrom = `FROM iam_v2.stay_events ev
 // stayEventMatch is the status and search filter. $2 processing status (NULL for every one), $3 the ILIKE
 // pattern (NULL for no search).
 const stayEventMatch = `($2::text IS NULL OR ev.processing_status = $2)
+		  AND ($4::bool IS NOT TRUE OR (ev.processing_status = 'MANUAL_REVIEW'
+		       AND NOT EXISTS (SELECT 1 FROM iam_v2.pms_case_resolutions x WHERE x.stay_event_id = ev.id)))
 		  AND ($3::text IS NULL
 		       OR st.normalized_room_number ILIKE $3
-		       OR st.external_reservation_id ILIKE $3
+		       OR upper(btrim(COALESCE(ev.payload->>'room',''))) ILIKE $3
 		       OR ev.event_type ILIKE $3
-		       OR ev.external_event_identity ILIKE $3
-		       OR EXISTS (SELECT 1 FROM iam_v2.stay_guests g
-		                   WHERE g.stay_id = st.id
-		                     AND (g.display_name ILIKE $3 OR g.last_name_norm ILIKE $3)))`
+		       OR ($5::bool AND (st.external_reservation_id ILIKE $3
+		           OR ev.external_event_identity ILIKE $3
+		           OR btrim(COALESCE(ev.payload->>'reservation','')) ILIKE $3
+		           OR EXISTS (SELECT 1 FROM iam_v2.stay_guests g
+		                       WHERE g.stay_id = st.id
+		                         AND (g.display_name ILIKE $3 OR g.last_name_norm ILIKE $3)))))`
 
 // stayEventsSummary counts EVERY message this appliance holds, whatever the filter: the tiles answer "is the
 // feed alive and is anything waiting", which a filtered count cannot.
 type stayEventsSummary struct {
-	Applied   int        `json:"applied"`
-	Pending   int        `json:"pending"`
+	Applied int `json:"applied"`
+	Pending int `json:"pending"`
+	// Review counts every message ever placed in review; Undecided only those still waiting for a decision
+	// (no disposition). The "needs a decision" tile is Undecided (audit H-15).
 	Review    int        `json:"manual_review"`
+	Undecided int        `json:"undecided"`
 	Rejected  int        `json:"rejected"`
 	Unmatched int        `json:"unmatched"`
 	Newest    *time.Time `json:"newest_received_at,omitempty"`
@@ -509,7 +581,8 @@ func (s *server) listStayEvents(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	args := []any{s.tenantID, statusArg, likePattern(search)}
+	identity := canSeeStayIdentity(r)
+	args := []any{s.tenantID, statusArg, likePattern(search), r.URL.Query().Get("undecided") == "true", identity}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 
@@ -519,12 +592,15 @@ func (s *server) listStayEvents(w http.ResponseWriter, r *http.Request) {
 			count(*) FILTER (WHERE ev.processing_status = 'APPLIED')::int,
 			count(*) FILTER (WHERE ev.processing_status = 'PENDING')::int,
 			count(*) FILTER (WHERE ev.processing_status = 'MANUAL_REVIEW')::int,
+			count(*) FILTER (WHERE ev.processing_status = 'MANUAL_REVIEW'
+			                   AND NOT EXISTS (SELECT 1 FROM iam_v2.pms_case_resolutions x
+			                                    WHERE x.stay_event_id = ev.id))::int,
 			count(*) FILTER (WHERE ev.processing_status = 'REJECTED')::int,
 			count(*) FILTER (WHERE ev.stay_id IS NULL)::int,
 			max(ev.received_at),
 			count(*) FILTER (WHERE `+stayEventMatch+`)::int
 		`+stayEventFrom+`
-		WHERE ev.tenant_id=$1`, args...).Scan(&sum.Applied, &sum.Pending, &sum.Review, &sum.Rejected,
+		WHERE ev.tenant_id=$1`, args...).Scan(&sum.Applied, &sum.Pending, &sum.Review, &sum.Undecided, &sum.Rejected,
 		&sum.Unmatched, &sum.Newest, &total); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
@@ -538,11 +614,15 @@ func (s *server) listStayEvents(w http.ResponseWriter, r *http.Request) {
 			(SELECT COALESCE(NULLIF(g.display_name,''), NULLIF(g.last_name_norm,''))
 			   FROM iam_v2.stay_guests g WHERE g.stay_id = st.id
 			  ORDER BY g.is_primary DESC LIMIT 1),
-			st.status
+			st.status,
+			res.disposition,
+			NULLIF(btrim(COALESCE(ev.payload->>'reservation','')),''),
+			NULLIF(upper(btrim(COALESCE(ev.payload->>'room',''))),'')
 		`+stayEventFrom+`
+		LEFT JOIN iam_v2.pms_case_resolutions res ON res.stay_event_id = ev.id
 		WHERE ev.tenant_id=$1 AND `+stayEventMatch+`
 		ORDER BY ev.received_at DESC, ev.id
-		LIMIT $4 OFFSET $5`, append(args, pg.Fetch(), pg.Offset())...)
+		LIMIT $6 OFFSET $7`, append(args, pg.Fetch(), pg.Offset())...)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
@@ -553,9 +633,16 @@ func (s *server) listStayEvents(w http.ResponseWriter, r *http.Request) {
 		var e stayEventRow
 		if err := rows.Scan(&e.ID, &e.Interface, &e.Identity, &e.Type, &e.Status, &e.ReviewCode,
 			&e.StayID, &e.PMSAt, &e.ReceivedAt,
-			&e.InterfaceLabel, &e.Room, &e.Reservation, &e.PrimaryGuest, &e.StayStatus); err != nil {
+			&e.InterfaceLabel, &e.Room, &e.Reservation, &e.PrimaryGuest, &e.StayStatus,
+			&e.Decision, &e.MessageReservation, &e.MessageRoom); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
 			return
+		}
+		e.Decided = e.Decision != nil
+		if !identity {
+			// The PMS's own event identity can embed the reservation number, so it goes too.
+			e.Identity, e.Reservation, e.PrimaryGuest, e.MessageReservation = "", nil, nil, nil
+			e.IdentityHidden = true
 		}
 		out = append(out, e)
 	}
@@ -750,6 +837,10 @@ type checkoutGracePublishReq struct {
 // ADMIN_APPROVAL stay capability-disabled: offering them would let an operator publish a policy that silently
 // degrades to something else at the boundary.
 var supportedDeviceLimitPolicies = []string{"REJECT_NEW_DEVICE"}
+
+// graceEligibilityWindowUnused is what a publication stores for eligibility_window_seconds when the console sends
+// none: 24 hours, the value every fixture and the original form used. The converter does not read it (H-19).
+const graceEligibilityWindowUnused = 86400
 
 func (s *server) checkoutGraceConfigRoutes() http.Handler {
 	r := chi.NewRouter()
@@ -975,6 +1066,14 @@ func (s *server) putCheckoutGraceConfig(w http.ResponseWriter, r *http.Request) 
 	if sess == nil || sess.OperatorID == "" {
 		jsonErr(w, http.StatusUnauthorized, "unauthorized", "an operator identity is required")
 		return
+	}
+	// THE ELIGIBILITY WINDOW IS NOT AN OPERATOR CHOICE (audit H-19). The column is part of the published policy
+	// row, but the checkout converter never reads it: eligibility is proven from the entitlement's state AT the
+	// boundary (internal/checkout eligibleOriginalAtBoundary). The console therefore no longer asks for it; a
+	// request that omits it publishes the value the schema has always defaulted to, so nothing an operator sees
+	// claims to control a rule that does not exist.
+	if in.EligibilityWindowSec == 0 {
+		in.EligibilityWindowSec = graceEligibilityWindowUnused
 	}
 	// Shape checks only — the database re-validates everything and owns the authoritative decision.
 	if in.DurationSeconds <= 0 || in.DownKbps <= 0 || in.UpKbps <= 0 || in.DeviceLimit <= 0 || in.EligibilityWindowSec <= 0 {

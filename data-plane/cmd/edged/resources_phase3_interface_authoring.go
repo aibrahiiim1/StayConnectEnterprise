@@ -121,6 +121,24 @@ func (s *server) createPMSInterface(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
+	// ONE PROTEL FIAS CONNECTION PER PROPERTY (audit H-11). The FIAS link is a single socket to the hotel's PMS
+	// and the appliance carries room charge over it (D45); a second protel-fias connection would be a second
+	// writer on the same PMS, and duplicate-source detection could only report it after the fact. A retired
+	// (DECOMMISSIONED) one does not count.
+	if kind == pmsprovider.KindProtelFIAS {
+		var existing int
+		if err := s.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.pms_interfaces
+			WHERE tenant_id=$1 AND site_id=$2 AND connector_kind=$3 AND lifecycle_state <> 'DECOMMISSIONED'`,
+			s.tenantID, s.siteID, kind).Scan(&existing); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "internal", "create failed")
+			return
+		}
+		if existing > 0 {
+			jsonErr(w, http.StatusConflict, "protel_fias_exists",
+				"this property already has a Protel FIAS connection; change that one instead of adding a second")
+			return
+		}
+	}
 	var id string
 	// AUTH_DISABLED, not ACTIVE. A new interface has no published revision and therefore no endpoint to
 	// reach, so calling it ACTIVE would advertise a connection that cannot exist. It becomes usable when a

@@ -24,6 +24,7 @@ package main
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -133,6 +134,9 @@ type postStayActionReq struct {
 	// the request body is not an audit record.
 	Password string `json:"password"`
 	Reason   string `json:"reason"`
+	// ExtendValidity, on a reset only: also restart the validity window (24 h from now). Absent or false keeps
+	// it as it was -- a reset rotates the PIN and nothing else unless asked (audit H-17).
+	ExtendValidity bool `json:"extend_validity"`
 }
 
 // validReason bounds the mandatory justification. Empty is refused because an unexplained credential rotation
@@ -163,9 +167,13 @@ func (s *server) resetPostStayPIN(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	id := chi.URLParam(r, "id")
 	store := poststay.New(s.db, nil)
+	validFor := time.Duration(0)
+	if in.ExtendValidity {
+		validFor = postStayResetValidity
+	}
 	out, err := store.Reset(ctx, poststay.ResetRequest{
 		Tenant: s.tenantID, Site: s.siteID, Profile: id,
-		Operator: actor, Reason: in.Reason, ValidFor: postStayResetValidity})
+		Operator: actor, Reason: in.Reason, ValidFor: validFor})
 	if err != nil {
 		switch {
 		case errors.Is(err, poststay.ErrNotAuthenticable):
@@ -176,7 +184,8 @@ func (s *server) resetPostStayPIN(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, poststay.ErrNotEligible):
 			jsonErr(w, http.StatusBadRequest, "invalid", "reset requires an operator and a reason")
 		default:
-			jsonErr(w, http.StatusInternalServerError, "reset_failed", err.Error())
+			slog.Error("post-stay reset failed", "err", err)
+			jsonErr(w, http.StatusInternalServerError, "reset_failed", "the PIN could not be reset")
 		}
 		return
 	}
@@ -184,6 +193,7 @@ func (s *server) resetPostStayPIN(w http.ResponseWriter, r *http.Request) {
 	// reveal it exists to bound.
 	s.audit(r, "poststay.pin_reset", "post_stay_profile", id, map[string]any{
 		"reason": in.Reason, "valid_until": out.Expires.UTC().Format(time.RFC3339),
+		"validity_extended": in.ExtendValidity,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"profile_id":  id,
