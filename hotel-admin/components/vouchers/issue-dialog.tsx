@@ -227,8 +227,9 @@ export function IssueDialog({
               <Callout tone="info">
                 The codes appear once, on the next screen. The code format is the one set under Code security.
               </Callout>
-              <Field label="Confirm your password" hint="Issuing a batch of cards is recorded against your name." required>
-                <Input type="password" autoComplete="current-password" value={password}
+              <Field label="Confirm your password" hint="Issuing a batch of cards is recorded against your name." required
+                htmlFor="voucher-issue-password">
+                <Input id="voucher-issue-password" type="password" autoComplete="current-password" value={password}
                   onChange={(e) => setPassword(e.target.value)} />
               </Field>
             </div>
