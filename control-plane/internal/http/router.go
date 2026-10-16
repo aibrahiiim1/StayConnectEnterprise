@@ -84,6 +84,7 @@ func NewRouter(d Deps) http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(15 * time.Second))
 	r.Use(corsMiddleware(d.AllowOrigins))
+	r.Use(sameOriginWrites(d.AllowOrigins))
 	if d.Metrics != nil {
 		r.Use(d.Metrics.Middleware)
 	}
@@ -203,6 +204,39 @@ func traceIDHeader(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// sameOriginWrites refuses a state-changing console request whose Origin is neither an allowed admin origin
+// nor this host. SameSite=Lax keeps the cookie off cross-SITE requests, but not off a request from a sibling
+// subdomain of the same site, which a browser treats as same-site; this closes that. Requests without an
+// Origin header (curl, server-to-server) are not browser cross-origin requests and pass. Appliance routes
+// carry no cookie and are untouched.
+func sameOriginWrites(origins []string) func(http.Handler) http.Handler {
+	allow := map[string]bool{}
+	for _, o := range origins {
+		allow[strings.TrimRight(o, "/")] = true
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodGet, http.MethodHead, http.MethodOptions:
+				next.ServeHTTP(w, r)
+				return
+			}
+			cookieRoute := strings.HasPrefix(r.URL.Path, "/cloud/") || strings.HasPrefix(r.URL.Path, "/v1/auth/")
+			origin := r.Header.Get("Origin")
+			if !cookieRoute || origin == "" || allow[origin] {
+				next.ServeHTTP(w, r)
+				return
+			}
+			host := strings.TrimPrefix(strings.TrimPrefix(origin, "https://"), "http://")
+			if host == r.Host || (r.Header.Get("X-Forwarded-Host") != "" && host == r.Header.Get("X-Forwarded-Host")) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			api.Fail(w, r, http.StatusForbidden, "cross_origin", "This request did not come from the Central console.")
+		})
+	}
 }
 
 func corsMiddleware(origins []string) func(http.Handler) http.Handler {

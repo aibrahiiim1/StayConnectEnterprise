@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/ed25519"
 	"errors"
@@ -419,9 +420,20 @@ func runGenVendorKey(args []string) error {
 func runSeedAdmin(args []string) error {
 	fs := flag.NewFlagSet("seed-admin", flag.ExitOnError)
 	email := fs.String("email", "", "admin email")
-	password := fs.String("password", "", "admin password (min 10 chars)")
+	password := fs.String("password", "", "admin password (min 10 chars) -- DISCOURAGED: visible in ps and shell history; "+
+		"omit it and pass the password on stdin or in CTRLAPI_SEED_ADMIN_PASSWORD")
 	displayName := fs.String("name", "Platform Admin", "display name")
 	_ = fs.Parse(args)
+	// The password does not have to be on the command line, where `ps` and the shell history would keep it.
+	if *password == "" {
+		if v := os.Getenv("CTRLAPI_SEED_ADMIN_PASSWORD"); v != "" {
+			*password = v
+		} else if line, err := bufio.NewReader(os.Stdin).ReadString('\n'); err == nil || line != "" {
+			*password = strings.TrimRight(line, "\r\n")
+		}
+	} else {
+		slog.Warn("seed-admin: --password puts the password in the process list and shell history; prefer stdin")
+	}
 
 	if *email == "" || len(*password) < 10 {
 		return fmt.Errorf("--email and --password (min 10 chars) required")
