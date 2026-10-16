@@ -200,9 +200,12 @@ describe("buildPublishPayload — free-only, no PMS/settlement fields", () => {
     expect(validateRuleSet([{ type: "PRIOR_PURCHASE", mode: "forbids_prior", within_hours: "24" }])).toBeNull();
   });
 
+  // O-16 and D-C meet here: since D-C a package has one plain step, so a second step (duplicate order or not)
+  // is refused by the speed-steps rule before the order is even compared.
   it("refuses two speed steps with the same order", () => {
     expect(buildPublishPayload({ ...base, tiers: [{ order: 10 }, { order: "10", down_kbps: 1 }] }).error)
-      .toBe("Speed steps: two steps have the order 10. Give each step its own order.");
+      .toBe(SPEED_STEPS_REFUSAL);
+    expect(validateTiers([{ order: 10 }, { order: 10 }])).toBe("Speed steps: two steps have the order 10. Give each step its own order.");
     expect(validateTiers([{ order: 10 }, { order: 20 }])).toBeNull();
   });
 
@@ -212,14 +215,14 @@ describe("buildPublishPayload — free-only, no PMS/settlement fields", () => {
       ...base, name: "Renamed",
       display: { name: "Old", description: "Lobby", badge: "NEW" },
       preserved_rules: [{ type: "STAY_STATUS", value: { statuses: ["IN_HOUSE"] } }],
-      tiers: [{ order: 10, down_kbps: 5000, extra: { match: { type: "VIP", value: { is_vip: true } } } }],
+      tiers: [{ order: 10, extra: { match: { type: "VIP", value: { is_vip: true } } } }],
     });
     expect(payload!.display).toEqual({ name: "Renamed", description: "Lobby", badge: "NEW" });
     expect(payload!.eligibility_rules).toEqual([
       { type: "AUTH_METHOD", value: { methods: ["account", "voucher"] } },
       { type: "STAY_STATUS", value: { statuses: ["IN_HOUSE"] } },
     ]);
-    expect(payload!.grant_tiers).toEqual([{ order: 10, grant: { match: { type: "VIP", value: { is_vip: true } }, down_kbps: 5000 } }]);
+    expect(payload!.grant_tiers).toEqual([{ order: 10, grant: { match: { type: "VIP", value: { is_vip: true } } } }]);
   });
 });
 

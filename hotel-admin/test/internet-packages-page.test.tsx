@@ -319,7 +319,7 @@ describe("InternetPackagesPage — packages", () => {
           { Type: "STAY_STATUS", Value: { statuses: ["IN_HOUSE"] } },
           { Type: "AUTH_METHOD", Value: { methods: ["voucher"] } },
         ],
-        grant_tiers: [{ Order: 10, Value: { down_kbps: 5000, match: { type: "VIP", value: { is_vip: true } } } }],
+        grant_tiers: [{ Order: 10, Value: { match: { type: "VIP", value: { is_vip: true } } } }],
         price_minor: 0, currency: "USD", currency_exponent: 2, settlement_methods: ["NOT_REQUIRED", "PREPAID"],
         room_charge_mappings: null,
         package_type: "STAY_BUNDLE", plan_overrides: { max_concurrent_devices: 3 }, renewable: true, max_purchases_per_stay: 2,
@@ -340,7 +340,7 @@ describe("InternetPackagesPage — packages", () => {
     expect(body.display).toEqual({ name: "Free WiFi Plus", description: "Lobby and pool", badge: "NEW" });
     expect(body.eligibility_rules).toContainEqual({ type: "STAY_STATUS", value: { statuses: ["IN_HOUSE"] } });
     expect(body.eligibility_rules).toContainEqual({ type: "AUTH_METHOD", value: { methods: ["voucher"] } });
-    expect(body.grant_tiers).toEqual([{ order: 10, grant: { down_kbps: 5000, match: { type: "VIP", value: { is_vip: true } } } }]);
+    expect(body.grant_tiers).toEqual([{ order: 10, grant: { match: { type: "VIP", value: { is_vip: true } } } }]);
     expect(body).toMatchObject({
       package_type: "STAY_BUNDLE", plan_overrides: { max_concurrent_devices: 3 }, renewable: true, max_purchases_per_stay: 2,
       price_minor: 0, currency: "USD", currency_exponent: 2, acquisition_methods: ["NOT_REQUIRED", "PREPAID"],

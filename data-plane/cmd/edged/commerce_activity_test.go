@@ -280,6 +280,11 @@ type fakeCommerceRepo struct {
 func (f *fakeCommerceRepo) WithTx(ctx context.Context, fn func(iamv2.CommerceAdminTx) error) error {
 	return fn(f.tx)
 }
+// ListPackages: the fake catalogue is empty, so every publish in these tests is a NEW package (the republish
+// path's explicit-commercial-fields rule, O-1, has its own tests).
+func (f *fakeCommerceRepo) ListPackages(context.Context, string, string) ([]iamv2.PackageSummary, error) {
+	return nil, nil
+}
 func (f *fakeCommerceRepo) PackageBlockers(context.Context, string, string, string) ([]iamv2.CatalogueBlocker, error) {
 	return f.blockers, nil
 }

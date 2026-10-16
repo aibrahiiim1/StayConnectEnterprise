@@ -36,6 +36,7 @@ import { canWrite } from "@/lib/roles";
 import { cn, errMsg, formatDate } from "@/lib/utils";
 import { formatBytes } from "@/lib/bytes";
 import { AccountingRetentionCard } from "./accounting-retention-card";
+import { submitDownload } from "@/lib/backup-download";
 import {
   Archive, ShieldCheck, Download, RotateCcw, AlertTriangle, CheckCircle2, Loader2, HardDrive, ChevronRight,
 } from "lucide-react";
@@ -706,19 +707,4 @@ function StorageAndRetention({ writable }: { writable: boolean }) {
       </details>
     </Card>
   );
-}
-
-/** Posts the ticket as a form so the browser saves the file in place (Content-Disposition: attachment). */
-export function submitDownload(name: string, ticket: string) {
-  const form = document.createElement("form");
-  form.method = "POST";
-  form.action = `/api/edge/v1/backup-download/${encodeURIComponent(name)}`;
-  form.style.display = "none";
-  const input = document.createElement("input");
-  input.type = "hidden";
-  input.name = "ticket";
-  input.value = ticket;
-  form.appendChild(input);
-  document.body.appendChild(form);
-  try { form.submit(); } finally { form.remove(); }
 }
