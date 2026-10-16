@@ -2,7 +2,7 @@
 
 - **Base commit:** `87b32100ffb67fd5c59820aff00d727d4e189ff7`
 - **HEAD commit:** `dc32a52c94d30677108e50e210366374314022f0`
-- **Provenance (generation HEAD = inventory_head):** `dbc23206837f265d8f59afcc9476f5acf20dee9f`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `60b06d8c366fbb09ea39ada50a2756dc53867979`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/audit-remediation`
 - **Remote branch:** `origin/delivery/audit-remediation`
 - **Changed files:** 666
@@ -479,7 +479,7 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0237 records the audit remediation on PRE-LIVE and Central (D52-D63, migrations 0119-0126, Central 0051) |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0237 records the audit remediation on PRE-LIVE and Central (D52-D63, migrations 0119-0126, Central 0051) |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0237 records the audit remediation on PRE-LIVE and Central (D52-D63, migrations 0119-0126, Central 0051) |
-| `docs/manifests/AuditRemediation-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | The change manifest lists the gate-expectation commit |
+| `docs/manifests/AuditRemediation-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | The change manifest lists the review fixes |
 | `docs/manifests/EmailAccountsSelfService-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | The export packs and the change manifest carry the T0236 state |
 | `docs/user-guide/guest-portal.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Merge branch 'delivery/audit-remediation' into worktree-agent-a4f61a33ae2273eee |
 | `docs/user-guide/hotel-admin-config-manual.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Merge remediation stream worktree-agent-a25b8c49445906ce1 |
@@ -669,7 +669,7 @@
 | `scripts/email-accounts-e2e-test.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Test harnesses keep the appliance's own resolver running (dhclient's exit hook restarts it per namespace client); the email-accounts test expects the replacement choice at the device limit |
 | `scripts/flow-teardown-netns-test.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Network applies get a 180 s bound end to end, and a netns script proves revoked flows stop |
 | `scripts/gatep-grant-survives-reconcile.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Runtime database roles hold only the privileges their code uses, the entitlement guard can no longer be switched off by its caller, and the Gate-P reconcile runs on a schema rolled back below 0116-0125 |
-| `scripts/gatep-reconcile-acceptance.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Gate expectations follow B-7: netd no longer holds record_auth_context_offer, edged no longer reads the financial settings change log |
+| `scripts/gatep-reconcile-acceptance.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | The reconcile acceptance compares each ACL as a set: the same grants in another order are not a change |
 | `scripts/gatep-rollback-drill.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Runtime database roles hold only the privileges their code uses, the entitlement guard can no longer be switched off by its caller, and the Gate-P reconcile runs on a schema rolled back below 0116-0125 |
 | `scripts/lib-fullschema-testdb.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | The factory-clean baseline carries 0126; the harness pins follow it |
 | `scripts/phase4-email-otp-test.sh` | DELETED | `D` | other | OTHER | rollback RESTORES it | Self-service follow-ups: staff cannot rename a self-service account (its email); the EMAIL_ACCOUNT label; the removed flow's scripts go |
@@ -1148,7 +1148,7 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |    6 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |    6 +-
  docs/context/StayConnect-IAM-Handoff.md            |    6 +-
- docs/manifests/AuditRemediation-change-manifest.md | 1478 ++++++++
+ docs/manifests/AuditRemediation-change-manifest.md | 1480 ++++++++
  .../EmailAccountsSelfService-change-manifest.md    |  439 +++
  docs/user-guide/guest-portal.md                    |   11 +-
  docs/user-guide/hotel-admin-config-manual.md       |   20 +-
@@ -1338,7 +1338,7 @@
  scripts/email-accounts-e2e-test.sh                 |  140 +
  scripts/flow-teardown-netns-test.sh                |  194 ++
  scripts/gatep-grant-survives-reconcile.sh          |    3 +-
- scripts/gatep-reconcile-acceptance.sh              |    1 -
+ scripts/gatep-reconcile-acceptance.sh              |   10 +-
  scripts/gatep-rollback-drill.sh                    |   62 +
  scripts/lib-fullschema-testdb.sh                   |    2 +-
  scripts/phase4-email-otp-test.sh                   |  112 -
@@ -1347,7 +1347,7 @@
  scripts/prod-privilege-integration.sh              |    2 +-
  scripts/sitedb-dev.sh                              |    2 +-
  tools/validate-migration-location.py               |   16 +-
- 666 files changed, 52847 insertions(+), 8390 deletions(-)
+ 666 files changed, 52855 insertions(+), 8393 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -1357,6 +1357,8 @@ M  docs/manifests/AuditRemediation-change-manifest.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 60b06d8c The reconcile acceptance compares each ACL as a set: the same grants in another order are not a change
+HISTORICAL: 015bc8d8 The change manifest lists the review fixes
 HISTORICAL: dbc23206 Review fixes: the unit installer creates the product's socket group on upgrade; site backups age by their stamp, so a copied-back set is not kept for ever
 HISTORICAL: 02dfb9ba The change manifest lists the gate-expectation commit
 HISTORICAL: 90b7bf2d Gate expectations follow B-7: netd no longer holds record_auth_context_offer, edged no longer reads the financial settings change log
