@@ -25,6 +25,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/healthdir"
 )
 
 // Dir holds the per-service backoff trackers. It lives on tmpfs (/run) on
@@ -77,10 +79,10 @@ func path(service string) string { return filepath.Join(trackerDir(), service+".
 // (services run as root/stayconnect/caddy/unbound and each writes its own
 // tracker; edged reads them all). It lives on tmpfs and holds only non-sensitive
 // restart counters, so a shared-writable mode is acceptable.
+//
+// The directory is sticky (1777): every account may create its own file and remove only its own (audit B-3).
 func ensureDir() {
-	d := trackerDir()
-	_ = os.MkdirAll(d, 0o777)
-	_ = os.Chmod(d, 0o777)
+	healthdir.Ensure(trackerDir())
 }
 
 // Load returns the current tracker for a service (zero value if none/unreadable).
@@ -160,8 +162,7 @@ func save(t Tracker) {
 	if err != nil {
 		return
 	}
-	tmp := path(t.Service) + ".tmp"
-	if os.WriteFile(tmp, b, 0o644) == nil {
-		_ = os.Rename(tmp, path(t.Service))
-	}
+	// A fresh, exclusively created temporary file renamed over the target: a symlink planted at either name is
+	// never written through, which matters because several of the writers are root (internal/healthdir).
+	_ = healthdir.WriteFile(trackerDir(), t.Service+".backoff.json", b)
 }

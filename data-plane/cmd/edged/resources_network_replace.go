@@ -39,6 +39,54 @@ func (e errSubnetConflict) Error() string {
 	return fmt.Sprintf("subnet %s overlaps client network %q; every client network needs its own, non-overlapping subnet", e.subnet, e.other)
 }
 
+// errNameConflict: two ENABLED client networks may not share a name (audit N-14). A disabled network kept as
+// history keeps its name; it does not block a new one, because it is not served and nobody picks it from a list
+// of live networks.
+type errNameConflict struct{ name string }
+
+func (e errNameConflict) Error() string {
+	return fmt.Sprintf("an enabled client network is already called %q; give this one a different name", e.name)
+}
+
+// enabledConflict checks a network AS IT IS NOW STORED (inside tx, after an update) against every other enabled
+// network: an overlapping subnet or the same name. A disabled network conflicts with nothing. It used to be
+// checked only at create, so an edit or an Enable could put two live networks on one subnet, or two with one
+// name, and the conflict surfaced only at the next apply (or, for the name, never).
+func (s *server) enabledConflict(ctx context.Context, tx pgx.Tx, id string) error {
+	var otherName, subnet string
+	var overlap bool
+	err := tx.QueryRow(ctx, `
+		SELECT o.name, text(g.subnet_cidr), (o.subnet_cidr && g.subnet_cidr)
+		  FROM guest_networks g
+		  JOIN guest_networks o ON o.id <> g.id AND o.tenant_id = g.tenant_id AND o.site_id = g.site_id AND o.enabled
+		 WHERE g.id = $1 AND g.enabled
+		   AND (o.subnet_cidr && g.subnet_cidr OR lower(btrim(o.name)) = lower(btrim(g.name)))
+		 ORDER BY (o.subnet_cidr && g.subnet_cidr) DESC
+		 LIMIT 1`, id).Scan(&otherName, &subnet, &overlap)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if overlap {
+		return errSubnetConflict{subnet: subnet, other: otherName}
+	}
+	return errNameConflict{name: otherName}
+}
+
+// nameTaken returns whether an enabled network (other than those in exclude) already has this name.
+func (s *server) nameTaken(ctx context.Context, tx pgx.Tx, name string, exclude []string) (bool, error) {
+	if exclude == nil {
+		exclude = []string{}
+	}
+	var taken bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM guest_networks
+		WHERE tenant_id=$1 AND site_id=$2 AND enabled AND lower(btrim(name)) = lower(btrim($3))
+		  AND NOT (id::text = ANY($4::text[])))`, s.tenantID, s.siteID, name, exclude).Scan(&taken)
+	return taken, err
+}
+
 func normalizeGuestNetworkInput(in *guestNetworkInput) {
 	if in.NetworkType == "" {
 		in.NetworkType = "untagged"
@@ -61,6 +109,11 @@ func writeNetworkInsertErr(w http.ResponseWriter, err error) {
 	var sc errSubnetConflict
 	if errors.As(err, &sc) {
 		jsonErr(w, http.StatusConflict, "subnet_overlap", sc.Error())
+		return
+	}
+	var nc errNameConflict
+	if errors.As(err, &nc) {
+		jsonErr(w, http.StatusConflict, "duplicate_name", nc.Error())
 		return
 	}
 	jsonErr(w, http.StatusBadRequest, "bad_request", pgErr(err))
@@ -122,6 +175,15 @@ func (s *server) insertGuestNetwork(ctx context.Context, tx pgx.Tx, in guestNetw
 		}
 		if other != "" {
 			return createdNetwork{}, errSubnetConflict{subnet: in.SubnetCIDR, other: other}
+		}
+	}
+	if boolOr(in.Enabled, true) && strings.TrimSpace(in.Name) != "" {
+		taken, err := s.nameTaken(ctx, tx, in.Name, exclude)
+		if err != nil {
+			return createdNetwork{}, err
+		}
+		if taken {
+			return createdNetwork{}, errNameConflict{name: strings.TrimSpace(in.Name)}
 		}
 	}
 	bridge, err := uniqueBridgeName(ctx, tx, in.NetworkType, vlan, newID)

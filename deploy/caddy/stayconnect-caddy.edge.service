@@ -6,7 +6,8 @@
 # would restore an ExecReload that cannot work there, because Central runs Caddy with
 # `admin off` and `caddy reload` drives the admin API.
 #
-# Reload IS supported here: the Edge Caddyfile leaves the admin API on 127.0.0.1:2019, so
+# Reload IS supported here: the Edge Caddyfile serves the admin API on the owner-only unix socket
+# /run/caddy/admin.sock (audit N-10), which `caddy reload` (run as User=caddy) reaches, so
 # `systemctl reload` genuinely applies the new configuration.
 #
 # Drop into /etc/systemd/system/stayconnect-caddy.service and
@@ -35,6 +36,9 @@ Group=caddy
 ExecStartPre=/opt/stayconnect/bin/svc-run caddy
 ExecStart=/usr/bin/caddy run --environ --config /etc/caddy/Caddyfile
 ExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force
+# The admin API's unix socket lives here, owner-only (Caddyfile.edge `admin unix//run/caddy/admin.sock`).
+RuntimeDirectory=caddy
+RuntimeDirectoryMode=0700
 # The stock unit shipped with no Restart policy — a Caddy crash left the portal
 # and Hotel Admin routes dead until a manual restart. Always recover.
 Restart=always

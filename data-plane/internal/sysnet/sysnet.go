@@ -230,6 +230,37 @@ func ValidateFull(wan WANConfig, lan LANConfig) ValidationResult {
 	return res
 }
 
+// ValidateProposal validates the effective configuration a proposal produces, and adds the two rules that depend
+// on what the proposal touches rather than on the result alone:
+//
+//   - A WAN-only change is not blocked by the LAN. On an appliance whose base LAN bridge carries no address (it is
+//     a legacy bridge client networks do not use), every LAN rule failed and the WAN could never be changed.
+//     The LAN is validated in full whenever the proposal changes it, or when it is configured at all.
+//   - DHCP on the base LAN is NOT edited here. It has one source of truth, the client-network pages (the console
+//     says so), and the values this screen sends were validated and then silently discarded. A proposal whose
+//     DHCP fields differ from what is in force is refused, so nobody believes a change was made.
+func ValidateProposal(wan WANConfig, lan LANConfig, cur LANConfig, p Proposal) ValidationResult {
+	res := ValidateFull(wan, lan)
+	if p.LAN == nil && strings.TrimSpace(cur.IP) == "" {
+		out := ValidationResult{OK: true}
+		for _, is := range res.Issues {
+			if !strings.HasPrefix(is.Field, "lan.") {
+				out.add(is.Field, is.Code, is.Msg)
+			}
+		}
+		res = out
+	}
+	if p.LAN != nil {
+		if p.LAN.DHCPEnabled != cur.DHCPEnabled || p.LAN.DHCPStart != cur.DHCPStart || p.LAN.DHCPEnd != cur.DHCPEnd ||
+			(p.LAN.DHCPLeaseSeconds != 0 && p.LAN.DHCPLeaseSeconds != cur.DHCPLeaseSeconds) {
+			res.add("lan.dhcp_enabled", "dhcp_not_edited_here",
+				"DHCP is configured on the client-network pages (Client networks, DHCP & leases), not on this screen; "+
+					"this change would not be applied")
+		}
+	}
+	return res
+}
+
 // ManagementURL is the URL an operator uses to reach Hotel Admin after a WAN
 // change (rule 14). Caddy serves TLS on the WAN/management IP.
 func ManagementURL(wan WANConfig) string {

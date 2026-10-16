@@ -28,6 +28,12 @@ RestartSec=2
 # group membership no longer buys the administrative surface: cmd/scd/admin_surface.go classifies every
 # route and requires the peer to be edged's uid for the administrative ones.
 #
+# THE SAME GROUP ALSO OPENS netd's SOCKET (/run/stayconnect/netd.sock, root:stayconnect 0660). portald never
+# calls netd, and group membership does not buy it anything there either: netd checks the caller's uid on every
+# route (cmd/netd/caller_authz.go, NETD_ADMIN_CALLERS / NETD_FLOW_CALLERS in stayconnect-netd.service) and
+# refuses this account. Before that check existed this comment said portald "gets nothing else"; it was false --
+# netd answered portald's identity on every route but the Phase-3 plan submission (audit B-2).
+#
 # The primary group stays portald's own, so anything it creates is not group-shared with edged by default.
 User=stayconnect-portald
 Group=stayconnect-portald

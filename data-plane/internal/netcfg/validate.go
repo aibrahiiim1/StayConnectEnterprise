@@ -6,6 +6,14 @@ import (
 	"strings"
 )
 
+const (
+	// MinSubnetPrefix is the widest client subnet: /20 (see the subnet_too_large rule).
+	MinSubnetPrefix = 20
+	// MinLeaseSeconds / MaxLeaseSeconds bound every DHCP lease timer that is set.
+	MinLeaseSeconds = 60
+	MaxLeaseSeconds = 7 * 24 * 3600
+)
+
 // Issue is a single structured validation problem (surfaced to the API).
 type Issue struct {
 	Field   string `json:"field"`
@@ -100,6 +108,26 @@ func ValidateOne(n GuestNetwork, topo Topology, availIfaces, knownIfaces map[str
 		if bits == 32 && ones > 30 {
 			r.add(f("subnet_cidr"), "subnet_too_small",
 				"subnet is too small to host a gateway and a DHCP pool (use /30 or larger)")
+		}
+		// THE WIDEST SUBNET THE SHAPER CAN TELL APART (audit B-8). A client's tc class is chosen from the low
+		// 12 host bits of its address (internal/shape MinorForIP), so in anything wider than a /20 two clients
+		// share one class: one is metered and limited for the other's traffic. 4094 addresses per network.
+		if bits == 32 && ones < MinSubnetPrefix {
+			r.add(f("subnet_cidr"), "subnet_too_large",
+				fmt.Sprintf("subnet is larger than /%d (4094 clients); per-client speed limits and usage cannot tell "+
+					"clients apart in a wider subnet. Split it into several client networks.", MinSubnetPrefix))
+		}
+	}
+
+	// Lease timers: each one that is set must lie within Kea-sane bounds (audit N-20). Negative values used to
+	// pass, and a lease of a second or of a year reached Kea unchecked.
+	for _, lt := range []struct {
+		field string
+		v     int
+	}{{"lease_default_seconds", n.LeaseDefault}, {"lease_min_seconds", n.LeaseMin}, {"lease_max_seconds", n.LeaseMax}} {
+		if lt.v != 0 && (lt.v < MinLeaseSeconds || lt.v > MaxLeaseSeconds) {
+			r.add(f(lt.field), "lease_out_of_range",
+				fmt.Sprintf("lease times must be between %d seconds and %d seconds (7 days)", MinLeaseSeconds, MaxLeaseSeconds))
 		}
 	}
 

@@ -35,16 +35,35 @@ func RenderUnbound(nets []GuestNetwork) []byte {
 	}
 	b.WriteString("    access-control: 0.0.0.0/0 refuse\n")
 
-	// Portal FQDNs resolve to each network's own gateway. Because a single
-	// static zone can only map a name to one address, we serve a per-network
-	// view via response-ip is overkill; instead we publish the canonical
-	// portal hostnames pointing at every gateway (clients on a network only
-	// reach their own gateway's unbound instance, which returns its own A).
+	// PORTAL NAMES ANSWER WITH THE ASKING NETWORK'S OWN GATEWAY (audit N-21).
+	//
+	// This used to publish every gateway under the same names in one global zone, on the belief that a client
+	// only reaches its own gateway's resolver. It does not: there is one Unbound, listening on every gateway, so
+	// a client on VLAN 20 asking for portal.stayconnect.local got VLAN 40's gateway too -- an address its own
+	// network may not reach (guest input is limited to its own gateway), so the portal failed for some clients
+	// at random. Each network now has its own view, selected by the client's source subnet, holding only its
+	// gateway. view-first lets everything else (the portal's public names, recursion) fall through to the
+	// global configuration. The global zone stays, empty, so these names are never forwarded upstream.
 	b.WriteString("    local-zone: \"stayconnect.local.\" static\n")
 	for _, n := range enabled {
+		fmt.Fprintf(&b, "    access-control-view: %s %s\n", n.SubnetCIDR, unboundViewName(n))
+	}
+	for _, n := range enabled {
+		fmt.Fprintf(&b, "view:\n    name: \"%s\"\n    view-first: yes\n", unboundViewName(n))
+		b.WriteString("    local-zone: \"stayconnect.local.\" static\n")
 		fmt.Fprintf(&b, "    local-data: \"portal.stayconnect.local. IN A %s\"\n", n.GatewayIP)
 		fmt.Fprintf(&b, "    local-data: \"captive.stayconnect.local. IN A %s\"\n", n.GatewayIP)
 		fmt.Fprintf(&b, "    local-data: \"gw.stayconnect.local. IN A %s\"\n", n.GatewayIP)
 	}
 	return []byte(b.String())
+}
+
+// unboundViewName is a per-network view name: the bridge name is unique and unbound-safe.
+func unboundViewName(n GuestNetwork) string {
+	return "sc-" + strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			return r
+		}
+		return '_'
+	}, n.BridgeName)
 }

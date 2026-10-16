@@ -39,7 +39,8 @@ die() { echo "[provision] ABORT: $*" >&2; exit 1; }
 say "packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq ca-certificates curl gnupg lsb-release nftables unbound jq python3 >/dev/null
+# conntrack: the fallback netd uses to end a revoked address's open flows when ctnetlink is unavailable (audit B-1).
+apt-get install -y -qq ca-certificates curl gnupg lsb-release nftables conntrack unbound jq python3 >/dev/null
 if ! command -v docker >/dev/null; then
   install -m 0755 -d /etc/apt/keyrings
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -84,7 +85,10 @@ chmod 700 "$ETC/secrets"
 #	stayconnect-portald   the captive portal. It listens on *:8380 -- on every guest VLAN -- so it is the
 #	                      process most likely to be attacked and the one that must own the least. It keeps
 #	                      the stayconnect SUPPLEMENTARY group because guest authentication runs through
-#	                      scd's socket, and gets nothing else.
+#	                      scd's socket. That group also opens netd's socket; what keeps portald out there
+#	                      is netd's per-route caller check (SO_PEERCRED against NETD_ADMIN_CALLERS /
+#	                      NETD_FLOW_CALLERS in stayconnect-netd.service), which does not name it. Group
+#	                      membership alone is not the boundary on either socket.
 #	stayconnect-pmsd      the PMS interface, which holds the credentials for the hotel's Protel connection.
 #
 # Sharing a uid makes the separation cosmetic: a process can ptrace another running under the same uid, so
@@ -113,6 +117,19 @@ say "layout ok"
 
 # ---------------------------------------------------------------- 3. infra containers
 say "infra containers"
+# THE DATABASE SUPERUSER GETS A RANDOM PASSWORD, NOT "stayconnect" (audit N-10). Postgres listens on loopback
+# only, but every local account can reach loopback, and the compose file's default password was the same on
+# every appliance. A fresh install generates one here, keeps it 0600 in the secrets directory, and hands it to
+# compose (POSTGRES_PASSWORD only takes effect when the cluster is first initialised). An existing database
+# volume is left exactly as it is: its password was fixed at its initdb, and changing it is an operation of its
+# own (docs/SECURITY_HARDENING.md, "Database superuser password").
+PG_SECRET="$ETC/secrets/pg-superuser.env"
+if [ ! -s "$PG_SECRET" ] && ! docker volume inspect stayconnect-infra_pgdata >/dev/null 2>&1; then
+  ( umask 077; printf 'STAYCONNECT_PG_PASSWORD=%s\n' "$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')" > "$PG_SECRET" )
+  say "generated a random database superuser password ($PG_SECRET)"
+fi
+if [ -s "$PG_SECRET" ]; then set -a; . "$PG_SECRET"; set +a; fi
+[ -n "${STAYCONNECT_PG_PASSWORD:-}" ] || say "NOTE: this appliance's database predates the generated superuser password; see docs/SECURITY_HARDENING.md"
 ( cd "$DEPLOY/compose" && docker compose -f infra.yml up -d )
 for _ in $(seq 1 60); do
   docker exec stayconnect-pg pg_isready -U stayconnect >/dev/null 2>&1 && break
@@ -161,7 +178,7 @@ fi
 # keybootstrap creates the durable-throttle key, the OTP generation-1 key AND the voucher code-encryption
 # key. The last one is not optional on a production build: IAM-v2 VOUCHER cannot be configured off there, so
 # scd refuses to start without it and crash-loops on first boot.
-KEYBOOTSTRAP_DSN="postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect_site?sslmode=disable" \
+KEYBOOTSTRAP_DSN="postgres://stayconnect:${STAYCONNECT_PG_PASSWORD:-stayconnect}@127.0.0.1:5432/stayconnect_site?sslmode=disable" \
   "$SC/bin/keybootstrap" >/dev/null
 for k in throttle.key voucher_dek.key otp_hmac_1.key; do
   [ -s "$ETC/secrets/$k" ] || die "keybootstrap did not produce $k"
@@ -324,8 +341,15 @@ EOF
 NETD_DB_URL=${NETD_DB_URL}
 NETD_WAN_IFACE=${WAN_IFACE}
 NETD_MGMT_IFACE=${WAN_IFACE}
+NETD_MGMT_ADDR=auto
 NETD_LAN_PHYS=${LAN_IFACE}
 EOF
+# THE ADMIN CONSOLE'S PORT 443 IS PINNED TO THE WAN ADDRESS (docs/HOTEL_ADMIN_IP_ALIAS.md). The WAN is also the
+# management interface (two-NIC topology, docs/DEPLOYMENT_APPLIANCE.md), so without a pin 443 was accepted on
+# EVERY address the WAN NIC carries. "auto" pins it to the WAN's current primary IPv4 and follows a change made
+# through System network (cmd/netd/nft_watch.go); a literal address would lock the console out at the first WAN
+# readdressing. Added to an existing netd.env too, because this script never rewrites one.
+grep -qE '^NETD_MGMT_ADDR=' "$ETC/netd.env" || printf 'NETD_MGMT_ADDR=auto\n' >> "$ETC/netd.env"
 [ -f "$ETC/portald.env" ] || printf 'PORTALD_SCD_SOCKET=/run/stayconnect/scd.sock\n' > "$ETC/portald.env"
 [ -f "$ETC/pmsd.env" ] || cp "$DEPLOY/env/pmsd.env.dark" "$ETC/pmsd.env"
 chmod 640 "$ETC"/*.env && chown root:stayconnect "$ETC"/*.env

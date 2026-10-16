@@ -379,6 +379,12 @@ func (s *server) updateGuestNetwork(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "not_found", "client network not found")
 		return
 	}
+	// THE EDITED NETWORK MAY NOT COLLIDE WITH ANOTHER LIVE ONE (N-14): checked on what is now stored, so a PUT
+	// that changes the subnet, the name or enabled is judged exactly as the next apply would see it.
+	if cerr := s.enabledConflict(ctx, tx, id); cerr != nil {
+		writeNetworkInsertErr(w, cerr)
+		return
+	}
 	// replace pools if provided
 	if in.Pools != nil {
 		if _, err := tx.Exec(ctx, `DELETE FROM dhcp_pools WHERE guest_network_id=$1`, id); err != nil {
@@ -397,6 +403,14 @@ func (s *server) updateGuestNetwork(w http.ResponseWriter, r *http.Request) {
 	s.audit(r, "network.guest.updated", "guest_network", id, nil)
 	writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "updated"})
 }
+
+// activeOnNetworkSQL counts the sessions live ON this network now: an active session whose address is inside
+// the network's subnet (enabled subnets never overlap). It used to join every device that had EVER appeared on
+// the network, so a device that had moved to another network was counted on both -- the status doubled, and a
+// network nobody was using could not be deleted (audit N-14).
+const activeOnNetworkSQL = `SELECT count(*) FROM iam_v2.sessions se
+	  JOIN guest_networks g ON g.id = $1
+	 WHERE se.state = 'active' AND se.ended IS NULL AND se.ip IS NOT NULL AND se.ip <<= g.subnet_cidr`
 
 func (s *server) deleteGuestNetwork(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -418,9 +432,7 @@ func (s *server) deleteGuestNetwork(w http.ResponseWriter, r *http.Request) {
 			"whether this client network is still in use could not be determined, so it was not deleted")
 		return
 	}
-	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.sessions se
-	           JOIN iam_v2.device_network_appearances a ON a.device_id = se.device_id
-	          WHERE a.guest_network_id=$1 AND se.state='active'`, id).Scan(&active); err != nil {
+	if err := s.db.QueryRow(ctx, activeOnNetworkSQL, id).Scan(&active); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal",
 			"whether this client network still has clients online could not be determined, so it was not deleted")
 		return
@@ -475,13 +487,28 @@ func (s *server) enableGuestNetwork(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	tag, err := s.db.Exec(ctx, `UPDATE guest_networks SET enabled=true, updated_at=now() WHERE id=$1`, id)
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "enable failed")
+		return
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx, `UPDATE guest_networks SET enabled=true, updated_at=now() WHERE id=$1`, id)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "enable failed")
 		return
 	}
 	if tag.RowsAffected() == 0 {
 		jsonErr(w, http.StatusNotFound, "not_found", "guest network not found")
+		return
+	}
+	// Enabling puts the network back among the live ones, so it is checked against them first (N-14).
+	if cerr := s.enabledConflict(ctx, tx, id); cerr != nil {
+		writeNetworkInsertErr(w, cerr)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "enable failed")
 		return
 	}
 	s.audit(r, "network.guest.enabled", "guest_network", id, nil)
@@ -499,9 +526,7 @@ func (s *server) guestNetworkStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var active int
-	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.sessions se
-	           JOIN iam_v2.device_network_appearances a ON a.device_id = se.device_id
-	          WHERE a.guest_network_id=$1 AND se.state='active'`, id).Scan(&active)
+	_ = s.db.QueryRow(ctx, activeOnNetworkSQL, id).Scan(&active)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id": id, "bridge_name": bridge, "enabled": enabled, "active_clients": active,
 	})
@@ -518,9 +543,16 @@ func (s *server) netValidate(w http.ResponseWriter, r *http.Request) {
 // undone here, in the same request: the database and the appliance never disagree about which network is live.
 func (s *server) netApply(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Summary string `json:"summary"`
+		Summary  string `json:"summary"`
+		Password string `json:"password"`
 	}
 	_ = decodeJSON(r, &in)
+	// STEP-UP (audit N-15). An apply changes what every client network forwards; like a WAN / LAN change it
+	// needs the operator's password, checked before anything is staged or sent to netd.
+	if !s.reauth(r, in.Password) {
+		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation failed")
+		return
+	}
 	ctx, cancel := dbCtx(r)
 
 	// ONE APPLY AT A TIME, FOR THIS SITE.
@@ -597,9 +629,28 @@ func (s *server) netApply(w http.ResponseWriter, r *http.Request) {
 		staged = append(staged, m.ReplacementID)
 	}
 
-	s.audit(r, "network.apply", "network", "", map[string]any{"summary": in.Summary, "replacements": staged})
 	st, raw, err := s.netd.call(r.Context(), http.MethodPost, "/v1/apply",
 		map[string]string{"actor": s.actor(r), "summary": in.Summary})
+	// THE AUDIT FOLLOWS THE OUTCOME (audit N-15), as confirm and rollback already do: it used to be written
+	// before the netd call, so an apply that never reached the appliance or was rolled back by its health checks
+	// read in Activity as an apply.
+	{
+		detail := map[string]any{"summary": in.Summary, "replacements": staged, "status": st}
+		var out struct {
+			RevisionID string `json:"revision_id"`
+			State      string `json:"state"`
+		}
+		if err != nil {
+			detail["error"] = err.Error()
+		} else if json.Unmarshal(raw, &out) == nil {
+			detail["revision_id"], detail["state"] = out.RevisionID, out.State
+		}
+		action := "network.apply"
+		if err != nil || st >= 300 || out.State == "failed" || out.State == "rolled_back" {
+			action = "network.apply_failed"
+		}
+		s.audit(r, action, "network", out.RevisionID, detail)
+	}
 
 	// EVERYTHING BELOW RUNS ON A FRESH CONTEXT OF ITS OWN, NOT ON THE ONE THE MATERIALISE USED.
 	//
@@ -946,6 +997,15 @@ func (s *server) getRevision(w http.ResponseWriter, r *http.Request) {
 // successor, so eligibility keeps meaning what the hotel intended.
 func (s *server) confirmRevision(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	var in struct {
+		Password string `json:"password"`
+	}
+	_ = decodeJSON(r, &in)
+	// STEP-UP (audit N-15): keeping a configuration makes it permanent.
+	if !s.reauth(r, in.Password) {
+		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation failed")
+		return
+	}
 	// FAIL-CLOSED, BEFORE THE WIRE IS MADE PERMANENT. Confirming tells netd to keep this configuration; after
 	// that the retired client network is gone for good. So the packages that depend on it are pre-flighted
 	// first, writing nothing: if one could not be carried forward, the confirm is refused and the appliance is
@@ -1004,6 +1064,15 @@ func (s *server) confirmRevision(w http.ResponseWriter, r *http.Request) {
 // original client network enabled and the request waiting for another attempt.
 func (s *server) rollbackRevision(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	var in struct {
+		Password string `json:"password"`
+	}
+	_ = decodeJSON(r, &in)
+	// STEP-UP (audit N-15): a rollback changes what every client network forwards, now.
+	if !s.reauth(r, in.Password) {
+		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation failed")
+		return
+	}
 	st, raw, err := s.netd.call(r.Context(), http.MethodPost, "/v1/rollback",
 		map[string]string{"revision_id": id, "actor": s.actor(r)})
 	if err != nil {

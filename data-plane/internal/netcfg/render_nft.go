@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"strings"
 )
 
@@ -269,7 +270,29 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	// Pre-authentication DNS straight to a public resolver, rate-limited exactly like DNS to the gateway and for
 	// the same reason placed before the established accept; authenticated devices are exempt.
 	fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" meta l4proto { tcp, udp } th dport 53 iifname . ip saddr != @auth_ipv4 iifname . ip saddr != @phase3_auth_ipv4 update @dns_preauth_rl { ip saddr limit rate over 20/second burst 40 packets } counter name \"dns_preauth_limited\" drop comment \"pre-auth DNS rate limit\"\n", topo.WANInterface)
+	// CLIENT ISOLATION (audit N-4): the switch was stored and never rendered. A client's packet ROUTED back into
+	// its own network (sent to the gateway's MAC for another client's address) is dropped here, before the
+	// established accept so an existing flow is not exempt. Clients that share an access point or switch port
+	// exchange frames there without the appliance ever seeing them, which is why the console tells the operator
+	// to switch on the access point's own client isolation as well.
+	for _, n := range enabled {
+		if n.ClientIsolation {
+			fmt.Fprintf(&b, "\t\tiifname \"%s\" oifname \"%s\" drop comment \"client isolation\"\n", n.BridgeName, n.BridgeName)
+		}
+	}
 	b.WriteString("\t\tct state established,related accept\n\t\tct state invalid drop\n")
+	// A NETWORK ON CUSTOM DNS REACHES ITS OWN RESOLVERS BEFORE SIGN-IN (audit N-6). DHCP hands those clients the
+	// custom servers instead of the gateway, and nothing opened them pre-authentication: a client could resolve
+	// nothing, so neither its captive check nor the sign-in page's own names worked. Port 53 only, to exactly the
+	// configured addresses, from that network only (rate-limited above like all pre-auth DNS). Before the
+	// management drop, because a hotel's own resolver commonly sits in a management range and the operator named
+	// it explicitly.
+	for _, n := range enabled {
+		if s := customDNSServers(n); s != "" {
+			fmt.Fprintf(&b, "\t\tiifname \"%s\" ip daddr { %s } meta l4proto { tcp, udp } th dport 53 accept comment \"custom DNS (pre-auth)\"\n",
+				n.BridgeName, s)
+		}
+	}
 	// block guests reaching management subnets
 	for _, cidr := range topo.MgmtCIDRs {
 		fmt.Fprintf(&b, "\t\tiifname @guest_interfaces ip daddr %s drop comment \"guest -> mgmt blocked\"\n", cidr)
@@ -391,6 +414,25 @@ func renderPortalVIP(topo Topology) string {
 		return ip.String()
 	}
 	return ""
+}
+
+// customDNSServers is the network's custom resolvers as an nft set body, or "" when it uses the appliance's.
+// Only well-formed IPv4 addresses are rendered: one malformed element would break the whole atomic ruleset.
+func customDNSServers(n GuestNetwork) string {
+	if n.DNSMode != "custom" {
+		return ""
+	}
+	var parts []string
+	seen := map[string]bool{}
+	for _, d := range n.DNSServers {
+		ip := net.ParseIP(strings.TrimSpace(d)).To4()
+		if ip == nil || ip.IsUnspecified() || seen[ip.String()] {
+			continue
+		}
+		seen[ip.String()] = true
+		parts = append(parts, ip.String())
+	}
+	return strings.Join(parts, ", ")
 }
 
 func joinBridges(nets []GuestNetwork) string {

@@ -56,9 +56,14 @@ revoked.json), env files, and the Postgres data dir.
 
 ## 3. nftables policy (deltas vs the pilot ruleset)
 
-- input (drop default): mgmt allows SSH 22 + Caddy 443 (Admin Console) **from the
-  mgmt VLAN only**; client networks allow DHCP/DNS/8380/8343/ICMP. **No 8080/3000
-  accepts anywhere** ([SECURITY_HARDENING.md](SECURITY_HARDENING.md) §2).
+- input (drop default): the **WAN/management interface** (two-NIC rule above) accepts SSH 22
+  and Caddy 443 (Admin Console). Port 443 is **pinned to the WAN's own address**
+  (`NETD_MGMT_ADDR=auto`, set by provisioning: the current primary IPv4 of `NETD_MGMT_IFACE`,
+  followed automatically when System network changes it), so it is refused on any other address
+  the WAN NIC carries. There is no separate management VLAN to restrict to: who can reach the WAN
+  address is decided by the hotel's upstream network. Client networks allow DHCP/DNS/8380/8343/ICMP
+  to their own gateway only. **No 8080/3000 accepts anywhere**
+  ([SECURITY_HARDENING.md](SECURITY_HARDENING.md) §2).
 - forward: client→uplink iff `saddr @auth_ipv4` or `daddr @walled_garden_ip`;
   client→mgmt VLAN explicitly dropped.
 - **IPv6: dropped on the client LAN** (no RAs, no v6 forwarding from br-lan)

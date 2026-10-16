@@ -22,6 +22,19 @@ Type=simple
 # Restart=always, exactly today's behaviour, never worse.
 ExecStartPre=/opt/stayconnect/bin/wait-for-site-db.sh
 ExecStart=/opt/stayconnect/bin/netd
+# WHO MAY CALL WHICH ROUTE (cmd/netd/caller_authz.go). The socket is group-readable by every service in the
+# stayconnect group -- portald holds that group for scd's socket -- so netd checks the kernel-reported uid
+# (SO_PEERCRED) on every route and refuses anyone not named here. Unset or unresolvable = nobody (fail closed).
+#   NETD_ADMIN_CALLERS  guest/system network configuration, leases, interfaces, health: edged, and root for the
+#                       operator test scripts (scripts/phase19-*.sh)
+#   NETD_FLOW_CALLERS   /v1/flows/end, the kernel half of a staff disconnect: scd (root)
+#   NETD_EDGED_CALLER   the only caller whose request body names the audited actor; anyone else is recorded as
+#                       itself ("local:<user>(<uid>)")
+# The Phase-3 plan routes are authenticated separately against NETD_PHASE3_PRODUCER_UID (netd.env).
+# netd.env may override any of these (EnvironmentFile wins over Environment=).
+Environment=NETD_ADMIN_CALLERS=stayconnect,root
+Environment=NETD_FLOW_CALLERS=root
+Environment=NETD_EDGED_CALLER=stayconnect
 EnvironmentFile=-/etc/stayconnect/netd.env
 User=root
 Group=root

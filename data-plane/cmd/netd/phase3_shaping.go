@@ -167,6 +167,27 @@ type phase3Shaping struct {
 	// restoreNote records why durable class state was not carried forward, so an operator can tell
 	// "nothing was running" from "we could not prove what was running".
 	restoreNote string
+	// endedTorn remembers the torn-down sessions the plan still lists, so their teardown is not repeated every
+	// pass (audit B-9). Keyed by classKey; rebuilt from the plan on every pass.
+	endedTorn map[string]bool
+	// passClasses caches tc class reads for the SHAPE step of one pass (classPresent). nil outside a pass.
+	passClasses map[string]map[int]shape.ClassBytes
+}
+
+// passLeases asks the DHCP server for its lease list at most once per reconciliation pass.
+type passLeases struct {
+	src    leaseSource
+	done   bool
+	leases []KeaLease
+	err    error
+}
+
+func (l *passLeases) Leases() ([]KeaLease, error) {
+	if !l.done {
+		l.leases, l.err = l.src.Leases()
+		l.done = true
+	}
+	return l.leases, l.err
 }
 
 // speedAllocationShared is the plan-revision mode in which every session under one Entitlement borrows from a
@@ -278,6 +299,18 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 	if p.minorOwner == nil {
 		p.minorOwner = map[string]string{}
 	}
+	if p.endedTorn == nil {
+		p.endedTorn = map[string]bool{}
+	}
+	// ONE DHCP LEASE LIST PER PASS (audit B-9). The ownership check used to ask Kea for every lease once per
+	// SESSION per tick; a pass now asks once and every session is judged against the same answer.
+	if p.owner.src != nil {
+		saved := p.owner
+		p.owner.src = &passLeases{src: saved.src}
+		defer func() { p.owner = saved }()
+	}
+	p.passClasses = nil
+	defer func() { p.passClasses = nil }()
 
 	// desired[bridge][minor] = the session that must occupy that class.
 	desired := map[string]map[int]shapeplan.Session{}
@@ -338,6 +371,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 	}
 
 	// 1. TEAR DOWN — explicit, precise, by address.
+	stillTorn := map[string]bool{}
 	for _, s := range tear {
 		ip := net.ParseIP(s.IP)
 		if ip == nil {
@@ -369,6 +403,14 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 				continue
 			}
 		}
+		// ALREADY ENDED (audit B-9). The producer keeps listing an ended session for a while; it was denied, its
+		// class deleted and its durable record ended on an earlier pass, so repeating the kernel work every tick
+		// is pure cost. Anything that could still be installed for it is caught by the stray sweeps below, which
+		// remove every element and class the plan does not want.
+		if p.endedTorn[classKey(s.Bridge, s.SessionID)] {
+			stillTorn[classKey(s.Bridge, s.SessionID)] = true
+			continue
+		}
 		p.endSeries(s.Bridge, s.SessionID) // the series ends here; a future class for this session is a new one
 		// PACKET AUTHORIZATION FIRST. An entitlement that expired must stop reaching the internet even if tc
 		// teardown then fails; the reverse order would leave a guest online because a class delete failed.
@@ -385,46 +427,24 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			res.Problems = append(res.Problems, "tear "+s.SessionID+": access denied but tc cleanup failed: "+err.Error())
 			continue
 		}
-		p.markEnded(ctx, s.SessionID, s.EndReason)
+		if p.markEnded(ctx, s.SessionID, s.EndReason) {
+			stillTorn[classKey(s.Bridge, s.SessionID)] = true
+		}
 		if minor, ok := shape.MinorForIP(ip); ok {
 			delete(p.minorOwner, minorKey(s.Bridge, minor))
 		}
 		delete(p.classes, classKey(s.Bridge, s.SessionID))
 		res.TornDown++
 	}
+	// Forget sessions the plan no longer mentions, so the memory is bounded by the plan.
+	p.endedTorn = stillTorn
 
-	// 2. REMOVE STRAYS — everything installed on a managed bridge that the plan does not claim.
-	for _, bridge := range sortedKeys(bridges) {
-		installed, err := p.shp.ReadClasses(ctx, bridge)
-		if err != nil {
-			// Unknown installed state means unknown strays. Say so rather than silently reconciling against
-			// an assumption: an operator seeing "applied cleanly" would believe enforcement is exact.
-			res.Failed++
-			res.Problems = append(res.Problems, "stray scan failed on "+bridge+": "+err.Error())
-			continue
-		}
-		for _, minor := range sortedInts(installed) {
-			if minor < shape.GuestMinorBase || minor > shape.GuestMinorMax {
-				continue // appliance infrastructure, never per-session state
-			}
-			if _, want := desired[bridge][minor]; want {
-				continue
-			}
-			owner := p.minorOwner[minorKey(bridge, minor)]
-			if err := p.shp.DeleteSessionClass(ctx, bridge, minor); err != nil {
-				res.Failed++
-				res.Problems = append(res.Problems, fmt.Sprintf("stray %d on %s: %s", minor, bridge, err.Error()))
-				continue
-			}
-			if owner != "" {
-				p.endSeries(bridge, owner)
-			}
-			delete(p.minorOwner, minorKey(bridge, minor))
-			res.StraysRemoved++
-		}
-	}
-
-	// 2b. REMOVE STRAY PACKET AUTHORIZATIONS — Phase-3 nft elements the plan does not claim.
+	// 2a. REMOVE STRAY PACKET AUTHORIZATIONS — Phase-3 nft elements the plan does not claim.
+	//
+	// BEFORE the tc stray sweep (2b), for the same reason teardown denies before it deletes: removing a stray
+	// class first would leave its still-authorized address forwarding through the bridge's default class,
+	// unshaped and uncounted, until this loop reached it. Revocation also ends the address's open flows
+	// (flushingGate), so by the time 2b deletes the class nothing is using it.
 	//
 	// This is the nft half of the same argument that justifies tc stray removal, and it matters more: a stray
 	// tc class meters traffic for a session that ended, but a stray nft element KEEPS THAT GUEST ONLINE. After
@@ -466,10 +486,41 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 						"stray authorization "+el.IP.String()+" on "+el.Bridge+" NOT removed: "+err.Error())
 					continue
 				}
-				// Its tc class, if any, is removed by the tc stray loop above/below on the same pass.
+				// Its tc class, if any, is removed by the tc stray loop (2b) on the same pass.
 				delete(view.byKey, gateKey(el.Bridge, el.IP))
 				res.StraysRemoved++
 			}
+		}
+	}
+
+	// 2b. REMOVE STRAY CLASSES — everything installed on a managed bridge that the plan does not claim.
+	for _, bridge := range sortedKeys(bridges) {
+		installed, err := p.shp.ReadClasses(ctx, bridge)
+		if err != nil {
+			// Unknown installed state means unknown strays. Say so rather than silently reconciling against
+			// an assumption: an operator seeing "applied cleanly" would believe enforcement is exact.
+			res.Failed++
+			res.Problems = append(res.Problems, "stray scan failed on "+bridge+": "+err.Error())
+			continue
+		}
+		for _, minor := range sortedInts(installed) {
+			if minor < shape.GuestMinorBase || minor > shape.GuestMinorMax {
+				continue // appliance infrastructure, never per-session state
+			}
+			if _, want := desired[bridge][minor]; want {
+				continue
+			}
+			owner := p.minorOwner[minorKey(bridge, minor)]
+			if err := p.shp.DeleteSessionClass(ctx, bridge, minor); err != nil {
+				res.Failed++
+				res.Problems = append(res.Problems, fmt.Sprintf("stray %d on %s: %s", minor, bridge, err.Error()))
+				continue
+			}
+			if owner != "" {
+				p.endSeries(bridge, owner)
+			}
+			delete(p.minorOwner, minorKey(bridge, minor))
+			res.StraysRemoved++
 		}
 	}
 
@@ -488,6 +539,10 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 	}
 
 	// 3. SHAPE what must be forwarded — STAGED and FAIL-CLOSED (see provisionSession).
+	//
+	// From here on, tc class inventories are read once per device for the pass (classPresent): the steady state
+	// used to be two tc reads per active session per tick (audit B-9).
+	p.passClasses = map[string]map[int]shape.ClassBytes{}
 	for _, bridge := range sortedKeys(bridges) {
 		byMinor := desired[bridge]
 		if len(byMinor) == 0 {

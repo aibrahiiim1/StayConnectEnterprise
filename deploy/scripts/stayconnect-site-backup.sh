@@ -96,7 +96,14 @@ STAMP="$(date -u +%Y%m%d-%H%M%S)"
 DUMP="$OUT_DIR/site-$STAMP.dump"
 ETC_TAR="$OUT_DIR/site-$STAMP-etc.tgz"
 
+# EVERY ARTEFACT IS 0600 ROOT, AND THE DIRECTORY 0700 (audit N-9). The /etc archive is a complete copy of
+# /etc/stayconnect -- service DSNs, the voucher and OTP keys, identity material -- and the dump is every guest
+# record the site holds. They used to be written 0644 into a 0755 directory: readable by every account on the
+# appliance. The nightly sweep (stayconnect-backup-cleanup) repairs anything written before this, and removes
+# sets beyond the hotel's retention setting.
+umask 077
 mkdir -p "$OUT_DIR"
+chmod 0700 "$OUT_DIR" 2>/dev/null || true
 
 # A FAILED BACKUP MUST NOT LEAVE SOMETHING THAT LOOKS LIKE A BACKUP.
 #

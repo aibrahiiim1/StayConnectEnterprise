@@ -44,6 +44,27 @@ loopback-bound. Acceptable only on the single-box pilot.
   runbook, Phase 3, and is what makes the one-instance pilot topology
   acceptable). (Neither Central nor the appliance runs or connects to a message bus — CLAUDE.md §0E.)
 
+### Database superuser password (appliance, audit N-10)
+
+A **fresh** provision now generates a random superuser password, keeps it in
+`/etc/stayconnect/secrets/pg-superuser.env` (0600) and hands it to compose; the service roles already
+had generated passwords (`gatep-set-passwords.sh`). An appliance whose database volume existed before
+keeps the password it was initialised with: `POSTGRES_PASSWORD` acts only at `initdb`, and provisioning
+never changes a running cluster.
+
+Migrating an existing appliance (a deliberate operation, not done by any deploy):
+
+1. Generate a password and write `STAYCONNECT_PG_PASSWORD=<value>` to `/etc/stayconnect/secrets/pg-superuser.env` (0600 root).
+2. `docker exec -i stayconnect-pg psql -U stayconnect -c "ALTER ROLE stayconnect PASSWORD '<value>'"` (local socket, no password needed).
+3. Anything that connects as the superuser over TCP must use it: on the appliance that is only `keybootstrap` at provisioning; service DSNs in `/etc/stayconnect/*.env` use their own roles. Check `grep -l 'stayconnect:stayconnect@' /etc/stayconnect/*.env` returns nothing.
+4. Export the file before any later `docker compose -f infra.yml up` so a recreated container is initialised consistently.
+
+### Caddy admin API (appliance, audit N-10)
+
+The Edge Caddyfile serves the admin API on `unix//run/caddy/admin.sock`, inside `/run/caddy` (0700
+`caddy`), instead of `127.0.0.1:2019`: no other local account can rewrite routing. `systemctl reload`
+still works (`caddy reload` runs as `caddy`). edged's Caddy health check probes TLS on 443 instead.
+
 ## 4. IPv6 client bypass — OPEN (must drop v6 on client LAN)
 
 The nftables table is `inet` family, so the **filter** chains do cover IPv6 —
@@ -90,7 +111,7 @@ ctrlapi, a JWT replayed against a *different* replica would pass.
 | Client-PII boundary | Enforced by design: client data exists only on the appliance, which has no telemetry subsystem (CLAUDE.md §0E; removed by appliance migration 0093); the guest-domain tables on Central were dropped (migration 0046) and the archived guest history with the `legacy_archive` schema (migration 0047) |
 | License anti-rollback | Implemented: monotonic `license_version` + issued_at + revoked-id store + 48h clock high-water ([LICENSING_AND_ENTITLEMENTS.md](LICENSING_AND_ENTITLEMENTS.md) §7) |
 | Vendor signing key | 0600 file, cloud-only; escrow + rotation procedure documented; treat as CA-grade secret ([BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md) §2) |
-| Admin Console exposure | Mgmt interface only, never WAN or client network — enforce in Caddy binds *and* nftables input chain |
+| Admin Console exposure | The WAN interface **is** the management interface (approved two-NIC topology, [DEPLOYMENT_APPLIANCE.md](DEPLOYMENT_APPLIANCE.md) §1), so the console is reachable on the WAN address and never on a client network. nftables accepts 443 on the WAN interface pinned to the WAN's own address (`NETD_MGMT_ADDR=auto`); client networks reach only their own gateway's guest services. Who can reach the WAN address is the hotel's upstream network's decision; restricting it to a management subnet is done there, not on the appliance |
 | Provider secrets (PMS/Stripe/Twilio/SendGrid/OAuth) | Write-only in APIs; stored per-site in the site DB; never sync |
 | No RLS | Cloud tenant isolation remains app-enforced (`EffectiveTenantID`); the edge split removes the worst blast radius (client data), RLS on the cloud DB remains desirable — Roadmap |
 | Registration / activation | Token-less, self-signed registration (proof of the identity key), rate-limited per client address; clone and hardware-reuse attempts are refused with a security alert; a retired identity key is recorded (`retired_appliance_identities`) and refused (`identity_retired`); nothing is authorized until a platform admin activates it (step-up) and the appliance verifies the signed assignment against its pinned key registry. Enrollment tokens no longer exist ([CENTRAL_CONTROL_PLANE.md §5](CENTRAL_CONTROL_PLANE.md#5-security-invariants-unchanged-by-this-redesign)) |

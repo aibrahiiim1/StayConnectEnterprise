@@ -240,6 +240,8 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 			// Client networks: create, batch create, replace and delete are site-database work in edged (only
 			// validate/apply/confirm/rollback reach netd), so they are exercised here against a real schema.
 			mountResource(r, s, "network", s.networkRoutes)
+			// The walled garden and its widest-network policy (0125).
+			mountResource(r, s, "walled-garden", s.walledGardenRoutes)
 			// Client accounts and the generated-password format (0104): paging, search, newest-first and the
 			// format setting are exercised through the real router, role matrix and database.
 			mountResource(r, s, "guest-accounts", s.guestAccountsRoutes)

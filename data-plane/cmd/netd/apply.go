@@ -88,6 +88,11 @@ type applier struct {
 	keaMu sync.Mutex
 	// busy counts apply / rollback / boot reconcile in progress; the runtime refresh stands aside while > 0.
 	busy atomic.Int32
+	// nftMu serialises every structural converge (apply, rollback, boot, the periodic re-assertion in
+	// nft_watch.go), so two of them can never interleave their atomic table replacements.
+	nftMu sync.Mutex
+	// mgmtAddrFn reads an interface's primary IPv4 for NETD_MGMT_ADDR=auto (nft_watch.go). nil = the live system.
+	mgmtAddrFn func(iface string) string
 	// Seams: the configured portal address, the HTTPS state, the host's addresses, the portal link's state,
 	// the Kea control socket, and the editable intent (for the validate endpoint). Defaults read the database,
 	// `ip -j -4 addr`, /sys/class/net and the real Kea socket.

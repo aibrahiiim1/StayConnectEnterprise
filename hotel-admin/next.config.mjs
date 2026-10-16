@@ -29,6 +29,13 @@ const nextConfig = {
       { source: "/commercial-packages", destination: "/internet-packages", permanent: true },
     ];
   },
+  // THE API PROXY WAITS AS LONG AS edged DOES. Next's rewrite proxy gives up after 30 s by default, and a
+  // client-network or WAN/LAN apply legitimately takes longer (bridges, Kea, netplan, health checks): the
+  // operator saw an error while the change went on applying. edged bounds every ordinary request at 15 s and
+  // the network applies at 180 s (cmd/edged/route_timeout.go); this only lets those finish.
+  experimental: {
+    proxyTimeout: 190_000,
+  },
   async rewrites() {
     return [
       { source: "/api/:path*", destination: `${EDGE_BASE}/:path*` },

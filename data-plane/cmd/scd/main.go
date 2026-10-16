@@ -188,8 +188,10 @@ type server struct {
 	methodSwitches func(ctx context.Context) (*tenantcfg.AuthMethods, error)
 	nft            *localNFT
 	shp            *shape.Client
-	mail           mail.Mailer
-	sms            sms.Sender
+	// flows ends an address's access and open flows through netd (netd_flows.go); nil in tests without netd.
+	flows flowEnder
+	mail  mail.Mailer
+	sms   sms.Sender
 	// whatsapp delivers one-time codes as a WhatsApp authentication template (its own channel, not SMS).
 	whatsapp whatsapp.Sender
 	// otpIssuer issues a challenge; nil means otp.Issue against s.db. A test with no database supplies its own.
@@ -503,19 +505,38 @@ func (s *server) revoke(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "revoked"})
 }
 
-// denyAtGate runs after the caller has ended the session row -- /v1/sessions/revoke by address, the Email
-// accounts sweep and password reset by session (self_service.go). It removes the address from the LEGACY
-// authorization set, best effort (netd also drains that set to empty).
+// denyAtGate is the kernel half of an operator disconnect: the address leaves the guest authorization set on its
+// ingress bridge and its shaping class goes. The session row is ended by the caller, with the caller's reason --
+// /v1/sessions/revoke by address, the Email accounts sweep and password reset by session (self_service.go).
+// Both kernel steps are best effort and logged: netd also converges the set from iam_v2.sessions, so an ended
+// session cannot stay admitted for longer than its next pass.
 //
-// It no longer touches tc (audit B-14). The per-session class belongs to netd, the single Phase-3 shaping
-// writer: deleting it here, outside netd's inventory, dropped the guest's flows into the bridge default class
-// (unshaped, uncounted) and made netd re-create the class under a new epoch if the session was still live. The
-// Phase-3 authorization and class are torn down by netd from the ended row on its next pass, about a second.
+// THE ORDER IS: legacy set, then netd (Phase-3 authorization revoked and the address's open flows ended,
+// netd_flows.go), then -- only for an address netd does NOT manage -- the legacy tc class. Deleting a class while
+// the address is still authorized is how an open flow ended up unshaped and uncounted in the bridge's default
+// class (audit B-1).
 func (s *server) denyAtGate(ctx context.Context, ip net.IP) {
 	nc := s.resolveNetwork(ctx, ip)
 	if s.nft != nil && s.nft.client != nil {
 		if err := s.nft.Deny(ctx, nc.Bridge, ip); err != nil {
 			slog.Error("nft deny", "err", err)
+		}
+	}
+	managed := false
+	if s.flows != nil {
+		res, err := s.flows.EndFlows(ctx, ip)
+		managed = res.Phase3Managed
+		if err != nil {
+			// netd also converges from iam_v2.sessions on its next pass; what is lost here is the immediacy.
+			slog.Error("netd could not end the address's flows", "ip", ip.String(), "err", err)
+		}
+	}
+	if managed {
+		return // the class is netd's; its reconciliation removes it once nothing can reach it
+	}
+	if s.shp != nil {
+		if err := s.shp.DeleteSession(ctx, nc.Bridge, ip); err != nil {
+			slog.Warn("shape delete", "err", err)
 		}
 	}
 }
@@ -715,6 +736,7 @@ func main() {
 	s := &server{
 		nft:          newLocalNFT(nft.New()),
 		shp:          shape.New(),
+		flows:        newNetdFlows(envOr("SCD_NETD_SOCKET", "/run/stayconnect/netd.sock")),
 		mail:         mail.NewStub(c.MailLogPath),
 		sms:          sms.NewStub(c.SMSLogPath),
 		whatsapp:     whatsapp.NewStub(c.WhatsAppLogPath),
