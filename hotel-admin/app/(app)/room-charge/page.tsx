@@ -52,6 +52,7 @@ import { Table, TBody, TD, TH, THead, TR, TableWrap } from "@/components/ui/tabl
 import { useToast } from "@/components/ui/toast";
 import { ArrowUpRight, BedDouble, CheckCircle2, ShieldCheck, Undo2 } from "lucide-react";
 import { CodeList, CodeText } from "../payment-methods/codes";
+import { RoomChargeLiveNotice } from "@/components/room-charge-live-notice";
 
 const FIAS = "protel-fias";
 const ATTESTATION_MIN = 20;
@@ -169,6 +170,7 @@ export default function RoomChargePage() {
   return (
     <PageShell>
       {header}
+      <RoomChargeLiveNotice />
       {!isSiteAdmin && (
         <ReadOnlyNotice>Approving a PMS interface for room charge is a site administrator decision.</ReadOnlyNotice>
       )}

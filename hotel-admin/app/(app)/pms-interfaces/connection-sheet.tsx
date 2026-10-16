@@ -17,7 +17,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { api, type PmsConnectionSettings, type PmsGuestNetworkRoute, type PmsInterfaceHealth, type PmsRevision } from "@/lib/api";
+import { api, ApiError, type PmsConnectionSettings, type PmsGuestNetworkRoute, type PmsInterfaceHealth, type PmsRevision } from "@/lib/api";
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetSection } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +42,7 @@ import { ChecksRow, ProviderTile, When, lifecycleTone, providerLabel } from "./c
 import { ConfigSummary, ProviderFieldsForm, configRows } from "./provider-fields";
 import { SynchronizationCard } from "./synchronization-card";
 import { Router } from "lucide-react";
+import { RoomChargeLiveNotice } from "@/components/room-charge-live-notice";
 
 export type SheetTab = "overview" | "configuration" | "credentials" | "networks" | "history" | "actions";
 
@@ -134,6 +135,7 @@ export function ConnectionSheet({
             </TabsList>
           </div>
           <SheetBody>
+            <RoomChargeLiveNotice className="mb-3" />
             <ErrorBanner err={pmsErrorText(err)} />
             <TabsContent value="overview" className="space-y-5">
               <OverviewTab iface={iface} health={health} provider={p} routes={routes} />
@@ -333,11 +335,18 @@ function PublishDialog({
   const [reason, setReason] = useState(PUBLISH_REASONS[0].value);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
+  // ROOM CHARGE WOULD BE SWITCHED OFF (audit H-3). edged refuses, with room_charge_reset_unconfirmed, to put
+  // live a version without the posting target the live version carries -- room charge would stop for this
+  // connection until it is onboarded again. The operator is told and may confirm.
+  const [resetWarning, setResetWarning] = useState<string | null>(null);
+  const [resetAck, setResetAck] = useState(false);
   const older = !!target && !!iface.current_revision_no && target.revision_no < iface.current_revision_no;
 
   useEffect(() => {
     if (target) {
       setErr(null);
+      setResetWarning(null);
+      setResetAck(false);
       setReason(older ? "CONFIG_ROLLBACK" : iface.published ? "CONFIG_CORRECTION" : "INITIAL_COMMISSIONING");
     }
   }, [target, older, iface.published]);
@@ -352,12 +361,14 @@ function PublishDialog({
           ? "From this moment the connection uses these settings and reconnects with them. Guests keep being verified against the guest list already loaded while it does."
           : "This becomes the configuration the connection uses. It does not activate the connection — that is a separate step."
       }
-      confirmLabel="Put live"
+      confirmLabel={resetWarning ? "Put live and turn room charge off" : "Put live"}
+      confirmVariant={resetWarning ? "danger" : "primary"}
       busy={busy}
-      error={pmsErrorText(err)}
+      error={resetWarning ? null : pmsErrorText(err)}
       requirePassword
       onConfirm={async ({ password }) => {
         if (!target) return;
+        if (resetWarning && !resetAck) return;
         setBusy(true); setErr(null);
         try {
           await api.post(`/pms-interfaces/${iface.id}/publish`, {
@@ -367,18 +378,32 @@ function PublishDialog({
             expected_revision_id: iface.current_revision_id ?? "",
             reason_code: reason,
             password,
+            ...(resetWarning && resetAck ? { confirm_room_charge_reset: true } : {}),
           });
           toast.success(`Version ${target.revision_no} is live`,
             iface.lifecycle_state === "ACTIVE" ? "The connection reconnects with it." : "Activate the connection when you are ready.");
           onClose();
           await onDone();
         } catch (e) {
-          setErr(e);
+          if (e instanceof ApiError && e.code === "room_charge_reset_unconfirmed") {
+            setResetWarning(e.message);
+          } else {
+            setErr(e);
+          }
         } finally {
           setBusy(false);
         }
       }}
     >
+      {resetWarning && (
+        <Callout tone="warning" title="Room charge will be turned off for this connection">
+          {resetWarning}
+          <label className="mt-2 flex items-start gap-2 text-sm">
+            <input type="checkbox" checked={resetAck} onChange={(e) => setResetAck(e.target.checked)} />
+            <span>I understand that clients will not be offered charge to room until the connection is approved for room charge again.</span>
+          </label>
+        </Callout>
+      )}
       <Field label="Reason" hint="Recorded with the change.">
         <Select value={reason} onChange={(e) => setReason(e.target.value)}>
           {PUBLISH_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
@@ -937,7 +962,7 @@ function lifecycleMoves(iface: PmsConnection, providerName: string): LifecycleMo
   const activate: LifecycleMove = {
     to: "ACTIVE", label: iface.lifecycle_state === "DRAINING" ? "Activate again" : "Activate", variant: "primary",
     title: "Activate this connection?",
-    description: `The appliance connects to ${providerName} with the live configuration${iface.current_revision_no ? ` (version ${iface.current_revision_no})` : ""} and loads the guest list. Guests on the networks that use this connection can then sign in with their room number. Nothing is written to the PMS.`,
+    description: `The appliance connects to ${providerName} with the live configuration${iface.current_revision_no ? ` (version ${iface.current_revision_no})` : ""} and loads the guest list. Guests on the networks that use this connection can then sign in with their room number. Nothing is sent to the PMS except approved room charges, and only if room charge is approved for this connection.`,
   };
   const pause: LifecycleMove = {
     to: "AUTH_DISABLED", label: "Pause room sign-in", variant: "danger",

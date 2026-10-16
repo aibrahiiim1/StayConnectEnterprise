@@ -354,12 +354,16 @@ export default function StaysPage() {
                         {s.room ?? "—"}
                         {s.vip ? <Badge tone="warn">VIP</Badge> : null}
                       </div>
-                      <div className="font-mono text-2xs text-muted-foreground">
-                        {s.external_reservation_id}
-                      </div>
+                      {s.external_reservation_id && (
+                        <div className="font-mono text-2xs text-muted-foreground">
+                          {s.external_reservation_id}
+                        </div>
+                      )}
                     </TD>
                     <TD>
-                      <div>{s.primary_guest ?? <span className="text-muted-foreground">Not provided</span>}</div>
+                      <div>{s.identity_hidden
+                        ? <span className="text-muted-foreground">Not shown to your role</span>
+                        : s.primary_guest ?? <span className="text-muted-foreground">Not provided</span>}</div>
                       {s.occupants > 1 && (
                         <div className="text-xs text-muted-foreground">+{s.occupants - 1} sharing</div>
                       )}
@@ -423,7 +427,7 @@ export default function StaysPage() {
         title={detail ? `Room ${detail.room ?? "—"}${detail.primary_guest ? ` · ${detail.primary_guest}` : ""}` : ""}
         description={
           detail
-            ? `Reservation ${detail.external_reservation_id}${detail.pms_interface_label ? ` · from ${detail.pms_interface_label}` : ""}`
+            ? `${detail.identity_hidden ? "Reservation not shown to your role" : `Reservation ${detail.external_reservation_id}`}${detail.pms_interface_label ? ` · from ${detail.pms_interface_label}` : ""}`
             : undefined
         }
       >
@@ -451,22 +455,19 @@ export default function StaysPage() {
                       value={<span className="text-sm">{speedPair(detail.access_down_kbps, detail.access_up_kbps) ?? "—"}</span>}
                     />
                     <Metric
-                      label="Devices online"
+                      label="Devices with a place"
                       value={
                         <span className="text-sm">
-                          {detail.access_active_devices ?? 0}
+                          {placesHeld(detail)}
                           {typeof detail.access_max_devices === "number" && detail.access_max_devices > 0
                             ? ` of ${detail.access_max_devices}`
                             : ""}
+                          <span className="block text-2xs text-muted-foreground">
+                            {detail.access_active_devices ?? 0} online now
+                          </span>
                         </span>
                       }
-                      tone={
-                        typeof detail.access_max_devices === "number" &&
-                        detail.access_max_devices > 0 &&
-                        (detail.access_active_devices ?? 0) >= detail.access_max_devices
-                          ? "warn"
-                          : "default"
-                      }
+                      tone={atDeviceLimit(detail) ? "warn" : "default"}
                     />
                   </div>
                   {detail.access_status !== "ACTIVE" && (
@@ -522,7 +523,7 @@ export default function StaysPage() {
                 <ul className="space-y-1 text-sm">
                   {detail.occupant_list.map((o, i) => (
                     <li key={i} className="flex items-center gap-2">
-                      {o.display_name ?? <span className="text-muted-foreground">Name not provided</span>}
+                      {o.display_name ?? <span className="text-muted-foreground">{detail.identity_hidden ? "Name not shown to your role" : "Name not provided"}</span>}
                       {o.is_primary && <Badge tone="info">Main guest</Badge>}
                     </li>
                   ))}
@@ -690,10 +691,7 @@ function AccessCell({ stay }: { stay: Stay }) {
       </span>
     );
   }
-  const atLimit =
-    typeof stay.access_max_devices === "number" &&
-    stay.access_max_devices > 0 &&
-    (stay.access_active_devices ?? 0) >= stay.access_max_devices;
+  const atLimit = atDeviceLimit(stay);
   return (
     <>
       <div className="text-sm">{stay.access_package_name || stay.access_package_code || "Package"}</div>
@@ -701,7 +699,7 @@ function AccessCell({ stay }: { stay: Stay }) {
         {speedPair(stay.access_down_kbps, stay.access_up_kbps) ?? stay.access_plan_code ?? ""}
       </div>
       <div className={atLimit ? "text-2xs text-warning-subtle-foreground" : "text-2xs text-muted-foreground"}>
-        {stay.access_active_devices ?? 0}
+        {placesHeld(stay)}
         {typeof stay.access_max_devices === "number" && stay.access_max_devices > 0
           ? ` / ${stay.access_max_devices} devices`
           : " devices"}
@@ -709,4 +707,15 @@ function AccessCell({ stay }: { stay: Stay }) {
       </div>
     </>
   );
+}
+
+// THE DEVICE LIMIT COUNTS PLACES, NOT SESSIONS (audit H-14). A device keeps its place on the package after it
+// signs out, so "at the limit" is the devices holding a place, which may be more than those online. An older
+// appliance that does not report places falls back to the online count.
+function placesHeld(s: Stay): number {
+  return s.access_authorized_devices ?? s.access_active_devices ?? 0;
+}
+
+function atDeviceLimit(s: Stay): boolean {
+  return typeof s.access_max_devices === "number" && s.access_max_devices > 0 && placesHeld(s) >= s.access_max_devices;
 }

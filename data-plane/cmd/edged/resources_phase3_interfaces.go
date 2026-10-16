@@ -327,6 +327,10 @@ type pmsRevisionRow struct {
 	PostingTargetModel   string `json:"posting_target_model"`
 	NormalizationVersion int    `json:"normalization_version"`
 	SourceFingerprint    string `json:"source_fingerprint,omitempty"`
+	// The currency pair is a revision COLUMN, not a config key; the console reads it to carry it through an
+	// edit (audit H-3), because a draft authored without it silently drops it.
+	FinancialBaseCurrency *string `json:"financial_base_currency,omitempty"`
+	FinancialCurrencyExp  *int    `json:"financial_base_currency_exponent,omitempty"`
 	// Config is the Revision's declarative configuration, REDACTED before it leaves the process — see
 	// redactRevisionConfig. A Revision's config is operator-authored and can acquire anything over time.
 	Config json.RawMessage `json:"config"`
@@ -370,8 +374,16 @@ func redactRevisionConfig(raw []byte) json.RawMessage {
 	return out
 }
 
+// notSecretConfigKeys are configuration settings whose NAME happens to contain a secret-ish word but whose value
+// is a plain operational number. max_auth_cache_age_seconds contains "auth", so it was redacted on every read --
+// and the console, which never saves "[redacted]", then dropped it from every edited draft (audit H-3).
+var notSecretConfigKeys = map[string]bool{"max_auth_cache_age_seconds": true}
+
 func redactMap(m map[string]any) {
 	for k, v := range m {
+		if notSecretConfigKeys[k] {
+			continue
+		}
 		lower := strings.ToLower(k)
 		hit := false
 		for _, s := range secretishKeys {
@@ -426,7 +438,8 @@ func (s *server) listPMSInterfaceRevisions(w http.ResponseWriter, r *http.Reques
 	rows, err := s.db.Query(ctx, `
 		SELECT rev.id::text, rev.revision_no, rev.source_timezone, rev.posting_target_model,
 		       rev.normalization_version, COALESCE(rev.source_fingerprint,''), rev.config,
-		       (rev.id = i.current_revision_id) AS published
+		       (rev.id = i.current_revision_id) AS published,
+		       rev.financial_base_currency::text, rev.financial_base_currency_exponent::int
 		  FROM iam_v2.pms_interface_revisions rev
 		  JOIN iam_v2.pms_interfaces i ON i.id = rev.pms_interface_id
 		 WHERE rev.tenant_id=$1 AND rev.site_id=$2 AND rev.pms_interface_id=$3::uuid
@@ -442,7 +455,8 @@ func (s *server) listPMSInterfaceRevisions(w http.ResponseWriter, r *http.Reques
 		var cfg []byte
 		var published *bool
 		if err := rows.Scan(&e.ID, &e.RevisionNo, &e.SourceTimezone, &e.PostingTargetModel,
-			&e.NormalizationVersion, &e.SourceFingerprint, &cfg, &published); err != nil {
+			&e.NormalizationVersion, &e.SourceFingerprint, &cfg, &published,
+			&e.FinancialBaseCurrency, &e.FinancialCurrencyExp); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 			return
 		}

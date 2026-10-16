@@ -98,6 +98,13 @@ export const PROTEL_FIELDS: PmsProviderField[] = [
   { key: "feed_freshness_ms", label: "Guest data stale after", type: "int", required: true, default: 120000, min: 1, max: 86_400_000, unit: "ms", advanced: true },
   { key: "complete_sync_ms", label: "Full refresh at least every", type: "int", required: true, default: 600000, min: 1, max: 86_400_000, unit: "ms", advanced: true },
   {
+    // Carried through an edit like every other stored key (audit H-3): the form dropped it, so editing any
+    // timeout silently removed a site's offline sign-in window.
+    key: "max_auth_cache_age_seconds", label: "Offline sign-in window", type: "int", min: 0, max: 604800,
+    unit: "seconds", advanced: true,
+    help: "How long the last good guest list may still authorise room sign-in while the PMS cannot be reached. Leave empty for the default.",
+  },
+  {
     key: "financial_base_currency", label: "Currency for charges (optional)", type: "string", placeholder: "USD",
     help: "Three-letter code. Set it together with the decimal places, or leave both empty.",
   },
@@ -151,11 +158,16 @@ export function providerFor(kind: string, catalogue: PmsProvider[]): PmsProvider
   return null;
 }
 
-/** The field schema the form renders. Protel always uses its own top-level fields. */
+/** The field schema the form renders: THE SERVER'S (GET /pms-providers), for Protel too (audit H-3).
+ *
+ *  Protel used a list kept in this file, and the list fell behind the server: it had no
+ *  max_auth_cache_age_seconds, so an edit started from a revision that carried one saved a draft without it.
+ *  The built-in list is now only the fallback for an appliance whose catalogue cannot be read. */
 export function fieldsFor(p: PmsProvider): PmsProviderField[] {
-  if (p.kind === PROTEL_KIND) return PROTEL_FIELDS;
+  const server = p.kind === PROTEL_KIND && p !== PROTEL_FALLBACK && (p.fields?.length ?? 0) > 0;
+  const list = p.kind === PROTEL_KIND && !server ? PROTEL_FIELDS : (p.fields ?? []);
   // The time zone is asked once, for every provider, as a revision column — never twice.
-  return (p.fields ?? []).filter((f) => f.key !== "source_timezone");
+  return list.filter((f) => f.key !== "source_timezone");
 }
 
 export const needsCredential = (p: PmsProvider | null | undefined) =>
@@ -269,11 +281,13 @@ function typed(f: PmsProviderField, raw: string | boolean | undefined): unknown 
  * The Protel revision body — byte-for-byte what the configuration form has always posted: every timing field as
  * a number, the currency pair only when set, read_only fixed true, and nothing else.
  */
-export function protelRevisionBody(values: FormValues, sourceTimezone: string): Record<string, unknown> {
+export function protelRevisionBody(
+  values: FormValues, sourceTimezone: string, fields: PmsProviderField[] = PROTEL_FIELDS,
+): Record<string, unknown> {
   const num = (k: string) => Number(values[k]);
   const cur = String(values.financial_base_currency ?? "").trim().toUpperCase();
   const exp = String(values.financial_base_currency_exponent ?? "").trim();
-  return {
+  const body: Record<string, unknown> = {
     endpoint: String(values.endpoint ?? "").trim(),
     source_timezone: sourceTimezone.trim(),
     dial_timeout_ms: num("dial_timeout_ms"),
@@ -287,13 +301,21 @@ export function protelRevisionBody(values: FormValues, sourceTimezone: string): 
     financial_base_currency_exponent: exp === "" ? undefined : Number(exp),
     read_only: true,
   };
+  // EVERY OTHER FIELD THE SCHEMA NAMES, so nothing the revision carries is dropped by an edit (audit H-3):
+  // max_auth_cache_age_seconds today, and whatever the server adds to its Protel schema tomorrow.
+  for (const f of fields) {
+    if (f.key in body || f.key === "source_timezone") continue;
+    const v = typed(f, values[f.key]);
+    if (v !== undefined) body[f.key] = v;
+  }
+  return body;
 }
 
 /** A catalogue provider's revision body: the time zone as a column, everything provider-specific in provider_config. */
 export function providerRevisionBody(
   p: PmsProvider, values: FormValues, sourceTimezone: string,
 ): Record<string, unknown> {
-  if (p.kind === PROTEL_KIND) return protelRevisionBody(values, sourceTimezone);
+  if (p.kind === PROTEL_KIND) return protelRevisionBody(values, sourceTimezone, fieldsFor(p));
   const provider_config: Record<string, unknown> = {};
   for (const f of fieldsFor(p)) {
     const v = typed(f, values[f.key]);
@@ -328,7 +350,12 @@ export function valuesFromRevision(
 ): { values: FormValues; timezone: string } {
   const fields = fieldsFor(p);
   const cfg = (rev?.config ?? {}) as Record<string, unknown>;
-  const src: Record<string, unknown> = { ...cfg, ...storedProviderValues(cfg) };
+  // The currency pair is a revision COLUMN, not a config key, so it is read from the revision itself.
+  const cols: Record<string, unknown> = {};
+  const r = (rev ?? {}) as Record<string, unknown>;
+  if (r.financial_base_currency != null) cols.financial_base_currency = r.financial_base_currency;
+  if (r.financial_base_currency_exponent != null) cols.financial_base_currency_exponent = r.financial_base_currency_exponent;
+  const src: Record<string, unknown> = { ...cols, ...cfg, ...storedProviderValues(cfg) };
   // A redacted value is not a value: starting an edit from "[redacted]" would save the placeholder.
   for (const k of Object.keys(src)) if (src[k] === "[redacted]") delete src[k];
   return { values: initialValues(fields, src), timezone: rev?.source_timezone || "Africa/Cairo" };

@@ -62,6 +62,10 @@ const MATRIX: Matrix = {
     // events and resolutions are read-only evidence.
     "pms-stays": "read", "pms-events": "read", "pms-resolutions": "read",
     "checkout-grace": "write", "operational-alerts": "write",
+    // Deciding a PMS message waiting for review (acknowledge / link to a stay) and the review-expiry setting.
+    "pms-event-decisions": "write",
+    // Guest names and reservation numbers on Stays and PMS activity (a field-level key; audit H-7).
+    "pms-stay-identity": "read",
     // The interface itself is this role's job; routing and conflicts are read-only for everyone but site_admin.
     "pms-interfaces": "write", "pms-routing": "read", "pms-source-conflicts": "read",
     // Phase 5 (DARK): rotating or ending a post-stay credential. This mirrors the edged matrix exactly --
@@ -109,6 +113,7 @@ const MATRIX: Matrix = {
     // Phase 6 (DARK): the desk answers "why can't I remove my old phone" and changes no capability.
     "guest-device-self-service": "read",
     "pms-stays": "read", "pms-events": "read", "operational-alerts": "write", "checkout-grace": "read",
+    "pms-stay-identity": "read",
     "pms-interfaces": "read", "pms-routing": "read", "pms-source-conflicts": "read",
     "post-stay-profiles": "write", "stay-transfers": "write",
     "financial-review": "read", "financial-ops": "read",
@@ -124,9 +129,10 @@ const MATRIX: Matrix = {
     "guest-signin-restrictions": "write", "guest-signin-protection": "read",
     "guest-device-self-service": "read",
     "pms-stays": "read", "pms-events": "read", "operational-alerts": "write", "checkout-grace": "read",
+    "pms-stay-identity": "read",
     "pms-interfaces": "read", "pms-routing": "read", "pms-source-conflicts": "read",
     // Same desk, same conversation, same read-only relationship with the engine.
-    "pms-reconciliation": "read",
+    "pms-reconciliation": "read", "pms-roster-reconciliation": "read",
     "post-stay-profiles": "write", "stay-transfers": "write",
     "guest-accounts": "write", sessions: "write", usage: "read",
     vouchers: "write", "voucher-codes": "write", "voucher-code-settings": "read",

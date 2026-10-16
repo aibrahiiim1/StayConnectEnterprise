@@ -30,6 +30,9 @@ const SEVERITY: Record<string, { tone: "err" | "warn" | "info"; label: string }>
   HIGH: { tone: "err", label: "high" },
   MEDIUM: { tone: "warn", label: "medium" },
   LOW: { tone: "info", label: "low" },
+  // Detected from the connections' own published configuration (audit H-11): two connections whose live
+  // versions dial the same PMS source.
+  DUPLICATE_SOURCE: { tone: "err", label: "same PMS source" },
 };
 
 // "UNRESOLVED" and friends, in words. An unknown value is de-underscored rather than hidden.
@@ -148,7 +151,11 @@ export default function PMSSourceConflictsPage() {
                         <span className="text-muted-foreground">—</span>
                       )}
                     </TD>
-                    <TD className="text-sm">{resolutionWords(c.resolution)}</TD>
+                    <TD className="text-sm">
+                      {c.detected
+                        ? "Both live versions point at the same PMS. Retire or reconfigure one of them on PMS connection."
+                        : resolutionWords(c.resolution)}
+                    </TD>
                   </TR>
                 );
               })}
