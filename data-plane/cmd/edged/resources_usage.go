@@ -96,6 +96,9 @@ type usageStayRow struct {
 	EndReason     string      `json:"end_reason,omitempty"`
 }
 
+// usageSearchHeader carries the access-source search text (see listUsageSources).
+const usageSearchHeader = "X-Usage-Search"
+
 // parseWindow reads an explicit from/to, defaulting to the last 30 days.
 //
 // A DISPUTE HAS A PERIOD, and it is usually not "all time". Defaulting to everything would make the first
@@ -145,10 +148,12 @@ func (s *server) listUsageStays(w http.ResponseWriter, r *http.Request) {
 		         COALESCE(SUM(se.bytes_up), 0)   AS up,
 		         COUNT(se.id)                    AS sessions,
 		         COUNT(DISTINCT se.device_id)    AS devices,
-		         MAX(e.data_quota_bytes)         AS quota,
+		         MAX(COALESCE(e.data_quota_bytes, spr.data_quota_bytes)) AS quota,
 		         MAX(e.consumed_data_bytes)      AS consumed,
 		         MAX(e.terminal_reason)          AS end_reason
 		    FROM iam_v2.entitlements e
+		    -- THE ENFORCED ALLOWANCE (internal/enforce): the entitlement's own frozen quota, else its plan's.
+		    LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
 		    LEFT JOIN iam_v2.sessions se
 		           ON se.entitlement_id = e.id
 		          AND se.started < $4 AND (se.ended IS NULL OR se.ended > $3)
@@ -235,8 +240,8 @@ const stayHeaderSQL = `
 		       COALESCE(pi.display_label, pi.id::text),
 		       COALESCE(st.external_reservation_id, ''),
 		       st.status, st.arrival, st.departure, st.effective_checkout_at,
-		       e.data_quota_bytes, e.consumed_data_bytes, COALESCE(e.terminal_reason, ''),
-		       COALESCE(spr.name, '')
+		       COALESCE(e.data_quota_bytes, spr.data_quota_bytes), e.consumed_data_bytes,
+		       COALESCE(e.terminal_reason, ''), COALESCE(spr.name, '')
 		  FROM iam_v2.stays st
 		  LEFT JOIN iam_v2.pms_interfaces pi ON pi.id = st.pms_interface_id
 		  LEFT JOIN LATERAL (
@@ -251,6 +256,9 @@ type stayUsageDetail struct {
 	Plan     string           `json:"service_plan,omitempty"`
 	Devices  []stayDeviceRow  `json:"devices"`
 	Sessions []staySessionRow `json:"sessions"`
+	// The period the totals cover, the same [from, to) as the list.
+	From time.Time `json:"from"`
+	To   time.Time `json:"to"`
 }
 
 // errNoSuchSource is "this site has no record of it" -- a 404, never a 500.
@@ -258,8 +266,8 @@ var errNoSuchSource = errors.New("no such access source at this site")
 
 // readStayUsage reads one stay in full. It is the stay case of both /usage/stays/{id} and
 // /usage/sources/stay/{id}, so the two can never disagree.
-func (s *server) readStayUsage(ctx context.Context, stayID string) (stayUsageDetail, error) {
-	out := stayUsageDetail{Devices: []stayDeviceRow{}, Sessions: []staySessionRow{}}
+func (s *server) readStayUsage(ctx context.Context, stayID string, from, to time.Time) (stayUsageDetail, error) {
+	out := stayUsageDetail{Devices: []stayDeviceRow{}, Sessions: []staySessionRow{}, From: from, To: to}
 	if err := s.db.QueryRow(ctx, stayHeaderSQL, stayID, s.tenantID, s.siteID).Scan(
 		&out.Stay.StayID, &out.Stay.Room, &out.Stay.PMSInterface, &out.Stay.Reservation,
 		&out.Stay.Status, &out.Stay.Arrival, &out.Stay.Departure, &out.Stay.EffectiveOut,
@@ -267,7 +275,7 @@ func (s *server) readStayUsage(ctx context.Context, stayID string) (stayUsageDet
 		// As before: an unknown or malformed stay id reads as "no such stay", not as a failure.
 		return out, errNoSuchSource
 	}
-	devices, sessions, totals, err := s.subjectDevicesAndSessions(ctx, "stay", stayID)
+	devices, sessions, totals, err := s.subjectDevicesAndSessions(ctx, "stay", stayID, from, to)
 	if err != nil {
 		return out, err
 	}
@@ -277,7 +285,8 @@ func (s *server) readStayUsage(ctx context.Context, stayID string) (stayUsageDet
 
 // getStayUsage answers "how much internet did this room use during this stay".
 func (s *server) getStayUsage(w http.ResponseWriter, r *http.Request) {
-	out, err := s.readStayUsage(r.Context(), chi.URLParam(r, "stay_id"))
+	from, to := parseWindow(r)
+	out, err := s.readStayUsage(r.Context(), chi.URLParam(r, "stay_id"), from, to)
 	switch {
 	case errors.Is(err, errNoSuchSource):
 		jsonErr(w, http.StatusNotFound, "not_found", "no such stay at this site")
@@ -302,6 +311,7 @@ func subjectDevicesSQL(col string) string {
 		  JOIN iam_v2.entitlements e ON e.id = se.entitlement_id
 		  LEFT JOIN iam_v2.devices d ON d.id = se.device_id
 		 WHERE e.` + col + ` = $1 AND se.tenant_id = $2 AND se.site_id = $3
+		   AND se.started < $5 AND (se.ended IS NULL OR se.ended > $4)
 		 GROUP BY d.mac
 		 ORDER BY 2 DESC`
 }
@@ -317,19 +327,24 @@ func subjectSessionsSQL(col string) string {
 		  JOIN iam_v2.entitlements e ON e.id = se.entitlement_id
 		  LEFT JOIN iam_v2.devices d ON d.id = se.device_id
 		 WHERE e.` + col + ` = $1 AND se.tenant_id = $2 AND se.site_id = $3
+		   AND se.started < $5 AND (se.ended IS NULL OR se.ended > $4)
 		 ORDER BY se.started DESC NULLS LAST LIMIT 200`
 }
 
 // subjectDevicesAndSessions reads the device breakdown and the sessions of one access source, and totals them.
 // The totals are the sum of the device rows, which are the sum of the sessions: nothing else is added.
-func (s *server) subjectDevicesAndSessions(ctx context.Context, kind, id string) ([]stayDeviceRow, []staySessionRow, usageTotals, error) {
+//
+// OVER THE SAME PERIOD AS THE LIST. The detail used to sum every session the source ever had while the list it
+// was opened from summed the last 30 days, so the two totals for one room disagreed on the same screen. Both
+// now read [from, to): the list's period travels into the detail.
+func (s *server) subjectDevicesAndSessions(ctx context.Context, kind, id string, from, to time.Time) ([]stayDeviceRow, []staySessionRow, usageTotals, error) {
 	devices, sessions := []stayDeviceRow{}, []staySessionRow{}
 	var t usageTotals
 	col, ok := usageSubjectColumn[kind]
 	if !ok {
 		return devices, sessions, t, errors.New("unknown access source type")
 	}
-	drows, err := s.db.Query(ctx, subjectDevicesSQL(col), id, s.tenantID, s.siteID)
+	drows, err := s.db.Query(ctx, subjectDevicesSQL(col), id, s.tenantID, s.siteID, from, to)
 	if err != nil {
 		return devices, sessions, t, err
 	}
@@ -352,7 +367,7 @@ func (s *server) subjectDevicesAndSessions(ctx context.Context, kind, id string)
 	t.Devices = len(devices)
 	t.BytesAll = t.BytesDown + t.BytesUp
 
-	srows, err := s.db.Query(ctx, subjectSessionsSQL(col), id, s.tenantID, s.siteID)
+	srows, err := s.db.Query(ctx, subjectSessionsSQL(col), id, s.tenantID, s.siteID, from, to)
 	if err != nil {
 		return devices, sessions, t, err
 	}
@@ -505,6 +520,9 @@ type usageSample struct {
 	BytesUp   int64     `json:"bytes_up"`
 }
 
+// sessionSamplesMax is how many samples one request returns, oldest first.
+const sessionSamplesMax = 2000
+
 // listSessionSamples is what makes a disputed total defensible: the durable samples it was summed from.
 func (s *server) listSessionSamples(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "session_id")
@@ -513,7 +531,7 @@ func (s *server) listSessionSamples(w http.ResponseWriter, r *http.Request) {
 		  FROM iam_v2.accounting_records
 		 WHERE session_id = $1 AND tenant_id = $2 AND site_id = $3
 		 ORDER BY sampled_at ASC
-		 LIMIT 2000`, id, s.tenantID, s.siteID)
+		 LIMIT `+strconv.Itoa(sessionSamplesMax+1), id, s.tenantID, s.siteID)
 	if err != nil {
 		slog.Error("session samples failed", "err", err)
 		jsonErr(w, http.StatusInternalServerError, "internal", "the accounting samples could not be read")
@@ -536,10 +554,19 @@ func (s *server) listSessionSamples(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "the accounting samples could not be read")
 		return
 	}
+	// A CUT LIST SAYS SO. Past sessionSamplesMax the samples shown no longer add up to the session total, and
+	// the screen must say "the first N" rather than present a partial sum as the whole.
+	truncated := len(out) > sessionSamplesMax
+	if truncated {
+		x := out[sessionSamplesMax]
+		down -= x.BytesDown
+		up -= x.BytesUp
+		out = out[:sessionSamplesMax]
+	}
 	// The sum is returned WITH the samples so the screen can show that they add up to the session total
 	// rather than asking the operator to trust that they do.
 	writeJSON(w, http.StatusOK, map[string]any{
-		"samples": out, "sample_count": len(out),
+		"samples": out, "sample_count": len(out), "truncated": truncated,
 		"bytes_down": down, "bytes_up": up, "bytes_total": down + up,
 	})
 }
@@ -616,11 +643,13 @@ func usageSourceListSQL(limit, offset int) string {
 		         COALESCE(SUM(se.bytes_up), 0)   AS up,
 		         COUNT(se.id)                    AS sessions,
 		         COUNT(DISTINCT se.device_id)    AS devices,
-		         MAX(e.data_quota_bytes)         AS quota,
+		         MAX(COALESCE(e.data_quota_bytes, spr.data_quota_bytes)) AS quota,
 		         MAX(e.consumed_data_bytes)      AS consumed,
 		         MAX(e.terminal_reason)          AS end_reason,
 		         MAX(se.started)                 AS last_started
 		    FROM iam_v2.entitlements e
+		    -- THE ENFORCED ALLOWANCE (internal/enforce): the entitlement's own frozen quota, else its plan's.
+		    LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
 		    LEFT JOIN iam_v2.sessions se
 		           ON se.entitlement_id = e.id
 		          AND se.started < $4 AND (se.ended IS NULL OR se.ended > $3)
@@ -693,7 +722,16 @@ func (s *server) listUsageSources(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	q := likeEscape(normaliseSourceQuery(r.URL.Query().Get("q")))
+	// THE SEARCH TEXT TRAVELS IN A HEADER (X-Usage-Search): it is a username or a room number, and edged logs
+	// request lines. ?q= is still read for an older console.
+	raw, ok := readSearch(w, r, usageSearchHeader)
+	if !ok {
+		return
+	}
+	if raw == "" {
+		raw = r.URL.Query().Get("q")
+	}
+	q := likeEscape(normaliseSourceQuery(raw))
 
 	rows, err := s.db.Query(r.Context(), usageSourceListSQL(pg.Fetch(), pg.Offset()),
 		s.tenantID, s.siteID, from, to, kind, q)
@@ -745,7 +783,8 @@ func finishSourceRow(x usageSourceRow) usageSourceRow {
 // Only the username: never display_name, notes or password_hash.
 const accountHeaderSQL = `
 		SELECT ga.id::text, ga.username,
-		       en.data_quota_bytes, en.consumed_data_bytes, COALESCE(en.terminal_reason, ''),
+		       COALESCE(en.data_quota_bytes, spr.data_quota_bytes), en.consumed_data_bytes,
+		       COALESCE(en.terminal_reason, ''),
 		       COALESCE(en.status, ''), COALESCE(spr.name, '')
 		  FROM iam_v2.guest_access_accounts ga
 		  LEFT JOIN LATERAL (
@@ -761,8 +800,8 @@ const accountHeaderSQL = `
 // read (svc_edged may not); a voucher that granted nothing at this site has no usage and reads as not found.
 const voucherHeaderSQL = `
 		SELECT x.voucher_id::text,
-		       x.data_quota_bytes, x.consumed_data_bytes, COALESCE(x.terminal_reason, ''),
-		       x.status, COALESCE(spr.name, '')
+		       COALESCE(x.data_quota_bytes, spr.data_quota_bytes), x.consumed_data_bytes,
+		       COALESCE(x.terminal_reason, ''), x.status, COALESCE(spr.name, '')
 		  FROM iam_v2.entitlements x
 		  LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = x.service_plan_revision_id
 		 WHERE x.voucher_id = $1 AND x.tenant_id = $2 AND x.site_id = $3
@@ -771,8 +810,8 @@ const voucherHeaderSQL = `
 // openHeaderSQL is voucherHeaderSQL for the anonymous access subject: its most recent entitlement here.
 const openHeaderSQL = `
 		SELECT x.anonymous_subject_id::text,
-		       x.data_quota_bytes, x.consumed_data_bytes, COALESCE(x.terminal_reason, ''),
-		       x.status, COALESCE(spr.name, '')
+		       COALESCE(x.data_quota_bytes, spr.data_quota_bytes), x.consumed_data_bytes,
+		       COALESCE(x.terminal_reason, ''), x.status, COALESCE(spr.name, '')
 		  FROM iam_v2.entitlements x
 		  LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = x.service_plan_revision_id
 		 WHERE x.anonymous_subject_id = $1 AND x.tenant_id = $2 AND x.site_id = $3
@@ -784,6 +823,8 @@ type sourceUsageDetail struct {
 	AccessStatus string           `json:"access_status,omitempty"`
 	Devices      []stayDeviceRow  `json:"devices"`
 	Sessions     []staySessionRow `json:"sessions"`
+	From         time.Time        `json:"from"`
+	To           time.Time        `json:"to"`
 }
 
 // getSourceUsage is one access source, in full: totals, allowance, why access ended, devices, sessions.
@@ -800,7 +841,8 @@ func (s *server) getSourceUsage(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "not_found", "no such access source at this site")
 		return
 	}
-	out, err := s.readSourceUsage(r.Context(), kind, id)
+	from, to := parseWindow(r)
+	out, err := s.readSourceUsage(r.Context(), kind, id, from, to)
 	switch {
 	case errors.Is(err, errNoSuchSource):
 		jsonErr(w, http.StatusNotFound, "not_found", "no such access source at this site")
@@ -813,14 +855,14 @@ func (s *server) getSourceUsage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (s *server) readSourceUsage(ctx context.Context, kind, id string) (sourceUsageDetail, error) {
-	out := sourceUsageDetail{Devices: []stayDeviceRow{}, Sessions: []staySessionRow{}}
+func (s *server) readSourceUsage(ctx context.Context, kind, id string, from, to time.Time) (sourceUsageDetail, error) {
+	out := sourceUsageDetail{Devices: []stayDeviceRow{}, Sessions: []staySessionRow{}, From: from, To: to}
 	out.Source.Type = kind
 
 	var err error
 	switch kind {
 	case "stay":
-		st, e := s.readStayUsage(ctx, id)
+		st, e := s.readStayUsage(ctx, id, from, to)
 		if e != nil {
 			return out, e
 		}
@@ -857,7 +899,7 @@ func (s *server) readSourceUsage(ctx context.Context, kind, id string) (sourceUs
 	if err != nil {
 		return out, err
 	}
-	devices, sessions, totals, err := s.subjectDevicesAndSessions(ctx, kind, id)
+	devices, sessions, totals, err := s.subjectDevicesAndSessions(ctx, kind, id, from, to)
 	if err != nil {
 		return out, err
 	}

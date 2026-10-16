@@ -220,12 +220,13 @@ describe("the sidebar and the role matrix stay in step with the server", () => {
     // A nav item whose resource is missing from the matrix is hidden from every role but site_admin — which is
     // how PMS connection, Network routing and Duplicate sources became unreachable for the role that owns them.
     const nav = read(join(ROOT, "components/nav.tsx"));
-    const roles = read(join(ROOT, "lib/roles.ts"));
+    // The console's matrix is GENERATED from edged's rolePerms (lib/role-permissions.generated.json), so "known"
+    // is every key some role holds there.
+    const generated = JSON.parse(read(join(ROOT, "lib/role-permissions.generated.json"))) as {
+      roles: Record<string, Record<string, string>>;
+    };
     const resources = new Set([...nav.matchAll(/resource:\s*"([^"]+)"/g)].map((m) => m[1]));
-    // Both spellings: lib/roles.ts quotes hyphenated keys ("pms-stays") and leaves single words bare (sessions).
-    const known = new Set(
-      [...roles.matchAll(/"?([a-z0-9-]+)"?:\s*"(?:read|write)"/g)].map((m) => m[1]),
-    );
+    const known = new Set(Object.values(generated.roles).flatMap((row) => Object.keys(row)));
     // These are legitimately site_admin-only on the server too.
     const adminOnly = new Set(["operators"]);
     const missing = [...resources].filter((r) => !known.has(r) && !adminOnly.has(r));

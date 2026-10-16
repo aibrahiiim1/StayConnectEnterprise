@@ -8,8 +8,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError, type GuestAccount, type GuestAccountManage } from "@/lib/api";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody, ConfirmDialog,
 } from "@/components/ui/dialog";
+import { REASON_MAX_CHARS, REASON_MIN_CHARS } from "@/lib/reason";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -39,9 +40,19 @@ function packageLabel(status: string): string {
   }
 }
 
-export function ManageAccountDialog({ account, mayWrite, onClose, onChanged, onRemove }: {
+export function ManageAccountDialog({
+  account, mayWrite, mayReadDevices = true, mayActOnDevices, mayVouch = false, onClose, onChanged, onRemove,
+}: {
   account: GuestAccount | null;
   mayWrite: boolean;
+  /** The device view reads /client-devices (sessions READ); without it the Device button is not offered. */
+  mayReadDevices?: boolean;
+  /** Device actions are sessions WRITE, not guest-accounts WRITE: the voucher station holds the second only.
+   *  Defaults to mayWrite for callers that have not said. */
+  mayActOnDevices?: boolean;
+  /** Mark email verified vouches for an address on the client's behalf: code-reveal WRITE, the password and a
+   *  reason (edged guest_accounts_manage.go). */
+  mayVouch?: boolean;
   onClose: () => void;
   // Something about the account changed: the list behind should reload.
   onChanged: () => void;
@@ -53,6 +64,9 @@ export function ManageAccountDialog({ account, mayWrite, onClose, onChanged, onR
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [device, setDevice] = useState<string | null>(null);
+  const [vouching, setVouching] = useState(false);
+  const [vouchErr, setVouchErr] = useState<unknown>(null);
+  const deviceActions = mayActOnDevices ?? mayWrite;
 
   const load = useCallback(async () => {
     if (!account) return;
@@ -123,11 +137,12 @@ export function ManageAccountDialog({ account, mayWrite, onClose, onChanged, onR
               <div className="flex flex-wrap gap-1.5 pt-1">
                 {canAdjust && (
                   <>
-                    <Button size="sm" variant="outline" disabled={busy !== null}
-                      onClick={() => void act("verify", () => api.post(`/guest-accounts/${a!.id}/verify-email`),
-                        "The email address is marked verified.")}>
-                      <BadgeCheck /> {busy === "verify" ? "Saving…" : "Mark email verified"}
-                    </Button>
+                    {mayVouch && (
+                      <Button size="sm" variant="outline" disabled={busy !== null}
+                        onClick={() => { setVouchErr(null); setVouching(true); }}>
+                        <BadgeCheck /> {busy === "verify" ? "Saving…" : "Mark email verified"}
+                      </Button>
+                    )}
                     <Button size="sm" variant="outline" disabled={busy !== null}
                       onClick={() => void act("restart", () => api.post(`/guest-accounts/${a!.id}/restart-verification`),
                         "A new verification period has started.")}>
@@ -156,7 +171,7 @@ export function ManageAccountDialog({ account, mayWrite, onClose, onChanged, onR
             )}
             {canAdjust && (
               <p className="text-caption text-muted-foreground">
-                Mark email verified when you have confirmed the address yourself. A new verification period moves
+                {mayVouch ? "Mark email verified when you have confirmed the address yourself; it asks for your password and a reason. " : ""}A new verification period moves
                 the deadline forward by the site&apos;s setting and makes the extra hour available again. Neither
                 changes the client&apos;s package.
               </p>
@@ -214,7 +229,9 @@ export function ManageAccountDialog({ account, mayWrite, onClose, onChanged, onR
                               {d.first_authorized ? formatDate(d.first_authorized) : "—"}
                             </TD>
                             <TD className="text-end">
-                              <Button size="sm" variant="ghost" onClick={() => setDevice(d.id)}>Device</Button>
+                              {mayReadDevices && (
+                                <Button size="sm" variant="ghost" onClick={() => setDevice(d.id)}>Device</Button>
+                              )}
                             </TD>
                           </TR>
                         ))}
@@ -239,8 +256,35 @@ export function ManageAccountDialog({ account, mayWrite, onClose, onChanged, onR
           </section>
         </DialogBody>
       </DialogContent>
-      <DeviceDetailDialog deviceId={device} mayWrite={mayWrite} onClose={() => setDevice(null)}
+      <DeviceDetailDialog deviceId={device} mayWrite={deviceActions} onClose={() => setDevice(null)}
         onChanged={() => { onChanged(); void load(); }} />
+      <ConfirmDialog
+        open={vouching}
+        onOpenChange={(v) => !v && setVouching(false)}
+        title="Mark this email address verified?"
+        description={a ? `You vouch that ${a.username} belongs to this client. The account's verification deadline no longer applies.` : undefined}
+        consequences={["The client was not asked to prove the address; your name and reason are recorded instead."]}
+        confirmLabel="Mark verified"
+        requireReason
+        reasonMinLength={REASON_MIN_CHARS}
+        reasonMaxLength={REASON_MAX_CHARS}
+        reasonPlaceholder="For example: the client showed the email on their phone at reception"
+        requirePassword
+        busy={busy === "verify"}
+        error={vouchErr}
+        onConfirm={async ({ reason, password }) => {
+          setBusy("verify"); setVouchErr(null);
+          try {
+            await api.post(`/guest-accounts/${a!.id}/verify-email`, { reason: reason.trim(), password });
+            toast.success("The email address is marked verified.");
+            setVouching(false);
+            onChanged();
+            await load();
+          } catch (e) {
+            setVouchErr(e instanceof ApiError && e.code === "reauth_required" ? new Error("Your password was not accepted.") : e);
+          } finally { setBusy(null); }
+        }}
+      />
     </Dialog>
   );
 }

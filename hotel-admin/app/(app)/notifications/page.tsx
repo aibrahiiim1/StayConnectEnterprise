@@ -263,14 +263,15 @@ export default function NotificationsPage() {
         icon={<MessageSquare />}
         eyebrow="Client access"
         title="Delivery"
-        description="How one-time codes reach clients. Without a working sender, sign-in methods that need a code cannot be used."
+        description="How the appliance reaches clients: SMS and WhatsApp sign-in codes, and the verification and password-reset emails of Email accounts."
         help={
           <>
             <HelpSection title="What a sender does">
               <p>
-                How the appliance delivers one-time sign-in codes to clients, by email, text message or WhatsApp. Without a
-                working sender, any sign-in method that needs a code cannot be used. Room numbers, vouchers and
-                accounts do not need one.
+                An <strong>SMS</strong> or <strong>WhatsApp</strong> sender delivers one-time sign-in codes; without one, that
+                code method cannot be offered. An <strong>email</strong> sender delivers the verification and
+                password-reset emails of Email accounts (there is no emailed sign-in code any more). Room numbers,
+                vouchers and staff-created accounts do not need a sender.
               </p>
             </HelpSection>
             <HelpSection title="Setting one up">
@@ -280,7 +281,8 @@ export default function NotificationsPage() {
                   <>Credentials come from the sending service&apos;s own console. The key or password is stored write-only and is never shown again. When editing, leave it blank to keep the one already stored.</>,
                   <>The channel and service of a sender cannot be changed; remove it and add it again instead.</>,
                   <>Use <strong>Send a test message</strong> after saving: it connects with the stored credentials and delivers one message to an address you type. The result is recorded in the Health column.</>,
-                  <>Whether clients are offered email, SMS or WhatsApp codes is switched on in <strong>Sign-in methods</strong>. A change saved here is live at once; nothing needs restarting.</>,
+                  <>Whether clients are offered Email accounts, SMS codes or WhatsApp codes is switched on in <strong>Sign-in methods</strong>. A change saved here is live at once; nothing needs restarting.</>,
+                  <>A <strong>Test only</strong> sender delivers nothing to a client; it exists to try the flow. Sign-in methods does not count it as a working sender.</>,
                   <>A WhatsApp sender needs an approved <strong>authentication template</strong> from Meta (template name and language) or Twilio (content SID); codes are sent only through that template.</>,
                 ]}
               />
@@ -301,7 +303,7 @@ export default function NotificationsPage() {
             <EmptyState
               icon={<Send />}
               title="No sender is configured"
-              hint="Clients cannot be sent an emailed or texted code until one is. Room numbers, vouchers and accounts do not need this."
+              hint="Clients cannot be sent an SMS or WhatsApp code, or an Email account's verification email, until one is. Room numbers, vouchers and staff-created accounts do not need this."
               action={writable && channels.length > 0 ? <Button onClick={openNew}><Plus /> Add a sender</Button> : undefined}
             />
           ) : (
@@ -544,7 +546,7 @@ export default function NotificationsPage() {
         title="Remove this sender?"
         description={
           deleting
-            ? `Codes will no longer be sent by ${deleting.display_name || (CHANNEL_LABELS[deleting.channel] ?? deleting.channel).toLowerCase()}. Any sign-in method that depends on it will stop working for clients until another sender is configured.`
+            ? `Nothing more will be sent by ${deleting.display_name || (CHANNEL_LABELS[deleting.channel] ?? deleting.channel).toLowerCase()}. A sign-in method that depends on it (SMS or WhatsApp codes, Email account emails) stops working for clients until another sender is configured.`
             : undefined
         }
         confirmLabel="Remove"

@@ -112,7 +112,7 @@ describe("the navigation contract", () => {
   it("still hides what the role may not read, even when the appliance serves it", async () => {
     // Authorization is untouched by any of this. edged enforces server-side regardless of the menu.
     await renderNavWith(SERVED, ["payments_operator"]);
-    expect(screen.queryByText("Internet packages")).toBeNull();
+    expect(screen.queryByText("Client accounts")).toBeNull();
     expect(screen.queryByText("Operators")).toBeNull();
   });
 

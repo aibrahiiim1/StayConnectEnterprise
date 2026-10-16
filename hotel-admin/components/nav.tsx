@@ -102,7 +102,10 @@ const SECTIONS: Section[] = [
       { href: "/sessions",       label: "Active sessions", icon: Monitor,  resource: "sessions", keywords: "online now devices connected who is on wifi disconnect guests" },
       { href: "/devices",        label: "Devices",         icon: Smartphone, resource: "sessions", keywords: "device mac phone laptop place slot release replace disconnect sign in again test reset remembered" },
       { href: "/usage",          label: "Usage explorer",  icon: ChartColumn, resource: "usage", keywords: "data used quota dispute how much room device mac gigabytes consumption investigate guests" },
-      { href: "/guest-device-self-service", label: "Client devices", icon: Smartphone, resource: "guest-device-self-service", keywords: "phone laptop remove device guest devices" },
+      // "Client devices" (the dark Phase-6 guest self-service switch) is RETIRED from the menu (decision D-K): since
+      // migration 0118 the portal's "Your devices" list is always on and does not read that switch, so the screen
+      // saved a setting that controlled nothing. Devices is the one place for client devices; its daily
+      // device-change limit is the setting that does govern the portal.
       { href: "/online-time",    label: "Online-time budgets", icon: Hourglass, resource: "sessions", capability: "sessions.aggregate-time", keywords: "time remaining allowance hours guests" },
     ],
   },

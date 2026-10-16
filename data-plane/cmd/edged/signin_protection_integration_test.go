@@ -626,6 +626,7 @@ func TestIntegration_Protection_ChangingTheSettingChangesEnforcementWithoutARest
 		"observation_window_seconds": 120,
 		"restriction_seconds":        90,
 		"reason":                     "conference floor, guests kept mistyping",
+		"password":                   f.password,
 	})
 	if status != http.StatusOK {
 		t.Fatalf("save policy: %d %s", status, raw)
@@ -664,6 +665,7 @@ func TestIntegration_Protection_ShorteningTheSettingDoesNotShortenAWaitAlreadyRu
 
 	if status, raw := f.doRaw(t, http.MethodPut, "/guest-signin-protection", map[string]any{
 		"max_failed_attempts": 5, "observation_window_seconds": 60, "restriction_seconds": 30,
+		"reason": "shorter waits for the conference", "password": f.password,
 	}); status != http.StatusOK {
 		t.Fatalf("save policy: %d %s", status, raw)
 	}
@@ -711,13 +713,13 @@ func TestIntegration_Protection_EveryPolicyChangeRecordsWhoAndFromWhat(t *testin
 	f := newAPI(t)
 	if status, raw := f.doRaw(t, http.MethodPut, "/guest-signin-protection", map[string]any{
 		"max_failed_attempts": 8, "observation_window_seconds": 300, "restriction_seconds": 120,
-		"reason": "first change",
+		"reason": "first change", "password": f.password,
 	}); status != http.StatusOK {
 		t.Fatalf("save: %d %s", status, raw)
 	}
 	if status, raw := f.doRaw(t, http.MethodPut, "/guest-signin-protection", map[string]any{
 		"max_failed_attempts": 20, "observation_window_seconds": 300, "restriction_seconds": 30,
-		"reason": "second change, weaker",
+		"reason": "second change, weaker", "password": f.password,
 	}); status != http.StatusOK {
 		t.Fatalf("save: %d %s", status, raw)
 	}
@@ -778,6 +780,7 @@ func TestIntegration_Protection_TheChangeLogCannotBeRewritten(t *testing.T) {
 	f := newAPI(t)
 	if status, _ := f.doRaw(t, http.MethodPut, "/guest-signin-protection", map[string]any{
 		"max_failed_attempts": 7, "observation_window_seconds": 60, "restriction_seconds": 60,
+		"reason": "setup for the append-only check", "password": f.password,
 	}); status != http.StatusOK {
 		t.Fatal("setup save failed")
 	}

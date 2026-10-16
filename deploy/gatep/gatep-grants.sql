@@ -317,6 +317,8 @@ GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_acctd;
 \ir svc-self-service-grants.sql
 -- Device management: client replacement and release, staff slot release and fresh sign-in (0118).
 \ir svc-device-management-grants.sql
+-- Client accounts: Disable suspends the package, Enable resumes it (0120).
+\ir svc-client-accounts-grants.sql
 
 -- EXECUTE on the CANONICAL audited, versioned publication boundary. This is the only function the product
 -- calls to change checkout grace policy: it requires an active operator as actor, a bounded machine reason

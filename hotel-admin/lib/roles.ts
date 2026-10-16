@@ -1,7 +1,17 @@
-// Site-role → resource permission matrix, mirroring edged's rolePerms
-// (data-plane/cmd/edged/auth.go) and docs/ROLE_AND_SCOPE_MATRIX.md §3.
-// The UI uses this only to hide nav items / write controls the operator's
-// role cannot use — edged enforces the real gate on every request.
+// Site-role → resource permission matrix. The UI uses this only to hide nav items / write controls the
+// operator's role cannot use — edged enforces the real gate on every request.
+//
+// THE TABLE IS NOT WRITTEN HERE. It is GENERATED from edged's rolePerms (data-plane/cmd/edged/auth.go) into
+// role-permissions.generated.json by data-plane/cmd/edged/role_permissions_console_test.go, and that test fails
+// when the two differ. The hand-copied table this file used to carry drifted three ways at once (audit L-2,
+// 2026-10-16): it offered Usage explorer to three roles edged refused, hid Internet packages and Service plans
+// from the Site IT manager edged lets edit them, and sent the payments role to a page whose data it could not
+// read. A permission this table is missing is a screen nobody can find; one it invents is a button that 403s.
+//
+// To change who may do what, change auth.go and regenerate:
+//   UPDATE_ROLE_PERMISSIONS=1 go test ./cmd/edged -run TestConsoleRolePermissionsAreGeneratedFromTheServerTable
+
+import generated from "./role-permissions.generated.json";
 
 export type Perm = "none" | "read" | "write";
 
@@ -30,156 +40,7 @@ export const ROLE_LABELS: Record<SiteRole, string> = {
 // Resource keys match edged's mountResource names.
 type Matrix = Record<string, Record<string, Perm>>;
 
-// THIS TABLE HAD DRIFTED FROM THE SERVER'S, AND THE DRIFT HID SCREENS.
-//
-// edged's rolePerms grants hotel_it_manager WRITE on "pms-interfaces" and READ on "pms-routing" and
-// "pms-source-conflicts". None of those three keys appeared here, so `canRead` returned false for them and the
-// sidebar hid PMS connection, Network routing and Duplicate sources from the role that owns the PMS integration.
-// The screens worked; they were unreachable. The same omission hid "financial-ops" from everyone but site_admin
-// and "commercial-packages" from site_viewer.
-//
-// The keys below now mirror data-plane/cmd/edged/auth.go. When that file changes, this one has to change with it:
-// a permission this table is missing is a screen nobody can find, and a permission it invents is a button that
-// 403s on click.
-const MATRIX: Matrix = {
-  hotel_it_manager: {
-    // Code requests (contract §6.7): the SMS / WhatsApp list, read-only; code-reveal reads a live code.
-    "code-requests": "read", "code-reveal": "write",
-    // Guest sign-in attempts. Two keys, mirroring edged exactly: the list, and the credential comparison.
-    // "View_Guest_SignIn_Attempts" and "View_Guest_SignIn_Credentials" are the same two permissions under
-    // the names the Product Owner uses.
-    "guest-signin-attempts": "read", "guest-signin-credentials": "read",
-    // Guest sign-in protection: the property's thresholds are a configuration decision, which is this
-    // role's territory, and whoever sets the threshold may waive one instance of it.
-    "guest-signin-protection": "write", "guest-signin-restrictions": "write",
-    // Unresolved departures are READ-ONLY for every role. There is no local action: the PMS resolves them.
-    "pms-reconciliation": "read",
-    // Roster reconciliation is a different power: it runs automatically, and this role owns the integration
-    // it belongs to -- the reconnect bounds and the blocker thresholds are its settings to change.
-    "pms-roster-reconciliation": "write",
-    // Phase 3 (DARK): the IT manager owns the PMS integration — publishing the
-    // checkout-grace policy and clearing alerts are manager actions; stays,
-    // events and resolutions are read-only evidence.
-    "pms-stays": "read", "pms-events": "read", "pms-resolutions": "read",
-    "checkout-grace": "write", "operational-alerts": "write",
-    // The interface itself is this role's job; routing and conflicts are read-only for everyone but site_admin.
-    "pms-interfaces": "write", "pms-routing": "read", "pms-source-conflicts": "read",
-    // Phase 5 (DARK): rotating or ending a post-stay credential. This mirrors the edged matrix exactly --
-    // it decides whether the BUTTON is offered, never whether the action is allowed.
-    "post-stay-profiles": "write",
-    "stay-transfers": "write",
-    // Phase 6 (DARK): the per-appliance Guest Device Self-Service setting follows auth-methods -- which
-    // capabilities the property offers its guests is a configuration decision, not a desk action.
-    "guest-device-self-service": "write",
-    "guest-accounts": "write",
-    sessions: "write",
-    usage: "read",
-    "auth-methods": "write", "walled-garden": "write", "client-groups": "write",
-    "portal-branding": "write", "notification-providers": "write",
-    "social-providers": "write",
-    // Card payment provider accounts (site-local; credentials write-only). Modules and a PMS interface's
-    // financial onboarding are READ here: switching a module and approving room charge are site_admin only.
-    "payment-providers": "write", modules: "read", "pms-financial-onboarding": "read",
-    network: "write",
-    // Portal HTTPS (portal_https.read / portal_https.manage): follows network; changes also need the password.
-    "portal-https": "write",
-    "financial-review": "read", "financial-ops": "read",
-    // Vouchers: prints and cancels cards, and CHOOSES THE FORMAT -- which is a property configuration
-    // decision, the same reasoning that puts auth-methods here. Not "voucher-codes": this role owns
-    // configuration and the PMS integration, and neither job requires reading a guest's credential.
-    vouchers: "write", "voucher-code-settings": "write",
-    // The format of GENERATED client-account passwords follows the voucher code format role for role.
-    "account-password-settings": "write",
-    operators: "read", audit: "read",
-    reports: "read", backups: "read", license: "read", diagnostics: "write",
-    // Downloading a full database dump (decision D-B): this role and site_admin only, behind the password.
-    "backup-download": "write",
-  },
-  front_office_operator: {
-    // Code requests (contract §6.7): the SMS / WhatsApp list, read-only; code-reveal reads a live code.
-    "code-requests": "read", "code-reveal": "write",
-    // The reception desk: the role this screen was asked for, and the one that needs the comparison.
-    "guest-signin-attempts": "read", "guest-signin-credentials": "read",
-    // The desk RELEASES and does not re-tune: the restricted guest is standing there now, but making
-    // "five" into "twenty" for the whole property must not be the quickest way to help one person.
-    "guest-signin-restrictions": "write", "guest-signin-protection": "read",
-    // "Is this guest still checked in according to the PMS" is a reception question; this list answers it.
-    "pms-reconciliation": "read",
-    // The desk READS the reconciliation state and its blockers -- "is the PMS link the reason" is a question
-    // it gets asked -- and changes none of the integration's settings.
-    "pms-roster-reconciliation": "read",
-    // Phase 6 (DARK): the desk answers "why can't I remove my old phone" and changes no capability.
-    "guest-device-self-service": "read",
-    "pms-stays": "read", "pms-events": "read", "operational-alerts": "write", "checkout-grace": "read",
-    "pms-interfaces": "read", "pms-routing": "read", "pms-source-conflicts": "read",
-    "post-stay-profiles": "write", "stay-transfers": "write",
-    "financial-review": "read", "financial-ops": "read",
-    "guest-accounts": "write", sessions: "write", usage: "read",
-    vouchers: "write", "voucher-codes": "write", "voucher-code-settings": "read",
-    "account-password-settings": "read",
-    "auth-methods": "read", "walled-garden": "read", "client-groups": "read", reports: "read", audit: "read", license: "read", backups: "read", diagnostics: "read",
-  },
-  guest_relations_operator: {
-    // Code requests (contract §6.7): the SMS / WhatsApp list, read-only; code-reveal reads a live code.
-    "code-requests": "read",
-    "guest-signin-attempts": "read", "guest-signin-credentials": "read",
-    "guest-signin-restrictions": "write", "guest-signin-protection": "read",
-    "guest-device-self-service": "read",
-    "pms-stays": "read", "pms-events": "read", "operational-alerts": "write", "checkout-grace": "read",
-    "pms-interfaces": "read", "pms-routing": "read", "pms-source-conflicts": "read",
-    // Same desk, same conversation, same read-only relationship with the engine.
-    "pms-reconciliation": "read",
-    "post-stay-profiles": "write", "stay-transfers": "write",
-    "guest-accounts": "write", sessions: "write", usage: "read",
-    vouchers: "write", "voucher-codes": "write", "voucher-code-settings": "read",
-    "account-password-settings": "read",
-    "auth-methods": "read", reports: "read",
-    audit: "read", license: "read", backups: "read", "walled-garden": "read", "client-groups": "read", diagnostics: "read",
-  },
-  voucher_operator: {
-    // THE DRIFT THIS FILE CARRIED: `usage: "read"` was here and is not in edged's matrix, so the sidebar
-    // offered a kiosk account a destination the appliance refuses. Removed rather than added to auth.go --
-    // a print station has no business reading guests' consumption.
-    "guest-accounts": "write", sessions: "read", reports: "read",
-    license: "read", diagnostics: "read",
-    vouchers: "write", "voucher-codes": "write", "voucher-code-settings": "read",
-    "account-password-settings": "read",
-  },
-  payments_operator: {
-    "guest-device-self-service": "read",
-    "payment-providers": "read", modules: "read", "pms-financial-onboarding": "read",
-    // Contract section 15 gives the charge decision to this role; edged additionally requires password
-    // re-authentication at the route.
-    "financial-review": "write", "financial-ops": "write",
-    sessions: "read", usage: "read", reports: "read", audit: "read", license: "read", diagnostics: "read",
-    // A voucher is a commercial instrument, so this role reads the list -- and reads no code.
-    vouchers: "read",
-  },
-  site_viewer: {
-    // Code requests (contract §6.7): the SMS / WhatsApp list, read-only; code-reveal reads a live code.
-    "code-requests": "read",
-    // The list only. A read-only observer has no reason to hold thirty days of what guests typed, so the
-    // credentials key is absent here rather than merely unused — and edged enforces that, not this file.
-    "guest-signin-attempts": "read",
-    // A viewer sees what the policy is and which devices are waiting it out, and acts on neither.
-    "guest-signin-protection": "read", "guest-signin-restrictions": "read",
-    "guest-device-self-service": "read",
-    "pms-stays": "read", "pms-events": "read", "pms-resolutions": "read", "checkout-grace": "read", "operational-alerts": "read",
-    "pms-interfaces": "read", "pms-routing": "read", "pms-source-conflicts": "read",
-    // The reconciliation backlog is evidence of the kind a viewer already reads. Acts on none of it.
-    "pms-reconciliation": "read",
-    "commercial-packages": "read",
-    "post-stay-profiles": "read", "stay-transfers": "read",
-    "financial-review": "read", "financial-ops": "read",
-    "guest-accounts": "read", sessions: "read", usage: "read", "auth-methods": "read",
-    "walled-garden": "read", "client-groups": "read", "portal-branding": "read", "notification-providers": "read", "social-providers": "read",
-    "payment-providers": "read", modules: "read", audit: "read", reports: "read",
-    backups: "read", license: "read", network: "read", diagnostics: "read", "portal-https": "read",
-    // Sees which cards exist and in what state; reads no code, for the same reason
-    // guest-signin-credentials is absent from this role.
-    vouchers: "read", "voucher-code-settings": "read", "account-password-settings": "read",
-  },
-};
+const MATRIX: Matrix = generated.roles as Matrix;
 
 const rank: Record<Perm, number> = { none: 0, read: 1, write: 2 };
 

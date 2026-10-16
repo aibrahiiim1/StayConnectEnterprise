@@ -135,8 +135,55 @@ func (s *server) authMethodsRoutes() http.Handler {
 
 // validateAuthMethodsPatch refuses a patch the portal could not act on, so a bad value is reported here
 // rather than becoming a sign-in method that silently never works.
+//
+// EVERY KEY IS KNOWN AND EVERY SHAPE IS CHECKED. The merge used to store any top-level key it was given, with any
+// value -- {"voucher":"yes"} and {"anything":{"enabled":"maybe"}} were saved -- so a typo or a stale client
+// wrote configuration nothing reads, or a value that would not parse back into tenantcfg.AuthMethods and broke
+// every reader of the document. Only the methods tenantcfg serves are accepted, each as an object of the fields
+// it actually has.
 func validateAuthMethodsPatch(patch map[string]json.RawMessage) error {
+	if len(patch) == 0 {
+		return errors.New("nothing to change: send at least one sign-in method")
+	}
+	keys := make([]string, 0, len(patch))
+	for k := range patch {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		raw := patch[k]
+		switch k {
+		case "voucher", "email_account", "sms", "whatsapp", "guest_account", "open":
+			if err := validateMethodObject(k, raw, simpleMethodFields); err != nil {
+				return err
+			}
+		case "social":
+			var providers map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &providers); err != nil || providers == nil {
+				return errors.New("social must be an object keyed by identity provider")
+			}
+			for p, v := range providers {
+				if !socialAllowedProviders[p] {
+					return fmt.Errorf("social.%s is not an identity provider (google, apple, facebook or microsoft)", p)
+				}
+				if err := validateMethodObject("social."+p, v, simpleMethodFields); err != nil {
+					return err
+				}
+			}
+		case "pms":
+			if err := validateMethodObject(k, raw, pmsMethodFields); err != nil {
+				return err
+			}
+		case "portal", "email":
+			// checked below
+		default:
+			return fmt.Errorf("%q is not a sign-in method this appliance serves", k)
+		}
+	}
 	if rawPortal, ok := patch["portal"]; ok {
+		if err := validateMethodObject("portal", rawPortal, portalFields); err != nil {
+			return err
+		}
 		var p struct {
 			PrimaryMethod      *string `json:"primary_method"`
 			RememberDeviceDays *int    `json:"remember_device_days"`
@@ -185,6 +232,55 @@ func validateAuthMethodsPatch(patch map[string]json.RawMessage) error {
 	}
 	if !pmsSignInModes[cfg.Mode] {
 		return errors.New("pms.mode must be room_any, room_lastname, room_firstname or room_reservation")
+	}
+	return nil
+}
+
+// The JSON kind each field of a method object must have.
+type amKind int
+
+const (
+	amBool amKind = iota
+	amString
+	amInt
+)
+
+// The fields tenantcfg reads for each kind of method (internal/tenantcfg). template_id is the legacy plan link
+// some stored objects still carry; it is accepted so a stored object can be saved back unchanged.
+var (
+	simpleMethodFields = map[string]amKind{"enabled": amBool, "template_id": amString}
+	pmsMethodFields    = map[string]amKind{"enabled": amBool, "template_id": amString, "provider": amString,
+		"mode": amString, "max_failures_per_room": amInt, "lockout_window_minutes": amInt}
+	portalFields = map[string]amKind{"primary_method": amString, "remember_device_days": amInt}
+)
+
+// validateMethodObject refuses anything but an object of the known fields with the right JSON kinds.
+func validateMethodObject(name string, raw json.RawMessage, fields map[string]amKind) error {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil || obj == nil {
+		return fmt.Errorf("%s must be an object", name)
+	}
+	for f, v := range obj {
+		kind, ok := fields[f]
+		if !ok {
+			return fmt.Errorf("%s.%s is not a setting of this sign-in method", name, f)
+		}
+		var bad bool
+		switch kind {
+		case amBool:
+			var b bool
+			bad = json.Unmarshal(v, &b) != nil
+		case amString:
+			var s string
+			bad = json.Unmarshal(v, &s) != nil
+		case amInt:
+			var n int
+			bad = json.Unmarshal(v, &n) != nil
+		}
+		if bad {
+			want := map[amKind]string{amBool: "true or false", amString: "text", amInt: "a whole number"}[kind]
+			return fmt.Errorf("%s.%s must be %s", name, f, want)
+		}
 	}
 	return nil
 }

@@ -42,7 +42,7 @@ func TestIntegration_AccountManage_DeleteUnusedRemoveUsedAndReregister(t *testin
 	if st, b := f.do(t, "GET", "/guest-accounts/"+unused+"/manage", nil); st != 200 || b["removal"] != "delete" {
 		t.Fatalf("manage (unused) = %d %v", st, b)
 	}
-	if st, b := f.do(t, "DELETE", "/guest-accounts/"+unused, nil); st != 200 || b["status"] != "deleted" {
+	if st, b := f.do(t, "DELETE", "/guest-accounts/"+unused, map[string]any{"password": f.password}); st != 200 || b["status"] != "deleted" {
 		t.Fatalf("delete unused = %d %v", st, b)
 	}
 	var n int
@@ -67,7 +67,7 @@ func TestIntegration_AccountManage_DeleteUnusedRemoveUsedAndReregister(t *testin
 		t.Fatalf("the package's device = %v", ents[0])
 	}
 	before := readEntState(t, f, ent)
-	st, b = f.do(t, "DELETE", "/guest-accounts/"+acc, nil)
+	st, b = f.do(t, "DELETE", "/guest-accounts/"+acc, map[string]any{"password": f.password})
 	if st != 200 || b["status"] != "removed" || b["history_kept"] != true || b["disconnected_sessions"] != float64(1) ||
 		b["places_released"] != float64(1) {
 		t.Fatalf("remove used = %d %v", st, b)
@@ -94,7 +94,7 @@ func TestIntegration_AccountManage_DeleteUnusedRemoveUsedAndReregister(t *testin
 		t.Fatal("the removal is audited")
 	}
 	// Removing again is a no-op.
-	if st, b := f.do(t, "DELETE", "/guest-accounts/"+acc, nil); st != 200 || b["status"] != "removed" {
+	if st, b := f.do(t, "DELETE", "/guest-accounts/"+acc, map[string]any{"password": f.password}); st != 200 || b["status"] != "removed" {
 		t.Fatalf("remove again = %d %v", st, b)
 	}
 	// Listed only under its own filter.
@@ -150,7 +150,7 @@ func TestIntegration_AccountManage_VerificationAdjustments(t *testing.T) {
 		t.Fatalf("no longer suspended: %d %v", st, b)
 	}
 
-	if st, b := f.do(t, "POST", "/guest-accounts/"+late+"/verify-email", nil); st != 200 || b["status"] != "verified" {
+	if st, b := f.do(t, "POST", "/guest-accounts/"+late+"/verify-email", verifyBody(f)); st != 200 || b["status"] != "verified" {
 		t.Fatalf("mark verified = %d %v", st, b)
 	}
 	var verified bool
@@ -158,13 +158,18 @@ func TestIntegration_AccountManage_VerificationAdjustments(t *testing.T) {
 	if !verified || auditCount(t, f, "guest_account.email_marked_verified", late) != 1 {
 		t.Fatal("marked verified and audited")
 	}
-	if st, b := f.do(t, "POST", "/guest-accounts/"+late+"/verify-email", nil); st != 200 || b["status"] != "already_verified" {
+	if st, b := f.do(t, "POST", "/guest-accounts/"+late+"/verify-email", verifyBody(f)); st != 200 || b["status"] != "already_verified" {
 		t.Fatalf("again = %d %v", st, b)
 	}
 	if st, b := f.do(t, "POST", "/guest-accounts/"+late+"/restart-verification", nil); st != 409 || b["error"] != "already_verified" {
 		t.Fatalf("restart a verified account = %d %v", st, b)
 	}
-	if st, b := f.do(t, "POST", "/guest-accounts/"+staff+"/verify-email", nil); st != 409 || b["error"] != "not_self_service" {
+	if st, b := f.do(t, "POST", "/guest-accounts/"+staff+"/verify-email", verifyBody(f)); st != 409 || b["error"] != "not_self_service" {
 		t.Fatalf("staff account = %d %v", st, b)
 	}
+}
+
+// verifyBody is what Mark verified now requires: the operator's password and a bounded reason.
+func verifyBody(f *apiFixture) map[string]any {
+	return map[string]any{"password": f.password, "reason": "client showed the address at the desk"}
 }
