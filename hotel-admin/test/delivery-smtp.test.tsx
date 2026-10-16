@@ -68,7 +68,9 @@ describe("the page", () => {
     routes([]);
     render(<NotificationsPage />);
     expect(await screen.findByRole("heading", { name: "Delivery" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Add sender/ }));
+    // The button follows the operator's role, which loads after the heading: wait for it (a CI runner lost
+    // this race on 2026-10-16).
+    fireEvent.click(await screen.findByRole("button", { name: /Add sender/ }));
     const dialog = await screen.findByRole("dialog");
     const service = within(dialog).getByLabelText("Service") as HTMLSelectElement;
     expect(Array.from(service.options).map((o) => o.value)).toEqual(["stub", "sendgrid", "smtp"]);
