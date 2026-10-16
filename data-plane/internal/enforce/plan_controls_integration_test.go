@@ -752,3 +752,37 @@ func TestIntegration_Retention_BoundsAndNoOtherDeletePath(t *testing.T) {
 		t.Fatal("a record went")
 	}
 }
+
+// SUB-SECOND TICKS ARE CHARGED IN FULL (migration 0126). acctd ticks about once a second, so many ticks are a
+// little under one second. The accrual used to floor each tick's charge but still move the watermark to the
+// end of the tick, discarding the fraction every time: on PRE-LIVE a 90 s allowance lasted about 180 s of wall
+// time. A hundred 0.9 s ticks are 90 s of online time and must charge 90 s (89 allows the last remainder).
+func TestIntegration_PlanControls_SubSecondTicksChargeEverySecond(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	ctx := context.Background()
+	f := seed(t, p, 1000, 1000, 0)
+	window := time.Now().Add(24 * time.Hour)
+	ent, sess := grant(t, p, f, &window, time.Now().Add(-15*time.Minute))
+	revisePlan(t, p, f, ent, map[string]any{"time_quota_seconds": int64(7200)})
+	base := time.Now().Add(-5 * time.Minute).UTC().Truncate(time.Second)
+	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.session_online_watermarks
+		   (tenant_id, site_id, session_id, accounted_through, accounted_seconds) VALUES ($1,$2,$3,$4,0)`,
+		f.tenant, f.site, sess, base); err != nil {
+		t.Fatalf("seed watermark: %v", err)
+	}
+	for k := 1; k <= 100; k++ {
+		now := base.Add(time.Duration(k) * 900 * time.Millisecond)
+		if _, err := p.Exec(ctx, `SELECT * FROM iam_v2.p6_tick_online_time($1,$2,$3,10)`, f.tenant, f.site, now); err != nil {
+			t.Fatalf("tick %d: %v", k, err)
+		}
+	}
+	consumed := scalar[int64](t, p, `SELECT consumed_online_seconds FROM iam_v2.entitlements WHERE id=$1`, ent)
+	if consumed < 89 || consumed > 90 {
+		t.Fatalf("a hundred 0.9 s ticks charged %d s; want 90 (the old floor-per-tick charged 0)", consumed)
+	}
+	watermark := scalar[time.Time](t, p, `SELECT accounted_through FROM iam_v2.session_online_watermarks WHERE session_id=$1`, sess)
+	if d := base.Add(90 * time.Second).Sub(watermark.UTC()); d < 0 || d >= time.Second {
+		t.Fatalf("watermark %s is not the charged whole seconds after the base (%s off)", watermark, d)
+	}
+}

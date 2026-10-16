@@ -131,19 +131,21 @@ export default function SignInMethodsPage() {
     }
     // Provider readiness is advisory: a failure here must not stop the methods themselves being managed. It is
     // asked only for modules this site has.
-    if (emailMod || smsMod || whatsappMod) {
+    // ...and only by a role that may read it: the desk roles manage methods they may see, and a request their
+    // role cannot make is a 403 in the console for nothing (PRE-LIVE acceptance, 2026-10-16).
+    if ((emailMod || smsMod || whatsappMod) && roles !== null && canRead("notification-providers", roles)) {
       try {
         const n = await api.get<ListResp<NotifyProvider>>("/notification-providers");
         setNotify(n.data ?? []);
       } catch { /* readiness unknown; rendered as such */ }
     }
-    if (socialMod) {
+    if (socialMod && roles !== null && canRead("social-providers", roles)) {
       try {
         const s = await api.get<ListResp<SocialProvider>>("/social-providers");
         setSocial(s.data ?? []);
       } catch { /* readiness unknown; rendered as such */ }
     }
-  }, [emailMod, smsMod, whatsappMod, socialMod]);
+  }, [emailMod, smsMod, whatsappMod, socialMod, roles]);
   useEffect(() => { load(); }, [load]);
 
   // A PATCH carrying only the key being changed. The server merges per top-level key, so this screen can

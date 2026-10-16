@@ -18,6 +18,15 @@ import { ToastProvider } from "@/components/ui/toast";
 import { WhoamiProvider, useWhoamiSession } from "@/lib/whoami-context";
 import { ForcedPasswordChange } from "@/components/forced-password-change";
 
+// SCREENS REACHED BY LINK, NOT FROM THE MENU. They are opened from other pages (PMS connection, Stays), so the
+// menu's table does not list them; without this a role that cannot read them saw a shell of 403 banners instead
+// of the "not permitted" page (found in PRE-LIVE acceptance, 2026-10-16). Every other route outside the menu is a
+// server redirect.
+const OFF_MENU_SCREENS: { href: string; resource: string; label: string }[] = [
+  { href: "/pms-reconciliation", resource: "pms-reconciliation", label: "Unresolved departures" },
+  { href: "/roster-reconciliation", resource: "pms-roster-reconciliation", label: "Roster reconciliation" },
+];
+
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -119,7 +128,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // WHETHER THE OPERATOR'S ROLE MAY READ THE SCREEN THEY ARE ON (audit L-2). The menu hides it; a URL or a
   // bookmark still reaches it, and the page used to open as a shell of 403 banners. The same table the menu
   // uses decides, and the page does not mount, so it sends nothing that would be refused.
-  const activeItem = NAV_ITEMS.find((i) => i.href === activeNavHref(pathname));
+  const activeItem = NAV_ITEMS.find((i) => i.href === activeNavHref(pathname))
+    ?? OFF_MENU_SCREENS.find((i) => pathname === i.href || pathname.startsWith(i.href + "/"));
   const notPermitted = activeItem && !canRead(activeItem.resource, roles) ? activeItem.label : null;
 
   return (

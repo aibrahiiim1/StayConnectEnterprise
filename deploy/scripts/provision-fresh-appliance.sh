@@ -330,6 +330,13 @@ STAYCONNECT_IAMV2_SOCIAL=true
 SCD_PAYMENT_DB_URL=${SCD_PAYMENT_DB_URL}
 STAYCONNECT_PHASE4_PAYMENT_OUTCOME_DSN=${SCD_PAYMENT_OUTCOME_DB_URL}
 SCD_POSTING_DB_URL=${SCD_POSTING_DB_URL}
+# The durable sign-in throttle and keyed one-time codes (audit N-27). keybootstrap above has just created
+# throttle.key and otp_hmac_1.key; without these two lines the keys were made and never used, and guest
+# sign-in was throttled only in memory (lost on every scd restart) although the contracts rely on the durable
+# throttle (ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md "Throttles"). Both fail closed if their key is missing.
+SCD_SECRETS_DIR=${ETC}/secrets
+SCD_DURABLE_THROTTLE=true
+SCD_OTP_HMAC=true
 EOF
 [ -f "$ETC/edged.env" ] || cat > "$ETC/edged.env" <<EOF
 EDGED_DB_URL=${EDGED_DB_URL}
