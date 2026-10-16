@@ -10,7 +10,7 @@
 //     explanation — for an action that can stop a captive portal or a payment page from loading.
 
 import { useEffect, useState } from "react";
-import { api, ListResp, Whoami, WalledGardenRule } from "@/lib/api";
+import { api, ListResp, Whoami, WalledGardenRule, WalledGardenPolicy } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody } from "@/components/ui/card";
@@ -54,6 +54,13 @@ export default function WalledGardenPage() {
     ...(moduleLicensed(caps, "social_login") ? ["an identity provider, for social login"] : []),
   ];
   const [rows, setRows] = useState<WalledGardenRule[] | null>(null);
+  // The widest network a rule may name: a site setting (0125), changed with a reason and the password.
+  const [policy, setPolicy] = useState<WalledGardenPolicy | null>(null);
+  const [editingPolicy, setEditingPolicy] = useState(false);
+  const [policyPrefix, setPolicyPrefix] = useState("24");
+  const [policyErr, setPolicyErr] = useState<unknown>(null);
+  // null = adding a new rule; a rule = editing that one
+  const [editing, setEditing] = useState<WalledGardenRule | null>(null);
   const [roles, setRoles] = useState<string[] | null>(null);
   const [err, setErr] = useState<unknown>(null);
   const [showNew, setShowNew] = useState(false);
@@ -74,6 +81,8 @@ export default function WalledGardenPage() {
   async function load() {
     try { setRows((await api.get<ListResp<WalledGardenRule>>("/walled-garden")).data); }
     catch (e) { setErr(e); }
+    try { setPolicy(await api.get<WalledGardenPolicy>("/walled-garden/policy")); }
+    catch { /* the list still works; the limit line is simply not shown */ }
   }
   useEffect(() => {
     load();
@@ -81,9 +90,30 @@ export default function WalledGardenPage() {
   }, []);
 
   function openNew() {
+    setEditing(null);
     setKind("domain"); setValue(""); setPorts(""); setDescription("");
     setFormErr(null);
     setShowNew(true);
+  }
+
+  function openEdit(r: WalledGardenRule) {
+    setEditing(r);
+    setKind(r.kind); setValue(r.value); setPorts((r.ports ?? []).join(", ")); setDescription(r.description ?? "");
+    setFormErr(null);
+    setShowNew(true);
+  }
+
+  async function onSavePolicy({ reason, password }: { reason: string; password: string }) {
+    setBusy(true); setPolicyErr(null);
+    try {
+      setPolicy(await api.put<WalledGardenPolicy>("/walled-garden/policy", {
+        widest_prefix_len: Number(policyPrefix), reason, password,
+      }));
+      setEditingPolicy(false);
+      toast.success("Limit saved", "It applies to rules added or edited from now on; existing rules are not changed.");
+      await load();
+    } catch (e) { setPolicyErr(e); }
+    finally { setBusy(false); }
   }
 
   async function onCreate() {
@@ -93,14 +123,16 @@ export default function WalledGardenPage() {
       setFormErr("Ports must be whole numbers between 1 and 65535."); setBusy(false); return;
     }
     try {
-      await api.post("/walled-garden", {
+      const body = {
         kind,
         value: value.trim(),
         ports: parsed.length ? parsed : undefined,
         description: description.trim() || undefined,
-      });
+      };
+      if (editing) await api.put(`/walled-garden/${editing.id}`, body);
+      else await api.post("/walled-garden", body);
       setShowNew(false);
-      toast.success("Rule added", "Devices that have not signed in can reach it now.");
+      toast.success(editing ? "Rule saved" : "Rule added", "Devices that have not signed in can reach it now.");
       await load();
     } catch (e) { setFormErr(e); }
     finally { setBusy(false); }
@@ -150,6 +182,18 @@ export default function WalledGardenPage() {
         actions={writable && <Button onClick={openNew}><Plus /> Add rule</Button>}
       />
 
+      {policy && (
+        <p className="text-sm text-muted-foreground">
+          Widest address range allowed: <strong className="font-mono">/{policy.widest_prefix_len}</strong>{" "}
+          ({(2 ** (32 - policy.widest_prefix_len)).toLocaleString()} addresses). Private, link-local and reserved
+          addresses are never allowed before sign-in.{" "}
+          {writable && (
+            <Button size="sm" variant="ghost" onClick={() => { setPolicyPrefix(String(policy.widest_prefix_len)); setPolicyErr(null); setEditingPolicy(true); }}>
+              Change limit
+            </Button>
+          )}
+        </p>
+      )}
       {roles !== null && !writable && <ReadOnlyNotice>Your role can see which sites are allowed before sign-in but not change them.</ReadOnlyNotice>}
       <ErrorBanner err={err} className="mb-0" />
 
@@ -173,7 +217,12 @@ export default function WalledGardenPage() {
                 {rows.map((r) => (
                   <TR key={r.id}>
                     <TD><Badge tone={kindTone(r.kind)}>{KIND_LABELS[r.kind] ?? r.kind}</Badge></TD>
-                    <TD className="font-mono text-sm">{r.value}</TD>
+                    <TD className="font-mono text-sm">
+                      {r.value}
+                      {r.wider_than_policy && (
+                        <Badge tone="warn" className="ms-2">Wider than this site allows — edit or remove it</Badge>
+                      )}
+                    </TD>
                     <TD className="font-mono text-xs text-muted-foreground">
                       {r.ports && r.ports.length ? r.ports.join(", ") : "all"}
                     </TD>
@@ -181,9 +230,12 @@ export default function WalledGardenPage() {
                     <TD className="text-sm text-muted-foreground">{formatRelative(r.created_at)}</TD>
                     <TD className="text-right">
                       {writable && (
-                        <Button size="sm" variant="ghost" onClick={() => { setFormErr(null); setDeleting(r); }}>
-                          Remove
-                        </Button>
+                        <>
+                          <Button size="sm" variant="ghost" onClick={() => openEdit(r)}>Edit</Button>
+                          <Button size="sm" variant="ghost" onClick={() => { setFormErr(null); setDeleting(r); }}>
+                            Remove
+                          </Button>
+                        </>
                       )}
                     </TD>
                   </TR>
@@ -197,9 +249,9 @@ export default function WalledGardenPage() {
       <DialogForm
         open={showNew}
         onOpenChange={(v) => !v && setShowNew(false)}
-        title="Allow a site before sign-in"
+        title={editing ? "Edit this allowed site" : "Allow a site before sign-in"}
         description="Devices that have not signed in will be able to reach this address."
-        submitLabel="Add rule"
+        submitLabel={editing ? "Save rule" : "Add rule"}
         busy={busy}
         error={formErr}
         disabled={!value.trim()}
@@ -218,7 +270,7 @@ export default function WalledGardenPage() {
           hint={
             kind === "domain" ? "For example: checkout.stripe.com"
               : kind === "cidr" ? "For example: 10.0.0.0/24"
-                : "For example: 203.0.113.9"
+                : "For example: 203.0.113.9 (a public address: private and reserved ones are refused)"
           }
         >
           <Input
@@ -239,6 +291,24 @@ export default function WalledGardenPage() {
           />
         </Field>
       </DialogForm>
+
+      <ConfirmDialog
+        open={editingPolicy}
+        onOpenChange={(v) => !v && setEditingPolicy(false)}
+        title="Change the widest address range allowed?"
+        description="A wider range lets clients that have not signed in reach more of the internet. It applies to rules added or edited from now on; existing rules are not changed."
+        confirmLabel="Save limit"
+        busy={busy}
+        error={policyErr}
+        requireReason
+        reasonMinLength={4}
+        requirePassword
+        onConfirm={onSavePolicy}
+      >
+        <Field label="Widest range (prefix length)" hint={policy ? `Between /${policy.min} and /${policy.max}. Default /${policy.default}.` : undefined}>
+          <Input type="number" min={policy?.min ?? 16} max={policy?.max ?? 32} value={policyPrefix} onChange={(e) => setPolicyPrefix(e.target.value)} />
+        </Field>
+      </ConfirmDialog>
 
       <ConfirmDialog
         open={deleting !== null}

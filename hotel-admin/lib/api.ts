@@ -673,6 +673,14 @@ export type WalledGardenRule = {
   ports?: number[] | null;
   description?: string | null;
   created_at: string;
+  /** Wider than the site's widest-network policy (stored before it, or before it was narrowed). */
+  wider_than_policy?: boolean;
+};
+
+/** GET/PUT /walled-garden/policy (migration 0125): the widest network a rule may name. */
+export type WalledGardenPolicy = {
+  widest_prefix_len: number; min: number; max: number; default: number;
+  config_version: number; updated_at?: string | null; updated_by?: string | null;
 };
 
 export type PMSProvider = {

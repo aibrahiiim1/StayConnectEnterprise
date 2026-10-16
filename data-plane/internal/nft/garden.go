@@ -154,14 +154,67 @@ func parseGardenJSON(raw []byte) ([]string, error) {
 
 // ValidGardenElem reports whether s is an IPv4 address or CIDR usable as a
 // walled-garden element.
+//
+// THE ENFORCEMENT FLOOR (audit N-7). Whatever a rule says, the garden never opens 0.0.0.0, loopback, multicast or
+// anything wider than a /8: one stored 0.0.0.0/0 rule used to open the whole internet before sign-in. The
+// hotel's own, narrower limit is enforced where rules are written (edged, migration 0125); this is the line no
+// stored row can cross.
 func ValidGardenElem(s string) bool {
 	if ip := net.ParseIP(s); ip != nil {
-		return ip.To4() != nil
+		v4 := ip.To4()
+		return v4 != nil && gardenAddrUsable(v4)
 	}
 	if _, n, err := net.ParseCIDR(s); err == nil {
-		return n.IP.To4() != nil
+		ones, bits := n.Mask.Size()
+		return n.IP.To4() != nil && bits == 32 && ones >= GardenFloorPrefix && gardenAddrUsable(n.IP.To4())
 	}
 	return false
+}
+
+// GardenFloorPrefix is the widest network the garden will ever install.
+const GardenFloorPrefix = 8
+
+func gardenAddrUsable(ip net.IP) bool {
+	return !ip.IsUnspecified() && !ip.IsLoopback() && !ip.IsMulticast() && !ip.Equal(net.IPv4bcast)
+}
+
+// GardenTargetRefusal explains why an operator-supplied IP or CIDR may not be a walled-garden target, or "" when
+// it may. widest is the hotel's setting (the smallest prefix length allowed). Beyond the enforcement floor it
+// refuses the addresses a garden entry is meaningless for: private, shared (CGNAT), link-local and reserved
+// ranges -- a sign-in or payment service is a public address, and a private one would open the hotel's own
+// networks to clients that have not signed in.
+func GardenTargetRefusal(value string, widest int) string {
+	var ip net.IP
+	ones := 32
+	if p := net.ParseIP(value); p != nil {
+		ip = p.To4()
+	} else if _, n, err := net.ParseCIDR(value); err == nil {
+		ip = n.IP.To4()
+		ones, _ = n.Mask.Size()
+		if ip != nil && !n.IP.Equal(net.ParseIP(strings.SplitN(value, "/", 2)[0]).To4()) {
+			return "the address is not the start of the network; write it as " + n.String()
+		}
+	}
+	if ip == nil {
+		return "not an IPv4 address or network"
+	}
+	if ones < widest || ones < GardenFloorPrefix {
+		return fmt.Sprintf("/%d is wider than this site allows (/%d at most): a walled-garden entry should name a "+
+			"sign-in or payment service, not open a whole network before sign-in", ones, widest)
+	}
+	switch {
+	case ip.IsUnspecified(), ip.IsLoopback(), ip.IsMulticast(), ip.Equal(net.IPv4bcast):
+		return "this address cannot be reached through the walled garden"
+	case ip.IsPrivate(), ip.IsLinkLocalUnicast(), inCIDR(ip, "100.64.0.0/10"), inCIDR(ip, "240.0.0.0/4"), inCIDR(ip, "0.0.0.0/8"):
+		return "private, shared, link-local and reserved addresses are not walled-garden targets: clients reach " +
+			"public sign-in and payment services through it, and a private entry would open the hotel's own networks"
+	}
+	return ""
+}
+
+func inCIDR(ip net.IP, cidr string) bool {
+	_, n, _ := net.ParseCIDR(cidr)
+	return n.Contains(ip)
 }
 
 // GardenPortElem formats one `address . port` element for the TCP/UDP sets, or "" when either part is invalid.

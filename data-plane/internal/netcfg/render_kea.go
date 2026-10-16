@@ -3,7 +3,9 @@ package netcfg
 import (
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"os"
+	"sort"
 )
 
 // leaseCmdsHook is the Kea lease_cmds hook library path. Overridable via
@@ -34,7 +36,8 @@ func RenderKeaDhcp4(nets []GuestNetwork, topo Topology, leaseCSVPath, ctrlSocket
 
 	ifaceList := make([]string, 0, len(local))
 	subnets := make([]map[string]any, 0, len(local))
-	for i, n := range local {
+	ids := StableSubnetIDs(local)
+	for _, n := range local {
 		// Kea binds the network's bridge interface.
 		ifaceList = append(ifaceList, fmt.Sprintf("%s/%s", n.BridgeName, n.GatewayIP))
 
@@ -84,7 +87,7 @@ func RenderKeaDhcp4(nets []GuestNetwork, topo Topology, leaseCSVPath, ctrlSocket
 		}
 
 		sub := map[string]any{
-			"id":                 i + 1,
+			"id":                 ids[n.ID],
 			"subnet":             n.SubnetCIDR,
 			"interface":          n.BridgeName,
 			"pools":              pools,
@@ -140,6 +143,33 @@ func RenderKeaDhcp4(nets []GuestNetwork, topo Topology, leaseCSVPath, ctrlSocket
 		}},
 	}
 	return dhcp4
+}
+
+// StableSubnetIDs gives every network a Kea subnet id derived from the network's own id, not from its position
+// in the list (audit N-11). Position-based ids renumbered every subnet behind a network that was added or
+// removed, and Kea ties each lease to its subnet id. The id is FNV-1a of the network UUID folded into
+// 1..2^31-1; on the (rare) collision the later network in id order takes the next free value, so the answer
+// is still a pure function of the set of networks. No migration and no stored counter are needed.
+func StableSubnetIDs(nets []GuestNetwork) map[string]int {
+	sorted := make([]string, 0, len(nets))
+	for _, n := range nets {
+		sorted = append(sorted, n.ID)
+	}
+	sort.Strings(sorted)
+	out := make(map[string]int, len(nets))
+	used := map[int]bool{}
+	for _, id := range sorted {
+		h := fnv.New32a()
+		_, _ = h.Write([]byte(id))
+		v := int(h.Sum32()&0x7fffffff) % 0x7ffffffe
+		v++ // 1 .. 2^31-2
+		for used[v] {
+			v = v%0x7ffffffe + 1
+		}
+		used[v] = true
+		out[id] = v
+	}
+	return out
 }
 
 // RenderKeaFile wraps the Dhcp4 object as a full { "Dhcp4": {...} } file the

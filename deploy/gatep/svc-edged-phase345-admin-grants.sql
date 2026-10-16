@@ -474,3 +474,11 @@ GRANT SELECT ON iam_v2.card_reversal_reviews, iam_v2.refund_access_terminations 
 GRANT EXECUTE ON FUNCTION iam_v2.p4_resolve_reversal_review(uuid, uuid, uuid, text, text, text) TO svc_edged;
 GRANT SELECT ON iam_v2.payment_account_conversion, iam_v2.payment_account_conversion_changes,
                 iam_v2.payment_settlement_reports TO svc_edged;
+
+-- ---- the walled-garden policy (migration 0125) ------------------------------------------------------
+-- The widest network a walled-garden rule may name. edged enforces it on every rule create and edit, reads it
+-- and writes it ONLY through the functions (the setter keeps the append-only change row), and reads the
+-- history. The settings table itself is granted to nobody.
+GRANT EXECUTE ON FUNCTION iam_v2.walled_garden_settings_get(uuid,uuid)                  TO svc_edged;
+GRANT EXECUTE ON FUNCTION iam_v2.walled_garden_settings_set(uuid,uuid,integer,text,text) TO svc_edged;
+GRANT SELECT  ON iam_v2.walled_garden_settings_changes                                  TO svc_edged;

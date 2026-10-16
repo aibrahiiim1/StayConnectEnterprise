@@ -334,7 +334,7 @@ export default function NetworkPage() {
                   <TD className="hidden md:table-cell"><DhcpModeBadge mode={n.dhcp_mode} /></TD>
                   <TD className="hidden font-mono text-xs text-muted-foreground xl:table-cell">{poolSummary(n)}</TD>
                   <TD className="hidden sm:table-cell">
-                    {n.captive_portal_enabled ? <Badge tone="info">Sign-in page</Badge> : <Badge tone="default">Open</Badge>}
+                    {n.captive_portal_enabled ? <Badge tone="info">Sign-in page</Badge> : <Badge tone="warn">No sign-in page · no internet</Badge>}
                   </TD>
                   <TD>{n.enabled ? <Badge tone="ok" dot>Enabled</Badge> : <Badge tone="default">Disabled</Badge>}</TD>
                   <TD className="text-end tabular text-muted-foreground">{status[n.id]?.active_clients ?? "—"}</TD>
