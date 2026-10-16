@@ -45,7 +45,8 @@ import {
   DEVICE_LIMIT_POLICIES, TIME_ACCOUNTING_MODES,
 } from "@/lib/units";
 import {
-  stalePackagesFor, repinPayload, repinOutcomeMessage, type PackageCurrentDTO,
+  stalePackagesFor, repinPayload, repinOutcomeMessage, repinSkippedMessage, commercialTermsOf,
+  type PackageCurrentDTO,
 } from "@/lib/repin";
 
 type PlanSummary = {
@@ -103,6 +104,9 @@ export default function ServicePlansPage() {
     planRevisionID: string; planLabel: string; packages: PackageRef[];
     chosen: Record<string, boolean>; standing: boolean;
   } | null>(null);
+  // Asked once for the whole repin, cleared when the prompt closes.
+  const [repinPassword, setRepinPassword] = useState("");
+  useEffect(() => { if (!repin) setRepinPassword(""); }, [repin]);
 
   // The plan's existing time allowance, expressed in the largest unit that divides it exactly.
   const timeQuota = secondsToDurationField(prefill?.time_quota_seconds, ["hours", "days"]);
@@ -175,10 +179,16 @@ export default function ServicePlansPage() {
         max_continuous_session_seconds: durationToSeconds(str("max_session"), "hours"),
         time_quota_seconds: durationToSeconds(str("time_quota"), (str("time_quota_unit") as "hours" | "days") || "hours"),
         data_quota_bytes: gbToBytes(str("data_quota_gb")),
-        time_accounting_mode: str("time_accounting_mode") || "VALIDITY_WINDOW",
+        // KEPT AS THE PLAN HAS IT on edit: an online-time (AGGREGATE_ONLINE_TIME) plan must not become a
+        // validity-window plan because it was opened and saved (audit O-20). A plan whose mode was not read is
+        // sent without one, and the server carries the current mode.
+        ...(editingPlan
+          ? (editingPlan.time_accounting_mode ? { time_accounting_mode: editingPlan.time_accounting_mode } : {})
+          : { time_accounting_mode: str("time_accounting_mode") || "VALIDITY_WINDOW" }),
         speed_allocation: str("speed_allocation") || "PER_DEVICE",
-        // ADD refuses a code that already exists; EDIT publishes a new version of this plan.
-        ...(editingPlan ? {} : { create_only: true }),
+        // ADD refuses a code that already exists; EDIT publishes a new version of this plan, which changes
+        // what every package using it gives future clients -- a step-up, so the password goes with it.
+        ...(editingPlan ? { password: (f.get("password") as string) ?? "" } : { create_only: true }),
       });
       el.reset(); setShowNew(false);
       toast.success(editingPlan ? "Plan saved" : "Plan added");
@@ -201,7 +211,11 @@ export default function ServicePlansPage() {
         setNotice("Changes saved. Existing client access is unchanged; the new settings apply to future grants.");
       }
       setPrefill(null); await load();
-    } catch (e) { setFormErr(e); }
+    } catch (e) {
+      setFormErr(e instanceof ApiError && (e as ApiError).code === "reauth_required"
+        ? new Error("That password is not correct. The plan was not saved.")
+        : e);
+    }
     finally { setBusy(false); }
   }
 
@@ -222,20 +236,48 @@ export default function ServicePlansPage() {
 
   // applyRepin republishes ONLY the chosen packages, each from its own CURRENT configuration, pinned to the plan
   // revision the prompt was opened with. It posts only to /commercial-packages.
+  //
+  // Each package is republished with its full stored terms (price, currency, methods, room-charge codes and
+  // every other field), and with the operator's password: moving a package to other plan settings changes what
+  // it gives future clients. A package whose stored price details cannot be read in full is NOT posted -- it is
+  // named instead, so nothing is ever republished as Free by omission.
   async function applyRepin() {
     if (!repin) return;
     const chosen = repin.packages.filter((k) => repin.chosen[k.package_id]);
+    if (chosen.length > 0 && !repinPassword) {
+      setErr(new Error("Enter your password to apply the settings."));
+      return;
+    }
     setBusy(true); setErr(null);
+    let moved = 0;
+    const skipped: { name: string; missing: string[] }[] = [];
     try {
       for (const k of chosen) {
         const cur = await api.get<PackageCurrentDTO>(`/commercial-packages/${k.package_id}/current`);
-        await api.post("/commercial-packages", repinPayload(cur, repin.planRevisionID, k.name || k.code));
+        const { missing } = commercialTermsOf(cur);
+        if (missing.length > 0) { skipped.push({ name: k.name || k.code, missing }); continue; }
+        await api.post("/commercial-packages", {
+          ...repinPayload(cur, repin.planRevisionID, k.name || k.code),
+          password: repinPassword,
+        });
+        moved++;
       }
-      setRepin(null);
-      const msg = repinOutcomeMessage(chosen.length);
-      setNotice(msg); toast.success("Packages updated", msg);
+      setRepin(null); setRepinPassword("");
+      const skippedMsg = repinSkippedMessage(skipped);
+      const msg = [moved > 0 || skipped.length === 0 ? repinOutcomeMessage(moved) : null, skippedMsg].filter(Boolean).join(" ");
+      setNotice(msg);
+      if (moved > 0) toast.success("Packages updated", repinOutcomeMessage(moved));
       await load();
-    } catch (e) { setErr(e); }
+    } catch (e) {
+      if (e instanceof ApiError && (e as ApiError).code === "reauth_required") {
+        setErr(new Error(moved > 0
+          ? `That password was not accepted. ${moved} package${moved === 1 ? " was" : "s were"} already moved; the rest were not changed.`
+          : "That password is not correct. Nothing was changed."));
+      } else {
+        setErr(e);
+      }
+      if (moved > 0) await load();
+    }
     finally { setBusy(false); }
   }
 
@@ -325,8 +367,18 @@ export default function ServicePlansPage() {
                 </label>
               ))}
             </div>
+            {/* A PLAN CHANGE IS A STEP-UP. Asked once for every package moved in this run. */}
+            <div className="mb-4 max-w-sm">
+              <Label htmlFor="repin-password">Confirm your password</Label>
+              <Input id="repin-password" type="password" autoComplete="current-password" value={repinPassword}
+                onChange={(e) => setRepinPassword(e.target.value)} />
+              <Hint>Moving a package to other plan settings changes what it gives future clients, so your password is asked once for all of them.</Hint>
+            </div>
             <div className="flex gap-2">
-              <Button onClick={applyRepin} disabled={busy}>{busy ? "Applying…" : "Apply to selected packages"}</Button>
+              <Button onClick={applyRepin}
+                disabled={busy || (repin.packages.some((k) => repin.chosen[k.package_id]) && repinPassword === "")}>
+                {busy ? "Applying…" : "Apply to selected packages"}
+              </Button>
               <Button variant="ghost" disabled={busy} onClick={() => {
                 const wasStanding = repin.standing;
                 setRepin(null);
@@ -652,12 +704,32 @@ export default function ServicePlansPage() {
 
               <div className="sm:col-span-2">
                 <Label htmlFor="plan-time-mode">How time is counted</Label>
-                <Select id="plan-time-mode" name="time_accounting_mode" defaultValue="VALIDITY_WINDOW">
-                  {/* Only VALIDITY_WINDOW is implemented end to end; offering the other would be a control that
-                      silently does nothing. */}
-                  <option value="VALIDITY_WINDOW">{TIME_ACCOUNTING_MODES.VALIDITY_WINDOW}</option>
-                </Select>
+                {prefill ? (
+                  // AN EXISTING PLAN KEEPS HOW ITS TIME IS COUNTED. Shown, not offered: the save sends the plan's
+                  // own mode, so editing a speed never converts an online-time plan into a validity-window one.
+                  <>
+                    <Select id="plan-time-mode" disabled value={prefill.time_accounting_mode || "VALIDITY_WINDOW"} onChange={() => {}}>
+                      <option value={prefill.time_accounting_mode || "VALIDITY_WINDOW"}>
+                        {TIME_ACCOUNTING_MODES[prefill.time_accounting_mode || "VALIDITY_WINDOW"] ?? prefill.time_accounting_mode}
+                      </option>
+                    </Select>
+                    <Hint>Kept as this plan has it. Saving does not change how time is counted.</Hint>
+                  </>
+                ) : (
+                  <Select id="plan-time-mode" name="time_accounting_mode" defaultValue="VALIDITY_WINDOW">
+                    {/* Only VALIDITY_WINDOW is offered for a new plan; online-time plans are created elsewhere. */}
+                    <option value="VALIDITY_WINDOW">{TIME_ACCOUNTING_MODES.VALIDITY_WINDOW}</option>
+                  </Select>
+                )}
               </div>
+
+              {prefill && (
+                <div className="sm:col-span-2">
+                  <Label htmlFor="plan-password">Confirm your password</Label>
+                  <Input id="plan-password" name="password" type="password" autoComplete="current-password" required />
+                  <Hint>Saving changes what every package using this plan can give future clients, so your password is required.</Hint>
+                </div>
+              )}
 
             </form>
           </DialogBody>

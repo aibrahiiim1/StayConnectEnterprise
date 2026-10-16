@@ -142,4 +142,5 @@ export const DEVICE_LIMIT_POLICIES: Record<string, string> = {
 export const TIME_ACCOUNTING_MODES: Record<string, string> = {
   VALIDITY_WINDOW: "Validity window — time runs from purchase, whether or not the client is online",
   ACTIVE_USAGE: "Active usage — time is consumed only while the client is connected",
+  AGGREGATE_ONLINE_TIME: "Online time — the time allowance is used only while the client is online",
 };

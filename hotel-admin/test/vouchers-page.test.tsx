@@ -279,6 +279,10 @@ describe("issuing vouchers", () => {
     await user.type(within(dlg).getByLabelText(/Note/), "Conference desk");
     await user.click(within(dlg).getByRole("button", { name: "Review" }));
 
+    // ISSUING IS A STEP-UP (audit O-21): nothing is sent until the operator's password is given.
+    expect(within(dlg).getByRole("button", { name: "Issue 25 vouchers" })).toBeDisabled();
+    await user.type(within(dlg).getByLabelText(/Confirm your password/), "pw-op");
+
     post.mockResolvedValueOnce({ count: 25, batch_id: BATCH, codes: ["48273962", "K7PX4R9M"] });
     await user.click(within(dlg).getByRole("button", { name: "Issue 25 vouchers" }));
 
@@ -290,6 +294,7 @@ describe("issuing vouchers", () => {
       count: 25,
       note: "Conference desk",
       valid_until: new Date(local).toISOString(),
+      password: "pw-op",
     });
     expect("valid_from" in body).toBe(false);
 
@@ -307,6 +312,28 @@ describe("issuing vouchers", () => {
     await user.click(screen.getByRole("button", { name: /Issue vouchers/ }));
     await screen.findByRole("dialog", { name: "Issue vouchers" });
     expect(screen.queryByText("48273962")).toBeNull();
+  });
+
+  it("says a refused password in words, and shows the server's sentence when the package can never be redeemed", async () => {
+    wire();
+    const { user } = renderView();
+    await user.click(await screen.findByRole("button", { name: /Issue vouchers/ }));
+    const dlg = await screen.findByRole("dialog", { name: "Issue vouchers" });
+    await user.click(within(dlg).getByText("One day"));
+    await user.click(within(dlg).getByRole("button", { name: "Next" }));
+    await user.click(within(dlg).getByRole("button", { name: "Review" }));
+    await user.type(within(dlg).getByLabelText(/Confirm your password/), "wrong");
+
+    const { ApiError } = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
+    post.mockRejectedValueOnce(new ApiError(401, { error: "reauth_required", message: "password confirmation required" }));
+    await user.click(within(dlg).getByRole("button", { name: /Issue \d+ vouchers/ }));
+    expect(await within(dlg).findByText("That password is not correct. No vouchers were issued.")).toBeTruthy();
+
+    const sentence = "This package gives a data allowance per night of a stay, so it cannot be redeemed from a voucher.";
+    post.mockRejectedValueOnce(new ApiError(409, { error: "not_voucher_redeemable", message: sentence }));
+    await user.click(within(dlg).getByRole("button", { name: /Issue \d+ vouchers/ }));
+    expect(await within(dlg).findByText(sentence)).toBeTruthy();
+    expect(screen.queryByTestId("held-code")).toBeNull();
   });
 
   it("never asks for a raw package id when the package list fails; it offers a retry", async () => {

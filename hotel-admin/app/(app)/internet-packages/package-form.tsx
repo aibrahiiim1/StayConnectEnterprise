@@ -45,8 +45,10 @@ import {
   isPaidPrice,
   WITHIN_HOURS_MIN,
   WITHIN_HOURS_MAX,
+  type PreservedRule,
 } from "@/lib/commerce-form";
 import { moduleLicensedIn } from "@/lib/commerce-form";
+import { cardCurrencyProblem, type CardAccountView } from "@/lib/card-currency";
 import { AcquisitionSection } from "./acquisition-section";
 import { TravelAgentPicker } from "./travel-agent-picker";
 
@@ -102,6 +104,10 @@ export type PackageFormInitial = {
   allocation?: AllocationForm;
   /** The package's price, currency, acquisition methods and room-charge mappings, handed back unchanged. */
   acquisition?: AcquisitionForm;
+  /** Stored conditions of a type this form does not edit: shown read-only and republished exactly as loaded. */
+  preservedRules?: PreservedRule[];
+  /** The loaded display object; the edited name is merged into it so nothing else in it is dropped. */
+  display?: Record<string, unknown> | null;
 };
 
 function emptyRule(type: RuleType): EligibilityRuleForm {
@@ -131,7 +137,7 @@ const num = (v: unknown): number | null => {
 
 export function PackageForm({
   mode, initial, plans, busy, onSave, onCancel, modules = null, roomChargeInterfaces = null, clientGroups = null,
-  cardCurrencies = null,
+  cardAccount = null,
 }: {
   mode: "add" | "edit";
   initial?: PackageFormInitial;
@@ -146,8 +152,9 @@ export function PackageForm({
   roomChargeInterfaces?: RoomChargeInterface[] | "error" | null;
   /** GET /client-groups: the groups an audience can name. null while loading; "error" when they cannot be read. */
   clientGroups?: ClientGroupOption[] | "error" | null;
-  /** The currencies the site's ACTIVE payment accounts settle (upper-case). null = unknown: no claim is made. */
-  cardCurrencies?: string[] | null;
+  /** The site's DEFAULT ACTIVE payment account (the one checkouts use); "none" when there is none; null =
+   *  unknown, and then no claim is made about card currencies. */
+  cardAccount?: CardAccountView | "none" | null;
 }) {
   // HOSPITALITY decides whether hotel conditions and the per-night allowance are offered at all.
   const hotel = moduleLicensedIn("hospitality", modules ?? null);
@@ -215,6 +222,8 @@ export function PackageForm({
       service_plan_revision_id: selected.current_revision_id || "pending",
       rules, tiers, duration,
       visible_from: visFrom || undefined, visible_until: visUntil || undefined,
+      preserved_rules: initial?.preservedRules,
+      display: initial?.display,
     });
     if (res.error || !res.payload) { setError(res.error ?? "Please check the form"); return; }
     const allocErr = validateAllocation(alloc);
@@ -410,9 +419,19 @@ export function PackageForm({
                   .map((r) => `${r.nights} nights → ${r.gb} GB`).join(" · ")}
               </div>
             )}
-            <p className="text-xs text-muted-foreground">
-              Clients who did not sign in with their room are not offered this package.
+            {/* TRUE AS STATED (audit O-4): a per-night allowance needs a stay to count nights of, so the
+                appliance offers and grants such a package only to a client who signed in with their room. */}
+            <p className="text-xs text-muted-foreground" data-testid="per-night-audience-note">
+              This allowance is given only to clients who signed in with their room, because it is counted from
+              their stay. The package is not offered to clients who signed in with a voucher, an account, an email
+              or phone code, a social account or open access, and it cannot be issued as vouchers.
             </p>
+            {acq.methods.includes("PREPAID") && (
+              <p className="text-xs text-warning-subtle-foreground" role="status" data-testid="per-night-voucher-note">
+                Voucher is ticked below, but vouchers cannot be issued for a package with a per-night allowance.
+                Untick Voucher, or choose the plan&rsquo;s allowance instead.
+              </p>
+            )}
           </div>
         )}
 
@@ -471,14 +490,12 @@ export function PackageForm({
       </div>
 
       <AcquisitionSection value={acq} onChange={setAcq} modules={modules} interfaces={roomChargeInterfaces} />
-      {/* A card payment is never converted: a package priced in a currency no active account settles is not
-          offered by card. Said here, beside the price, rather than discovered by a client after choosing. */}
-      {paid && acq.methods.includes("ONLINE_PAYMENT") && Array.isArray(cardCurrencies)
-        && !cardCurrencies.includes((acq.currency || "").trim().toUpperCase()) && (
+      {/* WHETHER CLIENTS WILL BE OFFERED CARD FOR THIS PRICE, by the rule scd applies: the DEFAULT active account
+          settles the package currency, or it lets its provider convert that currency (lib/card-currency).
+          Said here, beside the price, rather than discovered by a client after choosing. */}
+      {paid && acq.methods.includes("ONLINE_PAYMENT") && cardCurrencyProblem(cardAccount, acq.currency) && (
         <p className="text-xs text-warning-subtle-foreground" role="status" data-testid="card-currency-note">
-          {cardCurrencies.length === 0
-            ? "No active payment account exists yet, so this package will not be offered by card until one is added under Payment methods."
-            : `Your active payment account${cardCurrencies.length > 1 ? "s settle" : " settles"} ${cardCurrencies.join(", ")}, not ${(acq.currency || "").toUpperCase()}. A card payment is never converted, so this package will not be offered by card until the price currency or the account matches.`}
+          {cardCurrencyProblem(cardAccount, acq.currency)}
         </p>
       )}
 
@@ -665,6 +682,22 @@ export function PackageForm({
           </div>
           );
         })}
+        {/* CONDITIONS THIS FORM DOES NOT EDIT. A stored rule of a type the console has no control for (a newer
+            appliance's, or one set outside this screen) is kept and saved again exactly as it is, never dropped. */}
+        {(initial?.preservedRules ?? []).length > 0 && (
+          <div className="mt-2 space-y-1" data-testid="preserved-rules">
+            {(initial?.preservedRules ?? []).map((r, i) => (
+              <div key={i} className="rounded-md border border-border bg-surface/50 px-3 py-1.5 text-xs">
+                <span className="font-mono">{r.type}</span>{" "}
+                <span className="font-mono text-muted-foreground">{JSON.stringify(r.value)}</span>{" "}
+                <span className="text-muted-foreground">— kept as is</span>
+              </div>
+            ))}
+            <p className="text-xs text-muted-foreground">
+              These conditions cannot be changed here. They are saved again unchanged.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* ADVANCED. Sale window and speed steps are real controls and stay available, but they are not part of

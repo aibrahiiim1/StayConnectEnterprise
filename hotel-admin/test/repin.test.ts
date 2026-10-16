@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from "vitest";
 import {
-  stalePackagesFor, repinPayload, repinOutcomeMessage,
+  stalePackagesFor, repinPayload, repinOutcomeMessage, repinSkippedMessage, commercialTermsOf,
   type PlanRef, type PackageRef, type PackageCurrentDTO,
 } from "@/lib/repin";
 
@@ -119,6 +119,74 @@ describe("repinPayload", () => {
   it("falls back to a readable name only when the package has no display", () => {
     expect(repinPayload({ code: "X" }, "rev4", "Nice name").display).toEqual({ name: "Nice name" });
     expect(repinPayload({ code: "X" }, "rev4").display).toEqual({ name: "X" });
+  });
+});
+
+// AUDIT O-1: "Apply current settings to packages" republished every chosen package as FREE, because the body
+// named no price, currency, methods or mappings and the server defaulted them.
+describe("repinPayload — the package's commercial terms travel with it", () => {
+  const card: PackageCurrentDTO = {
+    code: "DAY",
+    display: { name: "Day pass", description: "24 hours", badge: "Popular" },
+    duration_policy: { end_mode: "VALIDITY_WINDOW", duration_seconds: 86400 },
+    eligibility_rules: [{ Type: "STAY_STATUS", Value: { statuses: ["IN_HOUSE"] } }],
+    grant_tiers: [{ Order: 10, Value: { down_kbps: 5000, match: { type: "VIP", value: { is_vip: true } } } }],
+    price_minor: 1500, currency: "eur", currency_exponent: 2,
+    settlement_methods: ["ONLINE_PAYMENT", "PMS_POSTING", "PREPAID"],
+    room_charge_mappings: [{ pms_interface_id: "if-1", posting_code: "WIFI", tax_code: null, tax_rate_bp: 1400 }],
+    package_type: "STAY_BUNDLE", plan_overrides: { max_concurrent_devices: 3 }, renewable: true, max_purchases_per_stay: 2,
+  };
+
+  it("carries price, currency, exponent, methods and room-charge mappings exactly", () => {
+    const p = repinPayload(card, "rev4") as Record<string, unknown>;
+    expect(p.price_minor).toBe(1500);
+    expect(p.currency).toBe("EUR");
+    expect(p.currency_exponent).toBe(2);
+    expect(p.acquisition_methods).toEqual(["ONLINE_PAYMENT", "PMS_POSTING", "PREPAID"]);
+    expect(p.room_charge_mappings).toEqual([{ pms_interface_id: "if-1", posting_code: "WIFI", tax_rate_bp: 1400 }]);
+  });
+
+  it("carries the fields no screen edits, the whole display, unknown rules and tier match keys", () => {
+    const p = repinPayload(card, "rev4") as Record<string, unknown>;
+    expect(p).toMatchObject({
+      package_type: "STAY_BUNDLE", plan_overrides: { max_concurrent_devices: 3 }, renewable: true, max_purchases_per_stay: 2,
+    });
+    expect(p.display).toEqual({ name: "Day pass", description: "24 hours", badge: "Popular" });
+    expect(p.eligibility_rules).toEqual([{ type: "STAY_STATUS", value: { statuses: ["IN_HOUSE"] } }]);
+    expect(p.grant_tiers).toEqual([{ order: 10, grant: { down_kbps: 5000, match: { type: "VIP", value: { is_vip: true } } } }]);
+  });
+
+  it("states a Free legacy revision the way the server stores it, and null mappings as none", () => {
+    const { terms, missing } = commercialTermsOf({ code: "F", price_minor: 0, currency: "", settlement_methods: null, room_charge_mappings: null });
+    expect(missing).toEqual([]);
+    expect(terms).toEqual({
+      price_minor: 0, currency: "USD", currency_exponent: 2, acquisition_methods: ["NOT_REQUIRED"], room_charge_mappings: [],
+    });
+  });
+
+  it("guesses nothing for a priced package whose terms are incomplete, and names what is missing", () => {
+    expect(commercialTermsOf({ code: "P", price_minor: 900, currency: "", settlement_methods: [], room_charge_mappings: null }).missing)
+      .toEqual(["currency", "currency_exponent", "acquisition_methods"]);
+    expect(commercialTermsOf({ code: "P", currency: "USD", settlement_methods: ["PREPAID"], room_charge_mappings: [] }).missing)
+      .toEqual(["price_minor"]);
+    // A reader that does not return the mappings at all is a gap; one that returns null is "none".
+    expect(commercialTermsOf({ code: "P", price_minor: 0, currency: "USD", settlement_methods: ["NOT_REQUIRED"] }).missing)
+      .toEqual(["room_charge_mappings"]);
+    // ...and then the payload carries no commercial field at all, so nothing is posted half-stated.
+    const p = repinPayload({ code: "P", price_minor: 900 }, "rev4") as Record<string, unknown>;
+    expect("price_minor" in p).toBe(false);
+  });
+
+  it("a currency this build does not list keeps the exponent it was published with", () => {
+    const { terms } = commercialTermsOf({ code: "X", price_minor: 100, currency: "CHF", currency_exponent: 2, settlement_methods: ["PREPAID"], room_charge_mappings: [] });
+    expect(terms?.currency_exponent).toBe(2);
+    expect(commercialTermsOf({ code: "X", price_minor: 100, currency: "CHF", settlement_methods: ["PREPAID"], room_charge_mappings: [] }).missing)
+      .toEqual(["currency_exponent"]);
+  });
+
+  it("names the packages it did not move", () => {
+    expect(repinSkippedMessage([])).toBeNull();
+    expect(repinSkippedMessage([{ name: "Day pass", missing: ["currency"] }])).toContain("Not moved: Day pass (missing currency)");
   });
 });
 

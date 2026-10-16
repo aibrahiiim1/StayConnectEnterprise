@@ -787,13 +787,17 @@ W = can change, R = read-only, — = not shown. The appliance enforces these on 
 | Action | Page | What is asked |
 |---|---|---|
 | Disable an internet package | Internet packages | Reason + password |
+| Enable (offer again) an internet package | Internet packages | Password |
+| Save a package with a changed price, currency, way to get it, or service plan | Internet packages | Password (a rename or a new condition needs none) |
+| Save changes to an existing service plan | Service plans | Password |
+| Apply current settings to packages | Service plans | Password, asked once for all the packages moved |
 | Delete a package or service plan | Internet packages, Service plans | Reason + password (refused while in use) |
 | Publish a Grace Period policy | Grace Period | Reason (from a list) + password |
 | Show a voucher code / export a batch | Vouchers | Reason + password, recorded |
 | Cancel a voucher card | Vouchers | Reason + password |
 | Change the voucher code format | Vouchers → Code security | Reason |
 | Retire a code key | Vouchers → Code security | Reason + password |
-| Issue vouchers | Vouchers | One-time reveal of the codes (no password) |
+| Issue vouchers | Vouchers | Password, then one-time reveal of the codes |
 | Create an account / set a password | Client accounts | One-time reveal of the password |
 | Reset a post-stay PIN | Post-stay access | Reason + password, then one-time reveal |
 | End post-stay access | Post-stay access | Reason + type `REVOKE` + password |
