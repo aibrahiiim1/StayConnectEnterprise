@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0116, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0118, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -752,6 +752,124 @@ END $$;
 
 
 --
+-- Name: client_device_action(uuid, uuid, text, uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.client_device_action(p_tenant uuid, p_site uuid, p_action text, p_device uuid, p_auth_context uuid, p_target uuid) RETURNS TABLE(outcome text, entitlement_id uuid)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE
+  v_ac iam_v2.auth_contexts%ROWTYPE; v_ent uuid; v_limit int; v_open int; v_used int; v_allowed int;
+  v_status text; v_online int; v_out text;
+BEGIN
+  IF p_action NOT IN ('REPLACE','RELEASE') THEN
+    RAISE EXCEPTION 'action must be REPLACE or RELEASE' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_device IS NULL OR p_target IS NULL THEN
+    RAISE EXCEPTION 'both devices are required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+
+  -- WHICH PACKAGE. Never named by the caller: derived from proof the device holds.
+  IF p_action = 'REPLACE' THEN
+    SELECT * INTO v_ac FROM iam_v2.auth_contexts a
+     WHERE a.id = p_auth_context AND a.tenant_id = p_tenant AND a.site_id = p_site;
+    IF NOT FOUND OR v_ac.device_id <> p_device OR v_ac.expires_at <= now() THEN
+      v_out := 'REFUSED_SIGNIN_EXPIRED';
+    ELSE
+      SELECT e.id INTO v_ent FROM iam_v2.entitlements e
+       WHERE e.tenant_id = p_tenant AND e.site_id = p_site AND e.status = 'ACTIVE'
+         AND ((v_ac.guest_account_id IS NOT NULL AND e.guest_account_id = v_ac.guest_account_id)
+           OR (v_ac.voucher_id IS NOT NULL AND e.voucher_id = v_ac.voucher_id)
+           OR (v_ac.stay_id IS NOT NULL AND e.stay_id = v_ac.stay_id)
+           OR (v_ac.guest_principal_id IS NOT NULL AND e.guest_principal_id = v_ac.guest_principal_id)
+           OR (v_ac.anonymous_subject_id IS NOT NULL AND e.anonymous_subject_id = v_ac.anonymous_subject_id))
+       LIMIT 1;
+      IF v_ent IS NULL THEN v_out := 'REFUSED_NO_PACKAGE'; END IF;
+    END IF;
+  ELSE
+    SELECT s.entitlement_id INTO v_ent FROM iam_v2.sessions s
+      JOIN iam_v2.entitlements e ON e.id = s.entitlement_id
+     WHERE s.tenant_id = p_tenant AND s.site_id = p_site AND s.device_id = p_device
+       AND s.state = 'active' AND s.ended IS NULL AND e.status = 'ACTIVE'
+     ORDER BY s.started DESC LIMIT 1;
+    IF v_ent IS NULL THEN v_out := 'REFUSED_NO_PACKAGE'; END IF;
+  END IF;
+
+  IF v_out IS NULL AND p_target = p_device THEN v_out := 'REFUSED_SAME_DEVICE'; END IF;
+
+  IF v_out IS NULL THEN
+    -- L3 lock first, as authorize/deauthorize take it: the count below and the move cannot interleave with
+    -- another activation on this package.
+    PERFORM 1 FROM iam_v2.entitlements WHERE id = v_ent FOR UPDATE;
+
+    SELECT g.client_device_changes_per_day INTO v_allowed FROM iam_v2.device_settings_get(p_tenant, p_site) g;
+    SELECT count(*) INTO v_used FROM iam_v2.device_slot_actions d
+     WHERE d.entitlement_id = v_ent AND d.actor = 'CLIENT' AND d.outcome = 'OK'
+       AND d.acted_at > now() - interval '24 hours';
+    IF v_used >= v_allowed THEN v_out := 'REFUSED_THROTTLED'; END IF;
+  END IF;
+
+  IF v_out IS NULL AND p_action = 'REPLACE' THEN
+    SELECT spr.max_concurrent_devices INTO v_limit
+      FROM iam_v2.entitlements e JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
+     WHERE e.id = v_ent;
+    SELECT count(*) INTO v_open FROM iam_v2.entitlement_device_authorizations x
+     WHERE x.entitlement_id = v_ent AND x.deauthorized_at IS NULL;
+    -- A free slot needs no replacement (the device simply joins), and a device already holding a slot has
+    -- nothing to take.
+    IF v_limit IS NULL OR v_open < v_limit
+       OR EXISTS (SELECT 1 FROM iam_v2.entitlement_device_authorizations x
+                   WHERE x.entitlement_id = v_ent AND x.device_id = p_device AND x.deauthorized_at IS NULL) THEN
+      v_out := 'REFUSED_LIMIT_NOT_REACHED';
+    END IF;
+  END IF;
+
+  IF v_out IS NULL THEN
+    SELECT ed.status INTO v_status FROM iam_v2.entitlement_devices ed
+     WHERE ed.entitlement_id = v_ent AND ed.device_id = p_target;
+    IF v_status IS NULL THEN v_out := 'REFUSED_NOT_FOUND';
+    ELSIF v_status <> 'AUTHORIZED' THEN v_out := 'REFUSED_ALREADY_RELEASED';
+    END IF;
+  END IF;
+
+  IF v_out IS NULL THEN
+    -- Offline only. scd ends the target's session through enforcement (nft deny, session ended) before calling;
+    -- a session still live here is one that came back in between, and the client is asked to try again.
+    SELECT count(*) INTO v_online FROM iam_v2.sessions s
+     WHERE s.entitlement_id = v_ent AND s.device_id = p_target AND s.state IN ('active','PENDING_ENFORCEMENT');
+    IF v_online > 0 THEN v_out := 'REFUSED_ONLINE'; END IF;
+  END IF;
+
+  IF v_out IS NULL THEN
+    IF NOT iam_v2.deauthorize_entitlement_device(v_ent, p_target, now(),
+                                                 CASE p_action WHEN 'REPLACE' THEN 'CLIENT_REPLACED' ELSE 'CLIENT_RELEASED' END) THEN
+      v_out := 'REFUSED_ALREADY_RELEASED';
+    ELSE
+      IF p_action = 'REPLACE' THEN
+        -- The freed slot goes to the device that asked, in this transaction: nobody else can take it first.
+        PERFORM iam_v2.authorize_entitlement_device(v_ent, p_device, now());
+      END IF;
+      v_out := 'OK';
+    END IF;
+  END IF;
+
+  INSERT INTO iam_v2.device_slot_actions
+    (tenant_id, site_id, entitlement_id, device_id, replacement_device_id, actor, action, outcome)
+  VALUES (p_tenant, p_site, v_ent, p_target, CASE WHEN p_action = 'REPLACE' THEN p_device END, 'CLIENT',
+          p_action, v_out);
+  RETURN QUERY SELECT v_out, v_ent;
+END $$;
+
+
+--
+-- Name: FUNCTION client_device_action(p_tenant uuid, p_site uuid, p_action text, p_device uuid, p_auth_context uuid, p_target uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.client_device_action(p_tenant uuid, p_site uuid, p_action text, p_device uuid, p_auth_context uuid, p_target uuid) IS 'A client replaces (REPLACE, from a new device with a fresh sign-in) or releases (RELEASE, from a device online on the package) one of their devices'' slots (0118). Offline targets only; limited per package per day by site_device_settings; every attempt recorded in device_slot_actions. Never changes the package''s window, consumption or ownership.';
+
+
+--
 -- Name: client_group_changes_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -844,6 +962,83 @@ BEGIN
     WHERE entitlement_id = p_ent AND device_id = p_device;
   RETURN true;
 END $_$;
+
+
+--
+-- Name: device_settings_changes_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.device_settings_changes_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'iam_v2.device_settings_changes is append-only: % refused', TG_OP
+    USING ERRCODE = 'restrict_violation';
+END $$;
+
+
+--
+-- Name: device_settings_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.device_settings_get(p_tenant uuid, p_site uuid) RETURNS TABLE(client_device_changes_per_day integer, config_version bigint, updated_at timestamp with time zone, updated_by text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE(s.client_device_changes_per_day, 3), COALESCE(s.config_version, 0), s.updated_at, s.updated_by
+    FROM (SELECT 1) one
+    LEFT JOIN iam_v2.site_device_settings s ON s.tenant_id = p_tenant AND s.site_id = p_site;
+$$;
+
+
+--
+-- Name: device_settings_set(uuid, uuid, integer, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.device_settings_set(p_tenant uuid, p_site uuid, p_client_device_changes_per_day integer, p_operator text, p_reason text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_version bigint; v_old integer;
+BEGIN
+  IF p_operator IS NULL OR btrim(p_operator) = '' THEN
+    RAISE EXCEPTION 'an operator label is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_reason IS NULL OR length(btrim(p_reason)) < 4 OR length(btrim(p_reason)) > 500 THEN
+    RAISE EXCEPTION 'a reason of 4-500 characters is required to change the device settings'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_client_device_changes_per_day IS NULL OR p_client_device_changes_per_day NOT BETWEEN 1 AND 10 THEN
+    RAISE EXCEPTION 'client_device_changes_per_day must be 1-10 (got %)', p_client_device_changes_per_day
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('device_settings'), hashtext(p_site::text));
+  SELECT s.client_device_changes_per_day INTO v_old
+    FROM iam_v2.site_device_settings s WHERE s.tenant_id = p_tenant AND s.site_id = p_site FOR UPDATE;
+  INSERT INTO iam_v2.site_device_settings AS s (tenant_id, site_id, client_device_changes_per_day, updated_by)
+  VALUES (p_tenant, p_site, p_client_device_changes_per_day, btrim(p_operator))
+  ON CONFLICT (tenant_id, site_id) DO UPDATE
+     SET client_device_changes_per_day = EXCLUDED.client_device_changes_per_day,
+         updated_by = EXCLUDED.updated_by, config_version = s.config_version + 1, updated_at = now()
+  RETURNING s.config_version INTO v_version;
+  INSERT INTO iam_v2.device_settings_changes
+    (tenant_id, site_id, changed_by, change_reason, old_client_device_changes_per_day,
+     new_client_device_changes_per_day, new_config_version)
+  VALUES (p_tenant, p_site, btrim(p_operator), btrim(p_reason), v_old, p_client_device_changes_per_day, v_version);
+  RETURN v_version;
+END $$;
+
+
+--
+-- Name: device_slot_actions_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.device_slot_actions_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'iam_v2.device_slot_actions is append-only: % refused', TG_OP USING ERRCODE = 'restrict_violation';
+END $$;
 
 
 --
@@ -8517,6 +8712,171 @@ $_$;
 
 
 --
+-- Name: self_service_settings_changes_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.self_service_settings_changes_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'iam_v2.self_service_settings_changes is append-only: % refused', TG_OP
+    USING ERRCODE = 'restrict_violation';
+END $$;
+
+
+--
+-- Name: self_service_settings_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.self_service_settings_get(p_tenant uuid, p_site uuid) RETURNS TABLE(verification_required boolean, verification_deadline_hours integer, suspension_policy text, reminder_hours_before integer, resend_cooldown_seconds integer, resend_max_per_day integer, grace_minutes integer, max_grace_extensions integer, registrations_per_device_per_day integer, config_version bigint, updated_at timestamp with time zone, updated_by text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE(s.verification_required, true),
+         COALESCE(s.verification_deadline_hours, 24),
+         COALESCE(s.suspension_policy, 'SUSPEND'),
+         COALESCE(s.reminder_hours_before, 4),
+         COALESCE(s.resend_cooldown_seconds, 60),
+         COALESCE(s.resend_max_per_day, 5),
+         COALESCE(s.grace_minutes, 60),
+         COALESCE(s.max_grace_extensions, 1),
+         COALESCE(s.registrations_per_device_per_day, 3),
+         COALESCE(s.config_version, 0),
+         s.updated_at,
+         s.updated_by
+    FROM (SELECT 1) one
+    LEFT JOIN iam_v2.site_self_service_settings s
+      ON s.tenant_id = p_tenant AND s.site_id = p_site;
+$$;
+
+
+--
+-- Name: FUNCTION self_service_settings_get(p_tenant uuid, p_site uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.self_service_settings_get(p_tenant uuid, p_site uuid) IS 'The Email accounts settings in force for a site. config_version 0 with a null updated_at means no row exists and the answer is the contract defaults.';
+
+
+--
+-- Name: self_service_settings_set(uuid, uuid, boolean, integer, text, integer, integer, integer, integer, integer, integer, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.self_service_settings_set(p_tenant uuid, p_site uuid, p_verification_required boolean, p_verification_deadline_hours integer, p_suspension_policy text, p_reminder_hours_before integer, p_resend_cooldown_seconds integer, p_resend_max_per_day integer, p_grace_minutes integer, p_max_grace_extensions integer, p_registrations_per_device_per_day integer, p_operator text, p_reason text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_version bigint; v_old iam_v2.site_self_service_settings%ROWTYPE;
+BEGIN
+  IF p_operator IS NULL OR btrim(p_operator) = '' THEN
+    RAISE EXCEPTION 'an operator label is required: "somebody changed it" is not an audit record'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_reason IS NULL OR length(btrim(p_reason)) < 4 OR length(btrim(p_reason)) > 500 THEN
+    RAISE EXCEPTION 'a reason of 4-500 characters is required to change the Email accounts settings'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_verification_required IS NULL THEN
+    RAISE EXCEPTION 'verification_required must be true or false' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_verification_deadline_hours IS NULL OR p_verification_deadline_hours NOT BETWEEN 1 AND 168 THEN
+    RAISE EXCEPTION 'verification_deadline_hours must be 1-168 (got %)', p_verification_deadline_hours
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_suspension_policy IS NULL OR p_suspension_policy NOT IN ('SUSPEND','WARN_ONLY') THEN
+    RAISE EXCEPTION 'suspension_policy must be SUSPEND or WARN_ONLY (got %)', coalesce(p_suspension_policy,'null')
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_reminder_hours_before IS NULL OR p_reminder_hours_before NOT BETWEEN 0 AND 72
+     OR p_reminder_hours_before >= p_verification_deadline_hours THEN
+    RAISE EXCEPTION 'reminder_hours_before must be 0-72 and less than the deadline (got %)', p_reminder_hours_before
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_resend_cooldown_seconds IS NULL OR p_resend_cooldown_seconds NOT BETWEEN 30 AND 3600 THEN
+    RAISE EXCEPTION 'resend_cooldown_seconds must be 30-3600 (got %)', p_resend_cooldown_seconds
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_resend_max_per_day IS NULL OR p_resend_max_per_day NOT BETWEEN 1 AND 20 THEN
+    RAISE EXCEPTION 'resend_max_per_day must be 1-20 (got %)', p_resend_max_per_day
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_grace_minutes IS NULL OR p_grace_minutes NOT BETWEEN 15 AND 240 THEN
+    RAISE EXCEPTION 'grace_minutes must be 15-240 (got %)', p_grace_minutes USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_max_grace_extensions IS NULL OR p_max_grace_extensions NOT BETWEEN 0 AND 3 THEN
+    RAISE EXCEPTION 'max_grace_extensions must be 0-3 (got %)', p_max_grace_extensions
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_registrations_per_device_per_day IS NULL OR p_registrations_per_device_per_day NOT BETWEEN 1 AND 10 THEN
+    RAISE EXCEPTION 'registrations_per_device_per_day must be 1-10 (got %)', p_registrations_per_device_per_day
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtext('self_service_settings'), hashtext(p_site::text));
+
+  SELECT s.* INTO v_old
+    FROM iam_v2.site_self_service_settings s
+   WHERE s.tenant_id = p_tenant AND s.site_id = p_site
+     FOR UPDATE;
+
+  INSERT INTO iam_v2.site_self_service_settings AS s
+    (tenant_id, site_id, verification_required, verification_deadline_hours, suspension_policy,
+     reminder_hours_before, resend_cooldown_seconds, resend_max_per_day, grace_minutes, max_grace_extensions,
+     registrations_per_device_per_day, updated_by)
+  VALUES (p_tenant, p_site, p_verification_required, p_verification_deadline_hours, p_suspension_policy,
+          p_reminder_hours_before, p_resend_cooldown_seconds, p_resend_max_per_day, p_grace_minutes,
+          p_max_grace_extensions, p_registrations_per_device_per_day, btrim(p_operator))
+  ON CONFLICT (tenant_id, site_id) DO UPDATE
+     SET verification_required            = EXCLUDED.verification_required,
+         verification_deadline_hours      = EXCLUDED.verification_deadline_hours,
+         suspension_policy                = EXCLUDED.suspension_policy,
+         reminder_hours_before            = EXCLUDED.reminder_hours_before,
+         resend_cooldown_seconds          = EXCLUDED.resend_cooldown_seconds,
+         resend_max_per_day               = EXCLUDED.resend_max_per_day,
+         grace_minutes                    = EXCLUDED.grace_minutes,
+         max_grace_extensions             = EXCLUDED.max_grace_extensions,
+         registrations_per_device_per_day = EXCLUDED.registrations_per_device_per_day,
+         updated_by                       = EXCLUDED.updated_by,
+         config_version                   = s.config_version + 1,
+         updated_at                       = now()
+  RETURNING s.config_version INTO v_version;
+
+  -- v_old is NULL-filled when no row existed: the first change records no "old" values, as in 0104.
+  INSERT INTO iam_v2.self_service_settings_changes
+    (tenant_id, site_id, changed_by, change_reason,
+     old_verification_required, new_verification_required,
+     old_verification_deadline_hours, new_verification_deadline_hours,
+     old_suspension_policy, new_suspension_policy,
+     old_reminder_hours_before, new_reminder_hours_before,
+     old_resend_cooldown_seconds, new_resend_cooldown_seconds,
+     old_resend_max_per_day, new_resend_max_per_day,
+     old_grace_minutes, new_grace_minutes,
+     old_max_grace_extensions, new_max_grace_extensions,
+     old_registrations_per_device_per_day, new_registrations_per_device_per_day,
+     new_config_version)
+  VALUES (p_tenant, p_site, btrim(p_operator), btrim(p_reason),
+          v_old.verification_required, p_verification_required,
+          v_old.verification_deadline_hours, p_verification_deadline_hours,
+          v_old.suspension_policy, p_suspension_policy,
+          v_old.reminder_hours_before, p_reminder_hours_before,
+          v_old.resend_cooldown_seconds, p_resend_cooldown_seconds,
+          v_old.resend_max_per_day, p_resend_max_per_day,
+          v_old.grace_minutes, p_grace_minutes,
+          v_old.max_grace_extensions, p_max_grace_extensions,
+          v_old.registrations_per_device_per_day, p_registrations_per_device_per_day,
+          v_version);
+
+  RETURN v_version;
+END $$;
+
+
+--
+-- Name: FUNCTION self_service_settings_set(p_tenant uuid, p_site uuid, p_verification_required boolean, p_verification_deadline_hours integer, p_suspension_policy text, p_reminder_hours_before integer, p_resend_cooldown_seconds integer, p_resend_max_per_day integer, p_grace_minutes integer, p_max_grace_extensions integer, p_registrations_per_device_per_day integer, p_operator text, p_reason text); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.self_service_settings_set(p_tenant uuid, p_site uuid, p_verification_required boolean, p_verification_deadline_hours integer, p_suspension_policy text, p_reminder_hours_before integer, p_resend_cooldown_seconds integer, p_resend_max_per_day integer, p_grace_minutes integer, p_max_grace_extensions integer, p_registrations_per_device_per_day integer, p_operator text, p_reason text) IS 'Stores validated Email accounts settings and returns the new config_version, recording the old and new values with the operator and the reason. Existing deadlines are not moved: a change applies to accounts registered after it (and to the sweep''s suspension and reminder decisions at once).';
+
+
+--
 -- Name: service_plan_delete_unused(uuid, uuid, uuid, uuid, text); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -8703,6 +9063,96 @@ BEGIN
   VALUES (p_tenant, p_site, btrim(p_operator), NULLIF(btrim(coalesce(p_reason,'')),''), v_old, p_domains);
   RETURN v_version;
 END $$;
+
+
+--
+-- Name: staff_release_device_slot(uuid, uuid, uuid, uuid, uuid, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.staff_release_device_slot(p_tenant uuid, p_site uuid, p_entitlement uuid, p_device uuid, p_operator uuid, p_operator_label text, p_reason text) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_status text; v_online int; v_out text;
+BEGIN
+  IF p_operator_label IS NULL OR btrim(p_operator_label) = '' THEN
+    RAISE EXCEPTION 'an operator label is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_reason IS NULL OR length(btrim(p_reason)) < 4 OR length(btrim(p_reason)) > 500 THEN
+    RAISE EXCEPTION 'a reason of 4-500 characters is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  PERFORM 1 FROM iam_v2.entitlements e
+   WHERE e.id = p_entitlement AND e.tenant_id = p_tenant AND e.site_id = p_site FOR UPDATE;
+  IF NOT FOUND THEN
+    v_out := 'REFUSED_NO_PACKAGE';
+  ELSE
+    SELECT ed.status INTO v_status FROM iam_v2.entitlement_devices ed
+     WHERE ed.entitlement_id = p_entitlement AND ed.device_id = p_device;
+    IF v_status IS NULL THEN v_out := 'REFUSED_NOT_FOUND';
+    ELSIF v_status <> 'AUTHORIZED' THEN v_out := 'REFUSED_ALREADY_RELEASED';
+    ELSE
+      SELECT count(*) INTO v_online FROM iam_v2.sessions s
+       WHERE s.entitlement_id = p_entitlement AND s.device_id = p_device
+         AND s.state IN ('active','PENDING_ENFORCEMENT');
+      IF v_online > 0 THEN v_out := 'REFUSED_ONLINE';
+      ELSIF iam_v2.deauthorize_entitlement_device(p_entitlement, p_device, now(), 'STAFF_RELEASED') THEN
+        v_out := 'OK';
+      ELSE v_out := 'REFUSED_ALREADY_RELEASED';
+      END IF;
+    END IF;
+  END IF;
+  INSERT INTO iam_v2.device_slot_actions
+    (tenant_id, site_id, entitlement_id, device_id, actor, operator_id, operator_label, action, outcome, reason)
+  VALUES (p_tenant, p_site, CASE WHEN v_out <> 'REFUSED_NO_PACKAGE' THEN p_entitlement END, p_device, 'STAFF',
+          p_operator, btrim(p_operator_label), 'RELEASE', v_out, btrim(p_reason));
+  RETURN v_out;
+END $$;
+
+
+--
+-- Name: FUNCTION staff_release_device_slot(p_tenant uuid, p_site uuid, p_entitlement uuid, p_device uuid, p_operator uuid, p_operator_label text, p_reason text); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.staff_release_device_slot(p_tenant uuid, p_site uuid, p_entitlement uuid, p_device uuid, p_operator uuid, p_operator_label text, p_reason text) IS 'Staff free one device''s slot on one package (0118). Offline devices only (edged disconnects first); reason required; recorded in device_slot_actions. The package''s window, consumption and ownership are untouched.';
+
+
+--
+-- Name: staff_require_device_signin(uuid, uuid, uuid, uuid, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.staff_require_device_signin(p_tenant uuid, p_site uuid, p_device uuid, p_operator uuid, p_operator_label text, p_reason text) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_n integer;
+BEGIN
+  IF p_operator_label IS NULL OR btrim(p_operator_label) = '' THEN
+    RAISE EXCEPTION 'an operator label is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_reason IS NULL OR length(btrim(p_reason)) < 4 OR length(btrim(p_reason)) > 500 THEN
+    RAISE EXCEPTION 'a reason of 4-500 characters is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  PERFORM 1 FROM iam_v2.devices d WHERE d.id = p_device AND d.tenant_id = p_tenant AND d.site_id = p_site;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'device % is not at this site', p_device USING ERRCODE = 'foreign_key_violation';
+  END IF;
+  -- The device-bound remembered sign-in ("Welcome back"). Revoked, never deleted.
+  UPDATE iam_v2.principal_device_credentials c SET revoked_at = now()
+   WHERE c.tenant_id = p_tenant AND c.site_id = p_site AND c.device_id = p_device AND c.revoked_at IS NULL;
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  INSERT INTO iam_v2.device_slot_actions
+    (tenant_id, site_id, device_id, actor, operator_id, operator_label, action, outcome, reason, detail)
+  VALUES (p_tenant, p_site, p_device, 'STAFF', p_operator, btrim(p_operator_label), 'REQUIRE_SIGNIN', 'OK',
+          btrim(p_reason), v_n || ' remembered sign-in(s) revoked');
+  RETURN v_n;
+END $$;
+
+
+--
+-- Name: FUNCTION staff_require_device_signin(p_tenant uuid, p_site uuid, p_device uuid, p_operator uuid, p_operator_label text, p_reason text); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.staff_require_device_signin(p_tenant uuid, p_site uuid, p_device uuid, p_operator uuid, p_operator_label text, p_reason text) IS 'Staff make a device sign in afresh (0118): its remembered sign-in is revoked (edged also ends its sessions through enforcement). Slots and packages are untouched; recorded in device_slot_actions.';
 
 
 --
@@ -9326,6 +9776,44 @@ SET default_tablespace = '';
 SET default_table_access_method = heap;
 
 --
+-- Name: account_email_tokens; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.account_email_tokens (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    account_id uuid NOT NULL,
+    purpose text NOT NULL,
+    token_hmac bytea,
+    key_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    used_at timestamp with time zone,
+    superseded_at timestamp with time zone,
+    sent_at timestamp with time zone,
+    send_attempts integer DEFAULT 0 NOT NULL,
+    next_send_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_send_error text,
+    CONSTRAINT aet_expiry CHECK ((expires_at > created_at)),
+    CONSTRAINT aet_key_with_hmac CHECK (((token_hmac IS NULL) = (key_id IS NULL))),
+    CONSTRAINT aet_last_send_error_len CHECK (((last_send_error IS NULL) OR (length(last_send_error) <= 500))),
+    CONSTRAINT aet_purpose CHECK ((purpose = ANY (ARRAY['VERIFY'::text, 'RESET'::text]))),
+    CONSTRAINT aet_send_attempts CHECK ((send_attempts >= 0)),
+    CONSTRAINT aet_sent_has_hmac CHECK (((sent_at IS NULL) OR (token_hmac IS NOT NULL))),
+    CONSTRAINT aet_token_hmac_len CHECK (((token_hmac IS NULL) OR (length(token_hmac) = 32))),
+    CONSTRAINT aet_used_has_hmac CHECK (((used_at IS NULL) OR (token_hmac IS NOT NULL)))
+);
+
+
+--
+-- Name: TABLE account_email_tokens; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.account_email_tokens IS 'Single-use VERIFY (until the verification deadline, at least 24 h) and RESET (30 min) links of self-service accounts (0117). Only HMAC-SHA256 of a token is stored (key derived from the appliance-local resume key, domain account-email-token:v1). A new token of a purpose supersedes the older unused ones. The row is also the outbox entry: sent_at, send_attempts, next_send_at, last_send_error.';
+
+
+--
 -- Name: account_password_settings_changes; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -9909,6 +10397,61 @@ CREATE TABLE iam_v2.device_network_appearances (
 
 
 --
+-- Name: device_settings_changes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.device_settings_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    changed_by text NOT NULL,
+    change_reason text NOT NULL,
+    old_client_device_changes_per_day integer,
+    new_client_device_changes_per_day integer NOT NULL,
+    new_config_version bigint NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT device_settings_changes_actor CHECK ((length(btrim(changed_by)) > 0)),
+    CONSTRAINT device_settings_changes_reason CHECK ((length(btrim(change_reason)) > 0))
+);
+
+
+--
+-- Name: device_slot_actions; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.device_slot_actions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    entitlement_id uuid,
+    device_id uuid,
+    replacement_device_id uuid,
+    actor text NOT NULL,
+    operator_id uuid,
+    operator_label text,
+    action text NOT NULL,
+    outcome text NOT NULL,
+    reason text,
+    detail text,
+    acted_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT dsa_action CHECK ((action = ANY (ARRAY['REPLACE'::text, 'RELEASE'::text, 'REQUIRE_SIGNIN'::text]))),
+    CONSTRAINT dsa_actor CHECK ((actor = ANY (ARRAY['CLIENT'::text, 'STAFF'::text]))),
+    CONSTRAINT dsa_detail_len CHECK (((detail IS NULL) OR (length(detail) <= 200))),
+    CONSTRAINT dsa_outcome CHECK ((outcome = ANY (ARRAY['OK'::text, 'REFUSED_SIGNIN_EXPIRED'::text, 'REFUSED_NO_PACKAGE'::text, 'REFUSED_NOT_FOUND'::text, 'REFUSED_ALREADY_RELEASED'::text, 'REFUSED_ONLINE'::text, 'REFUSED_THROTTLED'::text, 'REFUSED_SAME_DEVICE'::text, 'REFUSED_LIMIT_NOT_REACHED'::text]))),
+    CONSTRAINT dsa_reason_len CHECK (((reason IS NULL) OR (length(reason) <= 500))),
+    CONSTRAINT dsa_staff_named CHECK (((actor = 'STAFF'::text) = (operator_label IS NOT NULL))),
+    CONSTRAINT dsa_staff_reason CHECK (((actor <> 'STAFF'::text) OR (reason IS NOT NULL)))
+);
+
+
+--
+-- Name: TABLE device_slot_actions; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.device_slot_actions IS 'Every client or staff attempt to replace or release a device slot, or to forget a device''s remembered sign-in (0118), with its outcome. Append-only; refusals are recorded too.';
+
+
+--
 -- Name: devices; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -10270,7 +10813,16 @@ CREATE TABLE iam_v2.guest_access_accounts (
     locked_until timestamp with time zone,
     last_login_at timestamp with time zone,
     login_count integer DEFAULT 0 NOT NULL,
-    created_at timestamp with time zone DEFAULT now()
+    created_at timestamp with time zone DEFAULT now(),
+    self_registered boolean DEFAULT false NOT NULL,
+    email_verified_at timestamp with time zone,
+    verification_deadline timestamp with time zone,
+    verification_reminder_sent_at timestamp with time zone,
+    grace_until timestamp with time zone,
+    grace_extensions_used integer DEFAULT 0 NOT NULL,
+    created_by_device_mac macaddr,
+    CONSTRAINT gaa_grace_extensions_used_bounds CHECK (((grace_extensions_used >= 0) AND (grace_extensions_used <= 3))),
+    CONSTRAINT gaa_self_registered_username_is_email CHECK (((NOT self_registered) OR ((username = lower(btrim(username))) AND (POSITION(('@'::text) IN (username)) > 1))))
 );
 
 
@@ -10279,6 +10831,41 @@ CREATE TABLE iam_v2.guest_access_accounts (
 --
 
 COMMENT ON COLUMN iam_v2.guest_access_accounts.created_at IS 'When the account was created. NULL for accounts created before migration 0104, which recorded no creation time; never back-filled with an invented one.';
+
+
+--
+-- Name: COLUMN guest_access_accounts.self_registered; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.guest_access_accounts.self_registered IS 'true: the client created this account on the portal (Email accounts, 0117); its username is the address. false: a Personal account staff created (Client accounts).';
+
+
+--
+-- Name: COLUMN guest_access_accounts.email_verified_at; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.guest_access_accounts.email_verified_at IS 'When the client proved control of the address (a VERIFY or RESET link). NULL = not verified.';
+
+
+--
+-- Name: COLUMN guest_access_accounts.verification_deadline; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.guest_access_accounts.verification_deadline IS 'Until when an unverified self-registered account works normally. NULL = no deadline (verification not required when the account was created).';
+
+
+--
+-- Name: COLUMN guest_access_accounts.grace_until; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.guest_access_accounts.grace_until IS 'End of the one-time grace hour a suspended client asked for with their password. Lifts only the verification gate; no entitlement is created, extended or restored.';
+
+
+--
+-- Name: COLUMN guest_access_accounts.created_by_device_mac; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.guest_access_accounts.created_by_device_mac IS 'The device that registered this self-service account; counted by the per-device daily registration cap.';
 
 
 --
@@ -12240,6 +12827,41 @@ COMMENT ON TABLE iam_v2.refund_access_terminations IS 'Evidence: an entitlement 
 
 
 --
+-- Name: self_service_settings_changes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.self_service_settings_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    changed_by text NOT NULL,
+    change_reason text NOT NULL,
+    old_verification_required boolean,
+    new_verification_required boolean NOT NULL,
+    old_verification_deadline_hours integer,
+    new_verification_deadline_hours integer NOT NULL,
+    old_suspension_policy text,
+    new_suspension_policy text NOT NULL,
+    old_reminder_hours_before integer,
+    new_reminder_hours_before integer NOT NULL,
+    old_resend_cooldown_seconds integer,
+    new_resend_cooldown_seconds integer NOT NULL,
+    old_resend_max_per_day integer,
+    new_resend_max_per_day integer NOT NULL,
+    old_grace_minutes integer,
+    new_grace_minutes integer NOT NULL,
+    old_max_grace_extensions integer,
+    new_max_grace_extensions integer NOT NULL,
+    old_registrations_per_device_per_day integer,
+    new_registrations_per_device_per_day integer NOT NULL,
+    new_config_version bigint NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT self_service_settings_changes_actor CHECK ((length(btrim(changed_by)) > 0)),
+    CONSTRAINT self_service_settings_changes_reason CHECK ((length(btrim(change_reason)) > 0))
+);
+
+
+--
 -- Name: service_plan_revisions; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -12567,6 +13189,29 @@ CREATE TABLE iam_v2.site_checkout_grace_config (
 
 
 --
+-- Name: site_device_settings; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.site_device_settings (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    client_device_changes_per_day integer DEFAULT 3 NOT NULL,
+    config_version bigint DEFAULT 1 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_by text,
+    CONSTRAINT sds_changes_per_day CHECK (((client_device_changes_per_day >= 1) AND (client_device_changes_per_day <= 10))),
+    CONSTRAINT sds_version CHECK ((config_version >= 1))
+);
+
+
+--
+-- Name: TABLE site_device_settings; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.site_device_settings IS 'Per-site client device management (0118): how many times per package per 24 hours a client may replace or release one of their devices on the portal (default 3, hard bounds 1-10: the protection against passing one package around cannot be switched off). A site with no row reads the default. Written only through iam_v2.device_settings_set.';
+
+
+--
 -- Name: site_guest_signin_protection; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -12668,6 +13313,45 @@ CREATE TABLE iam_v2.site_payment_domains (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT site_payment_domains_bounded CHECK ((cardinality(domains) <= 20))
 );
+
+
+--
+-- Name: site_self_service_settings; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.site_self_service_settings (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    verification_required boolean DEFAULT true NOT NULL,
+    verification_deadline_hours integer DEFAULT 24 NOT NULL,
+    suspension_policy text DEFAULT 'SUSPEND'::text NOT NULL,
+    reminder_hours_before integer DEFAULT 4 NOT NULL,
+    resend_cooldown_seconds integer DEFAULT 60 NOT NULL,
+    resend_max_per_day integer DEFAULT 5 NOT NULL,
+    grace_minutes integer DEFAULT 60 NOT NULL,
+    max_grace_extensions integer DEFAULT 1 NOT NULL,
+    registrations_per_device_per_day integer DEFAULT 3 NOT NULL,
+    config_version bigint DEFAULT 1 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_by text,
+    CONSTRAINT ssss_deadline CHECK (((verification_deadline_hours >= 1) AND (verification_deadline_hours <= 168))),
+    CONSTRAINT ssss_grace_minutes CHECK (((grace_minutes >= 15) AND (grace_minutes <= 240))),
+    CONSTRAINT ssss_max_grace CHECK (((max_grace_extensions >= 0) AND (max_grace_extensions <= 3))),
+    CONSTRAINT ssss_policy CHECK ((suspension_policy = ANY (ARRAY['SUSPEND'::text, 'WARN_ONLY'::text]))),
+    CONSTRAINT ssss_registrations CHECK (((registrations_per_device_per_day >= 1) AND (registrations_per_device_per_day <= 10))),
+    CONSTRAINT ssss_reminder CHECK (((reminder_hours_before >= 0) AND (reminder_hours_before <= 72))),
+    CONSTRAINT ssss_reminder_before_deadline CHECK ((reminder_hours_before < verification_deadline_hours)),
+    CONSTRAINT ssss_resend_cooldown CHECK (((resend_cooldown_seconds >= 30) AND (resend_cooldown_seconds <= 3600))),
+    CONSTRAINT ssss_resend_max CHECK (((resend_max_per_day >= 1) AND (resend_max_per_day <= 20))),
+    CONSTRAINT ssss_version CHECK ((config_version >= 1))
+);
+
+
+--
+-- Name: TABLE site_self_service_settings; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.site_self_service_settings IS 'Per-site Email accounts settings (0117): verification required, deadline, suspension policy, reminder, resend limits, the grace hour and the per-device registration cap. A site with no row reads the defaults. Written only through iam_v2.self_service_settings_set.';
 
 
 --
@@ -13975,6 +14659,22 @@ ALTER TABLE ONLY public.portal_https_settings_changes ALTER COLUMN id SET DEFAUL
 
 
 --
+-- Name: account_email_tokens account_email_tokens_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.account_email_tokens
+    ADD CONSTRAINT account_email_tokens_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: account_email_tokens account_email_tokens_token_hmac_key; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.account_email_tokens
+    ADD CONSTRAINT account_email_tokens_token_hmac_key UNIQUE (token_hmac);
+
+
+--
 -- Name: account_password_settings_changes account_password_settings_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -14268,6 +14968,22 @@ ALTER TABLE ONLY iam_v2.delayed_accounting_records
 
 ALTER TABLE ONLY iam_v2.device_network_appearances
     ADD CONSTRAINT device_network_appearances_pkey PRIMARY KEY (device_id, guest_network_id);
+
+
+--
+-- Name: device_settings_changes device_settings_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.device_settings_changes
+    ADD CONSTRAINT device_settings_changes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: device_slot_actions device_slot_actions_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.device_slot_actions
+    ADD CONSTRAINT device_slot_actions_pkey PRIMARY KEY (id);
 
 
 --
@@ -15303,6 +16019,14 @@ ALTER TABLE ONLY iam_v2.refund_access_terminations
 
 
 --
+-- Name: self_service_settings_changes self_service_settings_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.self_service_settings_changes
+    ADD CONSTRAINT self_service_settings_changes_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: service_plan_revisions service_plan_revisions_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -15495,6 +16219,14 @@ ALTER TABLE ONLY iam_v2.site_checkout_grace_config
 
 
 --
+-- Name: site_device_settings site_device_settings_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.site_device_settings
+    ADD CONSTRAINT site_device_settings_pkey PRIMARY KEY (tenant_id, site_id);
+
+
+--
 -- Name: site_guest_signin_protection site_guest_signin_protection_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -15532,6 +16264,14 @@ ALTER TABLE ONLY iam_v2.site_payment_domain_changes
 
 ALTER TABLE ONLY iam_v2.site_payment_domains
     ADD CONSTRAINT site_payment_domains_pkey PRIMARY KEY (tenant_id, site_id);
+
+
+--
+-- Name: site_self_service_settings site_self_service_settings_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.site_self_service_settings
+    ADD CONSTRAINT site_self_service_settings_pkey PRIMARY KEY (tenant_id, site_id);
 
 
 --
@@ -16108,6 +16848,20 @@ CREATE INDEX aco_by_context ON iam_v2.auth_context_offers USING btree (auth_cont
 
 
 --
+-- Name: aet_account_purpose; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX aet_account_purpose ON iam_v2.account_email_tokens USING btree (account_id, purpose, created_at DESC);
+
+
+--
+-- Name: aet_outbox; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX aet_outbox ON iam_v2.account_email_tokens USING btree (next_send_at) WHERE ((sent_at IS NULL) AND (used_at IS NULL) AND (superseded_at IS NULL));
+
+
+--
 -- Name: anonymous_subject_credentials_subject; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
@@ -16154,6 +16908,27 @@ CREATE INDEX client_group_rules_group ON iam_v2.client_group_rules USING btree (
 --
 
 CREATE UNIQUE INDEX client_groups_name_per_site ON iam_v2.client_groups USING btree (tenant_id, site_id, lower(btrim(name)));
+
+
+--
+-- Name: device_settings_changes_lookup; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX device_settings_changes_lookup ON iam_v2.device_settings_changes USING btree (tenant_id, site_id, changed_at DESC);
+
+
+--
+-- Name: dsa_device; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX dsa_device ON iam_v2.device_slot_actions USING btree (tenant_id, site_id, device_id, acted_at DESC);
+
+
+--
+-- Name: dsa_entitlement; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX dsa_entitlement ON iam_v2.device_slot_actions USING btree (entitlement_id, actor, acted_at DESC);
 
 
 --
@@ -16227,6 +17002,13 @@ CREATE INDEX fin_restore_events_site ON iam_v2.financial_restore_events USING bt
 
 
 --
+-- Name: gaa_self_registered_device; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX gaa_self_registered_device ON iam_v2.guest_access_accounts USING btree (tenant_id, site_id, created_by_device_mac, created_at) WHERE self_registered;
+
+
+--
 -- Name: gaa_site_created; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
@@ -16234,10 +17016,17 @@ CREATE INDEX gaa_site_created ON iam_v2.guest_access_accounts USING btree (tenan
 
 
 --
+-- Name: gaa_unverified_self_registered; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX gaa_unverified_self_registered ON iam_v2.guest_access_accounts USING btree (tenant_id, site_id, verification_deadline) WHERE (self_registered AND (email_verified_at IS NULL));
+
+
+--
 -- Name: gaa_username; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
-CREATE UNIQUE INDEX gaa_username ON iam_v2.guest_access_accounts USING btree (tenant_id, lower(username));
+CREATE UNIQUE INDEX gaa_username ON iam_v2.guest_access_accounts USING btree (tenant_id, site_id, lower(username));
 
 
 --
@@ -16616,6 +17405,13 @@ CREATE INDEX seb_attribution ON iam_v2.session_entitlement_bindings USING btree 
 --
 
 CREATE UNIQUE INDEX seb_one_open ON iam_v2.session_entitlement_bindings USING btree (session_id) WHERE (bound_until IS NULL);
+
+
+--
+-- Name: self_service_settings_changes_lookup; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX self_service_settings_changes_lookup ON iam_v2.self_service_settings_changes USING btree (tenant_id, site_id, changed_at DESC);
 
 
 --
@@ -17099,6 +17895,20 @@ CREATE TRIGGER charge_gate BEFORE INSERT ON iam_v2.pms_postings FOR EACH ROW EXE
 --
 
 CREATE TRIGGER client_group_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.client_group_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.client_group_changes_append_only();
+
+
+--
+-- Name: device_settings_changes device_settings_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER device_settings_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.device_settings_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.device_settings_changes_append_only();
+
+
+--
+-- Name: device_slot_actions device_slot_actions_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER device_slot_actions_append_only BEFORE DELETE OR UPDATE ON iam_v2.device_slot_actions FOR EACH ROW EXECUTE FUNCTION iam_v2.device_slot_actions_append_only();
 
 
 --
@@ -17844,6 +18654,13 @@ CREATE TRIGGER scpsc_append_only BEFORE DELETE OR UPDATE ON iam_v2.site_card_pay
 
 
 --
+-- Name: self_service_settings_changes self_service_settings_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER self_service_settings_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.self_service_settings_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.self_service_settings_changes_append_only();
+
+
+--
 -- Name: pms_interface_secret_generations sg_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
@@ -17949,6 +18766,14 @@ ALTER TABLE ONLY iam_v2.accounting_checkpoints
 
 ALTER TABLE ONLY iam_v2.accounting_records
     ADD CONSTRAINT accounting_records_tenant_id_site_id_session_id_fkey FOREIGN KEY (tenant_id, site_id, session_id) REFERENCES iam_v2.sessions(tenant_id, site_id, id);
+
+
+--
+-- Name: account_email_tokens aet_account_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.account_email_tokens
+    ADD CONSTRAINT aet_account_fkey FOREIGN KEY (tenant_id, site_id, account_id) REFERENCES iam_v2.guest_access_accounts(tenant_id, site_id, id) ON DELETE CASCADE;
 
 
 --
@@ -19340,6 +20165,14 @@ GRANT ALL ON FUNCTION iam_v2.card_payment_settings_set(p_tenant uuid, p_site uui
 
 
 --
+-- Name: FUNCTION client_device_action(p_tenant uuid, p_site uuid, p_action text, p_device uuid, p_auth_context uuid, p_target uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.client_device_action(p_tenant uuid, p_site uuid, p_action text, p_device uuid, p_auth_context uuid, p_target uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.client_device_action(p_tenant uuid, p_site uuid, p_action text, p_device uuid, p_auth_context uuid, p_target uuid) TO svc_scd;
+
+
+--
 -- Name: FUNCTION client_group_changes_append_only(); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -19359,6 +20192,37 @@ GRANT ALL ON FUNCTION iam_v2.complete_sign_in_attempt(p_tenant uuid, p_site uuid
 --
 
 REVOKE ALL ON FUNCTION iam_v2.deauthorize_entitlement_device(p_ent uuid, p_device uuid, p_at timestamp with time zone, p_reason text) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION device_settings_changes_append_only(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.device_settings_changes_append_only() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION device_settings_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.device_settings_get(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.device_settings_get(p_tenant uuid, p_site uuid) TO svc_scd;
+GRANT ALL ON FUNCTION iam_v2.device_settings_get(p_tenant uuid, p_site uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION device_settings_set(p_tenant uuid, p_site uuid, p_client_device_changes_per_day integer, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.device_settings_set(p_tenant uuid, p_site uuid, p_client_device_changes_per_day integer, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.device_settings_set(p_tenant uuid, p_site uuid, p_client_device_changes_per_day integer, p_operator text, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION device_slot_actions_append_only(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.device_slot_actions_append_only() FROM PUBLIC;
 
 
 --
@@ -20701,6 +21565,30 @@ REVOKE ALL ON FUNCTION iam_v2.selectable_grace_packages(p_tenant uuid, p_site uu
 
 
 --
+-- Name: FUNCTION self_service_settings_changes_append_only(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.self_service_settings_changes_append_only() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION self_service_settings_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.self_service_settings_get(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.self_service_settings_get(p_tenant uuid, p_site uuid) TO svc_scd;
+GRANT ALL ON FUNCTION iam_v2.self_service_settings_get(p_tenant uuid, p_site uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION self_service_settings_set(p_tenant uuid, p_site uuid, p_verification_required boolean, p_verification_deadline_hours integer, p_suspension_policy text, p_reminder_hours_before integer, p_resend_cooldown_seconds integer, p_resend_max_per_day integer, p_grace_minutes integer, p_max_grace_extensions integer, p_registrations_per_device_per_day integer, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.self_service_settings_set(p_tenant uuid, p_site uuid, p_verification_required boolean, p_verification_deadline_hours integer, p_suspension_policy text, p_reminder_hours_before integer, p_resend_cooldown_seconds integer, p_resend_max_per_day integer, p_grace_minutes integer, p_max_grace_extensions integer, p_registrations_per_device_per_day integer, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.self_service_settings_set(p_tenant uuid, p_site uuid, p_verification_required boolean, p_verification_deadline_hours integer, p_suspension_policy text, p_reminder_hours_before integer, p_resend_cooldown_seconds integer, p_resend_max_per_day integer, p_grace_minutes integer, p_max_grace_extensions integer, p_registrations_per_device_per_day integer, p_operator text, p_reason text) TO svc_edged;
+
+
+--
 -- Name: FUNCTION service_plan_delete_unused(p_tenant uuid, p_site uuid, p_plan uuid, p_operator uuid, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -20746,6 +21634,22 @@ GRANT ALL ON FUNCTION iam_v2.site_module_set(p_tenant uuid, p_site uuid, p_modul
 
 REVOKE ALL ON FUNCTION iam_v2.site_payment_domains_set(p_tenant uuid, p_site uuid, p_domains text[], p_operator text, p_reason text) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.site_payment_domains_set(p_tenant uuid, p_site uuid, p_domains text[], p_operator text, p_reason text) TO svc_scd;
+
+
+--
+-- Name: FUNCTION staff_release_device_slot(p_tenant uuid, p_site uuid, p_entitlement uuid, p_device uuid, p_operator uuid, p_operator_label text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.staff_release_device_slot(p_tenant uuid, p_site uuid, p_entitlement uuid, p_device uuid, p_operator uuid, p_operator_label text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.staff_release_device_slot(p_tenant uuid, p_site uuid, p_entitlement uuid, p_device uuid, p_operator uuid, p_operator_label text, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION staff_require_device_signin(p_tenant uuid, p_site uuid, p_device uuid, p_operator uuid, p_operator_label text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.staff_require_device_signin(p_tenant uuid, p_site uuid, p_device uuid, p_operator uuid, p_operator_label text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.staff_require_device_signin(p_tenant uuid, p_site uuid, p_device uuid, p_operator uuid, p_operator_label text, p_reason text) TO svc_edged;
 
 
 --
@@ -20859,6 +21763,13 @@ REVOKE ALL ON FUNCTION iam_v2.voucher_revocations_append_only() FROM PUBLIC;
 
 REVOKE ALL ON FUNCTION iam_v2.voucher_revoke(p_tenant uuid, p_site uuid, p_voucher uuid, p_operator uuid, p_reason text) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.voucher_revoke(p_tenant uuid, p_site uuid, p_voucher uuid, p_operator uuid, p_reason text) TO svc_scd;
+
+
+--
+-- Name: TABLE account_email_tokens; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.account_email_tokens TO svc_scd;
 
 
 --
@@ -21039,6 +21950,48 @@ GRANT SELECT ON TABLE iam_v2.device_network_appearances TO svc_edged;
 
 
 --
+-- Name: TABLE device_settings_changes; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.device_settings_changes TO svc_edged;
+
+
+--
+-- Name: TABLE device_slot_actions; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.device_slot_actions TO svc_edged;
+
+
+--
+-- Name: COLUMN device_slot_actions.entitlement_id; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT(entitlement_id) ON TABLE iam_v2.device_slot_actions TO svc_scd;
+
+
+--
+-- Name: COLUMN device_slot_actions.actor; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT(actor) ON TABLE iam_v2.device_slot_actions TO svc_scd;
+
+
+--
+-- Name: COLUMN device_slot_actions.outcome; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT(outcome) ON TABLE iam_v2.device_slot_actions TO svc_scd;
+
+
+--
+-- Name: COLUMN device_slot_actions.acted_at; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT(acted_at) ON TABLE iam_v2.device_slot_actions TO svc_scd;
+
+
+--
 -- Name: TABLE devices; Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -21133,8 +22086,50 @@ GRANT SELECT ON TABLE iam_v2.financial_restore_events TO sc_financial_operator;
 -- Name: TABLE guest_access_accounts; Type: ACL; Schema: iam_v2; Owner: -
 --
 
-GRANT SELECT ON TABLE iam_v2.guest_access_accounts TO svc_scd;
+GRANT SELECT,INSERT ON TABLE iam_v2.guest_access_accounts TO svc_scd;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE iam_v2.guest_access_accounts TO svc_edged;
+
+
+--
+-- Name: COLUMN guest_access_accounts.password_hash; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT UPDATE(password_hash) ON TABLE iam_v2.guest_access_accounts TO svc_scd;
+
+
+--
+-- Name: COLUMN guest_access_accounts.email_verified_at; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT UPDATE(email_verified_at) ON TABLE iam_v2.guest_access_accounts TO svc_scd;
+
+
+--
+-- Name: COLUMN guest_access_accounts.verification_deadline; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT UPDATE(verification_deadline) ON TABLE iam_v2.guest_access_accounts TO svc_scd;
+
+
+--
+-- Name: COLUMN guest_access_accounts.verification_reminder_sent_at; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT UPDATE(verification_reminder_sent_at) ON TABLE iam_v2.guest_access_accounts TO svc_scd;
+
+
+--
+-- Name: COLUMN guest_access_accounts.grace_until; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT UPDATE(grace_until) ON TABLE iam_v2.guest_access_accounts TO svc_scd;
+
+
+--
+-- Name: COLUMN guest_access_accounts.grace_extensions_used; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT UPDATE(grace_extensions_used) ON TABLE iam_v2.guest_access_accounts TO svc_scd;
 
 
 --
@@ -21674,6 +22669,69 @@ GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.principal_device_credentials TO svc_s
 
 
 --
+-- Name: COLUMN principal_device_credentials.id; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT(id) ON TABLE iam_v2.principal_device_credentials TO svc_edged;
+
+
+--
+-- Name: COLUMN principal_device_credentials.tenant_id; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT(tenant_id) ON TABLE iam_v2.principal_device_credentials TO svc_edged;
+
+
+--
+-- Name: COLUMN principal_device_credentials.site_id; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT(site_id) ON TABLE iam_v2.principal_device_credentials TO svc_edged;
+
+
+--
+-- Name: COLUMN principal_device_credentials.device_id; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT(device_id) ON TABLE iam_v2.principal_device_credentials TO svc_edged;
+
+
+--
+-- Name: COLUMN principal_device_credentials.method; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT(method) ON TABLE iam_v2.principal_device_credentials TO svc_edged;
+
+
+--
+-- Name: COLUMN principal_device_credentials.created_at; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT(created_at) ON TABLE iam_v2.principal_device_credentials TO svc_edged;
+
+
+--
+-- Name: COLUMN principal_device_credentials.expires_at; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT(expires_at) ON TABLE iam_v2.principal_device_credentials TO svc_edged;
+
+
+--
+-- Name: COLUMN principal_device_credentials.last_used_at; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT(last_used_at) ON TABLE iam_v2.principal_device_credentials TO svc_edged;
+
+
+--
+-- Name: COLUMN principal_device_credentials.revoked_at; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT(revoked_at) ON TABLE iam_v2.principal_device_credentials TO svc_edged;
+
+
+--
 -- Name: TABLE purchases; Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -21691,6 +22749,13 @@ GRANT SELECT,INSERT ON TABLE iam_v2.purchases TO svc_pmsd;
 --
 
 GRANT SELECT ON TABLE iam_v2.refund_access_terminations TO svc_edged;
+
+
+--
+-- Name: TABLE self_service_settings_changes; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.self_service_settings_changes TO svc_edged;
 
 
 --

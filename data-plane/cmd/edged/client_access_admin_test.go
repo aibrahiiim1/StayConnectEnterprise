@@ -83,7 +83,7 @@ func TestSMTPProvidersAreValidatedAndSESIsNoLongerOffered(t *testing.T) {
 }
 
 func TestThePortalJourneySettingsAreBounded(t *testing.T) {
-	ok := map[string]json.RawMessage{"portal": json.RawMessage(`{"primary_method":"email","remember_device_days":30}`)}
+	ok := map[string]json.RawMessage{"portal": json.RawMessage(`{"primary_method":"email_account","remember_device_days":30}`)}
 	if err := validateAuthMethodsPatch(ok); err != nil {
 		t.Fatalf("valid portal settings refused: %v", err)
 	}

@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
-	"github.com/stayconnect/enterprise/data-plane/internal/mailreach"
 	"github.com/stayconnect/enterprise/data-plane/internal/nft"
 	"github.com/stayconnect/enterprise/data-plane/internal/social"
 	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
@@ -199,16 +198,13 @@ func (s *server) hotelAdminCertRenew(w http.ResponseWriter, r *http.Request) {
 // THE GARDEN IS LEAST PRIVILEGE BY PORT AS WELL AS BY ADDRESS (internal/nft/garden.go).
 //
 // The three baseline resolvers are reachable on port 53 only. What this appliance adds for a sign-in opens the
-// port that sign-in needs and nothing else: an identity provider's consent page and a payment page on TCP 443,
-// an email service on the ports a mail app reads with. An operator's own rule keeps its stated meaning: the
-// ports it names, or every port when it names none.
-var (
-	gardenBaselineDNS = []string{"1.1.1.1", "8.8.8.8", "8.8.4.4"}
-	// mailReachPorts: HTTPS (webmail, every mail app's API), IMAPS (Apple Mail, most clients), Google's push
-	// channel (mtalk, 5228) and Apple's (APNs, 5223). No SMTP: reading a code sends nothing. No UDP: QUIC falls
-	// back to TCP, and a UDP path is one more thing a device that has not signed in does not need.
-	mailReachPorts = []int{443, 993, 5228, 5223}
-)
+// port that sign-in needs and nothing else: an identity provider's consent page and a payment page on TCP 443.
+// An operator's own rule keeps its stated meaning: the ports it names, or every port when it names none.
+//
+// There is no mail-service entry any more. It existed so a device could read an emailed one-time code before
+// signing in; Email accounts need no pre-sign-in Internet at all (the verification link opens the local
+// portal), so nothing is opened for mail (contract docs/architecture/ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md §1).
+var gardenBaselineDNS = []string{"1.1.1.1", "8.8.8.8", "8.8.4.4"}
 
 // gardenRule is one operator rule as stored (walled_garden_rules). Ports empty = every port.
 type gardenRule struct {
@@ -221,7 +217,6 @@ type gardenSources struct {
 	Rules   []gardenRule
 	Payment []string // host names -> TCP 443
 	Social  []string // host names -> TCP 443
-	Mail    []string // host names -> TCP mailReachPorts
 }
 
 // planGarden turns the sources into the three sets' contents. resolve answers a host name with its IPv4
@@ -268,13 +263,6 @@ func planGarden(src gardenSources, resolve func(name string) []string) nft.Garde
 			pair(tcp, a, 443)
 		}
 	}
-	for _, d := range src.Mail {
-		for _, a := range resolve(d) {
-			for _, p := range mailReachPorts {
-				pair(tcp, a, p)
-			}
-		}
-	}
 	keys := func(m map[string]bool) []string {
 		out := make([]string, 0, len(m))
 		for k := range m {
@@ -311,9 +299,6 @@ func (s *server) reconcileWalledGarden(ctx context.Context) (int, error) {
 	// The identity providers' consent pages (contract §8): only providers that are deployed, licensed and
 	// switched on, with an enabled application. The token exchange is server-side and needs none of these.
 	src.Social = s.socialGardenDomains(ctx)
-	// The email services a device may read its one-time code from (internal/mailreach): only while the Email
-	// code method is on, only the presets and host names the site chose.
-	src.Mail = s.mailGardenDomains(ctx)
 
 	// Resolve names (best effort, short timeout each, once per name per pass). DNS answers churn; re-resolution
 	// every reconcile pass keeps the sets fresh enough for login/payment endpoints, which is the garden's purpose.
@@ -385,33 +370,6 @@ func (s *server) socialGardenDomains(ctx context.Context) []string {
 	return out
 }
 
-// mailGardenDomains lists the email services' host names the site chose (Sign-in methods → "Reading the
-// code"), only while the Email code method is switched on. A device that cannot reach its mail service cannot
-// read the code it was sent; a device that can reach nothing else is still captive.
-func (s *server) mailGardenDomains(ctx context.Context) []string {
-	if s.db == nil {
-		return nil
-	}
-	var cfg *tenantcfg.AuthMethods
-	var err error
-	if s.methodSwitches != nil {
-		cfg, err = s.methodSwitches(ctx)
-	} else {
-		cfg, err = tenantcfg.Load(ctx, s.db, s.tenID)
-	}
-	if err != nil || cfg == nil || cfg.Email == nil || !cfg.Email.Enabled || cfg.Portal == nil {
-		return nil
-	}
-	// NOT WHILE TEMPORARY INTERNET IS ON (contract §6.6, §10.1). A mail service's addresses also serve the
-	// provider's other services (measured: mail.google.com's address answers for YouTube, Search, Drive), and the
-	// garden opens them to EVERY device that has not signed in. The temporary window gives the one device that
-	// asked for a code what it needs, so while it is on the site-wide mail allowlist is not applied at all.
-	if cfg.Email.TemporaryAccess.Effective().Enabled {
-		return nil
-	}
-	return mailreach.Domains(cfg.Portal.MailProviders, cfg.Portal.MailDomains)
-}
-
 // gardenResolver resolves garden host names THROUGH THE GUEST RESOLVER (unbound on the appliance, which is the
 // nameserver every client device is handed by DHCP), so the addresses opened are the ones the clients were
 // told -- answers cached by unbound are served to scd and to the phone alike. The appliance's own
@@ -451,6 +409,11 @@ func (s *server) gardenReconcileLoop(ctx context.Context) {
 			if _, err := s.reconcileWalledGarden(ctx); err != nil {
 				slog.Warn("walled-garden: reconcile failed", "err", err)
 			}
+			// SMS / WhatsApp code copies that can no longer be used (temp_access_admin.go). They used to be
+			// pruned by the temporary-verification-window loop, which is removed with the email code; a copy is
+			// already deleted the moment its code is verified, so this minute-cadence sweep only catches the
+			// expired, locked and never-used ones.
+			s.pruneOTPEscrow(ctx)
 		}
 	}
 }
@@ -464,7 +427,7 @@ func (s *server) applyLicenseToMethods(cfg *tenantcfg.AuthMethods) {
 		return
 	}
 	if !s.lic.FeatureEnabled(licstate.FeatEmailOTP) {
-		cfg.Email = nil
+		cfg.EmailAccount = nil
 	}
 	if !s.lic.FeatureEnabled(licstate.FeatSMSOTP) {
 		cfg.SMS = nil
@@ -479,7 +442,7 @@ func (s *server) applyLicenseToMethods(cfg *tenantcfg.AuthMethods) {
 	// verifies a code or a social account would be refused after doing everything right.
 	if s.modules != nil {
 		if !s.ceiling.ModuleDeployed(lic.ModuleEmailOTP) {
-			cfg.Email = nil
+			cfg.EmailAccount = nil
 		}
 		if !s.ceiling.ModuleDeployed(lic.ModuleSMSOTP) {
 			cfg.SMS = nil

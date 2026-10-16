@@ -112,6 +112,11 @@ type iamv2GuestResult struct {
 	IdentityLabel string `json:"identity_label,omitempty"`
 	// ClientGroupName is the effective Client Group pinned on the context ("" = Public).
 	ClientGroupName string `json:"client_group_name,omitempty"`
+	// AccountToken and Account are set for a self-registered Email account only (contract §7): the scd-issued
+	// proof of a recent password sign-in on this device (portald keeps it in an HttpOnly cookie) and the
+	// account's verification state. A suspended account still authenticates; activation refuses it.
+	AccountToken string              `json:"account_token,omitempty"`
+	Account      *selfServiceAccount `json:"account,omitempty"`
 }
 
 // iamv2MethodEnabled reports whether IAM-v2 is the configured authority for a
@@ -198,13 +203,12 @@ func (s *server) authorizeViaIAMv2(w http.ResponseWriter, r *http.Request,
 		if req.ResumedPrincipalID == "" && res.Subject.PrincipalID != "" && !iamv2.IsAssistedCredential(req.Credential) {
 			out.ResumeToken = s.issueResumeCredential(r.Context(), res.Subject.PrincipalID, res.DeviceID, method, req.Credential)
 		}
-		// A SUCCESSFUL SIGN-IN ENDS THE DEVICE'S TEMPORARY VERIFICATION WINDOW (verify_access.go): from here the
-		// device's access is whatever its own entitlement says, never the metered window.
-		endReason := "SIGNED_IN"
-		if method == iamv2.MethodOTP {
-			endReason = "VERIFIED"
+		// A SELF-REGISTERED EMAIL ACCOUNT carries its verification state and the short-lived "recently signed in"
+		// proof portald keeps for resend, grace and status (self_service.go). A staff-created Personal account gets
+		// neither: it has no address to verify.
+		if method == iamv2.MethodAccount && res.Subject.GuestAccountID != "" {
+			s.decorateSelfServiceResult(r.Context(), &out, res.Subject.GuestAccountID, req.Device.MAC)
 		}
-		s.endVerifyAccess(r.Context(), req.Device.MAC, endReason)
 		if len(res.IdentityConflicts) > 0 {
 			slog.Info("iamv2 identity link conflict", "method", string(method), "factors", res.IdentityConflicts)
 		}

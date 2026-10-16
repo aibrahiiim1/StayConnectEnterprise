@@ -31,6 +31,11 @@ func (s *server) guestAccountsRoutes() http.Handler {
 	r.Patch("/{id}", s.patchGuestAccountIAMv2)
 	r.Post("/{id}/set-password", s.setGuestAccountPasswordIAMv2)
 	r.Post("/{id}/disconnect", s.disconnectGuestAccountSessionsIAMv2)
+	// Self-service email accounts (contract §7): ask scd to send the verification email again.
+	r.Post("/{id}/resend-verification", s.resendGuestAccountVerification)
+	r.Get("/{id}/manage", s.getGuestAccountManage)
+	r.Post("/{id}/verify-email", s.markGuestAccountEmailVerified)
+	r.Post("/{id}/restart-verification", s.restartGuestAccountVerification)
 	r.Delete("/{id}", s.deleteGuestAccountIAMv2)
 	return r
 }
@@ -83,7 +88,8 @@ func validUsername(u string) bool {
 			return false
 		}
 	}
-	return true
+	// The removal marker (guest_accounts_manage.go) is reserved: a live account may not look removed.
+	return !isRemovedUsername(u)
 }
 
 // validPassword: 1..128 chars. Very short passwords are allowed (these are

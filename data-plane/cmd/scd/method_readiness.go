@@ -59,8 +59,13 @@ func (s *server) applyProviderReadiness(ctx context.Context, cfg *tenantcfg.Auth
 		return
 	}
 	channels, social, ok := s.readProviderReadiness(ctx)
+	// EMAIL ACCOUNTS ARE OFFERED ONLY WITH AN EMAIL SENDER. Registration itself never waits for the sender (the
+	// verification email is queued, and the appliance may be offline), but a site with no email sender at all
+	// could never deliver a verification or reset link, and every account would end up suspended at its
+	// deadline. Refusing to offer the method in that state is the honest answer; the register route keeps
+	// working for a portal page that is already open (the switch, not readiness, gates it).
 	if !ok || !channels["email"] {
-		cfg.Email = nil
+		cfg.EmailAccount = nil
 	}
 	if !ok || !channels["sms"] {
 		cfg.SMS = nil

@@ -15,7 +15,6 @@ import (
 
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
-	"github.com/stayconnect/enterprise/data-plane/internal/mail"
 	"github.com/stayconnect/enterprise/data-plane/internal/otp"
 	"github.com/stayconnect/enterprise/data-plane/internal/phone"
 	"github.com/stayconnect/enterprise/data-plane/internal/sms"
@@ -111,11 +110,14 @@ func (s *server) sitePackagesAvailable(ctx context.Context) bool {
 // ---- /v1/auth/otp/issue ----------------------------------------------------
 
 type otpIssueReq struct {
-	Channel     string `json:"channel"`     // "email" | "sms" | "whatsapp"
-	Destination string `json:"destination"` // email address, or a phone number (normalised to E.164)
+	// Channel is "sms" or "whatsapp". The email channel is REMOVED: email sign-in is an Email account now
+	// (self_service.go; contract docs/architecture/ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md), and an email code
+	// request is refused as an unsupported channel.
+	Channel     string `json:"channel"`
+	Destination string `json:"destination"` // a phone number (normalised to E.164)
 	IP          string `json:"ip"`
 	// MAC is the requesting device's hardware address as portald resolved it from the kernel. The challenge is
-	// bound to it (migration 0110): the code, and the email's link that carries it, verify from this device only.
+	// bound to it (migration 0110): the code, and the SMS link that carries it, verify from this device only.
 	MAC string `json:"mac"`
 	// PortalBase is the origin the device reached the portal by, as portald saw it. STILL ACCEPTED, NEVER USED
 	// FOR THE LINK: it is the Host header of a guest's request, and a link in an email must not be built from
@@ -135,14 +137,11 @@ func otpLinkBase(st PortalTLSState) string {
 	return "https://" + st.Canonical
 }
 
+// otpIssueResp is the issued challenge. The temporary-internet window that an email code used to open (and its
+// "withheld" explanation) is REMOVED with the email channel: nothing grants pre-sign-in Internet any more.
 type otpIssueResp struct {
 	ChallengeID string `json:"challenge_id"`
 	TTLSeconds  int    `json:"ttl_seconds"`
-	// TemporaryAccess is the internet window this issue opened for the device (email only; absent when none
-	// was opened -- the setting is off, a limit was reached, or the device could not be placed).
-	TemporaryAccess *verifyAccessView `json:"temporary_access,omitempty"`
-	// TemporaryAccessWithheld says a limit kept the window closed, and when the device may ask again.
-	TemporaryAccessWithheld *verifyAccessWithheld `json:"temporary_access_withheld,omitempty"`
 }
 
 func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
@@ -153,10 +152,6 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	// License gating per channel.
 	switch req.Channel {
-	case "email":
-		if !s.licenseGate(w, licstate.FeatEmailOTP) {
-			return
-		}
 	case "sms":
 		if !s.licenseGate(w, licstate.FeatSMSOTP) {
 			return
@@ -181,19 +176,11 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 
 	// Per-channel: validate destination, resolve method config, decide sender.
 	var (
-		dest, sentBody string
-		method         *tenantcfg.AuthMethod
-		channelLabel   = req.Channel
+		dest         string
+		method       *tenantcfg.AuthMethod
+		channelLabel = req.Channel
 	)
 	switch req.Channel {
-	case "email":
-		method = cfg.Email
-		d := strings.TrimSpace(strings.ToLower(req.Destination))
-		if !looksLikeEmail(d) {
-			httpErr(w, http.StatusBadRequest, "invalid email")
-			return
-		}
-		dest = d
 	case "sms":
 		method = cfg.SMS
 		d, err := phone.Normalize(req.Destination)
@@ -276,33 +263,22 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sentBody = fmt.Sprintf("Your one-time code is: %s\n\nIt expires in %d minutes.",
-		issued.Code, int(otp.DefaultTTL.Minutes()))
-	// THE LINK THE CLIENT CAN TAP FROM THE MAIL APP. It opens the portal in the phone's real browser -- reachable
-	// before sign-in -- on a page with one Connect button; nothing is verified by merely opening it. The code in
-	// it is the same secret this email already carries, single-use and ten minutes long. Only while the portal is
-	// on HTTPS (contract section 4); on the approved HTTP fallback the message carries the code alone.
+	// THE LINK THE CLIENT CAN TAP FROM THE SMS. It opens the portal in the phone's real browser on a page with one
+	// Connect button; nothing is verified by merely opening it. The code in it is the same secret the message
+	// already carries, single-use and ten minutes long. Only while the portal is on HTTPS (contract section 4); on
+	// the approved HTTP fallback the message carries the code alone.
 	link := ""
 	if base := otpLinkBase(s.portalTLS.State()); base != "" {
 		link = fmt.Sprintf("%s/connect?c=%s&k=%s", base, url.QueryEscape(issued.ChallengeID), url.QueryEscape(issued.Code))
-	}
-	if link != "" && channelLabel == "email" {
-		sentBody += "\n\nOr tap to connect this device:\n" + link
 	}
 
 	// A FAILED SEND IS A FAILURE. The code used to be reported as sent while the delivery error went to the
 	// log alone, which left the client waiting for a message that was never coming. The sender's error is
 	// recorded on the provider row by the instrumented wrapper (the Delivery page shows it); the client is told
-	// the code could not be sent, with no detail that would say whether the address is known here.
-	mailer, smsSender, waSender := s.senders()
+	// the code could not be sent, with no detail that would say whether the number is known here.
+	_, smsSender, waSender := s.senders()
 	var sendErr error
 	switch channelLabel {
-	case "email":
-		sendErr = mailer.Send(r.Context(), mail.Message{
-			To:      dest,
-			Subject: "Your Wi-Fi access code",
-			Text:    sentBody,
-		})
 	case "sms":
 		shortText := fmt.Sprintf("Wi-Fi code: %s (expires in %dm)", issued.Code, int(otp.DefaultTTL.Minutes()))
 		if link != "" {
@@ -335,21 +311,10 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 	// A sealed copy of the SENT code, readable only by an operator holding the code-reveal permission, for a
 	// client whose message does not arrive (contract §6.7). Gone when the code is used or expires.
 	s.escrowOTPCode(r.Context(), issued.ChallengeID, issued.Code, issued.ExpiresAt)
-	out := otpIssueResp{
+	writeJSON(w, http.StatusOK, otpIssueResp{
 		ChallengeID: issued.ChallengeID,
 		TTLSeconds:  int(time.Until(issued.ExpiresAt).Seconds()),
-	}
-	// THE CODE IS ISSUED AND SENT: the device may now reach its mail (verify_access.go). Only for an email code,
-	// only after a successful send, and never a condition of the code itself -- a refused window leaves the
-	// code exactly as valid as it is.
-	if channelLabel == "email" {
-		if v, ok, why := s.grantVerifyAccessDetail(r.Context(), devMAC, net.ParseIP(req.IP), issued.ChallengeID, dest); ok {
-			out.TemporaryAccess = &v
-		} else if why != nil {
-			out.TemporaryAccessWithheld = why
-		}
-	}
-	writeJSON(w, http.StatusOK, out)
+	})
 }
 
 // ---- /v1/sessions/authorize-otp --------------------------------------------
@@ -419,6 +384,15 @@ func (s *server) authorizeOTP(w http.ResponseWriter, r *http.Request) {
 		s.met.OTPVerify.WithLabelValues("unknown", result).Inc()
 		return
 	}
+	// AN EMAIL CODE NO LONGER SIGNS ANYBODY IN. One issued before this software was installed can still be
+	// pending for its ten minutes; it is consumed by the verification above and then refused, because an email
+	// address is no longer an identity factor a code may prove (Email accounts replace it). Mapping it onto a
+	// PHONE factor -- the only kind otpFactorType now knows -- would be a lie about what was proven.
+	if otpFactorType(v.Channel) == "" {
+		s.met.OTPVerify.WithLabelValues(v.Channel, "channel_removed").Inc()
+		writeJSON(w, http.StatusGone, map[string]any{"error": "CHANNEL_REMOVED"})
+		return
+	}
 	s.met.OTPVerify.WithLabelValues(v.Channel, "ok").Inc()
 	s.dropOTPEscrow(r.Context(), req.ChallengeID)
 	// STAFF-ASSISTED (0114, contract §6.7): the code was shown to the client by a staff member. The sign-in may
@@ -458,28 +432,14 @@ func (s *server) authorizeOTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // otpFactorType maps a verified challenge's channel onto the IAM-v2 factor it proves. A WhatsApp code, like an
-// SMS code, proves possession of the phone number it was sent to, so both are PHONE factors.
+// SMS code, proves possession of the phone number it was sent to, so both are PHONE factors. Any other channel
+// -- the removed email code above all -- proves nothing a code may still prove, and answers "".
 func otpFactorType(channel string) string {
-	if channel == "email" {
-		return "EMAIL"
+	switch channel {
+	case "sms", "whatsapp":
+		return "PHONE"
 	}
-	return "PHONE"
-}
-
-// ---- helpers ---------------------------------------------------------------
-
-func looksLikeEmail(s string) bool {
-	if len(s) < 3 || len(s) > 254 {
-		return false
-	}
-	at := strings.IndexByte(s, '@')
-	if at <= 0 || at == len(s)-1 {
-		return false
-	}
-	if strings.ContainsAny(s, " \t\n") {
-		return false
-	}
-	return strings.Contains(s[at+1:], ".")
+	return ""
 }
 
 // tenantBranding serves the hotel's published portal design to the captive portal.

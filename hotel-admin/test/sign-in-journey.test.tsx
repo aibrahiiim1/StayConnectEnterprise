@@ -41,13 +41,13 @@ beforeEach(() => { vi.clearAllMocks(); });
 
 describe("Client journey", () => {
   it("saves the primary method and the remembered-device window as the portal key, on Save only", async () => {
-    routes({ voucher: { enabled: true }, email: { enabled: true }, sms: { enabled: false } });
-    put.mockResolvedValue({ voucher: { enabled: true }, email: { enabled: true }, portal: { primary_method: "email", remember_device_days: 14 } });
+    routes({ voucher: { enabled: true }, email_account: { enabled: true }, sms: { enabled: false } });
+    put.mockResolvedValue({ voucher: { enabled: true }, email_account: { enabled: true }, portal: { primary_method: "email_account", remember_device_days: 14 } });
     render(<SignInMethodsPage />);
 
     const primary = await screen.findByLabelText("Primary method") as HTMLSelectElement;
     // Automatic, then only the methods that are switched on: SMS is off and is not offered to lead.
-    expect(Array.from(primary.options).map((o) => o.value)).toEqual(["", "email", "voucher"]);
+    expect(Array.from(primary.options).map((o) => o.value)).toEqual(["", "email_account", "voucher"]);
     expect(primary.value).toBe("");
     const days = screen.getByLabelText("Remember devices") as HTMLInputElement;
     expect(days.value).toBe("30");
@@ -56,18 +56,18 @@ describe("Client journey", () => {
 
     const save = screen.getByRole("button", { name: /Save journey/ }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
-    fireEvent.change(primary, { target: { value: "email" } });
+    fireEvent.change(primary, { target: { value: "email_account" } });
     fireEvent.change(days, { target: { value: "14" } });
     expect(put).not.toHaveBeenCalled();
     expect(save.disabled).toBe(false);
     fireEvent.click(save);
-    await waitFor(() => expect(put).toHaveBeenCalledWith("/auth-methods", { portal: { primary_method: "email", remember_device_days: 14 } }));
+    await waitFor(() => expect(put).toHaveBeenCalledWith("/auth-methods", { portal: { primary_method: "email_account", remember_device_days: 14 } }));
     // One key, so the switches on this page are untouched by the save.
     expect(Object.keys(put.mock.calls[0][1])).toEqual(["portal"]);
   });
 
   it("reads the stored journey back, and refuses a window outside 0–365 days", async () => {
-    routes({ voucher: { enabled: true }, email: { enabled: true }, portal: { primary_method: "voucher", remember_device_days: 7 } });
+    routes({ voucher: { enabled: true }, email_account: { enabled: true }, portal: { primary_method: "voucher", remember_device_days: 7 } });
     render(<SignInMethodsPage />);
     const primary = await screen.findByLabelText("Primary method") as HTMLSelectElement;
     expect(primary.value).toBe("voucher");
@@ -81,11 +81,11 @@ describe("Client journey", () => {
   });
 
   it("names a stored primary method that has since been switched off", async () => {
-    routes({ voucher: { enabled: true }, email: { enabled: false }, portal: { primary_method: "email" } });
+    routes({ voucher: { enabled: true }, email_account: { enabled: false }, portal: { primary_method: "email_account" } });
     render(<SignInMethodsPage />);
     const primary = await screen.findByLabelText("Primary method") as HTMLSelectElement;
-    expect(primary.value).toBe("email");
-    expect(primary.options[primary.selectedIndex].textContent).toBe("Email code (switched off)");
+    expect(primary.value).toBe("email_account");
+    expect(primary.options[primary.selectedIndex].textContent).toBe("Email account (switched off)");
     expect(screen.getByText(/portal uses the automatic order/)).toBeInTheDocument();
   });
 

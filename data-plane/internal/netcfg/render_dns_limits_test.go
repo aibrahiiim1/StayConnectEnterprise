@@ -39,40 +39,68 @@ func TestDNSIsRateLimitedAtTheResolverAndForDevicesThatHaveNotSignedIn(t *testin
 	}
 }
 
-// TEMPORARY VERIFICATION ACCESS: metered before the established accept, admitted to the WAN only after the
-// management and client-to-client drops, and never captive-redirected while admitted.
-func TestVerificationAccessIsMeteredFirstAndAdmittedOnlyToTheInternet(t *testing.T) {
+// NOTHING GRANTS PRE-AUTHENTICATION INTERNET (contract ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE §1). The temporary
+// verification access is gone from the ruleset entirely -- its admission set, its quota and rate maps, the meters
+// and the marked-flow drops -- and the forward chain's WAN accepts are exactly the two authorization sets and the
+// walled garden. A rule that let an unsigned-in device out by any other route would have to appear in that list.
+func TestNoTemporaryVerificationAccessRemainsInTheRuleset(t *testing.T) {
 	topo := topoT()
 	topo.MgmtCIDRs = []string{"172.21.60.0/24"}
-	n := string(RenderNftables(twoNetworks(), topo))
-	fwd := n[strings.Index(n, "chain forward"):strings.Index(n, "chain prerouting_nat")]
-	est := strings.Index(fwd, "ct state established,related accept")
-	for _, meter := range []string{"quota name ip daddr map @verify_quota drop", "limit name ip daddr map @verify_down drop",
-		"quota name ip saddr map @verify_quota drop", "limit name ip saddr map @verify_up drop"} {
-		if i := strings.Index(fwd, meter); i < 0 || i > est {
-			t.Errorf("%q must precede the established accept", meter)
+	for _, vip := range []string{"", "10.255.255.1"} {
+		topo.PortalVIP = vip
+		n := string(RenderNftables(twoNetworks(), topo))
+		for _, gone := range []string{"verify_", "0x56455249", "quota", "limit name", "ct mark", "temporary verification"} {
+			if strings.Contains(n, gone) {
+				t.Errorf("vip=%q: the ruleset still carries %q", vip, gone)
+			}
 		}
-	}
-	admit := strings.Index(fwd, "iifname . ip saddr @verify_ipv4 ct mark set 0x56455249 accept")
-	if admit < 0 || !strings.Contains(fwd[admit-80:admit], `oifname "ens160"`) {
-		t.Fatal("verification access must be admitted to the WAN only")
-	}
-	for _, guard := range []string{`guest -> mgmt blocked`, `inter-guest isolation`} {
-		if g := strings.Index(fwd, guard); g < 0 || g > admit {
-			t.Errorf("%q must precede the verification admit", guard)
+		fwd := n[strings.Index(n, "chain forward"):strings.Index(n, "chain prerouting_nat")]
+		allowed := []string{
+			"ct state established,related accept",
+			`oifname "ens160" iifname . ip saddr @auth_ipv4 accept comment "authenticated guests"`,
+			`oifname "ens160" iifname . ip saddr @phase3_auth_ipv4 accept comment "phase-3 authorized guests"`,
+			`iifname @guest_interfaces oifname "ens160" ip daddr @walled_garden_ip accept`,
+			`iifname @guest_interfaces oifname "ens160" ip daddr . tcp dport @walled_garden_tcp accept`,
+			`iifname @guest_interfaces oifname "ens160" ip daddr . udp dport @walled_garden_udp accept`,
 		}
-	}
-	// A closed window's flows end with it: the marked-flow drops precede the established accept.
-	for _, d := range []string{"ct mark 0x56455249 iifname @guest_interfaces ip saddr != @verify_quota drop", "ct mark 0x56455249 oifname @guest_interfaces ip daddr != @verify_quota drop"} {
-		if i := strings.Index(fwd, d); i < 0 || i > est {
-			t.Errorf("%q must precede the established accept", d)
+		accepts := 0
+		for _, line := range strings.Split(fwd, "\n") {
+			line = strings.TrimSpace(line)
+			if !strings.Contains(line, "accept") {
+				continue
+			}
+			accepts++
+			ok := false
+			for _, a := range allowed {
+				ok = ok || line == a
+			}
+			if !ok {
+				t.Errorf("vip=%q: a forward accept outside the authorization sets and the garden: %s", vip, line)
+			}
 		}
-	}
-	nat := n[strings.Index(n, "chain prerouting_nat"):]
-	if strings.Count(nat, "iifname . ip saddr != @verify_ipv4") != strings.Count(nat, "dnat ip to") {
-		t.Error("every captive redirect must exclude an admitted device")
-	}
-	if i, j := strings.Index(fwd, `oifname @guest_interfaces meta nfproto ipv6`), est; i < 0 || i > j {
-		t.Error("the IPv6 return-path guard must precede the established accept")
+		if accepts != len(allowed) {
+			t.Errorf("vip=%q: %d forward accepts, want exactly %d", vip, accepts, len(allowed))
+		}
+		// Every gateway captive redirect exempts exactly the two authorization sets and the address-only garden;
+		// no third device exemption survives.
+		nat := n[strings.Index(n, "chain prerouting_nat"):strings.Index(n, "chain postrouting_nat")]
+		redirects := 0
+		for _, line := range strings.Split(nat, "\n") {
+			if !strings.Contains(line, "dnat ip to") || !strings.Contains(line, "!= @") {
+				continue
+			}
+			redirects++
+			if !strings.Contains(line, "iifname . ip saddr != @auth_ipv4 iifname . ip saddr != @phase3_auth_ipv4 ip daddr != @walled_garden_ip tcp dport") ||
+				strings.Count(line, "!= @") != 3 {
+				t.Errorf("vip=%q: a captive redirect with an unexpected exemption: %s", vip, strings.TrimSpace(line))
+			}
+		}
+		if redirects != len(twoNetworks()) {
+			t.Errorf("vip=%q: %d gateway captive redirects, want one per network", vip, redirects)
+		}
+		est := strings.Index(fwd, "ct state established,related accept")
+		if i := strings.Index(fwd, `oifname @guest_interfaces meta nfproto ipv6`); i < 0 || i > est {
+			t.Errorf("vip=%q: the IPv6 return-path guard must precede the established accept", vip)
+		}
 	}
 }

@@ -63,13 +63,15 @@ func (f *p6FakeScd) bySubjectMAC(mac string) *p6Subject {
 }
 
 func (f *p6FakeScd) RoundTrip(req *http.Request) (*http.Response, error) {
+	// scd's client device routes (client_devices.go) take the derived device as top-level ip/mac.
 	var body struct {
-		Device   map[string]string `json:"device"`
-		DeviceID string            `json:"device_id"`
+		IP       string `json:"ip"`
+		MAC      string `json:"mac"`
+		DeviceID string `json:"device_id"`
 	}
 	_ = json.NewDecoder(req.Body).Decode(&body)
 	f.calls = append(f.calls, req.URL.Path)
-	f.seenMACs = append(f.seenMACs, body.Device["mac"])
+	f.seenMACs = append(f.seenMACs, body.MAC)
 
 	reply := func(v any) (*http.Response, error) {
 		raw, _ := json.Marshal(v)
@@ -84,7 +86,7 @@ func (f *p6FakeScd) RoundTrip(req *http.Request) (*http.Response, error) {
 	// THE SUBJECT COMES FROM THE FORWARDED DEVICE IDENTITY AND FROM NOTHING ELSE — exactly as scd resolves
 	// it from its own tables. There is no branch here that consults a header or a body field, because there
 	// is none in the real service either.
-	subj := f.bySubjectMAC(body.Device["mac"])
+	subj := f.bySubjectMAC(body.MAC)
 	if subj == nil {
 		return reply(unavailable)
 	}
@@ -100,7 +102,7 @@ func (f *p6FakeScd) RoundTrip(req *http.Request) (*http.Response, error) {
 				"online": d.online, "removable": !d.online,
 			})
 		}
-		return reply(map[string]any{"outcome": "LISTED", "devices": out})
+		return reply(map[string]any{"outcome": "LISTED", "devices": out, "limit": 3, "in_use": len(out), "changes_left": 3})
 	}
 
 	// RELEASE is scoped to the caller's OWN devices. A target belonging to another subject is not "denied";

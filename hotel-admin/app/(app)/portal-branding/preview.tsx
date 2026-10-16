@@ -58,7 +58,8 @@ export type AuthMethodsDoc = {
   voucher?: Toggle;
   guest_account?: Toggle;
   open?: Toggle;
-  email?: Toggle;
+  /** Email accounts (email + password). The email one-time code and its `email` key are gone. */
+  email_account?: Toggle;
   sms?: Toggle;
   whatsapp?: Toggle;
   social?: Record<string, Toggle>;
@@ -70,9 +71,9 @@ export type AuthMethodsDoc = {
 
 /** The optional methods, each with the module that must be licensed for a client to be offered it. Voucher,
  *  personal account and open package selection are core and need none. */
-const OPTIONAL: { key: "pms" | "email" | "sms" | "whatsapp" | "social"; module: string; label: string }[] = [
+const OPTIONAL: { key: "pms" | "email_account" | "sms" | "whatsapp" | "social"; module: string; label: string }[] = [
   { key: "pms", module: "hospitality", label: "Room" },
-  { key: "email", module: "email_otp", label: "Email" },
+  { key: "email_account", module: "email_otp", label: "Email" },
   { key: "sms", module: "sms_otp", label: "Phone" },
   { key: "whatsapp", module: "whatsapp_otp", label: "WhatsApp" },
   { key: "social", module: "social_login", label: "Social" },

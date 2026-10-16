@@ -60,6 +60,12 @@ func (s *commerceSessionStore) put(token string, sess commerceSession) {
 	s.m[token] = sess
 }
 
+func (s *commerceSessionStore) delete(token string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.m, token)
+}
+
 func (s *commerceSessionStore) get(token string) (commerceSession, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

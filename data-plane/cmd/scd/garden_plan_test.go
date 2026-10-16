@@ -35,7 +35,6 @@ func TestGardenPlanOpensExactlyTheNamedPorts(t *testing.T) {
 		},
 		Payment: []string{"checkout.stripe.com"},
 		Social:  []string{"accounts.google.com"},
-		Mail:    []string{"mail.google.com", "accounts.google.com"},
 	}, resolve)
 
 	if want := []string{"198.51.100.7"}; !reflect.DeepEqual(plan.IP, want) {
@@ -43,15 +42,15 @@ func TestGardenPlanOpensExactlyTheNamedPorts(t *testing.T) {
 	}
 	wantTCP := []string{
 		"1.1.1.1 . 53", "10.9.0.0/24 . 8443",
-		"142.251.209.197 . 443", "142.251.209.197 . 5223", "142.251.209.197 . 5228", "142.251.209.197 . 993",
-		"142.251.209.198 . 443", "142.251.209.198 . 5223", "142.251.209.198 . 5228", "142.251.209.198 . 993",
+		// The identity provider's consent page on 443 only; no mail-service ports exist any more.
+		"142.251.209.197 . 443", "142.251.209.198 . 443",
 		"203.0.113.5 . 80", "203.0.113.9 . 443", "54.187.1.1 . 443", "8.8.4.4 . 53", "8.8.8.8 . 53",
 	}
 	if !reflect.DeepEqual(plan.TCP, wantTCP) {
 		t.Fatalf("tcp set:\n got %v\nwant %v", plan.TCP, wantTCP)
 	}
-	// UDP: the baseline resolvers' 53 and an operator's ported rules (a rule names no protocol); never a mail
-	// service, a payment page or an identity provider.
+	// UDP: the baseline resolvers' 53 and an operator's ported rules (a rule names no protocol); never a payment
+	// page or an identity provider.
 	wantUDP := []string{"1.1.1.1 . 53", "10.9.0.0/24 . 8443", "203.0.113.5 . 80", "203.0.113.9 . 443", "8.8.4.4 . 53", "8.8.8.8 . 53"}
 	if !reflect.DeepEqual(plan.UDP, wantUDP) {
 		t.Fatalf("udp set:\n got %v\nwant %v", plan.UDP, wantUDP)

@@ -218,7 +218,7 @@ func TestTheLandingScriptLeadsWithThePrimaryMethodAndQuickSignIn(t *testing.T) {
 	// The one-time-code block specifically: it must no longer read the legacy session_id / duration_seconds
 	// reply shape (the Phase-3 room and post-stay paths legitimately return a session; they are not this seam).
 	start := strings.Index(landingHTML, "codeForm.addEventListener('submit'")
-	end := strings.Index(landingHTML, "attach('email')")
+	end := strings.Index(landingHTML, "attach('sms')")
 	if start < 0 || end < start {
 		t.Fatal("the one-time-code block was not found")
 	}

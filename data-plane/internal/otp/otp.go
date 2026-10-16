@@ -5,8 +5,9 @@
 //   - SHA-256(per-row salt + code) — fast verify, no global secret needed,
 //     OTP lifetime is short (10m default) and rate-limited so brute-force
 //     resistance comes from the attempt cap, not the hash work-factor
-//   - Code is shown to the user once (returned from Issue) and emailed via
-//     the Mailer. We never log it server-side after delivery.
+//   - Code is shown to the user once (returned from Issue) and sent by SMS or
+//     WhatsApp. We never log it server-side after delivery. (Email codes are
+//     removed: email sign-in is an Email account, cmd/scd/self_service.go.)
 package otp
 
 import (
@@ -42,7 +43,7 @@ var (
 	ErrAttemptsExceeded = errors.New("otp: too many wrong attempts")
 	ErrAlreadyUsed      = errors.New("otp: code already used")
 	ErrCodeMismatch     = errors.New("otp: incorrect code")
-	// ErrOtherDevice: the code (or the email's link, which carries the same code) was presented from a device
+	// ErrOtherDevice: the code (or the SMS link, which carries the same code) was presented from a device
 	// other than the one it was issued to. It is not a wrong guess and does not count as one.
 	ErrOtherDevice = errors.New("otp: code was requested from another device")
 )
@@ -51,8 +52,8 @@ type IssueParams struct {
 	TenantID    string
 	ApplianceID string
 	TemplateID  string // kept for callers; auth_otps lost its template_id column in migration 0049 and it is no longer stored
-	Channel     string // "email" or "sms"
-	Destination string // email address or phone number
+	Channel     string // "sms" or "whatsapp"
+	Destination string // phone number (E.164)
 	IP          string // source IP of requester (for forensics)
 	UserAgent   string
 	// DeviceMAC is the requesting device's kernel-resolved hardware address. When set, the challenge is bound

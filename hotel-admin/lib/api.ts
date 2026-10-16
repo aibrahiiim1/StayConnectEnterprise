@@ -188,6 +188,94 @@ export type GuestAccount = {
   max_devices?: number | null; active_devices?: number;
   // When the account was created. ABSENT for accounts created before migration 0104, which recorded none.
   created_at?: string | null; updated_at?: string;
+  // EMAIL ACCOUNTS (self-service contract §2-§3, migration 0117). A self-registered account was opened by the
+  // client on the portal; its username is their email address. `suspended` is computed by edged from the site's
+  // Email accounts settings and is ABSENT when those could not be read.
+  self_registered?: boolean;
+  email_verified?: boolean;
+  email_verified_at?: string | null;
+  verification_deadline?: string | null;
+  grace_until?: string | null;
+  grace_extensions_used?: number;
+  suspended?: boolean;
+};
+
+/** One account's management view: edged GET /guest-accounts/{id}/manage. */
+export type GuestAccountDevice = {
+  id: string; mac: string; status: "AUTHORIZED" | "DISCONNECTED" | string; online: boolean;
+  first_authorized?: string | null; last_authorized?: string | null;
+};
+export type GuestAccountPackage = {
+  id: string; status: string; terminal_reason?: string | null; package_name: string;
+  activated_at?: string | null; window_ends_at?: string | null; terminated_at?: string | null;
+  consumed_data_bytes: number; data_quota_bytes?: number | null; consumed_online_seconds: number;
+  max_devices?: number | null; devices: GuestAccountDevice[];
+};
+export type GuestAccountManage = {
+  account: GuestAccount;
+  entitlements: GuestAccountPackage[];
+  entitlements_total: number;
+  removed: boolean;
+  // What Remove does: "delete" (never used: the row goes) or "remove" (history kept, address freed).
+  removal: "delete" | "remove";
+};
+/** Devices (edged /client-devices, migration 0118). */
+export type DevicePackage = {
+  entitlement_id: string; status: string; package_name: string; free: boolean;
+  subject_kind: "ACCOUNT" | "VOUCHER" | "ROOM" | "CLIENT" | "OPEN"; subject_label?: string; account_id?: string;
+  // AUTHORIZED: the device holds a place on the package. DISCONNECTED: its place was freed.
+  slot: "AUTHORIZED" | "DISCONNECTED" | string; slot_reason?: string;
+  first_authorized?: string | null; last_authorized?: string | null; window_ends_at?: string | null;
+  consumed_data_bytes: number; data_quota_bytes?: number | null; max_devices?: number | null; places_in_use: number;
+};
+export type ClientDeviceRow = {
+  id: string; mac: string; last_ip?: string; first_seen?: string | null; last_seen?: string | null;
+  online: boolean; online_ip?: string; current?: DevicePackage | null;
+  // On the Wi-Fi right now (an active DHCP lease), whether or not it has signed in. A row with an empty id is a
+  // device on the Wi-Fi that has never signed in.
+  on_network?: boolean; lease_ip?: string; hostname?: string; lease_expires?: string | null;
+};
+export type ClientDeviceDetail = {
+  device: ClientDeviceRow;
+  packages: DevicePackage[];
+  sessions: { id: string; started?: string | null; ended?: string | null; state: string; end_reason?: string;
+    method?: string; ip?: string; package_name?: string }[];
+  restriction: { restricted: boolean; until?: string | null; failures?: number | null };
+  remembered_signins: number;
+  free_packages_used: number;
+  actions: { acted_at: string; actor: "CLIENT" | "STAFF"; operator?: string; action: string; outcome: string; reason?: string }[];
+};
+export type DeviceSettings = { client_device_changes_per_day: number };
+
+/** What DELETE /guest-accounts/{id} did. */
+export type GuestAccountRemoveResp = {
+  status: "deleted" | "removed"; history_kept?: boolean; disconnected_sessions?: number; disconnect_failures?: number;
+};
+
+/** Email accounts' terms (contract §6): edged GET/PUT /self-service-settings. Bounds come from the server. */
+export type SelfServiceSettings = {
+  verification_required: boolean;
+  verification_deadline_hours: number;
+  suspension_policy: "SUSPEND" | "WARN_ONLY";
+  reminder_hours_before: number;
+  resend_cooldown_seconds: number;
+  resend_max_per_day: number;
+  grace_minutes: number;
+  max_grace_extensions: number;
+  registrations_per_device_per_day: number;
+};
+export type SelfServiceBound = { key: keyof SelfServiceSettings; min: number; max: number; unit: string; default: number };
+/** One row of the append-only change log, as the database holds it. */
+export type SelfServiceChange = { changed_at: string; changed_by?: string; change_reason?: string } & Record<string, unknown>;
+export type SelfServiceSettingsResp = {
+  settings: SelfServiceSettings;
+  defaults: SelfServiceSettings;
+  config_version: number;
+  updated_at?: string | null;
+  updated_by?: string | null;
+  limits: { bounds: SelfServiceBound[]; suspension_policies: string[] };
+  changes: SelfServiceChange[];
+  awaiting_assignment?: boolean;
 };
 
 /** One page of client accounts, newest first, with totals over EVERY matching account (not just this page). */

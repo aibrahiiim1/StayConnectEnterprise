@@ -304,6 +304,10 @@ GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_acctd;
 \ir svc-pmsd-iamv2-connector-grants.sql
 -- The HTTPS portal and sealed social secrets (0116).
 \ir svc-portal-https-grants.sql
+-- Email accounts: self-service registration, verification and reset (0117).
+\ir svc-self-service-grants.sql
+-- Device management: client replacement and release, staff slot release and fresh sign-in (0118).
+\ir svc-device-management-grants.sql
 
 -- EXECUTE on the CANONICAL audited, versioned publication boundary. This is the only function the product
 -- calls to change checkout grace policy: it requires an active operator as actor, a bounded machine reason

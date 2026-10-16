@@ -29,7 +29,7 @@ const MODULES: Record<string, { label: string; requires: string[]; switchable: b
   paid_access: { label: "Paid access (priced Internet Packages)", requires: [], switchable: true },
   card_payment: { label: "Card payment", requires: ["paid_access"], switchable: true },
   room_charge: { label: "Room charge (PMS posting)", requires: ["hospitality", "paid_access"], switchable: true },
-  email_otp: { label: "Email one-time code", requires: [], switchable: false },
+  email_otp: { label: "Email accounts", requires: [], switchable: false },
   sms_otp: { label: "SMS one-time code", requires: [], switchable: false },
   whatsapp_otp: { label: "WhatsApp one-time code", requires: [], switchable: false },
   social_login: { label: "Social sign-in", requires: [], switchable: false },

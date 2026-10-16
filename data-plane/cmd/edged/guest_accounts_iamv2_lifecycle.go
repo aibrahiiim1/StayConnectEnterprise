@@ -78,6 +78,43 @@ type iamv2Account struct {
 	ActiveDevices int `json:"active_devices"`
 	// Authority is explicit so an operator or a test never has to infer which domain owns this record.
 	Authority string `json:"authority"`
+
+	// EMAIL ACCOUNTS (self-service contract §2-§3, migration 0117). A self-registered account is one a client
+	// opened on the portal with their email address; its username IS that address.
+	SelfRegistered       bool       `json:"self_registered"`
+	EmailVerified        bool       `json:"email_verified"`
+	EmailVerifiedAt      *time.Time `json:"email_verified_at,omitempty"`
+	VerificationDeadline *time.Time `json:"verification_deadline,omitempty"`
+	GraceUntil           *time.Time `json:"grace_until,omitempty"`
+	GraceExtensionsUsed  int        `json:"grace_extensions_used"`
+	// Suspended: unverified past its deadline with no live grace, on a site whose policy suspends. Computed from
+	// the site's self-service settings at read time; ABSENT when those could not be read, rather than guessed.
+	Suspended *bool `json:"suspended,omitempty"`
+}
+
+// accountSuspended is the contract's §3 rule, the same one scd's sweep applies: a self-registered account,
+// unverified, past its deadline, with no grace still running, on a site that requires verification and
+// suspends. A WARN_ONLY site, or one that does not require verification, never suspends.
+func accountSuspended(a iamv2Account, set selfServiceSettings, now time.Time) bool {
+	if !a.SelfRegistered || a.EmailVerifiedAt != nil {
+		return false
+	}
+	if !set.VerificationRequired || set.SuspensionPolicy != suspensionSuspend {
+		return false
+	}
+	if a.VerificationDeadline == nil || a.VerificationDeadline.After(now) {
+		return false
+	}
+	return a.GraceUntil == nil || !a.GraceUntil.After(now)
+}
+
+// withVerificationState fills the derived fields once the row has been scanned.
+func (a *iamv2Account) withVerificationState(set *selfServiceSettings, now time.Time) {
+	a.EmailVerified = a.EmailVerifiedAt != nil
+	if set != nil {
+		v := accountSuspended(*a, *set, now)
+		a.Suspended = &v
+	}
 }
 
 // THERE IS NO ACCOUNT LOCKOUT ON THIS SURFACE, AND THERE NEVER WAS ONE.
@@ -101,15 +138,29 @@ type iamv2Account struct {
 //
 // iamv2AccountCols is the projection shared by list, get and patch so the three cannot drift apart.
 const iamv2AccountCols = `id, username, display_name, notes, enabled,
-                valid_from, valid_until, last_login_at, login_count, created_at`
+                valid_from, valid_until, last_login_at, login_count, created_at,
+                self_registered, email_verified_at, verification_deadline, grace_until, grace_extensions_used`
 
 func scanIAMv2Account(row interface{ Scan(...any) error }, a *iamv2Account) error {
 	if err := row.Scan(&a.ID, &a.Username, &a.DisplayName, &a.Notes, &a.Enabled,
-		&a.ValidFrom, &a.ValidUntil, &a.LastLoginAt, &a.LoginCount, &a.CreatedAt); err != nil {
+		&a.ValidFrom, &a.ValidUntil, &a.LastLoginAt, &a.LoginCount, &a.CreatedAt,
+		&a.SelfRegistered, &a.EmailVerifiedAt, &a.VerificationDeadline, &a.GraceUntil,
+		&a.GraceExtensionsUsed); err != nil {
 		return err
 	}
 	a.Authority = "iam_v2"
+	a.EmailVerified = a.EmailVerifiedAt != nil
 	return nil
+}
+
+// verificationSettings reads the site's self-service settings for the suspended flag. Nil when they cannot be
+// read: the list still answers, and the flag is left out rather than invented.
+func (s *server) verificationSettings(ctx contextT) *selfServiceSettings {
+	set, err := s.selfServiceSettingsFor(ctx)
+	if err != nil {
+		return nil
+	}
+	return &set.selfServiceSettings
 }
 
 // CLIENT ACCOUNTS ARE PAGED, SEARCHED AND COUNTED ON THE SERVER, the Stays pattern (resources_phase3.go).
@@ -146,11 +197,14 @@ const accountFrom = `FROM iam_v2.guest_access_accounts a
 	        JOIN iam_v2.entitlements e ON e.id = s.entitlement_id
 	       WHERE e.guest_account_id = a.id AND s.ended IS NULL) dev ON true`
 
-// accountFilter: $1 tenant, $2 site, $3 status (enabled|disabled), $4 search pattern.
+// accountFilter: $1 tenant, $2 site, $3 status (enabled|disabled|removed), $4 search pattern. A REMOVED
+// account (guest_accounts_manage.go) is listed only under its own filter: it can never sign in again, and
+// counting it among the disabled ones would read as an account staff could re-enable.
 const accountFilter = `WHERE a.tenant_id=$1 AND a.site_id=$2
-	  AND ($3::text IS NULL
+	  AND ($3::text IS NULL AND NOT ` + sqlRemoved + `
 	       OR ($3 = 'enabled'  AND a.enabled)
-	       OR ($3 = 'disabled' AND NOT a.enabled))
+	       OR ($3 = 'disabled' AND NOT a.enabled AND NOT ` + sqlRemoved + `)
+	       OR ($3 = 'removed'  AND ` + sqlRemoved + `))
 	  AND ($4::text IS NULL OR a.username ILIKE $4 OR a.display_name ILIKE $4)`
 
 func (s *server) listGuestAccountsIAMv2(w http.ResponseWriter, r *http.Request) {
@@ -166,13 +220,13 @@ func (s *server) listGuestAccountsIAMv2(w http.ResponseWriter, r *http.Request) 
 	var statusArg any
 	switch v := qv.Get("status"); v {
 	case "":
-	case "enabled", "disabled":
+	case "enabled", "disabled", "removed":
 		statusArg = v
 	default:
 		// "locked" is refused rather than quietly accepted and answered with an empty page: a filter that
 		// always matches nothing reads as "no account is locked out", which is a measurement this domain
 		// cannot make. Repeated-failure protection is per DEVICE (migration 0068).
-		jsonErr(w, http.StatusBadRequest, "bad_request", "status must be enabled or disabled")
+		jsonErr(w, http.StatusBadRequest, "bad_request", "status must be enabled, disabled or removed")
 		return
 	}
 	page, size := 1, accountsPageSizeDefault
@@ -224,6 +278,8 @@ func (s *server) listGuestAccountsIAMv2(w http.ResponseWriter, r *http.Request) 
 	// one, by username; id breaks the last tie so a page boundary is stable.
 	rows, err := s.db.Query(ctx, `SELECT a.id, a.username, a.display_name, a.notes, a.enabled,
 	           a.valid_from, a.valid_until, a.last_login_at, a.login_count, a.created_at,
+	           a.self_registered, a.email_verified_at, a.verification_deadline, a.grace_until,
+	           a.grace_extensions_used,
 	           COALESCE(dev.active_devices, 0)
 	      `+accountFrom+`
 	      `+accountFilter+`
@@ -239,6 +295,8 @@ func (s *server) listGuestAccountsIAMv2(w http.ResponseWriter, r *http.Request) 
 		var a iamv2Account
 		if err := rows.Scan(&a.ID, &a.Username, &a.DisplayName, &a.Notes, &a.Enabled,
 			&a.ValidFrom, &a.ValidUntil, &a.LastLoginAt, &a.LoginCount, &a.CreatedAt,
+			&a.SelfRegistered, &a.EmailVerifiedAt, &a.VerificationDeadline, &a.GraceUntil,
+			&a.GraceExtensionsUsed,
 			&a.ActiveDevices); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "list failed")
 			return
@@ -250,9 +308,16 @@ func (s *server) listGuestAccountsIAMv2(w http.ResponseWriter, r *http.Request) 
 		jsonErr(w, http.StatusInternalServerError, "internal", "list failed")
 		return
 	}
+	rows.Close()
 	more := len(out) > size
 	if more {
 		out = out[:size]
+	}
+	// The site's verification policy is read once for the page, from the same function scd enforces with.
+	set := s.verificationSettings(ctx)
+	now := time.Now()
+	for i := range out {
+		out[i].withVerificationState(set, now)
 	}
 	// The AUTHORITY is stated on the ENVELOPE, not only on each row: an empty site has no rows to ask.
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -273,6 +338,7 @@ func (s *server) getGuestAccountIAMv2(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.ActiveDevices = s.iamv2ActiveDeviceCount(ctx, a.ID)
+	a.withVerificationState(s.verificationSettings(ctx), time.Now())
 	writeJSON(w, http.StatusOK, a)
 }
 
@@ -325,6 +391,20 @@ func (s *server) patchGuestAccountIAMv2(w http.ResponseWriter, r *http.Request) 
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
+	// A SELF-SERVICE ACCOUNT'S USERNAME IS THE CLIENT'S EMAIL ADDRESS (contract ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE
+	// §2, §5): renaming it would move the account -- and every entitlement it owns -- to an address its owner never
+	// proved, and send the next reset link there. Staff may enable, disable, annotate or set validity; never rename.
+	if in.Username != nil {
+		var selfReg bool
+		var current string
+		if err := s.db.QueryRow(ctx, `SELECT self_registered, username FROM iam_v2.guest_access_accounts
+		     WHERE id=$1 AND tenant_id=$2 AND site_id=$3`, id, s.tenantID, s.siteID).Scan(&selfReg, &current); err == nil &&
+			selfReg && !strings.EqualFold(current, *in.Username) {
+			jsonErr(w, http.StatusForbidden, "self_service_account",
+				"a self-service account's username is the client's email address and cannot be changed by staff")
+			return
+		}
+	}
 	// COALESCE keeps every omitted field at its current value, so a partial PATCH cannot blank a column.
 	var a iamv2Account
 	err := scanIAMv2Account(s.db.QueryRow(ctx, `
@@ -371,6 +451,20 @@ func (s *server) setGuestAccountPasswordIAMv2(w http.ResponseWriter, r *http.Req
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
+	// A SELF-SERVICE ACCOUNT IS NEVER RE-PASSWORDED BY STAFF (contract §5). Its owner proved control of the email
+	// address by registering with it, and recovers it only by the reset link sent there; a staff-set password -- or
+	// a generated one revealed at the desk -- would be a second recovery path that proves nothing about the address.
+	// Checked before a password is generated, so nothing is produced or revealed for it.
+	var selfRegistered bool
+	if err := s.db.QueryRow(ctx, `SELECT self_registered FROM iam_v2.guest_access_accounts
+	     WHERE id=$1 AND tenant_id=$2 AND site_id=$3`, id, s.tenantID, s.siteID).Scan(&selfRegistered); err != nil {
+		jsonErr(w, http.StatusNotFound, "not_found", "account not found")
+		return
+	}
+	if st, code, msg := selfServicePasswordRefusal(selfRegistered); st != 0 {
+		jsonErr(w, st, code, msg)
+		return
+	}
 	generated := false
 	if in.Generate && in.Password == "" {
 		pw, ok := s.generateAccountPassword(w, ctx)
@@ -437,6 +531,88 @@ func (s *server) setGuestAccountPasswordIAMv2(w http.ResponseWriter, r *http.Req
 		out["generated_password"] = in.Password
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// selfServicePasswordRefusal is the decision above, as a pure function: (0, "", "") lets a staff-created account
+// through; a self-registered one is refused with words the desk can repeat to the client.
+func selfServicePasswordRefusal(selfRegistered bool) (int, string, string) {
+	if !selfRegistered {
+		return 0, "", ""
+	}
+	return http.StatusForbidden, "self_service_account",
+		"This is a self-service email account. Staff cannot set or show its password: the client resets it " +
+			"with the \"Forgot password\" link on the sign-in page, which emails them a reset link."
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// RESENDING THE VERIFICATION EMAIL (contract §4, §7).
+//
+// scd owns the tokens, the outbox and the resend limits; edged checks the operator's permission (guest-accounts
+// WRITE), that the account is a self-registered one of THIS site still waiting for verification, asks scd at
+// POST /v1/admin/accounts/{id}/resend-verification, and audits what scd accepted. No token or link passes
+// through edged.
+const scdResendVerificationPath = "/v1/admin/accounts/%s/resend-verification"
+
+func (s *server) resendGuestAccountVerification(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	var username string
+	var selfRegistered, verified bool
+	if err := s.db.QueryRow(ctx, `SELECT username, self_registered, email_verified_at IS NOT NULL
+	      FROM iam_v2.guest_access_accounts WHERE id=$1 AND tenant_id=$2 AND site_id=$3`,
+		id, s.tenantID, s.siteID).Scan(&username, &selfRegistered, &verified); err != nil {
+		jsonErr(w, http.StatusNotFound, "not_found", "account not found")
+		return
+	}
+	if !selfRegistered {
+		jsonErr(w, http.StatusConflict, "not_self_service",
+			"only a self-service email account has an address to verify")
+		return
+	}
+	if verified {
+		jsonErr(w, http.StatusConflict, "already_verified", "this account's email address is already verified")
+		return
+	}
+	if s.relayResendVerification(w, r, id) {
+		s.audit(r, "guest_account.verification_resent", "guest_account", id,
+			map[string]any{"username": username, "authority": "iam_v2"})
+	}
+}
+
+// relayResendVerification asks scd and answers the operator. It reports whether scd accepted the request.
+//
+// A 404 from scd is reported as the feature being unavailable, not as a missing account: the account was found
+// above, so a 404 means the sign-in service on this appliance does not serve the route.
+func (s *server) relayResendVerification(w http.ResponseWriter, r *http.Request, id string) bool {
+	if s.scd == nil {
+		jsonErr(w, http.StatusServiceUnavailable, "scd_unreachable", "the sign-in service could not be reached")
+		return false
+	}
+	op := ""
+	if sess := sessFrom(r.Context()); sess != nil {
+		op = protectionActor(sess)
+	}
+	st, raw, err := s.scd.call(r.Context(), http.MethodPost, fmt.Sprintf(scdResendVerificationPath, id),
+		map[string]any{"operator": op})
+	if err != nil {
+		jsonErr(w, http.StatusBadGateway, "scd_unreachable", "the sign-in service could not be reached")
+		return false
+	}
+	switch {
+	case st == http.StatusNotFound:
+		jsonErr(w, http.StatusNotImplemented, "resend_unavailable",
+			"This appliance's sign-in service cannot resend verification emails yet.")
+		return false
+	case st >= 200 && st < 300:
+		writeJSON(w, http.StatusAccepted, map[string]any{"status": "queued",
+			"notice": "The verification email is queued. It is sent as soon as the mail server accepts it."})
+		return true
+	default:
+		// scd's own refusal (resend_wait with retry_after_seconds, resend_limit, ...) is relayed as it is.
+		s.relayScd(w, st, raw)
+		return false
+	}
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -590,22 +766,6 @@ func (s *server) disconnectGuestAccountSessionsIAMv2(w http.ResponseWriter, r *h
 		out["disconnect_failures"] = res.Failed
 	}
 	writeJSON(w, http.StatusOK, out)
-}
-
-func (s *server) deleteGuestAccountIAMv2(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	ctx, cancel := dbCtx(r)
-	defer cancel()
-	var username string
-	if err := s.db.QueryRow(ctx, `DELETE FROM iam_v2.guest_access_accounts
-	     WHERE id=$1 AND tenant_id=$2 AND site_id=$3 RETURNING username`,
-		id, s.tenantID, s.siteID).Scan(&username); err != nil {
-		jsonErr(w, http.StatusNotFound, "not_found", "account not found")
-		return
-	}
-	s.audit(r, "guest_account.deleted", "guest_account", id,
-		map[string]any{"username": username, "authority": "iam_v2"})
-	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted"})
 }
 
 // acctAuthority is REMOVED. It dispatched each guest-account route between a legacy handler and an IAM-v2

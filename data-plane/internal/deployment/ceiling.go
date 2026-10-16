@@ -36,8 +36,9 @@ const (
 	CapRoomChargeConfig   Capability = "room_charge_config"   // posting domain: onboarding, mappings, quotes
 	CapRoomChargeReview   Capability = "room_charge_review"   // financial review and recovery surfaces
 	CapRoomChargeTransmit Capability = "room_charge_transmit" // PS bytes may reach a PMS (real posting)
-	CapOTPSignIn          Capability = "otp_sign_in"          // IAM-v2 accepts a verified one-time code (email, SMS, WhatsApp)
+	CapOTPSignIn          Capability = "otp_sign_in"          // IAM-v2 accepts a verified one-time code (SMS, WhatsApp)
 	CapSocialSignIn       Capability = "social_sign_in"       // IAM-v2 accepts a verified social identity
+	CapEmailAccounts      Capability = "email_accounts"       // IAM-v2 authenticates accounts (Email accounts are ACCOUNT subjects)
 )
 
 // Ceiling is the evaluated deployment state. The zero value allows nothing optional.
@@ -50,6 +51,10 @@ type Ceiling struct {
 	// otp and social: the IAM-v2 guest authority accepts that kind of identity. Without it a verified code or
 	// social sign-in has nowhere to go, so the identity modules are not deployed and no screen offers them.
 	otp, social bool
+	// account: the IAM-v2 guest authority authenticates ACCOUNT subjects. Email accounts are self-registered
+	// ACCOUNT subjects, so the email sign-in module (email_otp, whose meaning is now "email sign-in") is deployed
+	// exactly when this is -- not when one-time codes are, which they no longer use.
+	account bool
 }
 
 // Getenv reads one variable.
@@ -106,7 +111,15 @@ func Load(get Getenv) (Ceiling, error) {
 	if c.social, err = flag(iamv2.EnvSocial); err != nil {
 		return Ceiling{}, err
 	}
-	c.otp, c.social = c.otp && master, c.social && master
+	if c.account, err = flag(iamv2.EnvAccount); err != nil {
+		return Ceiling{}, err
+	}
+	// A production build locks ACCOUNT on whatever the environment says (iamv2 guest authority lock: IAM-v2 is
+	// the only guest authority), so the ceiling must say what the authenticator will actually do.
+	if iamv2.BuildProfile() == "production" && iamv2.GuestAuthorityLocked(iamv2.MethodAccount) {
+		c.account = true
+	}
+	c.otp, c.social, c.account = c.otp && master, c.social && master, c.account && master
 	return c, nil
 }
 
@@ -114,6 +127,13 @@ func Load(get Getenv) (Ceiling, error) {
 // ceiling with New).
 func (c Ceiling) WithIdentity(otp, social bool) Ceiling {
 	c.otp, c.social = otp, social
+	return c
+}
+
+// WithAccounts returns the ceiling with the IAM-v2 ACCOUNT method set (tests and callers that build a ceiling
+// with New).
+func (c Ceiling) WithAccounts(account bool) Ceiling {
+	c.account = account
 	return c
 }
 
@@ -147,6 +167,8 @@ func (c Ceiling) Available(cp Capability) bool {
 		return c.otp
 	case CapSocialSignIn:
 		return c.social
+	case CapEmailAccounts:
+		return c.account
 	}
 	return false
 }
@@ -163,7 +185,9 @@ func (c Ceiling) ModuleDeployed(id string) bool {
 		return c.Available(CapCardPayment)
 	case lic.ModuleRoomCharge:
 		return c.Available(CapRoomChargeConfig)
-	case lic.ModuleEmailOTP, lic.ModuleSMSOTP, lic.ModuleWhatsAppOTP:
+	case lic.ModuleEmailOTP:
+		return c.Available(CapEmailAccounts)
+	case lic.ModuleSMSOTP, lic.ModuleWhatsAppOTP:
 		return c.Available(CapOTPSignIn)
 	case lic.ModuleSocialLogin:
 		return c.Available(CapSocialSignIn)
@@ -176,7 +200,7 @@ func (c Ceiling) ModuleDeployed(id string) bool {
 func (c Ceiling) Summary() string {
 	parts := []string{}
 	for _, cp := range []Capability{CapClientPackages, CapPackageAdmin, CapHospitality, CapPaidAccess, CapCardPayment,
-		CapCardLive, CapRoomChargeConfig, CapRoomChargeReview, CapRoomChargeTransmit, CapOTPSignIn, CapSocialSignIn} {
+		CapCardLive, CapRoomChargeConfig, CapRoomChargeReview, CapRoomChargeTransmit, CapOTPSignIn, CapSocialSignIn, CapEmailAccounts} {
 		parts = append(parts, string(cp)+"="+strconv.FormatBool(c.Available(cp)))
 	}
 	return "deployment ceiling " + strings.Join(parts, " ")

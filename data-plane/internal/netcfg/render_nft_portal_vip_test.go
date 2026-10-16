@@ -210,24 +210,27 @@ func TestPortalVIP_IsNeverRoutedNorNATed(t *testing.T) {
 	}
 }
 
-// THE UNAUTHENTICATED-443 REFUSAL CANNOT CATCH PORTAL TRAFFIC. That reset lives in the FORWARD chain; a guest's
+// THE UNAUTHENTICATED-443 DROP CANNOT CATCH PORTAL TRAFFIC. That drop lives in the FORWARD chain; a guest's
 // 443 to the portal address is DNAT'd in prerouting to the portal address itself -- a local address -- so the
 // routing decision sends it to INPUT, and the forward chain never sees it. The render proves the three facts that
 // argument rests on: the DNAT target is the portal address (local, not forwarded), input admits the translated
-// port, and the reset is a forward-chain rule ordered after the forward never-routed drop.
-func TestPortalVIP_TheForward443ResetIsNotOnThePortalPath(t *testing.T) {
+// port, and the drop is a forward-chain rule ordered after the forward never-routed drop.
+func TestPortalVIP_TheForward443DropIsNotOnThePortalPath(t *testing.T) {
 	out := renderVIP(t, testVIP)
 	if !strings.Contains(out, "dnat ip to 10.255.255.1:8343") {
 		t.Fatal("the 443 redirect does not target the portal address itself")
 	}
 	idx(t, chainOf(t, out, "input"), "tcp dport { 8343, 8380 } accept")
 	fwd := chainOf(t, out, "forward")
-	reset := idx(t, fwd, "tcp dport 443 reject with tcp reset")
-	if strings.Contains(chainOf(t, out, "input"), "reject with tcp reset") {
-		t.Fatal("a 443 reset was rendered into the input chain, where it would refuse the portal")
+	drop := idx(t, fwd, `oifname "ens160" tcp dport 443 drop`)
+	if strings.Contains(chainOf(t, out, "input"), "tcp dport 443 drop") {
+		t.Fatal("a 443 drop was rendered into the input chain, where it would refuse the portal")
 	}
-	if idx(t, fwd, vipFwdDst) > reset {
-		t.Fatal("the never-routed drop is ordered after the 443 reset")
+	if strings.Contains(out, "reject") {
+		t.Fatal("the ruleset answers something with a reject; an unauthenticated 443 must go unanswered")
+	}
+	if idx(t, fwd, vipFwdDst) > drop {
+		t.Fatal("the never-routed drop is ordered after the 443 drop")
 	}
 	if strings.Contains(fwd, "8343") {
 		t.Fatal("the forward chain mentions the portal listener; portal traffic is input traffic")

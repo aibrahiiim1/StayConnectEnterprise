@@ -347,27 +347,51 @@ const landingHTML = `<!doctype html>
     </form>
   </div>
 
+  <!-- EMAIL -- an account of the client's own: sign in, create one, or reset its password. One panel, three
+       states (data-acct); the links between them only move visibility, so nothing typed is lost and the address
+       typed in one state is carried to the next. Each state is a plain POST form, so a refusal comes back as
+       this page with the same state open (EmailState). -->
   <div class="panel" id="panel-email">
-    <form data-otp="email" data-stage="dest" autocomplete="off">
+    <form method="POST" action="/auth/account/signin" id="form-acct-signin" data-acct="signin"{{if ne .EmailState "signin"}} style="display:none"{{end}}>
       <div class="field">
-        <label for="email"><span data-i18n="email.dest" data-i18n-en="Email address">{{index .T "email.dest"}}</span></label>
-        <input id="email" name="dest" type="email" required placeholder="you@example.com" autocomplete="email" autocapitalize="none" spellcheck="false">
+        <label for="acct-email"><span data-i18n="email.dest" data-i18n-en="Email address">{{index .T "email.dest"}}</span></label>
+        <input id="acct-email" name="email" type="email" required autocomplete="email" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="254" dir="ltr"{{if eq .EmailState "signin"}}{{with .EmailValue}} value="{{.}}"{{end}}{{end}}{{if and (eq .ErrorForm "email") (eq .EmailState "signin")}} aria-describedby="server-error"{{if .ErrorInvalid}} aria-invalid="true"{{end}}{{end}}>
       </div>
-      <button class="primary" type="submit"><span data-i18n="btn.sendcode" data-i18n-en="Send code">{{index .T "btn.sendcode"}}</span></button>
-      <div class="err" id="email-dest-err" role="alert" data-for="email"></div>
+      <div class="field">
+        <label for="acct-password"><span data-i18n="account.pass" data-i18n-en="Password">{{index .T "account.pass"}}</span></label>
+        <input id="acct-password" name="password" type="password" required autocomplete="current-password" maxlength="128"{{if and (eq .ErrorForm "email") (eq .EmailState "signin")}} aria-describedby="server-error"{{if .ErrorInvalid}} aria-invalid="true"{{end}}{{end}}>
+      </div>
+      <button class="primary" type="submit"><span data-i18n="btn.login" data-i18n-en="Login">{{index .T "btn.login"}}</span></button>
+      <button type="button" class="link" data-acct-go="forgot" data-i18n="acct.forgot.link" data-i18n-en="Forgot password?">{{index .T "acct.forgot.link"}}</button>
+      <button type="button" class="link" data-acct-go="create" data-i18n="acct.create.link" data-i18n-en="Create an account">{{index .T "acct.create.link"}}</button>
+      <div class="err" id="acct-signin-err" role="alert" data-for="acct-email acct-password"></div>
     </form>
-    <form data-otp="email" data-stage="code" autocomplete="off" style="display:none">
-      <p class="small"><span data-i18n="otp.sent.email" data-i18n-en="We sent a 6-digit code to">{{index .T "otp.sent.email"}}</span> <bdi class="dest"></bdi></p>
+    <form method="POST" action="/auth/account/register" id="form-acct-create" data-acct="create"{{if ne .EmailState "create"}} style="display:none"{{end}}>
       <div class="field">
-        <label for="email-code"><span data-i18n="otp.code" data-i18n-en="Verification code">{{index .T "otp.code"}}</span></label>
-        <input id="email-code" name="code" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" required maxlength="6" placeholder="••••••" dir="ltr">
+        <label for="acct-new-email"><span data-i18n="email.dest" data-i18n-en="Email address">{{index .T "email.dest"}}</span></label>
+        <input id="acct-new-email" name="email" type="email" required autocomplete="email" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="254" dir="ltr"{{if eq .EmailState "create"}}{{with .EmailValue}} value="{{.}}"{{end}}{{end}}{{if and (eq .ErrorForm "email") (eq .EmailState "create")}} aria-describedby="server-error"{{if .ErrorInvalid}} aria-invalid="true"{{end}}{{end}}>
       </div>
-      <button class="primary" type="submit"><span data-i18n="btn.verify" data-i18n-en="Verify">{{index .T "btn.verify"}}</span></button>
-      <p class="hint temp-access" role="status" hidden></p>
-      <p class="hint" data-i18n="otp.pending.hint" data-i18n-en="You can open your mail app and come back: this box will still be here. Or tap the link in the email.">{{index .T "otp.pending.hint"}}</p>
-      <button type="button" class="link" data-again data-i18n="otp.again" data-i18n-en="Send the code again">{{index .T "otp.again"}}</button>
-      <button type="button" class="link" data-resend data-i18n="otp.retry.email" data-i18n-en="Try a different email">{{index .T "otp.retry.email"}}</button>
-      <div class="err" id="email-code-err" role="alert" data-for="email-code"></div>
+      <div class="field">
+        <label for="acct-new-password"><span data-i18n="account.pass" data-i18n-en="Password">{{index .T "account.pass"}}</span></label>
+        <input id="acct-new-password" name="password" type="password" required autocomplete="new-password" minlength="8" maxlength="128" aria-describedby="acct-rule{{if and (eq .ErrorForm "email") (eq .EmailState "create")}} server-error{{end}}">
+        <p class="hint" id="acct-rule" data-i18n="acct.rule" data-i18n-en="At least 8 characters, and not your email address.">{{index .T "acct.rule"}}</p>
+      </div>
+      <div class="field">
+        <label for="acct-new-password2"><span data-i18n="acct.confirm" data-i18n-en="Confirm password">{{index .T "acct.confirm"}}</span></label>
+        <input id="acct-new-password2" name="password_confirm" type="password" required autocomplete="new-password" minlength="8" maxlength="128">
+      </div>
+      <button class="primary" type="submit"><span data-i18n="acct.create.btn" data-i18n-en="Create account">{{index .T "acct.create.btn"}}</span></button>
+      <button type="button" class="link" data-acct-go="signin" data-i18n="acct.signin.link" data-i18n-en="Already have an account? Sign in">{{index .T "acct.signin.link"}}</button>
+      <div class="err" id="acct-create-err" role="alert" data-for="acct-new-password acct-new-password2"></div>
+    </form>
+    <form method="POST" action="/auth/account/forgot" id="form-acct-forgot" data-acct="forgot"{{if ne .EmailState "forgot"}} style="display:none"{{end}}>
+      <p class="small" data-i18n="acct.forgot.lead" data-i18n-en="Enter your email address and we'll send you a link to choose a new password.">{{index .T "acct.forgot.lead"}}</p>
+      <div class="field">
+        <label for="acct-forgot-email"><span data-i18n="email.dest" data-i18n-en="Email address">{{index .T "email.dest"}}</span></label>
+        <input id="acct-forgot-email" name="email" type="email" required autocomplete="email" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="254" dir="ltr"{{if eq .EmailState "forgot"}}{{with .EmailValue}} value="{{.}}"{{end}}{{end}}{{if and (eq .ErrorForm "email") (eq .EmailState "forgot")}} aria-describedby="server-error"{{end}}>
+      </div>
+      <button class="primary" type="submit"><span data-i18n="acct.forgot.btn" data-i18n-en="Send reset link">{{index .T "acct.forgot.btn"}}</span></button>
+      <button type="button" class="link" data-acct-go="signin" data-i18n="acct.signin.link" data-i18n-en="Already have an account? Sign in">{{index .T "acct.signin.link"}}</button>
     </form>
   </div>
 
@@ -480,7 +504,7 @@ const landingHTML = `<!doctype html>
         <li data-help-method="poststay"><strong data-i18n="method.poststay" data-i18n-en="Post-stay">{{index .T "method.poststay"}}</strong><span data-i18n="help.poststay" data-i18n-en="Already checked out? Enter the PIN you were given at checkout to reconnect.">{{index .T "help.poststay"}}</span></li>
         <li data-help-method="voucher"><strong data-i18n="method.voucher" data-i18n-en="Voucher">{{index .T "method.voucher"}}</strong><span data-i18n="help.voucher" data-i18n-en="Type the code exactly as it is printed on your voucher, then tap Login.">{{index .T "help.voucher"}}</span></li>
         <li data-help-method="account"><strong data-i18n="method.account" data-i18n-en="Personal account">{{index .T "method.account"}}</strong><span data-i18n="help.account" data-i18n-en="Enter the username and password you were given. If a voucher field is showing, switch on “Use Personal Account” first.">{{index .T "help.account"}}</span></li>
-        <li data-help-method="email"><strong data-i18n="method.email" data-i18n-en="Email">{{index .T "method.email"}}</strong><span data-i18n="help.email" data-i18n-en="Enter your email address and tap Send code, then type the 6-digit code from the email. Check your spam folder if it does not arrive.">{{index .T "help.email"}}</span></li>
+        <li data-help-method="email"><strong data-i18n="method.email" data-i18n-en="Email">{{index .T "method.email"}}</strong><span data-i18n="help.email.account" data-i18n-en="Sign in with your email address and password. New here? Tap “Create an account”, then open the link in the email we send you to verify the address. Forgot your password? Tap “Forgot password?” for a reset link.">{{index .T "help.email.account"}}</span></li>
         <li data-help-method="sms"><strong data-i18n="method.sms" data-i18n-en="Phone">{{index .T "method.sms"}}</strong><span data-i18n="help.sms" data-i18n-en="Enter your phone number with the country code and tap Send code, then type the 6-digit code from the text message.">{{index .T "help.sms"}}</span></li>
         <li data-help-method="whatsapp"><strong data-i18n="method.whatsapp" data-i18n-en="WhatsApp">{{index .T "method.whatsapp"}}</strong><span data-i18n="help.whatsapp" data-i18n-en="Enter your WhatsApp phone number with the country code and tap Send code, then type the 6-digit code from the WhatsApp message.">{{index .T "help.whatsapp"}}</span></li>
         <li data-help-method="social"><strong data-i18n="method.social" data-i18n-en="Social">{{index .T "method.social"}}</strong><span data-i18n="social.note" data-i18n-en="You will be redirected to the provider, then back here.">{{index .T "social.note"}}</span></li>
@@ -542,6 +566,8 @@ const landingHTML = `<!doctype html>
       either:           'pms.prompt.either',
     };
     const challenges = {}; // channel -> challenge_id
+    // The plain-HTML form a refusal on this page answers ("voucher", "account" or "email"), from the server.
+    const SERVER_FORM = {{.ErrorForm}};
 
     // Which METHOD is showing, within whichever group is selected.
     function setTab(id) {
@@ -1031,7 +1057,7 @@ const landingHTML = `<!doctype html>
     })();
 
     // A plain-HTML sign-in form says it is working the moment it is sent, and cannot be sent twice.
-    ['form-voucher', 'form-credentials'].forEach(function (id) {
+    ['form-voucher', 'form-credentials', 'form-acct-signin', 'form-acct-create', 'form-acct-forgot'].forEach(function (id) {
       const f = document.getElementById(id);
       f.addEventListener('submit', function () {
         const b = f.querySelector('button[type=submit]');
@@ -1051,7 +1077,9 @@ const landingHTML = `<!doctype html>
       const enabled = [];
       if (cfg.voucher && cfg.voucher.enabled) enabled.push('voucher');
       if (cfg.guest_account && cfg.guest_account.enabled) enabled.push('account');
-      if (cfg.email   && cfg.email.enabled)   enabled.push('email');
+      // EMAIL IS AN ACCOUNT (email_account): sign in, create one, or reset its password. The email one-time
+      // code is gone, and so is its configuration key.
+      if (cfg.email_account && cfg.email_account.enabled) enabled.push('email');
       if (cfg.sms     && cfg.sms.enabled)     enabled.push('sms');
       if (cfg.whatsapp && cfg.whatsapp.enabled) enabled.push('whatsapp');
       PHASE3_PMS = !!cfg.phase3_pms;
@@ -1093,7 +1121,7 @@ const landingHTML = `<!doctype html>
       }
       // THE PRIMARY METHOD LEADS. The site's choice when it is enabled; otherwise the default order, which
       // puts the hotel's Room sign-in first and a printed voucher last.
-      const PRIMARY_MAP = { pms:'pms', email:'email', sms:'sms', whatsapp:'whatsapp', guest_account:'account', account:'account', voucher:'voucher' };
+      const PRIMARY_MAP = { pms:'pms', email:'email', email_account:'email', sms:'sms', whatsapp:'whatsapp', guest_account:'account', account:'account', voucher:'voucher' };
       const chosen = PRIMARY_MAP[(cfg.portal && cfg.portal.primary_method) || ''];
       enabled.sort((a, b) => DEFAULT_ORDER.indexOf(a) - DEFAULT_ORDER.indexOf(b));
       if (chosen && enabled.indexOf(chosen) > 0) { enabled.splice(enabled.indexOf(chosen), 1); enabled.unshift(chosen); }
@@ -1196,6 +1224,9 @@ const landingHTML = `<!doctype html>
       })();
       setGroup(shown[0], groupMembers);
       restorePending(cfg);
+      // A REFUSAL THE SERVER RENDERED FOR THE EMAIL PANEL is answered on that panel, in the state the server
+      // opened (an address already registered opens on Sign in): the guest sees the form they just sent.
+      if (SERVER_FORM === 'email' && enabled.indexOf('email') >= 0) selectMethod('email');
     }).catch(() => { setTab('voucher'); });
 
     function panel(channel) { return document.getElementById('panel-' + channel); }
@@ -1222,28 +1253,6 @@ const landingHTML = `<!doctype html>
       return t('err.service');
     }
 
-    // THE TEMPORARY WINDOW an issued email code opened for this device (scd verify_access.go): said in words, so
-    // the client knows they can open any mail app now, for how long, and how much.
-    // When a limit kept the window closed (temporary_access_withheld), the client is told when this device may
-    // have one again -- or that it may not today -- and that the desk can help.
-    function showTempAccess(codeForm, ta, withheld) {
-      const el = codeForm.querySelector('.temp-access');
-      if (!el) return;
-      if ((!ta || !ta.seconds) && withheld && withheld.reason) {
-        if (withheld.reason === 'device_retry_wait' && withheld.retry_after_seconds) {
-          el.textContent = t('otp.temp.wait').split('{m}').join(String(Math.max(1, Math.ceil(withheld.retry_after_seconds / 60))));
-        } else {
-          el.textContent = t('otp.temp.limit');
-        }
-        el.hidden = false;
-        return;
-      }
-      if (!ta || !ta.seconds) { el.hidden = true; return; }
-      const mins = Math.max(1, Math.round(ta.seconds / 60));
-      el.textContent = t('otp.temp.access').split('{m}').join(String(mins)).split('{mb}').join(String(ta.data_mb || 0));
-      el.hidden = false;
-    }
-
     function attach(channel) {
       const destForm = form(channel, 'dest');
       const codeForm = form(channel, 'code');
@@ -1261,7 +1270,6 @@ const landingHTML = `<!doctype html>
           const j = await r.json().catch(() => ({}));
           if (!r.ok) { errEl.textContent = otpMessage('dest', j); return; }
           challenges[channel] = j.challenge_id;
-          showTempAccess(codeForm, j.temporary_access, j.temporary_access_withheld);
           codeForm.querySelector('.dest').textContent = dest;
           destForm.style.display = 'none';
           codeForm.style.display = 'block';
@@ -1297,29 +1305,13 @@ const landingHTML = `<!doctype html>
         delete challenges[channel];
         fetch('/auth/otp/forget', {method:'POST'}).catch(() => {});
       });
-      // SEND AGAIN: the address the device gave earlier, held by the server and never echoed here.
-      const again = codeForm.querySelector('[data-again]');
-      if (again) again.addEventListener('click', async () => {
-        const errEl = codeForm.querySelector('.err');
-        errEl.textContent = ''; again.disabled = true;
-        try {
-          const r = await fetch('/auth/otp/resend', {method:'POST'});
-          const j = await r.json().catch(() => ({}));
-          if (!r.ok) { errEl.textContent = otpMessage('dest', j); return; }
-          challenges[channel] = j.challenge_id;
-          showTempAccess(codeForm, j.temporary_access, j.temporary_access_withheld);
-          codeForm.querySelector('input[name=code]').value = '';
-          codeForm.querySelector('input[name=code]').focus();
-        } catch (err) {
-          errEl.textContent = t('err.service');
-        } finally { again.disabled = false; }
-      });
     }
     // A CODE ALREADY IN FLIGHT FOR THIS DEVICE (the captive browser was dismissed to read it): reopen the
     // code box for that channel, naming the masked address, and make that channel the one on screen.
     function restorePending(cfg) {
       const p = cfg && cfg.pending_otp;
-      if (!p || !p.challenge_id || !panel(p.channel)) return false;
+      // Only a channel that still has a code box (SMS, WhatsApp) can be reopened on one.
+      if (!p || !p.challenge_id || !panel(p.channel) || !form(p.channel, 'code')) return false;
       challenges[p.channel] = p.challenge_id;
       const destForm = form(p.channel, 'dest'), codeForm = form(p.channel, 'code');
       codeForm.querySelector('.dest').textContent = p.dest_masked || '';
@@ -1329,9 +1321,52 @@ const landingHTML = `<!doctype html>
       codeForm.querySelector('input[name=code]').focus();
       return true;
     }
-    attach('email');
     attach('sms');
     attach('whatsapp');
+
+    // THE EMAIL PANEL'S THREE STATES: sign in, create an account, forgot password. Moving between them only
+    // moves visibility (an inline style, which the guard sheet leaves alone), carrying the address typed in one
+    // state to the next. Every state posts as a plain form; nothing here decides anything.
+    function acctState(state) {
+      const p = document.getElementById('panel-email');
+      if (!p) return;
+      let typed = '';
+      p.querySelectorAll('form[data-acct]').forEach(function (f) {
+        if (f.style.display !== 'none') { const e = f.querySelector('input[type=email]'); if (e) typed = e.value; }
+      });
+      p.querySelectorAll('form[data-acct]').forEach(function (f) { f.style.display = f.dataset.acct === state ? '' : 'none'; });
+      const target = p.querySelector('form[data-acct="' + state + '"]');
+      if (!target) return;
+      const e = target.querySelector('input[type=email]');
+      if (e && !e.value && typed) e.value = typed;
+      const first = e && !e.value ? e : target.querySelector('input[type=password]') || e;
+      if (first) first.focus();
+    }
+    document.querySelectorAll('#panel-email [data-acct-go]').forEach(function (b) {
+      b.addEventListener('click', function () { acctState(b.dataset.acctGo); });
+    });
+    // The two passwords are compared before the form leaves the device; the server compares them again.
+    (function () {
+      const f = document.getElementById('form-acct-create');
+      if (!f) return;
+      f.addEventListener('submit', function (e) {
+        const a = document.getElementById('acct-new-password'), b = document.getElementById('acct-new-password2');
+        if (a.value !== b.value) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          document.getElementById('acct-create-err').textContent = t('err.acct.mismatch');
+          b.focus();
+        }
+      }, true);
+    })();
+    // selectMethod shows a method's panel and marks its chip under "Or sign in with" as the current one.
+    function selectMethod(id) {
+      setTab(id);
+      const alt = document.getElementById('alt-methods');
+      if (alt) alt.querySelectorAll('button').forEach(function (x) {
+        x.setAttribute('aria-pressed', x.dataset.tab && Tabs[x.dataset.tab] && Tabs[id] && Tabs[x.dataset.tab].panel === Tabs[id].panel ? 'true' : 'false');
+      });
+    }
 
     // ---- Phase 3 (Stay resolution) ----------------------------------------
     // The guest sees exactly two possible outcomes: they are in, or the server's sentence. There is
@@ -1682,6 +1717,13 @@ const packagesHTML = guestHead + `
     <button class="choice" type="submit"><span class="c-text"><span class="c-name" dir="auto">{{.Name}}</span>{{if .Detail}}<span class="c-detail">{{.Detail}}</span>{{end}}<span class="c-detail c-price" dir="auto">{{.Price}} · {{index $.T .MethodKey}}</span></span>` + iconChevNext + `</button>
   </form>{{end}}
   </div>
+  {{if .VoucherCTA}}<form method="post" action="/auth/voucher" class="voucher-cta">
+    <label class="field-label" for="pkg-voucher">{{index .T "pkg.voucher.title"}}</label>
+    <input id="pkg-voucher" name="code" type="text" autocomplete="one-time-code" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="32" required>
+    <button class="btn btn--outline" type="submit">{{index .T "pkg.voucher.btn"}}</button>
+  </form>{{end}}
+  <!-- A way back to the sign-in page: signing out ends this sign-in (main.go endPortalSignIn). -->
+  <form method="post" action="/logout"><button class="link" type="submit">{{index .T "pkg.signout"}}</button></form>
 </div>` + guestFoot + `
 </main>
 </div>` + guestScripts + `
@@ -1733,6 +1775,8 @@ const payHTML = guestHead + `
         .then(function (r) { return r.json(); })
         .then(function (s) {
           if (s.state === 'connected' && s.redirect) { show('pay.connecting'); window.location.href = s.redirect; return; }
+          // Paid, but the email account behind it must verify its address first: the page that says how.
+          if (s.state === 'granted' && s.activation === 'VERIFICATION_REQUIRED') { window.location.href = '/account/verification'; return; }
           if (s.state === 'failed') { show('pay.failed'); done(); return; }
           if (s.state === 'review') { show('pay.review'); done(); return; }
           if (s.state === 'granted' && s.activation) { show('err.connect'); done(); return; }
@@ -1836,6 +1880,11 @@ const successHTML = guestHead + `
     <a class="btn btn--outline" href="/status?s={{.SessionID}}&amp;t={{.DurationSeconds}}">{{index .T "online.status"}}</a>
     <form method="POST" action="/logout"><button class="btn btn--outline" type="submit">{{index .T "online.disconnect"}}</button></form>
   </div>
+  {{with .Reminder}}<!-- AN EMAIL ACCOUNT NOT VERIFIED YET: when, and Resend. Online all the same (account_handlers.go). -->
+  <div class="section" id="acct-reminder">
+    <p class="lead" role="status"{{with .At}} data-acct-at="{{.}}" data-acct-tmpl="{{$.Reminder.Tmpl}}"{{end}}>{{.Text}}</p>
+    <div class="actions"><form method="post" action="/auth/account/resend" id="form-acct-resend">{{with $.SessionID}}<input type="hidden" name="s" value="{{.}}">{{end}}<button class="btn btn--outline" type="submit">{{index $.T "acct.resend"}}</button></form></div>
+  </div>{{end}}
 
   {{if .CommerceEnabled}}
   <div id="commerce" class="section" data-commerce="on">
@@ -2014,6 +2063,7 @@ const successHTML = guestHead + `
   <div id="devices" class="section" hidden>
     <h2>{{index .T "dev.title"}}</h2>
     <p class="lead">{{index .T "dev.lead"}}</p>
+    <p class="lead" id="dv-slots" hidden></p>
     <div id="dv-list"></div>
     <div id="dv-note" role="status" aria-live="polite"></div>
   </div>
@@ -2022,6 +2072,7 @@ const successHTML = guestHead + `
     var panel = document.getElementById('devices');
     var list  = document.getElementById('dv-list');
     var note  = document.getElementById('dv-note');
+    var slots = document.getElementById('dv-slots');
     var busy  = false;
     var ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="6.5" y="2.5" width="11" height="19" rx="2.2"/><path d="M11 18.3h2"/></svg>';
 
@@ -2041,14 +2092,20 @@ const successHTML = guestHead + `
     function refused(){ note.className='dv-err'; note.textContent=t('dev.refused'); }
     function clearNote(){ note.className=''; note.textContent=''; }
 
-    function render(devices){
+    function render(devices, res){
       list.innerHTML='';
+      // The package's places, and how many changes are left today (0: the limit is reached for today).
+      if(res && res.limit){
+        var line = fill(fill(t('dev.slots'), 'n', res.in_use || devices.length), 'max', res.limit);
+        line += ' · ' + (res.changes_left > 0 ? fill(t('dev.changes'), 'n', res.changes_left) : t('dev.changes.none'));
+        slots.textContent = line; slots.hidden = false;
+      }
       devices.forEach(function(d, i){
         var el = document.createElement('div'); el.className='dev';
         var icon = document.createElement('span'); icon.className='dev-icon'; icon.innerHTML = ICON;
         var text = document.createElement('div'); text.className='dev-text';
         var name = document.createElement('div'); name.className='name';
-        name.textContent = fill(t('dev.name'), 'n', i+1);
+        name.textContent = d.this ? t('dev.this') : fill(t('dev.name'), 'n', i+1);
         var meta = document.createElement('div'); meta.className='meta';
         var badge = document.createElement('span');
         badge.className = d.online ? 'badge badge--ok' : 'badge';
@@ -2065,14 +2122,16 @@ const successHTML = guestHead + `
           btn.className='btn btn--danger btn--sm';
           btn.textContent=t('dev.remove');
           btn.setAttribute('aria-label', fill(t('dev.name'), 'n', i+1) + ' — ' + t('dev.remove'));
-          btn.addEventListener('click', function(){ ask(el, d.id, btn, i+1); });
+          btn.addEventListener('click', function(){ ask(el, d.id, btn, i+1, d.online); });
           el.appendChild(btn);
         } else {
           // An online device is never removable, and saying so plainly is better than offering a button that
           // will refuse: the guest is told what to do instead.
           var why = document.createElement('div'); why.className='inuse';
-          why.textContent = d.online ? t('dev.inuse') : t('dev.cannot');
-          el.appendChild(why);
+          if(!d.this){
+            why.textContent = t('dev.cannot');
+            el.appendChild(why);
+          }
         }
         list.appendChild(el);
       });
@@ -2080,13 +2139,13 @@ const successHTML = guestHead + `
 
     // THE CONFIRMATION IS PART OF THE PAGE, not the browser's own dialog: it is in the guest's language, it
     // states the consequence, focus lands on the safe answer, and Escape keeps the device.
-    function ask(el, id, btn, n){
+    function ask(el, id, btn, n, online){
       if(busy) return;
       clearNote();
       var row = document.createElement('div'); row.className='confirm-row';
       row.setAttribute('role','group');
       var q = document.createElement('p'); q.id = 'dv-q-' + n;
-      q.textContent = fill(t('dev.confirm'), 'n', n);
+      q.textContent = fill(t(online ? 'dev.confirm.online' : 'dev.confirm'), 'n', n);
       row.setAttribute('aria-labelledby', q.id);
       var bar = document.createElement('div'); bar.className='row';
       var yes = document.createElement('button'); yes.type='button'; yes.className='btn btn--solid-danger btn--sm';
@@ -2113,7 +2172,7 @@ const successHTML = guestHead + `
             if(showPanel) panel.hidden = true;
             return;
           }
-          render(res.devices);
+          render(res.devices, res);
           panel.hidden = false;
         })
         .catch(function(){ if(showPanel) panel.hidden = true; });
@@ -2129,7 +2188,9 @@ const successHTML = guestHead + `
           busy = false;
           if(!res || !res.ok){
             if(row.parentNode) row.parentNode.removeChild(row);
-            btn.hidden = false; btn.disabled = false; refused(); return;
+            btn.hidden = false; btn.disabled = false;
+            if(res && res.code === 'limit_today'){ note.className='dv-err'; note.textContent=t('dev.changes.none'); return; }
+            refused(); return;
           }
           note.className='dv-done';
           note.textContent = t('dev.removed');
@@ -2147,5 +2208,5 @@ const successHTML = guestHead + `
   </script>
 </div>` + guestFoot + `
 </main>
-</div>` + guestScripts + `
+</div>` + guestScripts + acctMomentScript + `
 </body></html>`

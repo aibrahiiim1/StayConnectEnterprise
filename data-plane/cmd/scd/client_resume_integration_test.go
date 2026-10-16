@@ -76,7 +76,7 @@ func TestIntegration_RememberedDeviceIsBoundToOneDevice(t *testing.T) {
 	days := 30
 	s := &server{db: pool, tenID: tenant, siteID: site, resumeKey: key, resumeLimiter: &recoveryLimiter{hits: map[string][]time.Time{}},
 		methodSwitches: func(context.Context) (*tenantcfg.AuthMethods, error) {
-			return &tenantcfg.AuthMethods{Email: &tenantcfg.AuthMethod{Enabled: true}, Portal: &tenantcfg.PortalConfig{RememberDeviceDays: &days}}, nil
+			return &tenantcfg.AuthMethods{SMS: &tenantcfg.AuthMethod{Enabled: true}, Portal: &tenantcfg.PortalConfig{RememberDeviceDays: &days}}, nil
 		}}
 
 	tok := s.issueResumeCredential(ctx, pid, dev, iamv2.MethodOTP, iamv2.CredentialEmailOTP)
@@ -139,7 +139,7 @@ func TestIntegration_RememberedDeviceIsBoundToOneDevice(t *testing.T) {
 	// Remember for 0 days: nothing is issued.
 	zero := 0
 	s.methodSwitches = func(context.Context) (*tenantcfg.AuthMethods, error) {
-		return &tenantcfg.AuthMethods{Email: &tenantcfg.AuthMethod{Enabled: true}, Portal: &tenantcfg.PortalConfig{RememberDeviceDays: &zero}}, nil
+		return &tenantcfg.AuthMethods{SMS: &tenantcfg.AuthMethod{Enabled: true}, Portal: &tenantcfg.PortalConfig{RememberDeviceDays: &zero}}, nil
 	}
 	if tok := s.issueResumeCredential(ctx, pid, dev, iamv2.MethodOTP, iamv2.CredentialEmailOTP); tok != "" {
 		t.Fatal("a site that does not remember devices must issue nothing")

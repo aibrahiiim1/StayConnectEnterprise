@@ -1,0 +1,36 @@
+{
+  "transition_id": "T0235",
+  "seq": 235,
+  "timestamp": "2026-10-15T11:27:56+03:00",
+  "timestamp_derivation": "Computed from the workstation clock (UTC+3) when this receipt was written, before the commit that introduces it.",
+  "record_type": "EMAIL_ACCOUNTS_REVIEW_FINDING_FIXED_AND_PRE_LIVE_REDEPLOYED",
+  "authorisation": "D50 (2026-10-15); the standing PRE-LIVE deployment decision.",
+  "delivery": {
+    "pull_request": 216,
+    "branch": "delivery/email-accounts-self-service",
+    "content_head": "d01d13fcaeb87040372a228814aae84c59479266",
+    "pr_state": "OPEN -- READY FOR PRODUCT OWNER TESTING; not merged"
+  },
+  "review_finding": "Automated review (P2): a VERIFY/RESET message still unsent when its link expired stayed in the outbox index for ever, so every poll skipped a growing backlog. Fixed: each drain first retires expired unsent messages (superseded). Integration test as svc_scd; answered and resolved on the PR.",
+  "verified": "scd self-service integration tests 5/5 against the full appliance schema; scd unit tests pass; on PRE-LIVE the live outbox holds 0 expired pending rows after the redeploy.",
+  "deployment_provenance": "PRE-LIVE 172.21.60.25 read back on 2026-10-15: netd 9bb29145; scd d01d13fc; edged 9bb29145; pmsd 6a403326; portald 9bb29145; acctd 99ba9f10; keybootstrap e9b72aab; Admin Console release 20261015-074621 (9bb29145); schema 0117; DEPLOYED_BINARIES 6/6 OK. Only scd changed.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0234."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "head": "d01d13fc",
+  "head_note": "The last CONTENT commit of PR #216 at the time of this receipt; governance commits follow it.",
+  "previous_delivery": "T0234",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

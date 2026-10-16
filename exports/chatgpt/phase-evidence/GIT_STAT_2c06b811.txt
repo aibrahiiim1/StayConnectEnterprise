@@ -1,0 +1,4 @@
+commit 2c06b811d55f00fdc23ca7368101ee5fee14d837
+Date:   Thu Oct 15 14:50:00 2026 +0300
+
+    Governance: T0236 records device management and the portal health fix on PRE-LIVE (D51, migration 0118)

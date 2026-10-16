@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -37,8 +38,15 @@ func unixGet(ctx context.Context, sock, path string) (int, []byte, error) {
 }
 
 // tcpGet does a short GET to a loopback TCP address.
+//
+// IT NEVER FOLLOWS A REDIRECT. A redirect is the probed listener's own answer, which is what is being measured.
+// Following one took the probe somewhere else entirely: portald's HTTP listener answers 302
+// https://<canonical portal hostname>/ once HTTPS is active, and from the appliance host that name reaches Caddy's
+// :443 (guests reach portald :8343 only through the guest-interface DNAT), which has no certificate for it -- so
+// a portal serving clients perfectly was reported "degraded" from the moment HTTPS went live.
 func tcpGet(ctx context.Context, url string) (int, error) {
-	cl := &http.Client{Timeout: 3 * time.Second}
+	cl := &http.Client{Timeout: 3 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
 	resp, err := cl.Do(req)
 	if err != nil {
@@ -79,17 +87,57 @@ func checkNetd(ctx context.Context, s *server) (bool, string, string) {
 	return false, fmt.Sprintf("netd /v1/health http %d", code), ""
 }
 
+// portaldHTTPSAddr is portald's TLS listener (PORTALD_HTTPS_ADDR); guests reach it through the DNAT of the portal
+// address's 443 (netcfg.PortalAddressTLSPort).
+const portaldHTTPSAddr = "127.0.0.1:8343"
+
 func checkPortald(ctx context.Context, s *server) (bool, string, string) {
-	// The captive portal listener must answer. Any HTTP response (including a
-	// redirect) means portald is serving.
+	// The captive portal's HTTP listener must answer. Any HTTP response (including its redirect to the HTTPS
+	// portal) means portald is serving.
 	code, err := tcpGet(ctx, "http://127.0.0.1:8380/")
 	if err != nil {
 		return false, "captive portal not responding: " + errShort(err), ""
 	}
-	if code > 0 {
-		return true, fmt.Sprintf("captive portal responding (http %d)", code), ""
+	if code <= 0 {
+		return false, "captive portal no response", ""
 	}
-	return false, "captive portal no response", ""
+	// WHILE HTTPS IS ACTIVE, every client is sent to the TLS listener, so that is the portal clients actually use:
+	// it must complete a handshake for the canonical hostname with a certificate that verifies (system roots,
+	// hostname, validity) -- what a client's browser checks. The HTTPS state itself (fallback, expiry) is the
+	// separate portal_https check.
+	if s != nil && s.db != nil {
+		if st, err := s.loadPortalTLSState(ctx); err == nil && st.HTTPSActive && st.CanonicalHostname != "" {
+			tcode, terr := tlsListenerGet(ctx, portaldHTTPSAddr, st.CanonicalHostname)
+			if terr != nil {
+				return false, "HTTPS portal not serving " + st.CanonicalHostname + ": " + errShort(terr), ""
+			}
+			return true, fmt.Sprintf("captive portal responding (http %d; https %d for %s)", code, tcode, st.CanonicalHostname), ""
+		}
+	}
+	return true, fmt.Sprintf("captive portal responding (http %d)", code), ""
+}
+
+// tlsListenerGet GETs https://<host>/ from the listener at addr, presenting host as SNI and verifying the served
+// certificate against the system roots and host. Redirects are not followed.
+func tlsListenerGet(ctx context.Context, addr, host string) (int, error) {
+	tr := &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "tcp", addr)
+		},
+		TLSClientConfig:     &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12},
+		TLSHandshakeTimeout: 3 * time.Second,
+	}
+	defer tr.CloseIdleConnections()
+	cl := &http.Client{Timeout: 3 * time.Second, Transport: tr,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	req, _ := http.NewRequestWithContext(ctx, "GET", "https://"+host+"/", nil)
+	resp, err := cl.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode, nil
 }
 
 func checkAcctd(ctx context.Context, s *server) (bool, string, string) {

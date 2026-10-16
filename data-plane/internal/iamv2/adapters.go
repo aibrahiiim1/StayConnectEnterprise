@@ -2,15 +2,11 @@ package iamv2
 
 import (
 	"context"
-	"crypto/subtle"
-	"encoding/base64"
 	"errors"
-	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
-	"golang.org/x/crypto/argon2"
+	"github.com/stayconnect/enterprise/data-plane/internal/passwordhash"
 )
 
 // authAccount validates a username/password against iam_v2.guest_access_accounts (argon2id) and,
@@ -331,60 +327,17 @@ func deny(m Method, reason string) Result {
 	return Result{Decision: DecisionDeny, Method: m, Reason: reason}
 }
 
-// ---- argon2id (PHC $argon2id$v=19$m=..,t=..,p=..$salt$hash) — matches the existing scd format ----
+// ---- argon2id (PHC $argon2id$v=19$m=..,t=..,p=..$salt$hash) — internal/passwordhash is the one implementation ----
 
 // dummyArgon2 is a valid hash used for constant-work verification of unknown accounts.
-var dummyArgon2 = mustDummy()
+var dummyArgon2 = passwordhash.Dummy()
 
-func mustDummy() string {
-	salt := []byte("0123456789abcdef")
-	key := argon2.IDKey([]byte("x"), salt, 1, 64*1024, 4, 32)
-	return fmt.Sprintf("$argon2id$v=19$m=%d,t=%d,p=%d$%s$%s", 64*1024, 1, 4,
-		base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(key))
-}
-
-// Argon2id parameter bounds — sized around the hashes StayConnect actually issues (m=65536 KiB,
-// t=1, p=4, 16-byte salt, 32-byte digest) with headroom, and capped to prevent resource exhaustion
-// / integer overflow from a malformed or hostile hash.
-const (
-	argonMinMem    = 8      // KiB
-	argonMaxMem    = 262144 // 256 MiB KiB
-	argonMinT      = 1
-	argonMaxT      = 10
-	argonMinP      = 1
-	argonMaxP      = 16
-	argonMinSalt   = 8
-	argonMaxSalt   = 64
-	argonMinDigest = 16
-	argonMaxDigest = 64
-)
-
+// verifyArgon2id is the bounded verifier, with an unusable stored hash reported as an invalid credential (never
+// as a match, never as a repository fault the guest would see as "try later").
 func verifyArgon2id(pw, encoded string) (bool, error) {
-	parts := strings.Split(encoded, "$")
-	if len(parts) != 6 || parts[1] != "argon2id" {
-		return false, &Error{Code: ErrInvalidCred, Msg: "hash format"}
+	ok, err := passwordhash.Verify(pw, encoded)
+	if err != nil {
+		return false, &Error{Code: ErrInvalidCred, Msg: err.Error()}
 	}
-	if parts[2] != "v=19" {
-		return false, &Error{Code: ErrInvalidCred, Msg: "hash version"}
-	}
-	var m, t, p uint32
-	if n, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &m, &t, &p); err != nil || n != 3 {
-		return false, &Error{Code: ErrInvalidCred, Msg: "hash params"}
-	}
-	// Bound every parameter BEFORE calling argon2.IDKey (avoid memory/CPU exhaustion, uint8 overflow).
-	if m < argonMinMem || m > argonMaxMem || t < argonMinT || t > argonMaxT || p < argonMinP || p > argonMaxP {
-		return false, &Error{Code: ErrInvalidCred, Msg: "hash params out of range"}
-	}
-	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
-	if err != nil || len(salt) < argonMinSalt || len(salt) > argonMaxSalt {
-		return false, &Error{Code: ErrInvalidCred, Msg: "hash salt"}
-	}
-	want, err := base64.RawStdEncoding.DecodeString(parts[5])
-	if err != nil || len(want) < argonMinDigest || len(want) > argonMaxDigest {
-		return false, &Error{Code: ErrInvalidCred, Msg: "hash digest"}
-	}
-	got := argon2.IDKey([]byte(pw), salt, t, m, uint8(p), uint32(len(want)))
-	return subtle.ConstantTimeCompare(got, want) == 1, nil
+	return ok, nil
 }
-
-var _ = strconv.Itoa // reserved for future numeric parsing

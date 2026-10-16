@@ -22,6 +22,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -136,14 +137,9 @@ func (h *handler) tryIAMv2AuthMode(w http.ResponseWriter, r *http.Request, paylo
 		case "":
 			next("/success?s=" + url.QueryEscape(sid))
 		case activateDeviceLimit:
-			switch reply.Method {
-			case "ACCOUNT":
-				fail("This account has reached its device limit. Disconnect another device and try again.")
-			case "VOUCHER":
-				fail("This voucher has reached its device limit. Disconnect another device and try again.")
-			default:
-				fail("Your access has reached its device limit. Disconnect another device and try again.")
-			}
+			// Every place on the package is taken: let the client choose which device this one replaces
+			// (device_pages.go), keeping this fresh sign-in as the proof.
+			h.toReplace(w, r, sess, token, asJSON)
 		case activateNoDevice:
 			fail("Your device isn't connected to this Wi-Fi network.")
 		case activateCapacity:
@@ -152,6 +148,13 @@ func (h *handler) tryIAMv2AuthMode(w http.ResponseWriter, r *http.Request, paylo
 			fail(guestLicenseRefusedMessage)
 		case activateNotEnforced:
 			fail("We could not bring your device online. Please try again in a moment.")
+		case activateVerification:
+			// An email account past its verification deadline: the page that says why, and what to do.
+			if asJSON {
+				next("/account/verification")
+			} else {
+				h.renderAccountPage(w, r, nil, true, accountNote{})
+			}
 		default:
 			fail("We could not connect your device.")
 		}
@@ -231,13 +234,17 @@ func (h *handler) packagesFor(w http.ResponseWriter, r *http.Request, sess comme
 		return
 	}
 	if len(out.Packages) == 0 {
-		// THE UPGRADE JOURNEY ENDS HONESTLY: a Client whose free allowance is spent and who has nothing priced to
-		// choose from is told so in words, not shown a sign-in error.
+		// THE UPGRADE JOURNEY ENDS HONESTLY, AND NOT AT THE SIGN-IN PAGE. A Client whose free allowance is spent and
+		// who has nothing priced to choose from is told so in words -- on the package page, still signed in, with
+		// what they CAN do: enter a voucher code (when the site sells by voucher) or sign out. It used to drop them
+		// on the sign-in page under an error, with the first sign-in form selected, which read as "you were signed
+		// out" and offered nothing to act on (found on PRE-LIVE 2026-10-15: a card-only package whose currency the
+		// card account does not settle left an email-account client with nothing).
+		msg := "No internet packages are available for you right now."
 		if out.FreeAllowanceUsed {
-			h.landing(w, r, "You've used your free access here, and no other package is available for you right now. Please contact the site team.")
-			return
+			msg = "You've used your free access here, and no other package is available for you right now. Please contact the site team."
 		}
-		h.landing(w, r, "No internet packages are available for you right now.")
+		h.renderPackages(w, r, nil, "", sess.identityLabel, false, msg)
 		return
 	}
 	code := sess.returnCode
@@ -334,7 +341,7 @@ func (h *handler) acquirePackage(w http.ResponseWriter, r *http.Request) {
 		h.backToPackages(w, r, "Your device isn't connected to this Wi-Fi network.")
 		return
 	case activateDeviceLimit:
-		h.backToPackages(w, r, "This account has reached its device limit. Disconnect another device and try again.")
+		h.toReplace(w, r, sess, "", false)
 		return
 	case activateCapacity:
 		h.backToPackages(w, r, guestCapacityMessage)
@@ -344,6 +351,9 @@ func (h *handler) acquirePackage(w http.ResponseWriter, r *http.Request) {
 		return
 	case activateNotEnforced:
 		h.backToPackages(w, r, "We could not bring your device online. Please try again in a moment.")
+		return
+	case activateVerification:
+		h.renderAccountPage(w, r, nil, true, accountNote{})
 		return
 	default:
 		h.backToPackages(w, r, "We could not connect your device.")
@@ -370,8 +380,13 @@ func (h *handler) renderPackages(w http.ResponseWriter, r *http.Request, pkgs []
 	nonce := setPortalCSP(w)
 	p := h.newGuestPage(r, nonce)
 	// The refusal is one of the server's sentences, shown in the guest's language like the sign-in page does.
-	_ = packagesTmpl.Execute(w, packagesView{guestPage: p, Packages: packageRows(p.T, pkgs), ReturnCode: returnCode,
-		Identity: identity, FreeUsed: freeUsed, Error: localise(p.T, errMsg).Text})
+	v := packagesView{guestPage: p, Packages: packageRows(p.T, pkgs), ReturnCode: returnCode,
+		Identity: identity, FreeUsed: freeUsed, Error: localise(p.T, errMsg).Text}
+	// A voucher is entered as a code, never chosen from this list. When there is NOTHING to choose, the code field
+	// is the client's way forward (if the site takes vouchers), so it is offered here rather than by sending them
+	// back to the sign-in page. With choices on screen the page stays a choice, not a second sign-in form.
+	v.VoucherCTA = len(pkgs) == 0 && h.voucherOffered(r.Context())
+	_ = packagesTmpl.Execute(w, v)
 }
 
 var packagesTmpl = template.Must(template.New("packages").Parse(compactMarkup(packagesHTML)))
@@ -390,6 +405,9 @@ const (
 	activateLicense     = "LICENSE_REFUSED"
 	activateNotEnforced = "NOT_ENFORCED"
 	activateFailed      = "ACTIVATE_FAILED"
+	// activateVerification is an email account suspended for Internet until its address is verified (contract
+	// section 3): the entitlement is untouched, only this activation is refused.
+	activateVerification = "VERIFICATION_REQUIRED"
 )
 
 // activateEnforced turns a granted entitlement into a session for THIS device and reports success only when
@@ -446,6 +464,8 @@ func (h *handler) activateEnforced(r *http.Request, sess commerceSession, entitl
 			return "", activateDeviceLimit
 		case code == "LICENSE_CAPACITY_REACHED":
 			return "", activateCapacity
+		case code == "VERIFICATION_REQUIRED":
+			return "", activateVerification
 		case isLicenceRefusal(code):
 			return "", activateLicense
 		}
@@ -470,4 +490,27 @@ func portalOrigin(r *http.Request) string {
 		scheme = "https"
 	}
 	return scheme + "://" + host
+}
+
+// voucherOffered reports whether the site takes vouchers (scd's auth-methods), for the package page's code field.
+// Any failure answers false: the field is a convenience, and the sign-in page still offers vouchers.
+func (h *handler) voucherOffered(ctx context.Context) bool {
+	if h.scd == nil {
+		return false
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://unix/v1/tenant/auth-methods", nil)
+	if err != nil {
+		return false
+	}
+	resp, err := h.scd.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	var m struct {
+		Voucher struct {
+			Enabled bool `json:"enabled"`
+		} `json:"voucher"`
+	}
+	return resp.StatusCode == http.StatusOK && json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&m) == nil && m.Voucher.Enabled
 }

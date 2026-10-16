@@ -2,14 +2,17 @@ package main
 
 // STAFF HELP FOR CLIENTS WHO ASKED FOR A CODE (Product Owner, 2026-10-12; contract §6.7, migration 0113).
 //
-// Three admin-socket routes, reached only through edged, which checks the operator's permission, takes the
-// password step-up for the two actions and writes the audit record:
+// Two admin-socket routes, reached only through edged, which checks the operator's permission, takes the
+// password step-up for the reveal and writes the audit record:
 //
-//	GET  /v1/admin/temporary-access            recent code requests: the device, the address, the code's state,
-//	                                           the device's temporary-internet window and its limits
-//	POST /v1/admin/temporary-access/clear      let a device try again: its ENDED windows stop counting towards
-//	                                           the limits and the wait (the rows stay; a live window is untouched)
+//	GET  /v1/admin/code-requests               recent SMS / WhatsApp code requests: the device, the number and
+//	                                           the code's state (also answered at its old path,
+//	                                           /v1/admin/temporary-access)
 //	POST /v1/admin/otp/{id}/reveal             read a LIVE code to the client it was sent to
+//
+// The temporary-internet window, its columns, its limits and the "clear" action are REMOVED with the email code
+// they served (contract docs/architecture/ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md §1). Their history rows
+// (verification_access_grants) are kept and no longer read.
 //
 // THE CODE COPY. A code is stored as a keyed hash and cannot be read back, so each code that was SENT also gets
 // a sealed copy (sealbox, domain otp-code-escrow:v1, the appliance's local notify key, bound to tenant, site and
@@ -24,7 +27,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -39,8 +41,10 @@ import (
 const otpEscrowDomain = "otp-code-escrow:v1"
 
 func (s *server) tempAccessAdminRoutes(r chi.Router) {
+	// /v1/admin/code-requests is the name for what the list now is; the old path answers the same so an edged
+	// that has not moved yet keeps working.
+	r.Get("/v1/admin/code-requests", s.listCodeRequests)
 	r.Get("/v1/admin/temporary-access", s.listCodeRequests)
-	r.Post("/v1/admin/temporary-access/clear", s.clearTemporaryAccess)
 	r.Post("/v1/admin/otp/{id}/reveal", s.revealOTPCode)
 }
 
@@ -85,20 +89,6 @@ func (s *server) pruneOTPEscrow(ctx context.Context) {
 	}
 }
 
-type codeRequestWindow struct {
-	StartedAt time.Time  `json:"started_at"`
-	ExpiresAt time.Time  `json:"expires_at"`
-	EndedAt   *time.Time `json:"ended_at,omitempty"`
-	EndReason string     `json:"end_reason,omitempty"`
-	UsedBytes int64      `json:"used_bytes"`
-	CapBytes  int64      `json:"data_cap_bytes"`
-	ClearedAt *time.Time `json:"cleared_at,omitempty"`
-	ClearedBy string     `json:"cleared_by,omitempty"`
-	LiveNow   bool       `json:"live"`
-	DownKbps  int        `json:"down_kbps"`
-	UpKbps    int        `json:"up_kbps"`
-}
-
 type codeRequest struct {
 	ChallengeID   string     `json:"challenge_id"`
 	Channel       string     `json:"channel"`
@@ -111,18 +101,19 @@ type codeRequest struct {
 	State         string     `json:"state"` // PENDING | USED | EXPIRED | LOCKED
 	DeviceMAC     string     `json:"device_mac,omitempty"`
 	CodeAvailable bool       `json:"code_available"`
-	// ExistingClient: the address already belongs to a Client here. A staff-shown code cannot sign it in
-	// (contract §6.7), so the code is not offered for showing; the desk can let the device try again instead.
+	// ExistingClient: the number already belongs to a Client here. A staff-shown code cannot sign it in
+	// (contract §6.7), so the code is not offered for showing.
 	ExistingClient bool `json:"existing_client"`
 	// StaffRevealed: a staff member has already shown this code.
-	StaffRevealed bool               `json:"staff_revealed"`
-	Window        *codeRequestWindow `json:"window,omitempty"`
-	// What the device would meet if it asked for a window now.
-	DeviceWindows24h int `json:"device_windows_24h"`
-	RetryWaitSeconds int `json:"retry_wait_seconds"`
+	StaffRevealed bool `json:"staff_revealed"`
 }
 
-// GET /v1/admin/temporary-access?hours=N (1..72, default 24)
+// GET /v1/admin/code-requests?hours=N (1..72, default 24); also /v1/admin/temporary-access
+//
+// The path keeps its historical name so edged's proxy does not move; what it lists is the SMS and WhatsApp code
+// requests. Email code requests are history only (the email channel is removed) and are not listed, and the
+// temporary-internet window columns, its limits and the "clear" action are removed with the window itself
+// (contract docs/architecture/ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md §1).
 func (s *server) listCodeRequests(w http.ResponseWriter, r *http.Request) {
 	if s.db == nil {
 		httpErr(w, http.StatusServiceUnavailable, "no database")
@@ -132,30 +123,20 @@ func (s *server) listCodeRequests(w http.ResponseWriter, r *http.Request) {
 	if v, err := strconv.Atoi(r.URL.Query().Get("hours")); err == nil && v >= 1 && v <= 72 {
 		hours = v
 	}
-	set := s.temporaryAccessSettings(r.Context())
 	rows, err := s.db.Query(r.Context(), `
 	  SELECT o.id::text, o.channel, o.destination, o.issued_at, o.expires_at, o.consumed_at, o.attempts, o.max_attempts,
 	         COALESCE(b.device_mac::text, ''),
 	         EXISTS (SELECT 1 FROM iam_v2.otp_code_escrow e WHERE e.challenge_id = o.id),
 	         EXISTS (SELECT 1 FROM iam_v2.guest_principal_identities i WHERE i.tenant_id = o.tenant_id
-	                   AND i.factor_type = CASE WHEN o.channel = 'email' THEN 'EMAIL' ELSE 'PHONE' END
+	                   AND i.factor_type = 'PHONE'
 	                   AND coalesce(i.factor_issuer, '') = '' AND i.factor_value_norm = lower(btrim(o.destination))),
-	         EXISTS (SELECT 1 FROM iam_v2.otp_code_reveals v WHERE v.challenge_id = o.id),
-	         g.started_at, g.expires_at, g.ended_at, COALESCE(g.end_reason, ''), COALESCE(g.used_bytes, 0),
-	         COALESCE(g.data_cap_bytes, 0), g.cleared_at, COALESCE(g.cleared_by, ''), COALESCE(g.down_kbps, 0), COALESCE(g.up_kbps, 0),
-	         CASE WHEN b.device_mac IS NULL THEN 0 ELSE (SELECT count(*) FROM iam_v2.verification_access_grants x
-	                WHERE x.tenant_id=$1 AND x.site_id=$2 AND x.device_mac=b.device_mac AND x.cleared_at IS NULL
-	                  AND x.started_at > now() - interval '24 hours') END,
-	         CASE WHEN b.device_mac IS NULL THEN 0 ELSE GREATEST(0, COALESCE(EXTRACT(EPOCH FROM (
-	                (SELECT max(x.ended_at) FROM iam_v2.verification_access_grants x
-	                  WHERE x.tenant_id=$1 AND x.site_id=$2 AND x.device_mac=b.device_mac AND x.cleared_at IS NULL
-	                    AND x.end_reason <> 'CANCELLED') + make_interval(mins => $4) - now())), 0)) END
+	         EXISTS (SELECT 1 FROM iam_v2.otp_code_reveals v WHERE v.challenge_id = o.id)
 	    FROM public.auth_otps o
 	    LEFT JOIN iam_v2.otp_device_bindings b ON b.challenge_id = o.id
-	    LEFT JOIN iam_v2.verification_access_grants g ON g.challenge_id = o.id AND g.tenant_id=$1 AND g.site_id=$2
-	   WHERE o.tenant_id = $1 AND o.issued_at > now() - make_interval(hours => $3)
+	   WHERE o.tenant_id = $1 AND o.issued_at > now() - make_interval(hours => $2)
+	     AND o.channel IN ('sms','whatsapp')
 	   ORDER BY o.issued_at DESC
-	   LIMIT 200`, s.tenID, s.siteID, hours, set.RetryAfterMinutes)
+	   LIMIT 200`, s.tenID, hours)
 	if err != nil {
 		slog.Error("code requests: list", "err", err)
 		httpErr(w, http.StatusInternalServerError, "list failed")
@@ -166,14 +147,8 @@ func (s *server) listCodeRequests(w http.ResponseWriter, r *http.Request) {
 	out := []codeRequest{}
 	for rows.Next() {
 		var c codeRequest
-		var gs, ge, gend, gclr *time.Time
-		var greason, gby string
-		var gused, gcap int64
-		var gdown, gup int
-		var wait float64
 		if err := rows.Scan(&c.ChallengeID, &c.Channel, &c.Destination, &c.IssuedAt, &c.ExpiresAt, &c.ConsumedAt,
-			&c.Attempts, &c.MaxAttempts, &c.DeviceMAC, &c.CodeAvailable, &c.ExistingClient, &c.StaffRevealed, &gs, &ge, &gend, &greason, &gused, &gcap,
-			&gclr, &gby, &gdown, &gup, &c.DeviceWindows24h, &wait); err != nil {
+			&c.Attempts, &c.MaxAttempts, &c.DeviceMAC, &c.CodeAvailable, &c.ExistingClient, &c.StaffRevealed); err != nil {
 			slog.Error("code requests: scan", "err", err)
 			httpErr(w, http.StatusInternalServerError, "list failed")
 			return
@@ -189,58 +164,16 @@ func (s *server) listCodeRequests(w http.ResponseWriter, r *http.Request) {
 			c.State = "PENDING"
 		}
 		c.CodeAvailable = c.CodeAvailable && c.State == "PENDING" && !c.ExistingClient
-		c.RetryWaitSeconds = int(wait)
-		if gs != nil && ge != nil {
-			c.Window = &codeRequestWindow{StartedAt: *gs, ExpiresAt: *ge, EndedAt: gend, EndReason: greason,
-				UsedBytes: gused, CapBytes: gcap, ClearedAt: gclr, ClearedBy: gby, DownKbps: gdown, UpKbps: gup,
-				LiveNow: gend == nil && ge.After(now)}
-		}
 		out = append(out, c)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"requests": out,
-		"limits": map[string]int{
-			"per_device_daily": set.PerDeviceDaily, "per_destination_daily": set.PerDestinationDaily,
-			"retry_after_minutes": set.RetryAfterMinutes, "max_concurrent": set.MaxConcurrent,
-		},
+		"requests":            out,
 		"code_copy_available": s.otpEscrowKey.Present(),
 	})
 }
 
 func decodeJSONBody(r *http.Request, dst any) error {
 	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 8<<10)).Decode(dst)
-}
-
-// POST /v1/admin/temporary-access/clear {device_mac, operator, reason}
-func (s *server) clearTemporaryAccess(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		DeviceMAC string `json:"device_mac"`
-		Operator  string `json:"operator"`
-		Reason    string `json:"reason"`
-	}
-	if err := decodeJSONBody(r, &req); err != nil {
-		httpErr(w, http.StatusBadRequest, "bad body")
-		return
-	}
-	hw, err := net.ParseMAC(strings.TrimSpace(req.DeviceMAC))
-	op := strings.TrimSpace(req.Operator)
-	if err != nil || op == "" || len(op) > 200 || s.db == nil {
-		httpErr(w, http.StatusBadRequest, "device_mac and operator are required")
-		return
-	}
-	tag, err := s.db.Exec(r.Context(), `UPDATE iam_v2.verification_access_grants SET cleared_at=now(), cleared_by=$4
-	     WHERE tenant_id=$1 AND site_id=$2 AND device_mac=$3::macaddr AND ended_at IS NOT NULL AND cleared_at IS NULL`,
-		s.tenID, s.siteID, hw.String(), op)
-	if err != nil {
-		slog.Error("temporary access: clear", "err", err)
-		httpErr(w, http.StatusInternalServerError, "clear failed")
-		return
-	}
-	var live bool
-	_ = s.db.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM iam_v2.verification_access_grants
-	     WHERE tenant_id=$1 AND site_id=$2 AND device_mac=$3::macaddr AND ended_at IS NULL)`, s.tenID, s.siteID, hw.String()).Scan(&live)
-	slog.Info("temporary access: history cleared by an operator", "windows", tag.RowsAffected())
-	writeJSON(w, http.StatusOK, map[string]any{"cleared_windows": tag.RowsAffected(), "window_live": live})
 }
 
 // POST /v1/admin/otp/{id}/reveal {operator}
@@ -266,11 +199,11 @@ func (s *server) revealOTPCode(w http.ResponseWriter, r *http.Request) {
 	err := s.db.QueryRow(r.Context(), `SELECT e.key_id, e.cipher_version, e.nonce, e.ciphertext, o.expires_at,
 	         COALESCE((SELECT b.device_mac::text FROM iam_v2.otp_device_bindings b WHERE b.challenge_id=o.id), ''),
 	         EXISTS (SELECT 1 FROM iam_v2.guest_principal_identities i WHERE i.tenant_id = o.tenant_id
-	                   AND i.factor_type = CASE WHEN o.channel = 'email' THEN 'EMAIL' ELSE 'PHONE' END
+	                   AND i.factor_type = 'PHONE'
 	                   AND coalesce(i.factor_issuer, '') = '' AND i.factor_value_norm = lower(btrim(o.destination)))
 	    FROM iam_v2.otp_code_escrow e JOIN public.auth_otps o ON o.id = e.challenge_id
 	   WHERE e.challenge_id=$1::uuid AND e.tenant_id=$2 AND e.site_id=$3
-	     AND o.consumed_at IS NULL AND o.expires_at > now() AND o.attempts < o.max_attempts`,
+	     AND o.consumed_at IS NULL AND o.expires_at > now() AND o.attempts < o.max_attempts AND o.channel IN ('sms','whatsapp')`,
 		id, s.tenID, s.siteID).Scan(&keyID, &ver, &nonce, &ct, &expires, &mac, &existing)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Used, expired, locked, never sent, or not this site's: one answer for all of them.

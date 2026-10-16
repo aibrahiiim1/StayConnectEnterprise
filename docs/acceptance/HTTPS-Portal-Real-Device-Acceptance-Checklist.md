@@ -30,7 +30,7 @@ until a person runs them.
 
 | # | Steps | Expected |
 |---|---|---|
-| B1 | Email code: request a code | The email has the code **and** a link starting `https://<hostname>/connect` |
+| B1 | *(superseded 2026-10-15: the email code was replaced by Email accounts, section F)* | — |
 | B2 | Enter the code | Signed in; internet works |
 | B3 | Tap the email link on the same phone | Signed in |
 | B4 | Voucher / account / room sign-in | Unchanged behaviour, over HTTPS |
@@ -91,3 +91,40 @@ Mac is managed (System Settings -> Privacy & Security -> Profiles) or has captiv
 (`defaults read /Library/Preferences/SystemConfiguration/com.apple.captive.control Active` prints 0). On a Mac
 whose detection is off, opening any `http://` site (as with neverssl.com) or the portal hostname reaches the
 HTTPS portal; that is the documented workaround. Result: NOT RUN.
+
+## F. Email accounts (self-service, 2026-10-15)
+
+Automated on PRE-LIVE from guest-network devices: `scripts/email-accounts-e2e-test.sh` 24/24 (register -> packages
+-> free package online; another device held to the package's device limit; the same device returns to the same
+entitlement, window unchanged; deadline -> suspended, entitlement untouched; resend wait; one grace hour with the
+password, then suspended again and no second hour; duplicate registration; forgot-password genericity; per-device
+registration cap; no posting or payment). Regression: 18/18, 12/12, 15/15. The rows below are NOT RUN until a
+person runs them.
+
+| # | Steps | Expected |
+|---|---|---|
+| F1 | Phone: Email -> Create account, then pick the free package | Online at once, no email wait |
+| F2 | Open the verification email ON the guest Wi-Fi, tap the link, press the button | "Email verified"; connection not interrupted |
+| F3 | Another phone: sign in with the same email and password | Joins the same access if the package allows 2+ devices; otherwise a clear device-limit message |
+| F4 | Forgot password: request, open the link on the guest Wi-Fi, set a new password | The new password works; the old one does not |
+| F5 | (Operator, test account) set its deadline in the past; reconnect | Verification-required page with Resend and "Allow Internet for 1 More Hour" |
+| F6 | Laptop with Chrome or Edge, not signed in, open an `https://` site | Within about 30 s Chrome/Edge opens the login tab |
+| F7 | Windows laptop joins | Windows offers / opens the sign-in page |
+
+## G. Device limits, replacement and staff device actions (migration 0118, 2026-10-15)
+
+Automated on PRE-LIVE from guest-network devices with real enforcement: `scripts/device-management-e2e-test.sh`
+(a 1-device package: replace, the package unchanged, sign-out back to the sign-in page, the daily change limit;
+a multi-device voucher package: N devices on one entitlement, device N+1 replaces device 1 while the others stay
+online; staff find the device by account name and prepare it for a new sign-in test). Contract:
+docs/architecture/ONEGATE_DEVICE_MANAGEMENT.md. The rows below are NOT RUN until a person runs them.
+
+| # | Steps | Expected |
+|---|---|---|
+| G1 | Phone A takes a 1-device package; phone B signs in with the same account | B sees "Choose a device to replace" listing Device 1 |
+| G2 | On B, "Use this device instead" | B is online; A loses Internet within seconds; the package's time left is unchanged |
+| G3 | On A, sign in again, then "Not you? Sign out" | The sign-in page, not the packages |
+| G4 | Laptop + phone on a multi-device package; on the online page open "Your devices" | Both listed, "This device" named, places in use and changes left shown; removing the other disconnects it |
+| G5 | Staff: Admin Console -> Clients -> Devices, search the test account, Manage, "Prepare for a sign-in test" | The device is disconnected; reopening Wi-Fi on it shows the sign-in page |
+| G6 | The phone that already had the free package registers a new account | The free package is not offered (once per device); the device view says "Free package already used on this device" |
+| G7 | Staff: change "Device changes a client may make per day" to 1 with a reason; replace twice in a day | The second replacement is refused with the daily-limit message |

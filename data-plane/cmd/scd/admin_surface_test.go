@@ -94,6 +94,13 @@ func TestTheGuestSurfaceIsExactlyWhatPortaldNeeds(t *testing.T) {
 		"/v1/sessions/revoke", // acctd, enforcing a quota
 		"/v1/auth/otp/issue",
 		"/v1/auth/social/start",
+		"/v1/auth/account/register",
+		"/v1/auth/account/status",
+		"/v1/auth/account/resend",
+		"/v1/auth/account/grace",
+		"/v1/auth/account/verify",
+		"/v1/auth/account/forgot",
+		"/v1/auth/account/reset",
 		"/v1/tenant/auth-methods",
 		"/v1/tenant/branding",
 		"/v1/phase3/access/status",
@@ -104,6 +111,9 @@ func TestTheGuestSurfaceIsExactlyWhatPortaldNeeds(t *testing.T) {
 		"/v1/phase5/poststay/convert",
 		"/v1/phase6/devices/list",
 		"/v1/phase6/devices/release",
+		"/v1/devices/list",
+		"/v1/devices/release",
+		"/v1/devices/replace",
 		"/v1/portal/tls-state",
 	} {
 		if classifyRoute(path) != guestRoute {
@@ -140,6 +150,8 @@ func TestTheDangerousRoutesAreAdmin(t *testing.T) {
 		"/v1/phase3/signin-attempts/credentials",
 		"/v1/portal/tls/kick",
 		"/v1/portal/tls/renew",
+		// The operator's resend of a verification email: edged only, never the portal.
+		"/v1/admin/accounts/0f8b9a0e-0000-0000-0000-000000000000/resend-verification",
 	} {
 		if classifyRoute(path) != adminRoute {
 			t.Errorf("%s classified as GUEST: the network-facing captive portal would be able to call it", path)

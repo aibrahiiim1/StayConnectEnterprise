@@ -203,7 +203,7 @@ func TestWhatsAppSwitchIsTheLocalEnablementOfItsModule(t *testing.T) {
 }
 
 func TestAWhatsAppCodeProvesAPhone(t *testing.T) {
-	for ch, want := range map[string]string{"email": "EMAIL", "sms": "PHONE", "whatsapp": "PHONE"} {
+	for ch, want := range map[string]string{"email": "", "sms": "PHONE", "whatsapp": "PHONE", "": ""} { // an email code proves nothing now
 		if got := otpFactorType(ch); got != want {
 			t.Fatalf("%s -> %s, want %s", ch, got, want)
 		}
