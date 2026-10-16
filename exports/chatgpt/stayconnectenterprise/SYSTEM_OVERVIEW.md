@@ -257,7 +257,9 @@ Standalone enrollment/NATS smoke tester: default hello flow, `--replay` (JWT rep
 
 ## 6. PMS integration (the hotel side)
 
-**Guest login = room number + ONE OF (last name | first name | reservation number)**, mode configurable: `room_lastname`, `room_firstname`, `room_reservation`, `either`.
+**Guest login = room number + ONE OF (last name | first name | reservation number)**, mode configurable (`tenants.auth_methods.pms.mode`): `room_any` (one box, compared against all three; refused if it matches more than one stay), `room_lastname`, `room_firstname`, `room_reservation` (only that detail), or the legacy `either` (last name OR reservation number, exactly one; an unset mode reads as `either`, as the portal draws it).
+
+**The server enforces the mode.** scd's resolve (`cmd/scd/phase3_auth_mode.go`) reads the mode from the same record as the Room sign-in switch and refuses — with the uniform not-verified answer, looking up no room — any request carrying an identifier field the mode does not accept (e.g. a reservation number, or a surname plus a reservation number, on a `room_lastname` site). Such a refusal is recorded once as `CREDENTIAL_MISMATCH` and counts once toward the device's guest sign-in protection; one request is always one attempt, however many fields it carries. portald forwards only the fields the guest filled and leaves the decision to scd.
 
 ### Provider kinds
 
