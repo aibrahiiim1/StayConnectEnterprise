@@ -347,6 +347,18 @@ func (b *Base) move(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
+	// Lock the appliance and re-check what the move was decided on: a retirement, a second move or a delete
+	// that committed since the check above wins, and this move is refused rather than re-granting a site.
+	var lockedLifecycle, lockedSite string
+	var lockedRetiring bool
+	if err := tx.QueryRow(ctx, `SELECT a.lifecycle_state, COALESCE(a.site_id::text,''),
+                                       EXISTS (SELECT 1 FROM appliance_terminal_delivery td WHERE td.appliance_id=a.id)
+                                  FROM appliances a WHERE a.id=$1 FOR UPDATE`, id).
+		Scan(&lockedLifecycle, &lockedSite, &lockedRetiring); err != nil ||
+		lockedLifecycle != "assigned" || lockedRetiring || lockedSite != prevSite {
+		Fail(w, r, http.StatusConflict, "invalid_state", "The appliance changed state; reload and try again.")
+		return
+	}
 	// The licence is read INSIDE the transaction, under the per-appliance licence lock, so a suspend or renew
 	// racing this move cannot be undone by re-signing stale terms.
 	curLicense, lookupErr := b.Lic.CurrentTermsForApplianceTx(ctx, tx, id)
@@ -444,16 +456,33 @@ func (b *Base) retire(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := DBCtx(r)
 	defer cancel()
-	// Licence first: if it cannot be revoked nothing has changed and the operator can simply retry. Licence
-	// revocation never blocks the assignment channel or the ack, so it does not get in the way of phase 1.
-	revoked, err := b.revokeApplianceBoundLicenses(ctx, id)
+	// ONE TRANSACTION: the licence revocation, the portal hostname release, the signed terminal assignment and
+	// (emergency) the credential shutdown commit together or not at all. A failure leaves the appliance exactly
+	// as it was, so the operator simply retries; there is no half-retired appliance whose licence is revoked
+	// but who was never told to stand down. Licence revocation never blocks the assignment channel or the ack.
+	tx, err := b.DB.Begin(ctx)
 	if err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "The licence could not be revoked, so retirement did not start. Try again.")
+		failInternal(w, r, "Retirement could not start. Try again.", err)
 		return
 	}
-	ver, err := b.beginTerminalDelivery(ctx, r, id, terminal, in.Reason, in.Emergency)
+	defer tx.Rollback(ctx)
+	// Lock the row and re-check the state: a concurrent retire, move or delete gets one winner.
+	var lifecycle string
+	var delivery *string
+	if err := tx.QueryRow(ctx, `SELECT a.lifecycle_state, td.delivery_state FROM appliances a
+            LEFT JOIN appliance_terminal_delivery td ON td.appliance_id = a.id WHERE a.id=$1 FOR UPDATE OF a`, id).
+		Scan(&lifecycle, &delivery); err != nil || lifecycle != "assigned" || (delivery != nil && !in.Emergency) {
+		Fail(w, r, http.StatusConflict, "invalid_state", "The appliance changed state; reload and try again.")
+		return
+	}
+	revoked, err := b.revokeApplianceBoundLicensesTx(ctx, tx, id)
 	if err != nil {
-		Fail(w, r, http.StatusServiceUnavailable, "retire_failed", "Retirement could not start: "+publicError(r, err))
+		failInternal(w, r, "The licence could not be revoked, so retirement did not start. Try again.", err)
+		return
+	}
+	ver, err := b.beginTerminalDelivery(ctx, tx, id, terminal, in.Reason, in.Emergency)
+	if err != nil {
+		Fail(w, r, http.StatusServiceUnavailable, "retire_failed", "Retirement could not start, so nothing changed: "+publicError(r, err))
 		return
 	}
 	_, email := actorOf(r)
@@ -461,10 +490,16 @@ func (b *Base) retire(w http.ResponseWriter, r *http.Request) {
 	if in.Emergency {
 		to = lifecycleForTerminal(terminal)
 	}
-	recordLifecycle(ctx, b.DB, id, row.lifecycle, to, email, clientIPFromReq(r), in.Reason)
+	recordLifecycle(ctx, tx, id, row.lifecycle, to, email, clientIPFromReq(r), in.Reason)
+	if err := tx.Commit(ctx); err != nil {
+		failInternal(w, r, "Retirement could not start. Try again.", err)
+		return
+	}
+	b.PortalTLS.Nudge()
 	action := "appliance.retire_started"
 	if in.Emergency {
 		action = "appliance.retired_emergency"
+		audit.Op(ctx, b.DB, r, "appliance.credentials_revoked", "appliance", id, map[string]any{"reason": "emergency_compromise"})
 	}
 	audit.Op(ctx, b.DB, r, action, "appliance", id, map[string]any{
 		"_tenant_id": deref(row.CustomerID), "reason": in.Reason, "emergency": in.Emergency,

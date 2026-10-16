@@ -399,12 +399,48 @@ func (s *Service) CurrentLicenseID(ctx context.Context, applianceID string) (str
 // Reissue re-signs the current licence with every term preserved (PreservedTerms) and the next version —
 // used after a WAN-MAC rebind so the new document carries the new hardware binding.
 func (s *Service) Reissue(ctx context.Context, licenseID, createdBy string) (*lic.Document, error) {
-	cur, err := s.CurrentTerms(ctx, licenseID)
+	return s.reissueLocked(ctx, licenseID, createdBy, nil)
+}
+
+// reissueLocked reads the licence's terms and re-signs them in ONE transaction, under the per-appliance lock
+// IssueTx takes, and only while that licence is still the current one. Reading the terms outside the lock
+// let a suspend racing a Set licence re-sign the OLD terms over the new licence.
+func (s *Service) reissueLocked(ctx context.Context, licenseID, createdBy string, mutate func(*IssueParams) error) (*lic.Document, error) {
+	tx, err := s.DB.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
-	doc, _, err := s.Issue(ctx, PreservedTerms(cur, createdBy))
-	return doc, err
+	defer tx.Rollback(ctx)
+	var applianceID string
+	err = tx.QueryRow(ctx, `SELECT COALESCE(appliance_ids[1]::text,'') FROM licenses WHERE id::text = $1`, licenseID).Scan(&applianceID)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && applianceID == "") {
+		return nil, ErrNoLicense
+	}
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 42))`, applianceID); err != nil {
+		return nil, err
+	}
+	cur, err := scanTerms(tx.QueryRow(ctx, `SELECT `+currentTermsColumns+`
+          FROM licenses WHERE id::text = $1 AND status IN ('active','suspended')`, licenseID))
+	if err != nil {
+		return nil, err // ErrNoLicense: it was superseded or revoked meanwhile
+	}
+	p := PreservedTerms(cur, createdBy)
+	if mutate != nil {
+		if err := mutate(&p); err != nil {
+			return nil, err
+		}
+	}
+	doc, _, err := s.IssueTx(ctx, tx, p)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return doc, nil
 }
 
 // Suspend re-issues the current licence as a signed 'suspended' document. The appliance evaluates
@@ -419,15 +455,11 @@ func (s *Service) Resume(ctx context.Context, licenseID, createdBy string) (*lic
 }
 
 func (s *Service) reissueStatus(ctx context.Context, licenseID, createdBy string, status lic.DocStatus) (*lic.Document, error) {
-	cur, err := s.CurrentTerms(ctx, licenseID)
-	if err != nil {
-		return nil, err
-	}
-	if time.Until(cur.ValidUntil) <= 0 {
-		return nil, fmt.Errorf("licence already past valid_until; set new terms instead of suspend/resume")
-	}
-	p := PreservedTerms(cur, createdBy)
-	p.Status = status
-	doc, _, err := s.Issue(ctx, p)
-	return doc, err
+	return s.reissueLocked(ctx, licenseID, createdBy, func(p *IssueParams) error {
+		if time.Until(p.ValidUntil) <= 0 {
+			return fmt.Errorf("licence already past valid_until; set new terms instead of suspend/resume")
+		}
+		p.Status = status
+		return nil
+	})
 }

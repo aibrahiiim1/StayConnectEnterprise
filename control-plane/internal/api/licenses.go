@@ -110,9 +110,29 @@ func (b *Base) setLicense(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := DBCtx(r)
 	defer cancel()
-	doc, _, err := b.Lic.Issue(ctx, p)
+	// Lock the appliance and re-check inside the transaction that issues: a retirement or a move that commits
+	// between the check above and the issue must not be followed by a fresh licence for a retiring box.
+	tx, err := b.DB.Begin(ctx)
+	if err != nil {
+		failInternal(w, r, "licence not issued", err)
+		return
+	}
+	defer tx.Rollback(ctx)
+	var lifecycle string
+	var retiring bool
+	if err := tx.QueryRow(ctx, `SELECT a.lifecycle_state, EXISTS (SELECT 1 FROM appliance_terminal_delivery td WHERE td.appliance_id=a.id)
+                                  FROM appliances a WHERE a.id=$1 FOR UPDATE`, id).Scan(&lifecycle, &retiring); err != nil ||
+		lifecycle != "assigned" || retiring {
+		Fail(w, r, http.StatusConflict, "invalid_state", "only an activated appliance can hold a licence")
+		return
+	}
+	doc, _, err := b.Lic.IssueTx(ctx, tx, p)
 	if err != nil {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "licence not issued: "+publicError(r, err))
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		failInternal(w, r, "licence not issued", err)
 		return
 	}
 	audit.Op(r.Context(), b.DB, r, "license.issued", "appliance", id, map[string]any{

@@ -87,8 +87,16 @@ func (b *AssignmentBase) IssueTx(ctx context.Context, tx pgx.Tx, applianceID, st
 	// (rotated out) or a revoked key must never produce a new document, even if
 	// ctrlapi is still configured with it.
 	signerKeyID := assignment.KeyID(b.SignKey.Public().(ed25519.PublicKey))
+	// FAIL CLOSED: a key Central has no record of (registration failed at boot, or the row is unreadable) does
+	// not sign either -- an unknown state is not "active". ctrlapi registers its key on every start.
 	var st string
-	if err := tx.QueryRow(ctx, `SELECT state FROM assignment_signing_keys WHERE key_id=$1`, signerKeyID).Scan(&st); err == nil && !assignment.CanSign(st) {
+	if err := tx.QueryRow(ctx, `SELECT state FROM assignment_signing_keys WHERE key_id=$1`, signerKeyID).Scan(&st); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("refusing to sign: assignment key %s is not registered in Central (restart ctrlapi to register it)", signerKeyID)
+		}
+		return nil, fmt.Errorf("refusing to sign: the state of assignment key %s could not be read: %w", signerKeyID, err)
+	}
+	if !assignment.CanSign(st) {
 		return nil, fmt.Errorf("refusing to sign: assignment key %s is %s and may not sign new assignments", signerKeyID, st)
 	}
 	var tenantID, siteID, serial, pubB64, tenantName, siteName, siteType string

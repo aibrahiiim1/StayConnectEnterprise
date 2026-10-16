@@ -56,31 +56,53 @@ func (b *Base) completeReplacementIfPending(ctx context.Context, r *http.Request
 	}
 	reason := "replaced by " + newID
 
-	// Link the two rows and close the replacement window first, so a retry never picks the old box again and
-	// the window reconciler never alerts on a replacement that did complete.
-	_, _ = b.DB.Exec(ctx, `UPDATE appliances SET replacement_pending=false, replacement_deadline=NULL,
-        replaced_by=$2::uuid, updated_at=now() WHERE id=$1`, oldID, newID)
-	_, _ = b.DB.Exec(ctx, `UPDATE appliances SET replacement_of=$2::uuid, updated_at=now() WHERE id=$1`, newID, oldID)
-	_, _ = b.DB.Exec(ctx, `
-        UPDATE appliance_security_alerts SET status='resolved', resolved=true, acknowledged_at=now()
-         WHERE appliance_id=$1 AND kind='replacement_window_expired' AND resolved=false`, oldID)
-
-	licRevoked, licErr := b.revokeApplianceBoundLicenses(ctx, oldID)
-	ver, termErr := b.beginTerminalDelivery(ctx, r, oldID, assignment.StateDecommissioned, reason, false)
-	if termErr != nil {
-		// The replacement is live but the old box was not told. Visible, never silent: the operator retires
-		// it (normal or emergency) from its page.
+	// ONE TRANSACTION: link the two rows and close the replacement window, revoke the old appliance's licence
+	// and sign its terminal assignment -- exactly as a normal Retire. Never a revoked licence with no
+	// retirement document (the box would keep serving on its cached assignment), never a retirement whose
+	// licence survived, never a "completed" link with neither. If any step fails nothing is kept: the old
+	// appliance stays marked for replacement, so the window reconciler raises its alert, and the failure is
+	// audited; the operator retires it from its page.
+	var licRevoked []string
+	var ver int64
+	err = func() error {
+		tx, err := b.DB.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback(ctx)
+		for _, s := range []struct {
+			sql  string
+			args []any
+		}{
+			{`UPDATE appliances SET replacement_pending=false, replacement_deadline=NULL,
+                replaced_by=$2::uuid, updated_at=now() WHERE id=$1`, []any{oldID, newID}},
+			{`UPDATE appliances SET replacement_of=$2::uuid, updated_at=now() WHERE id=$1`, []any{newID, oldID}},
+			{`UPDATE appliance_security_alerts SET status='resolved', resolved=true, acknowledged_at=now()
+               WHERE appliance_id=$1 AND kind='replacement_window_expired' AND resolved=false`, []any{oldID}},
+		} {
+			if _, err := tx.Exec(ctx, s.sql, s.args...); err != nil {
+				return err
+			}
+		}
+		if licRevoked, err = b.revokeApplianceBoundLicensesTx(ctx, tx, oldID); err != nil {
+			return err
+		}
+		if ver, err = b.beginTerminalDelivery(ctx, tx, oldID, assignment.StateDecommissioned, reason, false); err != nil {
+			return err
+		}
+		recordLifecycle(ctx, tx, oldID, "assigned", "retiring", actor, clientIPFromReq(r), reason)
+		return tx.Commit(ctx)
+	}()
+	if err != nil {
 		audit.Op(ctx, b.DB, r, "appliance.replacement_terminal_unsigned", "appliance", oldID,
-			map[string]any{"replaced_by": newID, "error": termErr.Error()})
-	} else {
-		recordLifecycle(ctx, b.DB, oldID, "assigned", "retiring", actor, clientIPFromReq(r), reason)
+			map[string]any{"replaced_by": newID, "error": publicError(r, err),
+				"operator_action": "the old appliance was NOT retired and keeps its licence; retire it from its page"})
+		return
 	}
-	payload := map[string]any{"replaced_by": newID, "site_id": siteID, "licenses_revoked": len(licRevoked),
-		"assignment_version": ver, "retirement": "awaiting_ack"}
-	if licErr != nil {
-		payload["license_revoke_error"] = licErr.Error()
-	}
-	audit.Op(ctx, b.DB, r, "appliance.replacement_completed", "appliance", oldID, payload)
+	b.PortalTLS.Nudge()
+	audit.Op(ctx, b.DB, r, "appliance.replacement_completed", "appliance", oldID, map[string]any{
+		"replaced_by": newID, "site_id": siteID, "licenses_revoked": len(licRevoked),
+		"assignment_version": ver, "retirement": "awaiting_ack"})
 }
 
 // ReconcileReplacements raises a visible operational/security alert for any

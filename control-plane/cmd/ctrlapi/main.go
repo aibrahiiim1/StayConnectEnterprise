@@ -154,7 +154,8 @@ func serve() {
 
 	// Housekeeping, every minute: a retirement never acknowledged within policy becomes
 	// terminal_delivery_failed + a security alert (credentials are NOT revoked); an elapsed replacement
-	// window raises an alert; and, hourly, assignment-fetch log rows older than 30 days are deleted.
+	// window raises an alert; and, hourly, assignment-fetch log rows older than 30 days are deleted and
+	// certificates superseded by a rotation more than a day ago are recorded as revoked.
 	go func() {
 		t := time.NewTicker(60 * time.Second)
 		defer t.Stop()
@@ -181,6 +182,11 @@ func serve() {
 						slog.Warn("assignment fetch log retention failed", "err", err)
 					} else if n > 0 {
 						slog.Info("assignment fetch log retention", "deleted", n)
+					}
+					if n, err := api.RevokeSupersededCertificates(rootCtx, tb); err != nil {
+						slog.Warn("superseded certificate revocation failed", "err", err)
+					} else if n > 0 {
+						slog.Info("superseded appliance certificates revoked", "count", n)
 					}
 				}
 			}

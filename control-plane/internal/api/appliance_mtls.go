@@ -110,10 +110,21 @@ func mtlsCertBinding(db *pgxpool.Pool) func(http.Handler) http.Handler {
 				return
 			}
 			fpr := pki.FingerprintHex(cert)
-			var revoked int
-			db.QueryRow(r.Context(), `SELECT count(*) FROM appliance_certificate_revocations WHERE fingerprint_sha256=$1`, fpr).Scan(&revoked)
-			if revoked > 0 {
-				Fail(w, r, http.StatusForbidden, CodeForbidden, "client certificate revoked")
+			// The certificate must be one Central issued to THIS appliance and still in service: the current one,
+			// or one superseded by a rotation within SupersededOverlap. A CA-valid certificate that was superseded
+			// long ago, revoked, or never recorded is refused -- before, only an explicit revocation row was.
+			var usable bool
+			if err := db.QueryRow(r.Context(), `
+                SELECT EXISTS (SELECT 1 FROM appliance_certificates c
+                                WHERE c.appliance_id::text=$1 AND c.fingerprint_sha256=$2
+                                  AND (c.status='active' OR (c.status='superseded' AND c.superseded_at > now() - make_interval(secs => $3))))
+                   AND NOT EXISTS (SELECT 1 FROM appliance_certificate_revocations WHERE fingerprint_sha256=$2)`,
+				ident.ApplianceID, fpr, SupersededOverlap.Seconds()).Scan(&usable); err != nil {
+				Fail(w, r, http.StatusServiceUnavailable, "unavailable", "certificate check failed; retry")
+				return
+			}
+			if !usable {
+				Fail(w, r, http.StatusForbidden, CodeForbidden, "client certificate revoked or no longer in service")
 				return
 			}
 			next.ServeHTTP(w, r)
