@@ -175,7 +175,7 @@ func (b *Base) activate(w http.ResponseWriter, r *http.Request) {
 	if _, err := tx.Exec(ctx, `
         UPDATE appliances SET tenant_id=$2, site_id=$3, lifecycle_state='assigned', activated_at=now(), updated_at=now()
          WHERE id=$1`, id, customerID, siteID); err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "assign failed: "+err.Error())
+		failInternal(w, r, "assign failed", err)
 		return
 	}
 	// A previous life's retirement record must not make the new activation look like a retirement.
@@ -196,13 +196,13 @@ func (b *Base) activate(w http.ResponseWriter, r *http.Request) {
 	asg, err := ab.IssueTx(ctx, tx, id, assignment.StateAssigned)
 	if err != nil {
 		Fail(w, r, http.StatusServiceUnavailable, "assignment_unsignable",
-			"the assignment could not be signed, so nothing was activated: "+err.Error())
+			"the assignment could not be signed, so nothing was activated: "+publicError(r, err))
 		return
 	}
 	lp.TenantID, lp.SiteID = customerID, siteID
 	doc, _, err := b.Lic.IssueTx(ctx, tx, lp)
 	if err != nil {
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "the licence could not be issued, so nothing was activated: "+err.Error())
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "the licence could not be issued, so nothing was activated: "+publicError(r, err))
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -347,6 +347,18 @@ func (b *Base) move(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
+	// Lock the appliance and re-check what the move was decided on: a retirement, a second move or a delete
+	// that committed since the check above wins, and this move is refused rather than re-granting a site.
+	var lockedLifecycle, lockedSite string
+	var lockedRetiring bool
+	if err := tx.QueryRow(ctx, `SELECT a.lifecycle_state, COALESCE(a.site_id::text,''),
+                                       EXISTS (SELECT 1 FROM appliance_terminal_delivery td WHERE td.appliance_id=a.id)
+                                  FROM appliances a WHERE a.id=$1 FOR UPDATE`, id).
+		Scan(&lockedLifecycle, &lockedSite, &lockedRetiring); err != nil ||
+		lockedLifecycle != "assigned" || lockedRetiring || lockedSite != prevSite {
+		Fail(w, r, http.StatusConflict, "invalid_state", "The appliance changed state; reload and try again.")
+		return
+	}
 	// The licence is read INSIDE the transaction, under the per-appliance licence lock, so a suspend or renew
 	// racing this move cannot be undone by re-signing stale terms.
 	curLicense, lookupErr := b.Lic.CurrentTermsForApplianceTx(ctx, tx, id)
@@ -357,7 +369,7 @@ func (b *Base) move(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := tx.Exec(ctx, `UPDATE appliances SET site_id=$2, updated_at=now() WHERE id=$1 AND tenant_id::text=$3`,
 		id, in.SiteID, in.CustomerID); err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "move failed: "+err.Error())
+		failInternal(w, r, "move failed", err)
 		return
 	}
 	if _, err := tx.Exec(ctx, `
@@ -370,7 +382,7 @@ func (b *Base) move(w http.ResponseWriter, r *http.Request) {
 	ab := &AssignmentBase{Base: b, SignKey: b.AssignKey}
 	asg, err := ab.IssueTx(ctx, tx, id, assignment.StateAssigned)
 	if err != nil {
-		Fail(w, r, http.StatusServiceUnavailable, "assignment_unsignable", "The move could not be signed, so nothing changed: "+err.Error())
+		Fail(w, r, http.StatusServiceUnavailable, "assignment_unsignable", "The move could not be signed, so nothing changed: "+publicError(r, err))
 		return
 	}
 	var newLicenseID string
@@ -381,7 +393,7 @@ func (b *Base) move(w http.ResponseWriter, r *http.Request) {
 		doc, _, err := b.Lic.IssueTx(ctx, tx, p)
 		if err != nil {
 			Fail(w, r, http.StatusServiceUnavailable, "licensing_unavailable",
-				"The licence could not be re-issued for the new site, so the appliance was not moved: "+err.Error())
+				"The licence could not be re-issued for the new site, so the appliance was not moved: "+publicError(r, err))
 			return
 		}
 		newLicenseID, newLicenseVersion = doc.LicenseID, doc.LicenseVersion
@@ -444,16 +456,33 @@ func (b *Base) retire(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := DBCtx(r)
 	defer cancel()
-	// Licence first: if it cannot be revoked nothing has changed and the operator can simply retry. Licence
-	// revocation never blocks the assignment channel or the ack, so it does not get in the way of phase 1.
-	revoked, err := b.revokeApplianceBoundLicenses(ctx, id)
+	// ONE TRANSACTION: the licence revocation, the portal hostname release, the signed terminal assignment and
+	// (emergency) the credential shutdown commit together or not at all. A failure leaves the appliance exactly
+	// as it was, so the operator simply retries; there is no half-retired appliance whose licence is revoked
+	// but who was never told to stand down. Licence revocation never blocks the assignment channel or the ack.
+	tx, err := b.DB.Begin(ctx)
 	if err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "The licence could not be revoked, so retirement did not start. Try again.")
+		failInternal(w, r, "Retirement could not start. Try again.", err)
 		return
 	}
-	ver, err := b.beginTerminalDelivery(ctx, r, id, terminal, in.Reason, in.Emergency)
+	defer tx.Rollback(ctx)
+	// Lock the row and re-check the state: a concurrent retire, move or delete gets one winner.
+	var lifecycle string
+	var delivery *string
+	if err := tx.QueryRow(ctx, `SELECT a.lifecycle_state, td.delivery_state FROM appliances a
+            LEFT JOIN appliance_terminal_delivery td ON td.appliance_id = a.id WHERE a.id=$1 FOR UPDATE OF a`, id).
+		Scan(&lifecycle, &delivery); err != nil || lifecycle != "assigned" || (delivery != nil && !in.Emergency) {
+		Fail(w, r, http.StatusConflict, "invalid_state", "The appliance changed state; reload and try again.")
+		return
+	}
+	revoked, err := b.revokeApplianceBoundLicensesTx(ctx, tx, id)
 	if err != nil {
-		Fail(w, r, http.StatusServiceUnavailable, "retire_failed", "Retirement could not start: "+err.Error())
+		failInternal(w, r, "The licence could not be revoked, so retirement did not start. Try again.", err)
+		return
+	}
+	ver, err := b.beginTerminalDelivery(ctx, tx, id, terminal, in.Reason, in.Emergency)
+	if err != nil {
+		Fail(w, r, http.StatusServiceUnavailable, "retire_failed", "Retirement could not start, so nothing changed: "+publicError(r, err))
 		return
 	}
 	_, email := actorOf(r)
@@ -461,10 +490,16 @@ func (b *Base) retire(w http.ResponseWriter, r *http.Request) {
 	if in.Emergency {
 		to = lifecycleForTerminal(terminal)
 	}
-	recordLifecycle(ctx, b.DB, id, row.lifecycle, to, email, clientIPFromReq(r), in.Reason)
+	recordLifecycle(ctx, tx, id, row.lifecycle, to, email, clientIPFromReq(r), in.Reason)
+	if err := tx.Commit(ctx); err != nil {
+		failInternal(w, r, "Retirement could not start. Try again.", err)
+		return
+	}
+	b.PortalTLS.Nudge()
 	action := "appliance.retire_started"
 	if in.Emergency {
 		action = "appliance.retired_emergency"
+		audit.Op(ctx, b.DB, r, "appliance.credentials_revoked", "appliance", id, map[string]any{"reason": "emergency_compromise"})
 	}
 	audit.Op(ctx, b.DB, r, action, "appliance", id, map[string]any{
 		"_tenant_id": deref(row.CustomerID), "reason": in.Reason, "emergency": in.Emergency,
@@ -584,7 +619,7 @@ func (b *Base) rebindWANMAC(w http.ResponseWriter, r *http.Request) {
 	doc, err := b.Lic.Reissue(ctx, lid, operatorID)
 	if err != nil {
 		_, _ = b.DB.Exec(ctx, `UPDATE appliances SET wan_mac=NULLIF($2,''), updated_at=now() WHERE id=$1`, id, curMAC)
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "the licence could not be re-issued, so nothing changed: "+err.Error())
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "the licence could not be re-issued, so nothing changed: "+publicError(r, err))
 		return
 	}
 	_, _ = b.DB.Exec(ctx, `UPDATE appliance_security_alerts SET status='resolved', resolved=true,
@@ -643,7 +678,7 @@ func (b *Base) reissueCertificate(w http.ResponseWriter, r *http.Request) {
 	if pending > 0 {
 		cb := &CertBase{Base: b, CA: b.CA, ClientValid: b.ClientValid}
 		if _, err := cb.issueCertForAppliance(ctx, r, id, email); err != nil {
-			Fail(w, r, http.StatusBadRequest, CodeBadRequest, "the waiting CSR could not be signed: "+err.Error())
+			Fail(w, r, http.StatusBadRequest, CodeBadRequest, "the waiting CSR could not be signed: "+publicError(r, err))
 			return
 		}
 	} else {
@@ -753,7 +788,7 @@ func (b *Base) deleteAppliance(w http.ResponseWriter, r *http.Request) {
         SELECT public_key, serial, id, 'record deleted'
           FROM appliances WHERE id=$1 AND lifecycle_state IN ('revoked','decommissioned') AND COALESCE(public_key,'') <> ''
         ON CONFLICT (public_key) DO NOTHING`, id); err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "delete failed: "+err.Error())
+		failInternal(w, r, "delete failed", err)
 		return
 	}
 	// Its open alerts are closed, not orphaned: they would otherwise stay "open" with no appliance to act on.
@@ -761,12 +796,12 @@ func (b *Base) deleteAppliance(w http.ResponseWriter, r *http.Request) {
         UPDATE appliance_security_alerts SET status='resolved', resolved=true,
                acknowledged_by=NULLIF($2,'')::uuid, acknowledged_at=now()
          WHERE appliance_id=$1 AND NOT resolved`, id, operatorID); err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "delete failed: "+err.Error())
+		failInternal(w, r, "delete failed", err)
 		return
 	}
 	tag, err := tx.Exec(ctx, `DELETE FROM appliances WHERE id=$1 AND lifecycle_state IN ('pending_approval','revoked','decommissioned')`, id)
 	if err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "delete failed: "+err.Error())
+		failInternal(w, r, "delete failed", err)
 		return
 	}
 	if tag.RowsAffected() == 0 {

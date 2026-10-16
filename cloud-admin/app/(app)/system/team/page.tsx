@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/card";
 import { PageHeader, PageShell } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { UsersManager } from "@/components/users-manager";
+import { SessionLifetimeSetting } from "@/components/session-lifetime";
 import { roleLabel, TEAM_ROLES, usePermissions } from "@/lib/permissions";
 import { useSession } from "@/lib/session";
 
@@ -22,7 +23,7 @@ export default function TeamPage() {
               items={[
                 <><strong>{roleLabel("platform_admin")}</strong>: everything, including activation and licenses.</>,
                 <><strong>{roleLabel("platform_support")}</strong>: can see everything and change nothing.</>,
-                <>A role change takes effect the next time the person signs in.</>,
+                <>A role change, disabling a person or resetting their password takes effect at once: their open sign-ins end.</>,
               ]}
             />
           </HelpSection>
@@ -38,6 +39,7 @@ export default function TeamPage() {
           noun="team member"
         />
       </Card>
+      <SessionLifetimeSetting canManage={can["team.manage"]} />
     </PageShell>
   );
 }

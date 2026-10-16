@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -28,12 +29,14 @@ type UserRow struct {
 	Roles       []string  `json:"roles"`
 	CustomerID  *string   `json:"customer_id"`
 	CreatedAt   time.Time `json:"created_at"`
+	// LastLoginAt is the last successful console sign-in; null when the user never signed in.
+	LastLoginAt *time.Time `json:"last_login_at"`
 }
 
 // queryUsers lists users. customerID "" = the Team (operators holding a platform role).
 func (b *Base) queryUsers(ctx context.Context, customerID, userID string) ([]UserRow, error) {
 	rows, err := b.DB.Query(ctx, `
-        SELECT o.id::text, o.email, COALESCE(o.display_name,''), o.status, o.tenant_id::text, o.created_at,
+        SELECT o.id::text, o.email, COALESCE(o.display_name,''), o.status, o.tenant_id::text, o.created_at, o.last_login_at,
                COALESCE(array_agg(r.role ORDER BY r.role) FILTER (WHERE r.role IS NOT NULL), '{}')
           FROM operators o
           LEFT JOIN operator_roles r ON r.operator_id = o.id
@@ -53,7 +56,7 @@ func (b *Base) queryUsers(ctx context.Context, customerID, userID string) ([]Use
 	out := []UserRow{}
 	for rows.Next() {
 		var u UserRow
-		if err := rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Status, &u.CustomerID, &u.CreatedAt, &u.Roles); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Status, &u.CustomerID, &u.CreatedAt, &u.LastLoginAt, &u.Roles); err != nil {
 			return nil, err
 		}
 		for _, role := range u.Roles {
@@ -282,12 +285,22 @@ func (b *Base) updateUser(w http.ResponseWriter, r *http.Request, customerID, id
 			return
 		}
 	}
+	// Losing access, changing role or getting a new password ends every console session the user has open:
+	// they stop at their next request instead of running out the sliding lifetime on the old access.
+	sessionsEnded := in.Status == "disabled" || (in.Role != "" && in.Role != cur[0].Role) || in.Password != ""
+	if sessionsEnded {
+		if err := auth.EndOperatorSessions(ctx, tx, id); err != nil {
+			Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
+			return
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "commit failed")
 		return
 	}
 	audit.Op(r.Context(), b.DB, r, "user.updated", "operator", id, map[string]any{
-		"_tenant_id": customerID, "role": in.Role, "status": in.Status, "password_changed": in.Password != ""})
+		"_tenant_id": customerID, "role": in.Role, "status": in.Status, "password_changed": in.Password != "",
+		"sessions_ended": sessionsEnded})
 	b.writeUser(w, r, http.StatusOK, customerID, id)
 }
 
@@ -313,12 +326,15 @@ func (b *Base) removeUser(w http.ResponseWriter, r *http.Request, customerID, id
 		Fail(w, r, http.StatusConflict, CodeConflict, "this is the last active platform administrator")
 		return
 	}
-	audit.Op(r.Context(), b.DB, r, "user.removed", "operator", id, map[string]any{
-		"_tenant_id": customerID, "email": cur[0].Email, "role": cur[0].Role})
+	// Removing the row also ends the user's console sessions: the next request finds no operator
+	// (session_policy.go) and the session is destroyed.
 	if _, err := b.DB.Exec(ctx, `DELETE FROM operators WHERE id=$1`, id); err != nil {
-		Fail(w, r, http.StatusConflict, CodeConflict, "remove failed: "+err.Error())
+		slog.Warn("remove user failed", "operator_id", id, "err", err)
+		Fail(w, r, http.StatusConflict, CodeConflict, "The user could not be removed. Try again.")
 		return
 	}
+	audit.Op(r.Context(), b.DB, r, "user.removed", "operator", id, map[string]any{
+		"_tenant_id": customerID, "email": cur[0].Email, "role": cur[0].Role, "sessions_ended": true})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -382,11 +398,26 @@ func (b *Base) teamPassword(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "hash failed")
 		return
 	}
-	if _, err := b.DB.Exec(ctx, `UPDATE operators SET password_hash=$2, updated_at=now() WHERE id=$1`, id, hash); err != nil {
+	tx, err := b.DB.Begin(ctx)
+	if err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
 		return
 	}
-	audit.Op(r.Context(), b.DB, r, "user.password_reset", "operator", id, nil)
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `UPDATE operators SET password_hash=$2, updated_at=now() WHERE id=$1`, id, hash); err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
+		return
+	}
+	// A password reset ends the sessions opened with the old password.
+	if err := auth.EndOperatorSessions(ctx, tx, id); err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
+		return
+	}
+	audit.Op(r.Context(), b.DB, r, "user.password_reset", "operator", id, map[string]any{"sessions_ended": true})
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -621,8 +621,9 @@ if [ "$MODE" = new ] && [ "$SKIP_ADMIN" = 0 ]; then
         [ "$CENTRAL_ADMIN_PASSWORD" = "$p2" ] || die "passwords differ"
       fi
       [ "${#CENTRAL_ADMIN_PASSWORD}" -ge 10 ] || die "admin password must be at least 10 characters"
-      CTRLAPI_DB_URL="$(envfile_get "$CTRLAPI_ENV_PATH" CTRLAPI_DB_URL)" \
-        "$CTRLAPI_BIN_PATH" seed-admin --email "$ADMIN_EMAIL" --password "$CENTRAL_ADMIN_PASSWORD" >/dev/null
+      # The password goes in on stdin, never on the command line where `ps` would show it.
+      printf '%s\n' "$CENTRAL_ADMIN_PASSWORD" | CTRLAPI_DB_URL="$(envfile_get "$CTRLAPI_ENV_PATH" CTRLAPI_DB_URL)" \
+        "$CTRLAPI_BIN_PATH" seed-admin --email "$ADMIN_EMAIL" >/dev/null
       unset CENTRAL_ADMIN_PASSWORD
       say "seeded platform admin $ADMIN_EMAIL"
     fi

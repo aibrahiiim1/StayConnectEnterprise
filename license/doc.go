@@ -103,10 +103,24 @@ type Document struct {
 const CurrentSchemaVersion = 4
 const MinSchemaVersion = 1
 
-// EffectiveGraceDays is the grace window applied after ValidUntil. The simple
-// model (v3) carries it explicitly; older documents fall back to the offline
-// grace, which historically doubled as the renewal grace.
+// EffectiveGraceDays is the grace window applied after ValidUntil.
+//
+// From schema v3 (the simple model) the document carries the grace period EXPLICITLY and it is the whole
+// answer: grace_period_days = 0 means NO grace -- the licence stops admitting new guests the second after
+// valid_until. It used to fall back to offline_grace_days (30) whenever the value was 0, so an operator who
+// chose "no grace" silently gave the hotel a month. The field is `omitempty`, so a v3+ document issued with
+// 0 simply has no grace_period_days key; that absence now reads as 0, which is what Central signed.
+//
+// Older documents (v1/v2) never carried a grace period: for them the offline grace historically doubled as
+// the renewal grace, and that is kept so every licence already in the field evaluates exactly as before.
+// The signed bytes are untouched either way; only the reading of a v3+ zero changes.
 func (d *Document) EffectiveGraceDays() int {
+	if d.SchemaVersion >= 3 {
+		if d.GracePeriodDays < 0 {
+			return 0
+		}
+		return d.GracePeriodDays
+	}
 	if d.GracePeriodDays > 0 {
 		return d.GracePeriodDays
 	}

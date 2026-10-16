@@ -434,7 +434,7 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
               </CardBody>
               {canLicense && hasLicense && lic.id && (
                 <CardFooter>
-                  {(lic.state === "active" || lic.state === "expiring" || lic.state === "grace") && (
+                  {(lic.state === "active" || lic.state === "expiring") && (
                     <Button variant="ghost" size="sm" onClick={() => { setActionErr(null); setReasonAction(licenseAction("suspend")); }}>
                       <Pause /> Suspend
                     </Button>
@@ -535,9 +535,9 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
                 {a.version && <Fact label="Software version">{a.version}</Fact>}
               </dl>
             </CardBody>
-            {canManage && (a.activation === "activated" || a.activation === "waiting") && (
+            {canManage && (a.activation === "activated" || a.activation === "activating" || a.activation === "waiting") && (
               <CardFooter>
-                {a.activation === "activated" ? (
+                {a.activation === "activated" || a.activation === "activating" ? (
                   <Button
                     variant="ghost"
                     size="sm"
@@ -769,9 +769,12 @@ function Advanced({
                   <ArrowRightLeft /> Mark for replacement
                 </Button>
               )}
-              <Button variant="ghost" size="sm" disabled={fileBusy} onClick={onPackage}>
-                <Download /> Offline activation package
-              </Button>
+              {/* The package needs an imported, unconsumed offline activation request; without one ctrlapi refuses. */}
+              {a.offline_request_pending && (
+                <Button variant="ghost" size="sm" disabled={fileBusy} onClick={onPackage}>
+                  <Download /> Offline activation package
+                </Button>
+              )}
             </div>
           </div>
         )}

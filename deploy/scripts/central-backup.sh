@@ -37,17 +37,53 @@ docker inspect "$CENTRAL_PG_CONTAINER" >/dev/null 2>&1 || die "no $CENTRAL_PG_CO
 install -d -m 0700 "$CENTRAL_DB_BACKUPS"
 DUMP="$CENTRAL_DB_BACKUPS/central-$(date -u +%Y%m%dT%H%M%SZ)-$REASON.dump"
 TMP="$DUMP.partial"
-ERR="$(mktemp)"; trap 'rm -f "$TMP" "$ERR"' EXIT
+ERR="$(mktemp)"
 umask 077
+
+# EVERY RUN IS RECORDED, SUCCESS OR FAILURE, in $SC_OPT/central-backup-status.json, which the console's Backup
+# health page reads through ctrlapi. A failing daily dump used to be invisible there: the retention cleanup
+# kept refreshing its own last_run whether or not a dump had been written. The previous success is kept when
+# a run fails, so the page can say "failed; newest good backup is from <then>".
+BACKUP_STATUS="${CENTRAL_BACKUP_STATUS:-$SC_OPT/central-backup-status.json}"
+record_run() { # record_run ok|failed <file> <error>
+  python3 - "$BACKUP_STATUS" "$1" "$2" "$3" <<'PY' || true
+import json, os, sys, datetime
+path, outcome, file, error = sys.argv[1:5]
+now = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+try:
+    d = json.load(open(path))
+except Exception:
+    d = {}
+d['last_attempt_at'] = now
+if outcome == 'ok':
+    d['last_success_at'], d['last_file'], d['last_error'] = now, file, ''
+else:
+    d['last_failure_at'], d['last_error'] = now, error[:500]
+tmp = path + '.tmp'
+with open(tmp, 'w') as f:
+    json.dump(d, f)
+os.chmod(tmp, 0o644)
+os.replace(tmp, path)
+PY
+}
+on_exit() {
+  rc=$?
+  if [ "$rc" != 0 ]; then
+    record_run failed "" "${FAIL_WHY:-backup exited with status $rc}: $(tail -c 300 "$ERR" 2>/dev/null | tr '\n' ' ')"
+  fi
+  rm -f "$TMP" "$ERR"
+}
+trap on_exit EXIT
 
 # pg_dump always warns about TimescaleDB's circular catalog FKs (harmless for a full dump); shown only on failure.
 docker exec "$CENTRAL_PG_CONTAINER" pg_dump -U "$CENTRAL_DB_USER" -d "$CENTRAL_DB" -Fc > "$TMP" 2> "$ERR" \
-  || { cat "$ERR" >&2; die "pg_dump failed — no backup written"; }
-[ -s "$TMP" ] || die "pg_dump produced an empty file"
+  || { cat "$ERR" >&2; FAIL_WHY="pg_dump failed"; die "pg_dump failed — no backup written"; }
+[ -s "$TMP" ] || { FAIL_WHY="pg_dump produced an empty file"; die "pg_dump produced an empty file"; }
 docker exec -i "$CENTRAL_PG_CONTAINER" pg_restore -l < "$TMP" > /dev/null 2>"$ERR" \
-  || { cat "$ERR" >&2; die "the dump is not a readable archive — discarded"; }
+  || { cat "$ERR" >&2; FAIL_WHY="the dump is not a readable archive"; die "the dump is not a readable archive — discarded"; }
 chmod 0600 "$TMP"
 mv -f "$TMP" "$DUMP"
+record_run ok "$DUMP" ""
 say "backup $DUMP ($(du -h "$DUMP" | cut -f1))"
 logger -t stayconnect-central-backup "backup $DUMP" 2>/dev/null || true
 

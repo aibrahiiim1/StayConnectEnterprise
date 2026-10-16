@@ -96,6 +96,8 @@ it cannot drift from what appliances are told to dial. Central initiates **no** 
 /etc/caddy/Caddyfile   /etc/caddy/tls/server.{crt,key}
 /opt/stayconnect/backups/db/central-<stamp>-{scheduled|pre-<sha12>}.dump   daily + pre-deploy dumps (0700 dir)
 /opt/stayconnect/backup-retention-status.json  written by backup cleanup; read by the Backup health page
+/opt/stayconnect/central-backup-status.json    written by central-backup.sh on every run (success or failure);
+                                               the Backup health page shows the newest dump and a failing run
 ```
 
 ## 4. Build a release
@@ -334,7 +336,12 @@ Bring-up, all from **System → Portal certificates**:
    it records the zone id and registers the staging ACME account.
 3. Let one appliance obtain a staging certificate. Then switch the directory to **production** (a new account is
    registered on first use) and **Apply CAA**, which pins `onegate.work` to Let's Encrypt and this account and forbids
-   wildcards. Other CAs' existing `issue` records are kept and reported.
+   wildcards. Other CAs' existing `issue` records are kept and reported. **Order matters:** Central refuses Apply CAA
+   while the directory is staging (`caa_needs_production` — CAA would pin the staging account and block every
+   production order), and refuses leaving production once CAA is applied (`caa_pins_production`).
+4. Token blast radius: the Cloudflare token can edit every record of the zone, so keep the zone dedicated to
+   appliance hostnames. Portal A records point at private addresses; a hotel resolver with DNS-rebinding
+   protection drops such answers, so its own DNS must allow the zone.
 
 **Test chain before a token exists** (TEST-ONLY, never on a production Central): run Pebble and pebble-challtestsrv
 beside ctrlapi and set `CTRLAPI_PORTAL_DNS_PROVIDER=challtestsrv`, `CTRLAPI_PORTAL_CHALLTESTSRV_URL`,

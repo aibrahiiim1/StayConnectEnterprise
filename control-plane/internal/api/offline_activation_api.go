@@ -116,7 +116,10 @@ func (b *OfflineBase) importRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	var appID, lifecycle, existingPub string
 	err := b.DB.QueryRow(ctx,
-		`SELECT id::text, lifecycle_state, COALESCE(public_key,'') FROM appliances WHERE serial=$1`, req.Serial).
+		// Only a LIVE row (waiting or activated) is this hardware; a retired row with the same serial is history
+		// and stays untouched -- the request then creates a new appliance, exactly like registration.
+		`SELECT id::text, lifecycle_state, COALESCE(public_key,'') FROM appliances
+          WHERE serial=$1 AND lifecycle_state NOT IN ('revoked','decommissioned')`, req.Serial).
 		Scan(&appID, &lifecycle, &existingPub)
 	switch {
 	case err == nil && existingPub != "" && existingPub != req.PublicKey:

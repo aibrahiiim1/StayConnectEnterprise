@@ -146,7 +146,10 @@ func (b *CertBase) issueCertForAppliance(ctx context.Context, r *http.Request, a
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	_, _ = tx.Exec(ctx, `UPDATE appliance_certificates SET status='superseded' WHERE appliance_id=$1 AND status='active'`, appID)
+	if _, err := tx.Exec(ctx, `UPDATE appliance_certificates SET status='superseded', superseded_at=now()
+        WHERE appliance_id=$1 AND status='active'`, appID); err != nil {
+		return nil, err
+	}
 	var certID string
 	if err := tx.QueryRow(ctx, `
         INSERT INTO appliance_certificates
@@ -168,6 +171,39 @@ func (b *CertBase) issueCertForAppliance(ctx context.Context, r *http.Request, a
 		"_tenant_id": tenantID, "appliance_id": appID, "fingerprint": sc.FingerprintHex, "not_after": sc.NotAfter, "actor": actor,
 	})
 	return sc, nil
+}
+
+// SupersededOverlap is how long a certificate replaced by a rotation stays usable on the mTLS listener: long
+// enough for the appliance to fetch and install its new certificate (it does so at once), far shorter than
+// the 90-day lifetime the superseded certificate would otherwise keep. The assignment channel never accepts a
+// superseded certificate at all (strictMTLSSelf).
+const SupersededOverlap = 24 * time.Hour
+
+// RevokeSupersededCertificates records every certificate superseded more than SupersededOverlap ago (or at an
+// unknown time, before migration 0051) as revoked, where the mTLS listener checks it. Idempotent; run by the
+// housekeeping loop.
+func RevokeSupersededCertificates(ctx context.Context, b *Base) (int64, error) {
+	tx, err := b.DB.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx, `
+        INSERT INTO appliance_certificate_revocations (certificate_id, appliance_id, fingerprint_sha256, reason)
+        SELECT c.id, c.appliance_id, c.fingerprint_sha256, 'superseded by rotation'
+          FROM appliance_certificates c
+         WHERE c.status='superseded' AND (c.superseded_at IS NULL OR c.superseded_at < now() - make_interval(secs => $1))
+        ON CONFLICT DO NOTHING`, SupersededOverlap.Seconds())
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE appliance_certificates SET status='revoked', revoked_at=now(),
+            revocation_reason='superseded by rotation'
+         WHERE status='superseded' AND (superseded_at IS NULL OR superseded_at < now() - make_interval(secs => $1))`,
+		SupersededOverlap.Seconds()); err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), tx.Commit(ctx)
 }
 
 func (b *CertBase) certEvent(ctx context.Context, appID, certID, event, actor, ip string) {

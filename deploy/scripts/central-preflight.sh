@@ -183,6 +183,27 @@ else
 fi
 echo
 
+# ---------------------------------------------------------------- 2c. operator listener and session cookie
+# A production ctrlapi refuses to start with the operator API on every interface or with insecure cookies
+# (internal/config.Validate). Say so here, before a deploy restarts it into that refusal.
+echo "Operator listener and session cookie"
+ADDR="$(envget CTRLAPI_ADDR || echo 127.0.0.1:8080)"
+case "$ADDR" in
+  :*|0.0.0.0:*|"[::]:"*)
+    if [ "$(envget CTRLAPI_ALLOW_PUBLIC_LISTEN || echo false)" = true ]; then
+      warn "CTRLAPI_ADDR=$ADDR binds every interface (allowed by CTRLAPI_ALLOW_PUBLIC_LISTEN=true)"
+    else
+      bad "CTRLAPI_ADDR=$ADDR binds every interface; ctrlapi will refuse to start in production. Use 127.0.0.1:8080 (Caddy fronts it)."
+    fi ;;
+  *) ok "operator API listens on $ADDR" ;;
+esac
+if [ "$(envget CTRLAPI_COOKIE_SECURE || echo true)" = false ]; then
+  bad "CTRLAPI_COOKIE_SECURE=false; ctrlapi will refuse to start in production"
+else
+  ok "session cookie is Secure"
+fi
+echo
+
 # ---------------------------------------------------------------- 3. schema
 echo "Database schema"
 # A standard Central (central-install.sh) runs Postgres in the sc-central-pg container and has no psql on the

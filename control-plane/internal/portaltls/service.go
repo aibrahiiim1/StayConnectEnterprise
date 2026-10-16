@@ -319,8 +319,7 @@ type SyncResponse struct {
 // Sync is idempotent: it allocates the hostname once, records the portal address (and publishes it when it
 // changed), reconciles the hotel domain with what the appliance asks for, and reports the state of both.
 func (s *Service) Sync(ctx context.Context, applianceID string, in SyncRequest) (*SyncResponse, error) {
-	facts, err := s.requireActive(ctx, applianceID)
-	if err != nil {
+	if _, err := s.requireActive(ctx, applianceID); err != nil {
 		return nil, err
 	}
 	ip, err := ParsePortalIP(in.PortalIP)
@@ -342,17 +341,11 @@ func (s *Service) Sync(ctx context.Context, applianceID string, in SyncRequest) 
 	case err != nil:
 		return nil, err
 	case h.ReleasedAt != nil:
-		// Released by retirement. The same appliance identity can be activated again later (re-registration
-		// keeps its id): then, and only then, it gets its own name back. A box that is merely still talking
-		// while it retires does not.
-		if facts.activatedAt == nil || !facts.activatedAt.After(*h.ReleasedAt) {
-			return nil, refuse(http.StatusForbidden, "retired", "this appliance's portal hostname was released when it was retired")
-		}
-		if _, err := s.DB.Exec(ctx, `UPDATE portal_hostnames SET released_at=NULL, dns_error=NULL WHERE appliance_id=$1`, applianceID); err != nil {
-			return nil, err
-		}
-		h.ReleasedAt = nil
-		AppendEvent(ctx, s.DB, applianceID, h.FQDN, EvHostnameRestored, ActorSystem, nil)
+		// RELEASED IS FOREVER. The hostname was released when the appliance was retired, and a released name is
+		// never handed out again -- not even to the same appliance row. (It used to be restored when the row
+		// was activated again; a retired box that registers again now gets a NEW appliance row, and with it a
+		// new name, so nothing legitimate needs a released name back.)
+		return nil, refuse(http.StatusForbidden, "retired", "this appliance's portal hostname was released when it was retired")
 	}
 
 	if h.PortalIP != ip.String() {

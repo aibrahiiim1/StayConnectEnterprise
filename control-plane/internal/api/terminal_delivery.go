@@ -23,7 +23,10 @@ import (
 // raising a security alert (and NOT falsely reporting the box decommissioned).
 func terminalTimeout() time.Duration { return 10 * time.Minute }
 
-// beginTerminalDelivery starts retirement of an appliance.
+// beginTerminalDelivery starts retirement of an appliance INSIDE THE CALLER'S TRANSACTION, so the licence
+// revocation the caller made in the same transaction and the signed terminal assignment commit together or
+// not at all: there is never a retirement whose licence is revoked but whose terminal document was never
+// signed (the appliance would keep its cached assignment and never be told), nor the reverse.
 //
 // NORMAL (emergency=false) — two phases:
 //
@@ -38,23 +41,24 @@ func terminalTimeout() time.Duration { return 10 * time.Minute }
 //	revoke the certificate, deny all API access immediately, and mark the
 //	terminal delivery UNCONFIRMED. A signed terminal document is still minted (so a
 //	recovered box would stand down), but nothing waits for it.
-func (b *Base) beginTerminalDelivery(ctx context.Context, r *http.Request, id, terminalState, reason string, emergency bool) (int64, error) {
+func (b *Base) beginTerminalDelivery(ctx context.Context, tx pgx.Tx, id, terminalState, reason string, emergency bool) (int64, error) {
 	if terminalState != assignment.StateRevoked && terminalState != assignment.StateUnassigned &&
 		terminalState != assignment.StateDecommissioned {
 		return 0, fmt.Errorf("invalid terminal state %q", terminalState)
 	}
-	// Mint + persist the signed terminal assignment (higher version). This uses the
-	// signing guard (active key only) inside issueAssignment. The minted terminal
-	// document carries NO tenant/site — issueAssignment only stamps ownership for a
-	// Grants() state, and a terminal state Clears(). It is the APPLIANCE that
-	// atomically clears its own tenant/site when it verifies and adopts the document;
-	// Central's row keeps its last tenant_id (NOT NULL) with lifecycle_state marking
-	// the retirement, and the signed document remains authoritative.
-	if err := b.issueAssignment(ctx, id, terminalState); err != nil {
+	if b.AssignKey == nil {
+		return 0, errors.New("assignment signing key not configured")
+	}
+	// Mint + persist the signed terminal assignment (higher version), under the signing guard (active key
+	// only). The minted terminal document carries NO tenant/site — a terminal state Clears(). It is the
+	// APPLIANCE that atomically clears its own tenant/site when it verifies and adopts the document; Central's
+	// row keeps its last tenant_id with lifecycle_state marking the retirement.
+	ab := &AssignmentBase{Base: b, SignKey: b.AssignKey}
+	doc, err := ab.IssueTx(ctx, tx, id, terminalState)
+	if err != nil {
 		return 0, err
 	}
-	var ver int64
-	_ = b.DB.QueryRow(ctx, `SELECT version FROM appliance_signed_assignments WHERE appliance_id=$1`, id).Scan(&ver)
+	ver := doc.Version
 
 	deliveryState := "terminal_delivery_pending"
 	var timeoutAt any = time.Now().Add(terminalTimeout())
@@ -63,7 +67,7 @@ func (b *Base) beginTerminalDelivery(ctx context.Context, r *http.Request, id, t
 		deliveryState = "credential_revoked"
 		timeoutAt = nil
 	}
-	if _, err := b.DB.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
         INSERT INTO appliance_terminal_delivery
             (appliance_id, terminal_state, assignment_version, delivery_state, reason, emergency, issued_at, timeout_at)
         VALUES ($1,$2,$3,$4,$5,$6,now(),$7)
@@ -77,11 +81,11 @@ func (b *Base) beginTerminalDelivery(ctx context.Context, r *http.Request, id, t
 
 	if emergency {
 		// Immediate Phase 2 — the guardrail is the caller (confirmation + step-up).
-		if err := b.phase2ShutCredentials(ctx, r, id, "emergency_compromise"); err != nil {
+		if err := b.phase2ShutCredentials(ctx, tx, id, "emergency_compromise"); err != nil {
 			return ver, err
 		}
 		// Lifecycle goes terminal now; delivery stays UNCONFIRMED (acked_at NULL).
-		if _, err := b.DB.Exec(ctx, `UPDATE appliances SET lifecycle_state=$2, replacement_pending=false, updated_at=now() WHERE id=$1`,
+		if _, err := tx.Exec(ctx, `UPDATE appliances SET lifecycle_state=$2, replacement_pending=false, updated_at=now() WHERE id=$1`,
 			id, lifecycleForTerminal(terminalState)); err != nil {
 			return ver, err
 		}
@@ -98,40 +102,25 @@ func lifecycleForTerminal(state string) string {
 }
 
 // phase2ShutCredentials revokes the appliance's client certificate (which the mTLS listener checks on
-// every call) and records the shutdown. It is called after a verified ack (normal) or immediately
-// (emergency).
-func (b *Base) phase2ShutCredentials(ctx context.Context, r *http.Request, id, reason string) error {
-	tx, err := b.DB.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
+// every call) and records the shutdown, inside the caller's transaction. It is called after a verified ack
+// (normal) or immediately (emergency). The caller audits appliance.credentials_revoked once it commits.
+func (b *Base) phase2ShutCredentials(ctx context.Context, tx pgx.Tx, id, reason string) error {
 	if _, err := tx.Exec(ctx, `
         INSERT INTO appliance_certificate_revocations (certificate_id, appliance_id, fingerprint_sha256, reason)
         SELECT c.id, c.appliance_id, c.fingerprint_sha256, $2
-          FROM appliance_certificates c WHERE c.appliance_id=$1 AND c.status='active'
+          FROM appliance_certificates c WHERE c.appliance_id=$1 AND c.status IN ('active','superseded')
         ON CONFLICT DO NOTHING`, id, reason); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE appliance_certificates SET status='revoked', revoked_at=now(), revocation_reason=$2 WHERE appliance_id=$1 AND status='active'`, id, reason); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE appliance_certificates SET status='revoked', revoked_at=now(), revocation_reason=$2
+        WHERE appliance_id=$1 AND status IN ('active','superseded')`, id, reason); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE appliances SET current_cert_fingerprint=NULL, updated_at=now() WHERE id=$1`, id); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE appliance_terminal_delivery SET credential_revoked_at=now() WHERE appliance_id=$1`, id); err != nil {
-		return err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return err
-	}
-	if r != nil {
-		audit.Op(ctx, b.DB, r, "appliance.credentials_revoked", "appliance", id,
-			map[string]any{"reason": reason})
-	} else {
-		audit.System(ctx, b.DB, "appliance.credentials_revoked", "appliance", id, map[string]any{"reason": reason})
-	}
-	return nil
+	_, err := tx.Exec(ctx, `UPDATE appliance_terminal_delivery SET credential_revoked_at=now() WHERE appliance_id=$1`, id)
+	return err
 }
 
 // AckHandler receives the appliance's SIGNED terminal-adoption acknowledgment over
@@ -173,11 +162,24 @@ func (b *Base) AckHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The ack must name the CURRENT terminal document (version + fingerprint).
+	tx, err := b.DB.Begin(ctx)
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "ack failed")
+		return
+	}
+	defer tx.Rollback(ctx)
+	var prevLifecycle string
+	if err := tx.QueryRow(ctx, `SELECT lifecycle_state FROM appliances WHERE id=$1 FOR UPDATE`, ident.ApplianceID).Scan(&prevLifecycle); err != nil {
+		Fail(w, r, http.StatusNotFound, CodeNotFound, "appliance not found")
+		return
+	}
+	// The ack must name the CURRENT terminal document (version + fingerprint) of a retirement that is
+	// actually in progress. An ack with no retirement on record, or for a retirement already completed, is
+	// refused: it must never be able to retire an appliance nobody retired.
 	var version int64
 	var signedDoc []byte
 	var deliveryState string
-	err := b.DB.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
         SELECT sa.version, sa.signed_doc, COALESCE(td.delivery_state,'')
           FROM appliance_signed_assignments sa
           LEFT JOIN appliance_terminal_delivery td ON td.appliance_id = sa.appliance_id
@@ -186,38 +188,65 @@ func (b *Base) AckHandler(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusNotFound, CodeNotFound, "no assignment to acknowledge")
 		return
 	}
+	if deliveryState != "terminal_delivery_pending" && deliveryState != "terminal_delivery_failed" {
+		Fail(w, r, http.StatusConflict, "no_retirement_pending", "no retirement is waiting for this acknowledgment")
+		return
+	}
 	var doc assignment.Document
 	_ = json.Unmarshal(signedDoc, &doc)
-	if ack.Version != version || ack.Fingerprint != assignment.DocFingerprint(&doc) {
+	if !assignment.Clears(doc.State) || ack.Version != version || ack.Fingerprint != assignment.DocFingerprint(&doc) ||
+		ack.TerminalState != doc.State {
 		Fail(w, r, http.StatusConflict, "ack_mismatch", "ack does not match the current terminal assignment")
 		return
 	}
 
-	// Record the ack, mark adopted, then run Phase 2.
+	// Record the ack, run Phase 2 and mark the identity retired, in one transaction.
 	raw, _ := json.Marshal(ack)
-	_, _ = b.DB.Exec(ctx, `
-        UPDATE appliance_terminal_delivery
-           SET delivery_state='terminal_adopted', acked_at=now(), ack_version=$2,
-               ack_fingerprint=$3, ack_adopted_at=$4, ack_signed=$5
-         WHERE appliance_id=$1`, ident.ApplianceID, ack.Version, ack.Fingerprint, ack.AdoptedAt, raw)
-	_, _ = b.DB.Exec(ctx, `UPDATE appliance_signed_assignments SET last_acked_version=$2 WHERE appliance_id=$1`, ident.ApplianceID, ack.Version)
-	audit.Op(ctx, b.DB, r, "appliance.terminal_adopted", "appliance", ident.ApplianceID,
-		map[string]any{"version": ack.Version, "terminal_state": ack.TerminalState, "fingerprint": ack.Fingerprint})
-
-	if err := b.phase2ShutCredentials(ctx, r, ident.ApplianceID, "terminal_ack"); err != nil {
+	terminal := lifecycleForTerminal(ack.TerminalState)
+	steps := []struct {
+		sql  string
+		args []any
+	}{
+		{`UPDATE appliance_terminal_delivery
+             SET delivery_state='terminal_adopted', acked_at=now(), ack_version=$2,
+                 ack_fingerprint=$3, ack_adopted_at=$4, ack_signed=$5
+           WHERE appliance_id=$1`, []any{ident.ApplianceID, ack.Version, ack.Fingerprint, ack.AdoptedAt, raw}},
+		{`UPDATE appliance_signed_assignments SET last_acked_version=$2 WHERE appliance_id=$1`, []any{ident.ApplianceID, ack.Version}},
+	}
+	for _, s := range steps {
+		if _, err := tx.Exec(ctx, s.sql, s.args...); err != nil {
+			Fail(w, r, http.StatusInternalServerError, CodeInternal, "ack failed")
+			return
+		}
+	}
+	if err := b.phase2ShutCredentials(ctx, tx, ident.ApplianceID, "terminal_ack"); err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "phase2 failed")
 		return
 	}
-	var prevLifecycle string
-	_ = b.DB.QueryRow(ctx, `SELECT lifecycle_state FROM appliances WHERE id=$1`, ident.ApplianceID).Scan(&prevLifecycle)
-	_, _ = b.DB.Exec(ctx, `UPDATE appliances SET lifecycle_state=$2, replacement_pending=false, updated_at=now() WHERE id=$1`,
-		ident.ApplianceID, lifecycleForTerminal(ack.TerminalState))
-	recordLifecycle(ctx, b.DB, ident.ApplianceID, prevLifecycle, lifecycleForTerminal(ack.TerminalState), "appliance",
+	for _, s := range []struct {
+		sql  string
+		args []any
+	}{
+		{`UPDATE appliances SET lifecycle_state=$2, replacement_pending=false, updated_at=now() WHERE id=$1`, []any{ident.ApplianceID, terminal}},
+		{`UPDATE appliance_terminal_delivery SET delivery_state='credential_revoked' WHERE appliance_id=$1`, []any{ident.ApplianceID}},
+		// A late ack confirms a retirement that had timed out: the "did not confirm" alert is now answered.
+		{`UPDATE appliance_security_alerts SET status='resolved', resolved=true, acknowledged_at=now()
+           WHERE appliance_id=$1 AND kind='terminal_delivery_failed' AND NOT resolved`, []any{ident.ApplianceID}},
+	} {
+		if _, err := tx.Exec(ctx, s.sql, s.args...); err != nil {
+			Fail(w, r, http.StatusInternalServerError, CodeInternal, "ack failed")
+			return
+		}
+	}
+	recordLifecycle(ctx, tx, ident.ApplianceID, prevLifecycle, terminal, "appliance",
 		clientIPFromReq(r), "retirement acknowledged by the appliance")
-	_, _ = b.DB.Exec(ctx, `UPDATE appliance_terminal_delivery SET delivery_state='credential_revoked' WHERE appliance_id=$1`, ident.ApplianceID)
-	// A late ack confirms a retirement that had timed out: the "did not confirm" alert is now answered.
-	_, _ = b.DB.Exec(ctx, `UPDATE appliance_security_alerts SET status='resolved', resolved=true, acknowledged_at=now()
-         WHERE appliance_id=$1 AND kind='terminal_delivery_failed' AND NOT resolved`, ident.ApplianceID)
+	if err := tx.Commit(ctx); err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "ack failed")
+		return
+	}
+	audit.Op(ctx, b.DB, r, "appliance.terminal_adopted", "appliance", ident.ApplianceID,
+		map[string]any{"version": ack.Version, "terminal_state": ack.TerminalState, "fingerprint": ack.Fingerprint})
+	audit.Op(ctx, b.DB, r, "appliance.credentials_revoked", "appliance", ident.ApplianceID, map[string]any{"reason": "terminal_ack"})
 	WriteJSON(w, http.StatusOK, map[string]any{"status": "credential_revoked", "version": ack.Version})
 }
 
