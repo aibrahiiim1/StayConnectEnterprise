@@ -21,6 +21,11 @@ func designHandler(t *testing.T, design map[string]any) *handler {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/v1/sessions/status" {
+			// The device these pages are drawn for is online: "You're online" is looked up, not read from its URL.
+			_, _ = w.Write([]byte(`{"ip":"10.77.0.42","session_id":"sess-1","active":true}`))
+			return
+		}
 		if r.URL.Path != "/v1/tenant/branding" {
 			_, _ = w.Write([]byte(`{}`))
 			return

@@ -108,6 +108,9 @@ type iamv2GuestResult struct {
 	// ResumeToken is the remembered-device credential issued after a verified OTP / SOCIAL sign-in
 	// (client_resume.go); the portal stores it in an HttpOnly cookie. Absent when devices are not remembered.
 	ResumeToken string `json:"resume_token,omitempty"`
+	// ResumeDays is the site's Remember-devices setting the credential was issued under, so the portal's cookie
+	// lives exactly as long as the credential does (contract §2.3; audit P-17).
+	ResumeDays int `json:"resume_days,omitempty"`
 	// IdentityLabel is the masked factor the Client proved (a•••@example.com), for guest pages only.
 	IdentityLabel string `json:"identity_label,omitempty"`
 	// ClientGroupName is the effective Client Group pinned on the context ("" = Public).
@@ -202,6 +205,9 @@ func (s *server) authorizeViaIAMv2(w http.ResponseWriter, r *http.Request,
 		// next visit proves the address again.
 		if req.ResumedPrincipalID == "" && res.Subject.PrincipalID != "" && !iamv2.IsAssistedCredential(req.Credential) {
 			out.ResumeToken = s.issueResumeCredential(r.Context(), res.Subject.PrincipalID, res.DeviceID, method, req.Credential)
+			if out.ResumeToken != "" {
+				out.ResumeDays = s.rememberDeviceDays(r.Context())
+			}
 		}
 		// A SELF-REGISTERED EMAIL ACCOUNT carries its verification state and the short-lived "recently signed in"
 		// proof portald keeps for resend, grace and status (self_service.go). A staff-created Personal account gets

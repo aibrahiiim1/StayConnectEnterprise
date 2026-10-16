@@ -163,7 +163,11 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 			       AND ac.consumed_at IS NULL AND ac.expires_at > now()
 			       AND (e.voucher_id = ac.voucher_id OR e.guest_account_id = ac.guest_account_id
 			            OR e.guest_principal_id = ac.guest_principal_id
-			            OR e.anonymous_subject_id = ac.anonymous_subject_id)
+			            OR e.anonymous_subject_id = ac.anonymous_subject_id
+			            -- A room guest's verified sign-in for the same stay: the device that replaced another
+			            -- on the stay's access (client_device_action REPLACE) joins it like any other client's
+			            -- device (contract ONEGATE_DEVICE_MANAGEMENT §3, audit H-6).
+			            OR e.stay_id = ac.stay_id)
 			    RETURNING ac.id::text`,
 				req.AuthContextID, req.EntitlementID, s.tenID, s.siteID, req.DeviceID, nc.NetworkID).Scan(&joined)
 			if errors.Is(err, pgx.ErrNoRows) {

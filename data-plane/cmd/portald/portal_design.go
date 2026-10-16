@@ -7,10 +7,16 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"sort"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/stayconnect/enterprise/data-plane/internal/payment/paymob"
+	"github.com/stayconnect/enterprise/data-plane/internal/payment/stripe"
 	"github.com/stayconnect/enterprise/data-plane/internal/portaldesign"
+	"github.com/stayconnect/enterprise/data-plane/internal/portaltls"
 )
 
 // ---- Content-Security-Policy ---------------------------------------------------------------------------
@@ -23,7 +29,8 @@ import (
 //   - script-src 'nonce-…': only the page's OWN script blocks run, each carrying a nonce minted for this one
 //     response. An inline event handler or an injected <script> has no nonce and does not execute.
 //   - base-uri 'none': a <base href> cannot re-point the voucher and credentials forms' relative actions.
-//   - form-action 'self': a form can only ever submit to this portal.
+//   - form-action: a form submits to this portal; its redirect chain may end only on this portal's own HTTPS
+//     names or on a payment provider's hosted checkout (formActionSources below).
 //   - connect-src 'self': the page's fetches (room sign-in, OTP, branding) cannot be sent anywhere else.
 //   - object-src 'none', frame-ancestors 'none': no plugins, and the portal cannot be framed by another site.
 //   - img-src/font-src allow https and data: because a hotel may name an https logo or font; style-src keeps
@@ -54,8 +61,79 @@ func portalCSP(nonce string) string {
 		"connect-src 'self'; " +
 		"object-src 'none'; " +
 		"base-uri 'none'; " +
-		"form-action 'self'; " +
+		"form-action " + formActionSources() + "; " +
 		"frame-ancestors 'none'"
+}
+
+// ---- form-action: where a form submission may END UP ----------------------------------------------------
+//
+// Chromium and WebKit check form-action against every hop of a form submission's redirect chain, not only the
+// form's own action. Two journeys therefore end outside 'self' by design:
+//
+//   - CARD PAYMENT. "Pay by card" posts to /packages/acquire, which answers 303 to the provider's hosted checkout
+//     (checkout.stripe.com, a Paymob checkout host). With form-action 'self' alone that redirect was blocked and
+//     the client saw nothing happen (audit P-1). The page now submits that form by script and navigates with
+//     window.location (which form-action does not govern), and -- so the plain form still works without script --
+//     the hosted-checkout origins the payment adapters declare are allowed here too. They are the adapters' own
+//     RequiredHostedDomains (stripe, every Paymob region): fixed provider hosts, https only, never a value from a
+//     request or the database.
+//   - THE HTTPS PORTAL. A form loaded over the HTTP fallback (or on a portal name that is not canonical) and
+//     submitted after HTTPS came up is answered 307 to https://<canonical>/... (portal_https.go). That origin is
+//     not 'self' for the page that posted, so its portal names are allowed as well (audit P-33). They are
+//     published by refreshTLSState from scd's sanitised state.
+
+// hostedCheckoutOrigins are the payment providers' hosted-checkout origins, as https:// sources.
+var hostedCheckoutOrigins = func() []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(ds []string) {
+		for _, d := range ds {
+			d = strings.ToLower(strings.TrimSpace(d))
+			if d == "" || strings.ContainsAny(d, " ;,'\"*") || seen[d] {
+				continue
+			}
+			seen[d] = true
+			out = append(out, "https://"+d)
+		}
+	}
+	add(stripe.New().RequiredHostedDomains())
+	names := make([]string, 0, len(paymob.Regions))
+	for n := range paymob.Regions {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		if a, err := paymob.New(paymob.WithRegion(n)); err == nil {
+			add(a.RequiredHostedDomains())
+		}
+	}
+	return out
+}()
+
+// portalFormOrigins holds the portal's own other origins (https://<canonical>, https://<each portal name>),
+// replaced whenever portald learns scd's HTTPS state.
+var portalFormOrigins atomic.Value // []string
+
+func setPortalFormOrigins(st portalTLSState) {
+	var out []string
+	seen := map[string]bool{}
+	for _, h := range append([]string{st.Canonical, st.OneGateHostname, st.CustomDomain}, st.Hostnames...) {
+		if h == "" || seen[h] || !portaltls.ValidHostname(h) {
+			continue
+		}
+		seen[h] = true
+		out = append(out, "https://"+h)
+	}
+	portalFormOrigins.Store(out)
+}
+
+func formActionSources() string {
+	parts := []string{"'self'"}
+	if v, ok := portalFormOrigins.Load().([]string); ok {
+		parts = append(parts, v...)
+	}
+	parts = append(parts, hostedCheckoutOrigins...)
+	return strings.Join(parts, " ")
 }
 
 // setPortalCSP sets the policy for one HTML response and returns the nonce its scripts must carry.

@@ -55,7 +55,7 @@ const (
 // discloses nothing about the property, and callers resolve through messageForClass rather than writing a
 // string at a call site — a fourth sentence added somewhere else is the drift this exists to prevent.
 // guestRoomDeviceLimitMessage names no room, stay or system: it tells the guest the one thing they can act on.
-const guestRoomDeviceLimitMessage = "This room has reached its device limit. Disconnect another device and try again."
+const guestRoomDeviceLimitMessage = "Every device place for this room is in use. On a device that is online with it, remove one under “Your devices”, or contact the site team."
 
 // guestCapacityMessage and guestLicenseRefusedMessage are the SAME sentences the voucher and account sign-in
 // show for the same two conditions (main.go, iamv2_commerce_session.go), so a guest reads one answer whichever

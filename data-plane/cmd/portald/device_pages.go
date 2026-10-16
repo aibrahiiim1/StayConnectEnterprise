@@ -24,7 +24,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 )
 
 type replaceRow struct {
@@ -32,6 +31,7 @@ type replaceRow struct {
 	Name     string
 	Online   bool
 	LastSeen string // RFC 3339, rendered by the page's script in the device's own clock
+	Label    string // the button's accessible name
 }
 
 type replaceView struct {
@@ -121,14 +121,18 @@ func (h *handler) renderReplace(w http.ResponseWriter, r *http.Request, sess com
 	if errKey != "" {
 		v.Error = p.T[errKey]
 	}
-	n := 0
-	for _, d := range list.Devices {
+	// THE SAME NUMBERS AS "YOUR DEVICES" (audit P-28): a device is numbered by its place in the package's list,
+	// the order the online page's panel uses, so "Device 2" here is "Device 2" there. This device is skipped, not
+	// renumbered around.
+	for i, d := range list.Devices {
 		if d.ThisDevice {
 			continue
 		}
-		n++
-		v.Devices = append(v.Devices, replaceRow{ID: d.ID, Name: fillWord(p.T["dev.name"], "n", strconv.Itoa(n)),
-			Online: d.Online, LastSeen: d.LastSeen})
+		name := fillWord(p.T["dev.name"], "n", strconv.Itoa(i+1))
+		v.Devices = append(v.Devices, replaceRow{ID: d.ID, Name: name, Online: d.Online, LastSeen: d.LastSeen,
+			// One accessible name per button (audit P-24): "Device 2 — Use this device instead", not the same
+			// words on every row.
+			Label: name + " — " + p.T["rep.btn"]})
 	}
 	_ = replaceTmpl.Execute(w, v)
 }
@@ -148,26 +152,39 @@ func (h *handler) replaceDevice(w http.ResponseWriter, r *http.Request) {
 		h.renderReplace(w, r, sess, dev, "dev.refused")
 		return
 	}
-	body := map[string]string{"ip": dev["ip"], "mac": dev["mac"], "auth_context_id": dev["auth_context_id"], "device_id": target}
-	out, ok := h.scdDevices(r, "/v1/devices/replace", body)
-	switch {
-	case ok && (out.Outcome == "REPLACED" || out.Outcome == "SLOT_FREE") && out.EntitlementID != "":
-	case ok && out.Outcome == "LIMIT_TODAY":
-		h.renderReplace(w, r, sess, dev, "dev.changes.none")
-		return
-	default:
-		slog.Info("device replace not served", "outcome", out.Outcome)
-		h.renderReplace(w, r, sess, dev, "dev.refused")
-		return
+	// ONE CHANGE, HOWEVER MANY TAPS (audit P-10). Once scd has moved a place to this device, the change is done:
+	// what can still fail is only bringing this device online. A second tap -- the page shown again after that
+	// failure, a reload, a double tap -- retries the activation on the place this device already holds instead of
+	// replacing (and disconnecting) another device and spending a second of the day's changes.
+	ent := sess.replacedEntitlement
+	if ent == "" {
+		body := map[string]string{"ip": dev["ip"], "mac": dev["mac"], "auth_context_id": dev["auth_context_id"], "device_id": target}
+		out, ok := h.scdDevices(r, "/v1/devices/replace", body)
+		switch {
+		case ok && (out.Outcome == "REPLACED" || out.Outcome == "SLOT_FREE") && out.EntitlementID != "":
+			ent = out.EntitlementID
+			sess.replacedEntitlement = ent
+			if c, err := r.Cookie(commerceCookie); err == nil && h.commerceSessions != nil {
+				h.commerceSessions.put(c.Value, sess)
+			}
+		case ok && out.Outcome == "LIMIT_TODAY":
+			h.renderReplace(w, r, sess, dev, "dev.changes.none")
+			return
+		default:
+			slog.Info("device replace not served", "outcome", out.Outcome)
+			h.renderReplace(w, r, sess, dev, "dev.refused")
+			return
+		}
 	}
-	sid, failure := h.activateEnforced(r, sess, out.EntitlementID)
+	sid, failure := h.activateEnforced(r, sess, ent)
 	switch failure {
 	case "":
 	case activateVerification:
 		h.renderAccountPage(w, r, nil, true, accountNote{})
 		return
 	case activateDeviceLimit:
-		// Another device took the place in the moment between: choose again.
+		// Another device took the place in the moment between: this device holds none, so it chooses again.
+		h.updateCommerceSession(r, func(s *commerceSession) { s.replacedEntitlement = "" })
 		h.renderReplace(w, r, sess, dev, "dev.refused")
 		return
 	default:
@@ -176,6 +193,7 @@ func (h *handler) replaceDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	if c, err := r.Cookie(commerceCookie); err == nil {
 		sess.acquired = true
+		sess.replacedEntitlement = ""
 		h.commerceSessions.put(c.Value, sess)
 	}
 	http.Redirect(w, r, "/success?s="+url.QueryEscape(sid), http.StatusSeeOther)
@@ -186,8 +204,7 @@ func (h *handler) replaceDevice(w http.ResponseWriter, r *http.Request) {
 func (h *handler) toReplace(w http.ResponseWriter, r *http.Request, sess commerceSession, token string, asJSON bool) {
 	if token != "" && h.commerceSessions != nil {
 		h.commerceSessions.put(token, sess)
-		http.SetCookie(w, &http.Cookie{Name: commerceCookie, Value: token, Path: "/", HttpOnly: true,
-			SameSite: http.SameSiteLaxMode, Expires: time.Now().Add(commerceSessionTTL)})
+		setPortalCookie(w, r, commerceCookie, token, commerceSessionTTL)
 	}
 	if asJSON {
 		writeJSONPortal(w, http.StatusOK, map[string]any{"next": "/devices/replace"})
@@ -211,10 +228,10 @@ const replaceHTML = guestHead + `
   <div class="choice-list">
   {{range .Devices}}<form method="post" action="/devices/replace">
     <input type="hidden" name="device_id" value="{{.ID}}">
-    <button class="choice" type="submit"{{if not $.CanSwap}} disabled{{end}}><span class="c-text"><span class="c-name">{{.Name}}</span><span class="c-detail">{{if .Online}}{{index $.T "dev.online"}}{{else}}{{index $.T "dev.offline"}}{{end}}{{if .LastSeen}} · <span class="dev-seen" data-at="{{.LastSeen}}"></span>{{end}}</span><span class="c-detail c-price">{{index $.T "rep.btn"}}</span></span>` + iconChevNext + `</button>
+    <button class="choice" type="submit" aria-label="{{.Label}}"{{if not $.CanSwap}} disabled{{end}}><span class="c-text"><span class="c-name">{{.Name}}</span><span class="c-detail">{{if .Online}}{{index $.T "dev.online"}}{{else}}{{index $.T "dev.offline"}}{{end}}{{if .LastSeen}} · <span class="dev-seen" data-at="{{.LastSeen}}"></span>{{end}}</span><span class="c-detail c-price">{{index $.T "rep.btn"}}</span></span>` + iconChevNext + `</button>
   </form>{{end}}
   </div>
-  <form method="post" action="/logout"><button class="link" type="submit">{{index .T "pkg.signout"}}</button></form>
+  <form method="post" action="/logout"><input type="hidden" name="leave" value="{{.Leave}}"><button class="link" type="submit">{{index .T "pkg.signout"}}</button></form>
 </div>` + guestFoot + `
 </main>
 </div>` + guestScripts + `
@@ -224,7 +241,11 @@ const replaceHTML = guestHead + `
     var els = document.querySelectorAll('.dev-seen');
     for (var i = 0; i < els.length; i++) {
       var ts = Date.parse(els[i].getAttribute('data-at'));
-      if (!isNaN(ts)) els[i].textContent = new Date(ts).toLocaleString();
+      // In the PAGE's language (audit P-24), not whatever the browser defaults to.
+      if (!isNaN(ts)) {
+        var d = new Date(ts);
+        try { els[i].textContent = d.toLocaleString(document.documentElement.lang || undefined); } catch (e) { els[i].textContent = d.toLocaleString(); }
+      }
     }
     var forms = document.querySelectorAll('.choice-list form');
     for (var k = 0; k < forms.length; k++) {

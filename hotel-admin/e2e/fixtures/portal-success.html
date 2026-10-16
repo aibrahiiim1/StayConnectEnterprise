@@ -882,15 +882,13 @@ main.card { display: block; }
   <div class="status-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" stroke-width="2.4"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></div>
   <h1 class="page-title">You&#39;re online</h1>
   <p class="page-lead">Your device is connected to the internet.</p>
-  <div class="fact">
-    <span class="fact-label">Time remaining</span><span class="fact-value">No time limit</span>
-  </div>
-  <div class="actions">
-    <a class="btn btn--outline" href="/status?s=sess-1&amp;t=0">Status</a>
-    <form method="POST" action="/logout"><button class="btn btn--outline" type="submit">Disconnect</button></form>
-  </div>
   
-
+  <div class="fact"><span class="fact-label">Time remaining</span><span class="fact-value">No time limit</span></div>
+  
+  <div class="actions">
+    <a class="btn btn--outline" href="/status?s=sess-1">Status</a>
+    <form method="POST" action="/logout"><input type="hidden" name="leave" value="e2e-leave"><button class="btn btn--outline" type="submit">Disconnect</button></form>
+  </div>
   
 
   
@@ -1111,9 +1109,16 @@ main.card { display: block; }
   var sel = document.getElementById('lang');
   if (sel) sel.addEventListener('change', function () {
     try { localStorage.setItem('sc-lang', sel.value); } catch (e) {}
-    try { document.cookie = 'sc-lang=' + encodeURIComponent(sel.value) + '; path=/; max-age=31536000; SameSite=Lax'; } catch (e) {}
+    try { document.cookie = 'sc-lang=' + encodeURIComponent(sel.value) + '; path=/; max-age=31536000; SameSite=Lax' + (location.protocol === 'https:' ? '; Secure' : ''); } catch (e) {}
     location.reload();
   });
+  
+  
+  var alertEl = document.querySelector('.notice[role=alert], .page-lead[role=alert]');
+  if (alertEl) {
+    if (!alertEl.hasAttribute('tabindex')) alertEl.setAttribute('tabindex', '-1');
+    try { alertEl.focus({ preventScroll: false }); } catch (e) { alertEl.focus(); }
+  }
 })();
 </script>
 <script nonce="e2e-nonce">

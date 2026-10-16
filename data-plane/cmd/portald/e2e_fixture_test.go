@@ -45,14 +45,22 @@ func renderE2E(t *testing.T, path string, commerce bool) string {
 	if w.Code != http.StatusOK {
 		t.Fatalf("%s answered %d", path, w.Code)
 	}
-	return nonceAttr.ReplaceAllString(w.Body.String(), `nonce="e2e-nonce"`)
+	// The nonce and the sign-out token change with every response / process; the fixture carries placeholders.
+	out := nonceAttr.ReplaceAllString(w.Body.String(), `nonce="e2e-nonce"`)
+	return leaveAttr.ReplaceAllString(out, `name="leave" value="e2e-leave"`)
 }
 
+var leaveAttr = regexp.MustCompile(`name="leave" value="[^"]*"`)
+
 func TestE2EPortalFixtures(t *testing.T) {
+	// One success page: with the Phase-2 surface on or off it is the same page, since the package panel it used
+	// to carry is gone (audit P-16). The test below proves the two are identical.
 	pages := map[string]string{
-		"portal-landing.html":          renderE2E(t, "/", false),
-		"portal-success.html":          renderE2E(t, "/success?s=sess-1", false),
-		"portal-success-commerce.html": renderE2E(t, "/success?s=sess-1", true),
+		"portal-landing.html": renderE2E(t, "/", false),
+		"portal-success.html": renderE2E(t, "/success?s=sess-1", false),
+	}
+	if on := renderE2E(t, "/success?s=sess-1", true); on != pages["portal-success.html"] {
+		t.Error("the success page differs with the Phase-2 surface on: it must offer nothing to buy")
 	}
 	update := os.Getenv("UPDATE_E2E_FIXTURE") != ""
 	for name, got := range pages {

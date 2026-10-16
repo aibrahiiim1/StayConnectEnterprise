@@ -46,7 +46,7 @@ func accountHandler(t *testing.T) (*handler, *fakeAccountSCD) {
 	mux := http.NewServeMux()
 	for _, p := range []string{"/v1/auth/account/register", "/v1/sessions/authorize-credentials", "/v1/auth/account/forgot",
 		"/v1/auth/account/verify", "/v1/auth/account/reset", "/v1/auth/account/status", "/v1/auth/account/resend",
-		"/v1/auth/account/grace", "/v1/sessions/activate"} {
+		"/v1/auth/account/grace", "/v1/sessions/activate", "/v1/sessions/status"} {
 		path := p
 		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 			var in map[string]any
@@ -488,7 +488,11 @@ func TestYoureOnlineRemindsAnUnverifiedAccount(t *testing.T) {
 	deadline := time.Now().Add(20 * time.Hour).UTC().Format(time.RFC3339)
 	state := `{"account":{"verified":false,"verification_required":true,"deadline":"` + deadline + `","suspended":false}}`
 	f.on("/v1/auth/account/status", func(map[string]any) (int, string) { return 200, state })
-	req := httptest.NewRequest(http.MethodGet, "/success?s=0f0e0d0c-1111-2222-3333-444455556666&t=3600", nil)
+	// The online page looks up this device's session; the reminder's Resend carries the session scd named.
+	f.on("/v1/sessions/status", func(map[string]any) (int, string) {
+		return 200, `{"session_id":"0f0e0d0c-1111-2222-3333-444455556666","active":true}`
+	})
+	req := httptest.NewRequest(http.MethodGet, "/success?s=forged&t=3600", nil)
 	req.RemoteAddr = "10.20.0.50:4321"
 	req.AddCookie(&http.Cookie{Name: accountCookie, Value: acctToken})
 	body := serveAcct(h, req).Body.String()

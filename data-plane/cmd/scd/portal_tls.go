@@ -91,8 +91,11 @@ type PortalTLSState struct {
 	CustomDomain       string     `json:"custom_domain"`
 	CustomDomainStatus string     `json:"custom_domain_status"`
 	PortalIP           string     `json:"portal_ip"`
-	FallbackReason     string     `json:"fallback_reason"`
-	FallbackSince      *time.Time `json:"fallback_since"`
+	// PortalIPActive: the portal address is configured AND up on this appliance, so a guest can reach the portal
+	// at http://<portal_ip>/ whatever the HTTPS state. portald uses it as the HTTP fallback's canonical origin.
+	PortalIPActive bool       `json:"portal_ip_active"`
+	FallbackReason string     `json:"fallback_reason"`
+	FallbackSince  *time.Time `json:"fallback_since"`
 	// Hostnames are the portal hostnames portald may serve a certificate for: those with an installed, valid
 	// certificate. The canonical hostname is one of them whenever it is set.
 	Hostnames []string `json:"portal_hostnames"`
@@ -587,6 +590,7 @@ func (a *portalTLSAgent) decide(set ptSettings, st *ptState, mode centralMode, c
 	return PortalTLSState{
 		HTTPSActive: st.HTTPSActive, Canonical: canonical, OneGateHostname: st.OneGateHostname,
 		CustomDomain: set.CustomDomain, CustomDomainStatus: st.CustomDomainStatus, PortalIP: set.PortalIP,
+		PortalIPActive: set.PortalIP != "" && a.addrUp != nil && a.addrUp(set.PortalIP),
 		FallbackReason: reason, Hostnames: hosts, CertDir: a.defaultState().CertDir, Trust: a.trust,
 	}
 }
