@@ -1187,14 +1187,20 @@ func (p *phase3Auth) alreadyGranted(ctx context.Context, authContextID string, d
 // and this guest SHOULD be enforced. netd, the enforcement owner, promotes it to 'active' through
 // iam_v2.activate_session_enforcement once the accountable tc class and the nft authorization are both proven.
 func (p *phase3Auth) openSessionTx(ctx context.Context, tx pgx.Tx, entitlement string, dev deviceIdentity) (string, error) {
+	return p.openSessionWithMethodTx(ctx, tx, entitlement, dev, "PMS")
+}
+
+// openSessionWithMethodTx is openSessionTx with the session's credential label named by the caller: the
+// post-stay conversion opens its session through exactly this path, labelled POST_STAY.
+func (p *phase3Auth) openSessionWithMethodTx(ctx context.Context, tx pgx.Tx, entitlement string, dev deviceIdentity, method string) (string, error) {
 	var id string
 	err := tx.QueryRow(ctx, `
 		INSERT INTO iam_v2.sessions
 		  (tenant_id, site_id, entitlement_id, device_id, credential_method, state, started, ip, mac, ingress_interface)
-		VALUES ($1,$2,$3,$4,'PMS','PENDING_ENFORCEMENT',now(),$5::inet,$6::macaddr,$7)
+		VALUES ($1,$2,$3,$4,$8,'PENDING_ENFORCEMENT',now(),$5::inet,$6::macaddr,$7)
 		RETURNING id::text`,
 		p.srv.tenID, p.srv.siteID, entitlement, dev.DeviceID,
-		dev.IP.String(), dev.MAC.String(), p.bridgeFor(ctx, dev.IP)).Scan(&id)
+		dev.IP.String(), dev.MAC.String(), p.bridgeFor(ctx, dev.IP), method).Scan(&id)
 	return id, err
 }
 

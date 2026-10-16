@@ -428,6 +428,7 @@ const landingHTML = `<!doctype html>
       </div>
       <button class="primary" type="submit"><span data-i18n="btn.reconnect" data-i18n-en="Reconnect">{{index .T "btn.reconnect"}}</span></button>
     </form>
+    <div id="ps-choices" role="group" aria-label="{{index .T "pms.choose"}}" style="display:none"></div>
     <div class="err" id="ps-err" role="alert" data-for="ps-pin"></div>
   </div>
 
@@ -1486,38 +1487,89 @@ const landingHTML = `<!doctype html>
       });
     });
 
-    async function submitPostStay(pin, errEl) {
+    async function postStayCall(body) {
       let j = {};
       let reached = true;
       try {
         const r = await fetch('/auth/post-stay-pin', {
-          method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pin: pin })
+          method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
         });
         j = await r.json().catch(function(){ reached = false; return {}; });
       } catch (e) { reached = false; j = {}; }
+      return { j: j, reached: reached };
+    }
+
+    async function submitPostStay(pin, errEl) {
+      const res = await postStayCall({ pin: pin });
+      const j = res.j;
+      // A single post-stay package is converted by the server in the same request: the answer is the session.
       if (j.ok && j.session_id) {
         window.location = (j.redirect_to || '/success') + '?s=' + encodeURIComponent(j.session_id);
         return;
       }
-      if (j.ok && j.auth_context_id) {
-        // Verified. The conversion is a second call carrying the context the server just issued.
-        let k = {};
-        try {
-          const r2 = await fetch('/auth/post-stay-pin', {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ auth_context_id: j.auth_context_id })
-          });
-          k = await r2.json().catch(function(){ return {}; });
-        } catch (e) { k = {}; }
-        if (k.ok && k.session_id) {
-          window.location = (k.redirect_to || '/success') + '?s=' + encodeURIComponent(k.session_id);
-          return;
-        }
+      // Verified, with more than one package: the guest chooses, and the conversion is a second call carrying
+      // the context the server just issued AND the package chosen from the offers it returned.
+      if (j.ok && j.needs_choice && j.auth_context_id && (j.choices || []).length) {
+        renderPostStayChoices(j.auth_context_id, j.choices, errEl);
+        return;
       }
       // Every other ANSWER is the same message -- wrong PIN, expired, revoked, locked out, the room re-let, or
       // post-stay not being offered here at all. A request that never reached the server is not an answer, and
       // telling a guest whose connection dropped to re-check a PIN they typed correctly helps nobody.
-      errEl.textContent = reached ? PHASE3_FAIL() : PHASE3_UNREACHED();
+      errEl.textContent = res.reached ? PHASE3_FAIL() : PHASE3_UNREACHED();
+    }
+
+    function renderPostStayChoices(authContextID, choices, errEl) {
+      const box = document.getElementById('ps-choices');
+      const form = document.getElementById('form-poststay');
+      box.innerHTML = '';
+      const h = document.createElement('p');
+      h.className = 'choices-title';
+      h.dataset.i18n = 'pms.choose';
+      h.dataset.i18nEn = BUILTIN.en['pms.choose'];
+      h.textContent = t('pms.choose');
+      box.appendChild(h);
+      choices.forEach(function(c) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'choice';
+        const text = document.createElement('span');
+        text.className = 'c-text';
+        const name = document.createElement('span');
+        name.className = 'c-name';
+        name.dir = 'auto';
+        name.textContent = c.code;
+        text.appendChild(name);
+        const down = Math.round((c.down_kbps || 0) / 1000);
+        if (down > 0) {
+          const detail = document.createElement('span');
+          detail.className = 'c-detail';
+          detail.textContent = t('unit.mbps').split('{n}').join(String(down));
+          text.appendChild(detail);
+        }
+        b.appendChild(text);
+        b.insertAdjacentHTML('beforeend', ICON_CHEV);
+        b.addEventListener('click', async function() {
+          box.querySelectorAll('button').forEach(function(x){ x.disabled = true; });
+          errEl.textContent = '';
+          const res = await postStayCall({ auth_context_id: authContextID, package_revision_id: c.package_revision_id });
+          if (res.j.ok && res.j.session_id) {
+            window.location = (res.j.redirect_to || '/success') + '?s=' + encodeURIComponent(res.j.session_id);
+            return;
+          }
+          // The context is one-time: after a refused conversion the choices cannot be trusted, so they are taken
+          // down and the guest signs in with the PIN again.
+          box.innerHTML = '';
+          box.style.display = 'none';
+          form.style.display = '';
+          errEl.textContent = res.reached ? PHASE3_FAIL() : PHASE3_UNREACHED();
+        });
+        box.appendChild(b);
+      });
+      form.style.display = 'none';
+      box.style.display = 'block';
+      const first = box.querySelector('button.choice');
+      if (first) first.focus();
     }
 
     // phase3ClearFailure takes the page OUT of its failure state, including the countdown that writes to the

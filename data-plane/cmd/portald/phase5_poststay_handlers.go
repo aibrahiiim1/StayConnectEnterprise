@@ -46,18 +46,33 @@ type postStayOut struct {
 	PIN       string `json:"pin,omitempty"`
 	ExpiresAt string `json:"pin_expires_at,omitempty"`
 
-	AuthContextID string `json:"auth_context_id,omitempty"`
-	SessionID     string `json:"session_id,omitempty"`
-	RedirectTo    string `json:"redirect_to,omitempty"`
+	// NeedsChoice + Choices are a verified PIN awaiting the guest's package choice (more than one post-stay
+	// package is offered). The page sends the chosen package_revision_id back with AuthContextID.
+	NeedsChoice   bool             `json:"needs_choice,omitempty"`
+	AuthContextID string           `json:"auth_context_id,omitempty"`
+	Choices       []postStayChoice `json:"choices,omitempty"`
+	SessionID     string           `json:"session_id,omitempty"`
+	RedirectTo    string           `json:"redirect_to,omitempty"`
+}
+
+// postStayChoice is one package the verified guest may take. Post-stay grants zero-price packages only, so
+// there is no method and no price: the page shows the name and the speed.
+type postStayChoice struct {
+	PackageRevisionID string `json:"package_revision_id"`
+	Code              string `json:"code"`
+	DownKbps          int    `json:"down_kbps"`
+	UpKbps            int    `json:"up_kbps"`
 }
 
 type scdPostStayResp struct {
-	Outcome       string `json:"outcome"`
-	PIN           string `json:"pin"`
-	ExpiresAt     string `json:"pin_expires_at"`
-	AuthContextID string `json:"auth_context_id"`
-	ExpiresIn     int    `json:"expires_in_seconds"`
-	SessionID     string `json:"session_id"`
+	Outcome       string           `json:"outcome"`
+	PIN           string           `json:"pin"`
+	ExpiresAt     string           `json:"pin_expires_at"`
+	AuthContextID string           `json:"auth_context_id"`
+	ExpiresIn     int              `json:"expires_in_seconds"`
+	Offers        []postStayChoice `json:"offers"`
+	SessionID     string           `json:"session_id"`
+	EntitlementID string           `json:"entitlement_id"`
 }
 
 // postStayIssue serves POST /poststay/issue — an authenticated guest asking for a PIN to use after checkout.
@@ -117,16 +132,34 @@ func (h *handler) postStayAuth(w http.ResponseWriter, r *http.Request) {
 		h.phase3Fail(w, r, b, "poststay_not_verified", classPostStay)
 		return
 	}
+	// THE OFFER SET scd returned with the context. One offer is not a choice: it is converted at once, in this
+	// request, exactly as the room path grants a single included offer. More than one is the guest's choice,
+	// and the page sends the chosen package_revision_id back with the context.
+	switch len(out.Offers) {
+	case 0:
+		// scd issues no context without an offer, so this is a contract break, not a guest condition.
+		h.phase3Fail(w, r, b, "poststay_verified_without_offers", classPostStay)
+		return
+	case 1:
+		h.postStayConvert(w, r, b, out.AuthContextID, out.Offers[0].PackageRevisionID, device)
+		return
+	}
 	b.wait(r)
-	writeJSONPortal(w, http.StatusOK, postStayOut{OK: true, AuthContextID: out.AuthContextID})
+	writeJSONPortal(w, http.StatusOK, postStayOut{
+		OK: true, NeedsChoice: true, AuthContextID: out.AuthContextID, Choices: out.Offers})
 }
 
+// postStayConvert asks scd to convert the verified context into the chosen package. scd commits the
+// entitlement and this device's session together and answers GRANTED only once the session is enforced (the
+// room grant's rule), so a session id here is a device that is online -- which is exactly what the success page
+// is told. A GRANTED answer without a session id is not access and is refused like any other failure.
 func (h *handler) postStayConvert(w http.ResponseWriter, r *http.Request, b *phase3Budget,
 	contextID, packageRevision string, device map[string]string) {
 	body, _ := json.Marshal(map[string]any{
 		"device": device, "auth_context_id": contextID, "package_revision_id": packageRevision})
 	var out scdPostStayResp
-	if !h.scdPhase3Call(b, "http://unix/v1/phase5/poststay/convert", body, &out) || out.Outcome != "GRANTED" {
+	if !h.scdPhase3Call(b, "http://unix/v1/phase5/poststay/convert", body, &out) || out.Outcome != "GRANTED" ||
+		out.SessionID == "" || out.SessionID == out.EntitlementID {
 		h.phase3Fail(w, r, b, "poststay_convert_unavailable", classPostStay)
 		return
 	}

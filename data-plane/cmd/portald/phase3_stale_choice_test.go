@@ -43,7 +43,9 @@ func TestFailedSelectionTakesTheChoicesDown(t *testing.T) {
 	}
 
 	// THE REGRESSION ITSELF: the click handler must not re-enable the buttons it just disabled.
-	click := s[strings.Index(s, "b.addEventListener('click'"):]
+	// Searched inside the room chooser: the post-stay chooser has a click handler of its own.
+	room := s[strings.Index(s, "function renderPhase3Choices"):]
+	click := room[strings.Index(room, "b.addEventListener('click'"):]
 	click = click[:strings.Index(click, "box.appendChild(b);")]
 	if strings.Contains(click, "x.disabled = false") {
 		t.Error("a failed selection re-enables the same buttons; that is the defect this replaced")
