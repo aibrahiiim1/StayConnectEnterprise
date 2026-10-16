@@ -131,15 +131,21 @@ export function formatDevices(n?: number | null): string {
   return `${n} device${n === 1 ? "" : "s"}`;
 }
 
-/** Device-limit policy codes → operator wording. */
+/** Device-limit policy codes → operator wording. ADMIN_APPROVAL stays here only so plans published with it
+ *  before still read correctly: there is no approval workflow, so it is not offered (SELECTABLE_DEVICE_LIMIT_POLICIES)
+ *  and the appliance refuses to publish it. */
 export const DEVICE_LIMIT_POLICIES: Record<string, string> = {
   REJECT_NEW_DEVICE: "Refuse the new device",
   DISCONNECT_OLDEST: "Disconnect the oldest device",
-  ADMIN_APPROVAL: "Ask an operator to approve",
+  ADMIN_APPROVAL: "Ask an operator to approve (not available)",
 };
+
+/** The policies a plan can be published with: both are enforced by the appliance (migration 0122). */
+export const SELECTABLE_DEVICE_LIMIT_POLICIES = ["REJECT_NEW_DEVICE", "DISCONNECT_OLDEST"] as const;
 
 /** Time-accounting modes → operator wording, with the distinction that actually matters spelled out. */
 export const TIME_ACCOUNTING_MODES: Record<string, string> = {
   VALIDITY_WINDOW: "Validity window — time runs from purchase, whether or not the client is online",
   ACTIVE_USAGE: "Active usage — time is consumed only while the client is connected",
+  AGGREGATE_ONLINE_TIME: "Online time — the time allowance is used only while the client is online",
 };

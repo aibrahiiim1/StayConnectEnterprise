@@ -44,6 +44,10 @@ type fullResyncReq struct {
 // requestFullResync serves POST /edge/v1/pms-interfaces/{id}/full-resync.
 func (s *server) requestFullResync(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if !uuidRe.MatchString(id) {
+		jsonErr(w, http.StatusNotFound, "not_found", "no such PMS connection")
+		return
+	}
 	var in fullResyncReq
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
@@ -58,7 +62,7 @@ func (s *server) requestFullResync(w http.ResponseWriter, r *http.Request) {
 	// current mirror keeps serving until a new generation publishes — but it does put load on the hotel's PMS
 	// and changes what every subsequent guest resolves against.
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
 
@@ -95,6 +99,11 @@ func (s *server) requestFullResync(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "could not record the request")
 		return
 	}
+	// WHO ASKED (audit H-4). A full resync is real traffic to the hotel's PMS and replaces the guest list every
+	// sign-in resolves against; the command row carries the reason but not the operator, so the actor is
+	// recorded here, with the command it produced.
+	s.audit(r, "pms_interface.full_resync_requested", "pms_interfaces", id,
+		map[string]any{"reason_code": strings.TrimSpace(in.ReasonCode), "command_id": *cmdID})
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"command_id": *cmdID,
 		"stage":      "REQUESTING_FULL_SYNC",

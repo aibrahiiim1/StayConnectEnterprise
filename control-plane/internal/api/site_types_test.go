@@ -109,18 +109,18 @@ func TestModulesCatalogMirrorsTheRegistry(t *testing.T) {
 }
 
 func TestLicenseTermsModules(t *testing.T) {
-	p, err := licenseTerms{Modules: []string{"card_payment", "paid_access", "paid_access"}}.params("a", "op")
+	p, err := licenseTerms{MaxConcurrentOnlineGuests: 10, Modules: []string{"card_payment", "paid_access", "paid_access"}}.params("a", "op")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(p.Modules, []string{"card_payment", "paid_access"}) {
 		t.Fatalf("modules %v", p.Modules)
 	}
-	if p, err := (licenseTerms{}).params("a", "op"); err != nil || p.Modules == nil || len(p.Modules) != 0 {
+	if p, err := (licenseTerms{MaxConcurrentOnlineGuests: 10}).params("a", "op"); err != nil || p.Modules == nil || len(p.Modules) != 0 {
 		t.Fatalf("omitted modules must be core only: %v %v", p.Modules, err)
 	}
 	for _, bad := range [][]string{{"nope"}, {"card_payment"}, {"room_charge", "hospitality"}} {
-		_, err := licenseTerms{Modules: bad}.params("a", "op")
+		_, err := licenseTerms{MaxConcurrentOnlineGuests: 10, Modules: bad}.params("a", "op")
 		if err == nil || !strings.HasPrefix(err.Error(), "modules: ") {
 			t.Errorf("%v: err %v", bad, err)
 		}

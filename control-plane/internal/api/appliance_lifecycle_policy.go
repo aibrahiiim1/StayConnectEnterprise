@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/stayconnect/enterprise/control-plane/internal/portaltls"
 )
 
@@ -35,6 +37,21 @@ func (b *Base) revokeApplianceBoundLicenses(ctx context.Context, applianceID str
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
+	revoked, err := b.revokeApplianceBoundLicensesTx(ctx, tx, applianceID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	b.PortalTLS.Nudge() // the worker deletes the A record and revokes now, not at its next pass
+	return revoked, nil
+}
+
+// revokeApplianceBoundLicensesTx is revokeApplianceBoundLicenses inside the caller's transaction: retirement
+// and replacement commit the licence revocation together with the signed terminal assignment. The caller
+// nudges the portal-TLS worker after committing.
+func (b *Base) revokeApplianceBoundLicensesTx(ctx context.Context, tx pgx.Tx, applianceID string) ([]string, error) {
 	rows, err := tx.Query(ctx, `
         UPDATE licenses SET status='revoked', revoked_at=now()
          WHERE $1::uuid = ANY(appliance_ids) AND status IN ('active','suspended')
@@ -56,9 +73,5 @@ func (b *Base) revokeApplianceBoundLicenses(ctx context.Context, applianceID str
 	if err := portaltls.ReleaseAppliance(ctx, tx, applianceID, portaltls.ActorSystem); err != nil {
 		return nil, err
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, err
-	}
-	b.PortalTLS.Nudge() // the worker deletes the A record and revokes now, not at its next pass
 	return revoked, nil
 }

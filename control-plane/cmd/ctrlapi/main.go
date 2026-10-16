@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/ed25519"
 	"errors"
@@ -75,6 +76,18 @@ func serve() {
 		os.Exit(1)
 	}
 	logLevel.Set(cfg.LogLevel)
+	// Host hardening is checked before anything listens: a production Central does not start with the operator
+	// API on every interface or with an insecure session cookie (config.Validate).
+	hardenErrs, hardenWarns := cfg.Validate()
+	for _, w := range hardenWarns {
+		slog.Warn("configuration is not hardened", "problem", w)
+	}
+	if len(hardenErrs) > 0 {
+		for _, e := range hardenErrs {
+			slog.Error("refusing to start: configuration is not hardened", "problem", e)
+		}
+		os.Exit(1)
+	}
 
 	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -154,7 +167,8 @@ func serve() {
 
 	// Housekeeping, every minute: a retirement never acknowledged within policy becomes
 	// terminal_delivery_failed + a security alert (credentials are NOT revoked); an elapsed replacement
-	// window raises an alert; and, hourly, assignment-fetch log rows older than 30 days are deleted.
+	// window raises an alert; and, hourly, assignment-fetch log rows older than 30 days are deleted and
+	// certificates superseded by a rotation more than a day ago are recorded as revoked.
 	go func() {
 		t := time.NewTicker(60 * time.Second)
 		defer t.Stop()
@@ -181,6 +195,11 @@ func serve() {
 						slog.Warn("assignment fetch log retention failed", "err", err)
 					} else if n > 0 {
 						slog.Info("assignment fetch log retention", "deleted", n)
+					}
+					if n, err := api.RevokeSupersededCertificates(rootCtx, tb); err != nil {
+						slog.Warn("superseded certificate revocation failed", "err", err)
+					} else if n > 0 {
+						slog.Info("superseded appliance certificates revoked", "count", n)
 					}
 				}
 			}
@@ -401,9 +420,20 @@ func runGenVendorKey(args []string) error {
 func runSeedAdmin(args []string) error {
 	fs := flag.NewFlagSet("seed-admin", flag.ExitOnError)
 	email := fs.String("email", "", "admin email")
-	password := fs.String("password", "", "admin password (min 10 chars)")
+	password := fs.String("password", "", "admin password (min 10 chars) -- DISCOURAGED: visible in ps and shell history; "+
+		"omit it and pass the password on stdin or in CTRLAPI_SEED_ADMIN_PASSWORD")
 	displayName := fs.String("name", "Platform Admin", "display name")
 	_ = fs.Parse(args)
+	// The password does not have to be on the command line, where `ps` and the shell history would keep it.
+	if *password == "" {
+		if v := os.Getenv("CTRLAPI_SEED_ADMIN_PASSWORD"); v != "" {
+			*password = v
+		} else if line, err := bufio.NewReader(os.Stdin).ReadString('\n'); err == nil || line != "" {
+			*password = strings.TrimRight(line, "\r\n")
+		}
+	} else {
+		slog.Warn("seed-admin: --password puts the password in the process list and shell history; prefer stdin")
+	}
 
 	if *email == "" || len(*password) < 10 {
 		return fmt.Errorf("--email and --password (min 10 chars) required")

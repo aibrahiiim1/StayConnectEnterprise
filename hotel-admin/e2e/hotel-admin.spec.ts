@@ -225,7 +225,9 @@ test("internet packages: guest activity rows are sanitized and carry no guest PI
   await expect(page.getByRole("link", { name: /open this stay/i })).toHaveAttribute("href", "/usage?stay=st1");
   await page.keyboard.press("Escape");
 
-  const html = (await page.content()).toLowerCase();
+  // The console's own navigation links the signed-in OPERATOR to their change-password page; that link is
+  // operator chrome, not guest data, and is the only "password" the page may carry.
+  const html = (await page.content()).toLowerCase().split('href="/account/password"').join("");
   for (const pii of ["auth_context", "device_id", "guest_network", "voucher_id", "guest_account", "password\"", "mac address"]) {
     expect(html).not.toContain(pii);
   }

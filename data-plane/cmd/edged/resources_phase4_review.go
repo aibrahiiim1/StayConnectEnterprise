@@ -44,11 +44,11 @@ var reviewActions = map[string]struct {
 	operatorSummary string
 }{
 	"CONFIRM_POSTED": {terminal: true, needsEvidence: true,
-		operatorSummary: "The charge IS on the guest folio. External evidence is mandatory."},
+		operatorSummary: "The charge IS on the guest's reservation in the PMS. External evidence is mandatory."},
 	"CONFIRM_NOT_POSTED_RETRY": {terminal: true, needsEvidence: true,
-		operatorSummary: "The charge is NOT on the folio. Authorises exactly ONE further attempt, reusing the same business idempotency key."},
+		operatorSummary: "The charge is NOT on the reservation in the PMS. Authorises exactly ONE further attempt, reusing the same business idempotency key."},
 	"CONFIRM_NOT_POSTED_ABANDON": {terminal: true, needsEvidence: true,
-		operatorSummary: "The charge is NOT on the folio and will not be retried. The posting is final."},
+		operatorSummary: "The charge is NOT on the reservation in the PMS and will not be retried. The posting is final."},
 	"CREATE_REVERSAL": {terminal: true, needsEvidence: true, needsAmountOpt: true,
 		operatorSummary: "Records a PASSIVE reversal ledger row referencing the original. It is NOT sent to the PMS: " +
 			"programmatic reversal is capability=false in v1, so the actual correction is a manual Front Office operation."},
@@ -63,6 +63,17 @@ func (s *server) financialReviewRoutes() http.Handler {
 	r.Get("/postings/{id}", s.getReviewPosting)
 	r.Post("/postings/{id}/actions", s.postReviewAction)
 	// Card disputes and chargebacks (0115): cases resolved explicitly; full-refund terminations listed.
+	r.Get("/card-cases", s.listCardCases)
+	r.Post("/card-cases/{id}/resolve", s.resolveCardCase)
+	return r
+}
+
+// cardCasesRoutes is the card-dispute part of financial review ALONE, mounted when the PMS financial review
+// surface is off. Card disputes and chargebacks are opened by scd whenever card payment is in use (0115) and
+// never end access by themselves; behind the review flag, a site taking cards with review off had cases that
+// nobody could reach, so a chargeback could be neither kept nor ended.
+func (s *server) cardCasesRoutes() http.Handler {
+	r := chi.NewRouter()
 	r.Get("/card-cases", s.listCardCases)
 	r.Post("/card-cases/{id}/resolve", s.resolveCardCase)
 	return r
@@ -103,7 +114,7 @@ func (s *server) listReviewActionCatalog(w http.ResponseWriter, r *http.Request)
 				"heuristically screened for recognisable secret shapes. Screening is heuristic, not a proof.",
 		},
 		"note": "There is no generic approve action. Programmatic PMS reversal is disabled in v1: " +
-			"CREATE_REVERSAL records an audited ledger row only, and the folio correction is manual.",
+			"CREATE_REVERSAL records an audited ledger row only, and the correction in the PMS is manual.",
 	})
 }
 
@@ -299,7 +310,7 @@ func (s *server) getReviewPosting(w http.ResponseWriter, r *http.Request) {
 		"available_actions": s.availableActions(q, attempts),
 		"limitations": []string{
 			"Programmatic PMS reversal is capability=false in v1. CREATE_REVERSAL records an audited ledger " +
-				"row only; the folio correction itself is a manual Front Office operation.",
+				"row only; the correction in the PMS itself is a manual Front Office operation.",
 			"CONFIRM_NOT_POSTED_RETRY authorises exactly ONE further attempt and is consumed by it.",
 		},
 	})
@@ -387,7 +398,7 @@ func (s *server) postReviewAction(w http.ResponseWriter, r *http.Request) {
 	// STEP-UP. §15 requires password re-authentication for every review action, including ESCALATE: the
 	// audit record names an operator, and it should not be possible to write one from a stolen cookie.
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
 
@@ -437,6 +448,13 @@ func (s *server) postReviewAction(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "the decision could not be recorded")
 		return
 	}
+	// The console's audit trail records the decision too. The review ledger is the financial authority; the
+	// audit log is where an operator looks for "who did what on this appliance", and a money decision that
+	// appears in one and not the other is a gap someone will fall into.
+	s.audit(r, "financial_review.decided", "pms_posting", id, map[string]any{
+		"action": in.Action, "action_id": actionID, "reason": reason, "applied": applied,
+		"expected_version": in.ExpectedVersion, "reversal_amount_minor": in.ReversalAmountMinor,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"action_id": actionID,
 		"action":    in.Action,

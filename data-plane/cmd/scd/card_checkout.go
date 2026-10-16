@@ -255,6 +255,15 @@ func (s *server) purchaseStatus(w http.ResponseWriter, r *http.Request) {
 	if eid != nil {
 		out["entitlement_id"] = *eid
 	}
+	// How long the provider's checkout lives (the site's card payment setting), so the portal's pending page waits
+	// exactly that long before it says it could not confirm the payment (audit P-7), instead of a fixed 20 minutes.
+	if method == "ONLINE_PAYMENT" {
+		var exp int
+		if err := s.db.QueryRow(ctx, `SELECT checkout_expiry_minutes FROM iam_v2.card_payment_settings_get($1,$2)`,
+			s.tenID, s.siteID).Scan(&exp); err == nil && exp > 0 {
+			out["checkout_expiry_seconds"] = exp * 60
+		}
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -316,6 +325,13 @@ func (s *server) cardReconcileLoop(ctx context.Context) {
 		}
 		for _, id := range s.card.engine.CapturedStillUngranted(cctx, s.tenID, s.siteID) {
 			_, _ = s.card.engine.Reconcile(cctx, s.tenID, s.siteID, id)
+		}
+		// Purchases whose checkout was never created (the intent was refused) are failed once they are older
+		// than any checkout could be, so the package is offered again (migration 0121; audited per purchase).
+		if n, ferr := s.card.engine.FailUnstartedPurchases(cctx, s.tenID, s.siteID); ferr != nil {
+			slog.Warn("card: unstarted purchase sweep failed", "err", ferr)
+		} else if n > 0 {
+			slog.Info("card: failed purchases that never reached a provider", "count", n)
 		}
 		if time.Since(lastSweep) > 6*time.Hour {
 			s.card.engine.SweepReversals(cctx, s.tenID, s.siteID, 60*24*time.Hour, 200)
@@ -566,6 +582,12 @@ func (s *server) paymentAccountSave(w http.ResponseWriter, r *http.Request) {
 		strings.TrimSpace(req.DisplayName), req.Currency, payment.Mode(req.Mode), req.Status, req.IsDefault, toSeal,
 		strings.TrimSpace(req.Operator), strings.TrimSpace(req.Reason))
 	if err != nil {
+		// Open checkouts pin the account's identity (migration 0121): a conflict with work in flight, not a
+		// malformed request.
+		if strings.Contains(err.Error(), "PAYMENT_ACCOUNT_CHECKOUTS_OPEN") {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "checkouts_open", "message": sanitizeDBError(err)})
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "not_saved", "message": sanitizeDBError(err)})
 		return
 	}
@@ -678,6 +700,18 @@ func (s *server) paymentAccountConversion(w http.ResponseWriter, r *http.Request
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Operator) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid", "message": "operator is required"})
 		return
+	}
+	// ONLY THE DEFAULT ACCOUNT TAKES CHECKOUTS (p4_resolve_payment_account_v2), so provider-converts on any
+	// other account changes nothing a client sees -- the switch said "on" and did nothing. Turning it on is
+	// refused there; turning it off is always allowed.
+	if req.ProviderConverts {
+		var isDefault bool
+		if err := s.db.QueryRow(r.Context(), `SELECT is_default AND status='ACTIVE' FROM iam_v2.payment_provider_accounts
+			 WHERE tenant_id=$1 AND site_id=$2 AND id=$3::uuid`, s.tenID, s.siteID, chi.URLParam(r, "id")).Scan(&isDefault); err == nil && !isDefault {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "conversion_not_default",
+				"message": "Only the default active account takes card payments, so conversion can be turned on only for it. Make this account the default first."})
+			return
+		}
 	}
 	var out bool
 	err := s.db.QueryRow(r.Context(), `SELECT iam_v2.payment_account_set_conversion($1,$2,$3::uuid,$4,$5,$6)`,

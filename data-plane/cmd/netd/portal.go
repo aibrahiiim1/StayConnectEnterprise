@@ -71,6 +71,7 @@ func (a *applier) renderTopo() netcfg.Topology {
 	a.portalMu.Lock()
 	defer a.portalMu.Unlock()
 	t := a.topo
+	t.MgmtAddr = a.resolveMgmtAddr(t.MgmtAddr)
 	t.PortalVIP = a.portal.vip
 	t.PortalTLS = a.portal.tls
 	return t

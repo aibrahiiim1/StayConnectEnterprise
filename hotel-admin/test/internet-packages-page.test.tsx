@@ -7,11 +7,13 @@ vi.mock("@/lib/api", () => {
   class ApiError extends Error {
     status: number;
     body: unknown;
+    code: string;
     constructor(status: number, body?: unknown) {
       super(typeof body === "object" && body && "message" in body ? String((body as { message: unknown }).message)
         : typeof body === "object" && body && "error" in body ? String((body as { error: unknown }).error) : `HTTP ${status}`);
       this.status = status;
       this.body = body;
+      this.code = typeof body === "object" && body && "error" in body ? String((body as { error: unknown }).error) : "http_error";
     }
   }
   return {
@@ -303,6 +305,135 @@ describe("InternetPackagesPage — packages", () => {
     });
     const dialog = screen.getByRole("dialog");
     expect(await within(dialog).findByText("Room charge: One mapping per PMS interface.")).toBeInTheDocument();
+  });
+
+  // AUDIT O-15: EDIT MUST ROUND-TRIP EVERYTHING, including what the form has no control for.
+  it("Edit hands back unknown conditions, tier match keys, the whole display and the carried fields", async () => {
+    routes({
+      "/commercial-packages": list([PKG]), "/commercial-packages/plans": list([PLAN]),
+      "/commercial-packages/pk1/current": {
+        package_id: "pk1", code: "FREEWIFI", revision_id: "r1", revision_no: 1, service_plan_revision_id: "rev-gold",
+        display: { name: "Free WiFi", description: "Lobby and pool", badge: "NEW" },
+        duration_policy: { end_mode: "MANUAL_END" },
+        eligibility_rules: [
+          { Type: "STAY_STATUS", Value: { statuses: ["IN_HOUSE"] } },
+          { Type: "AUTH_METHOD", Value: { methods: ["voucher"] } },
+        ],
+        grant_tiers: [{ Order: 10, Value: { match: { type: "VIP", value: { is_vip: true } } } }],
+        price_minor: 0, currency: "USD", currency_exponent: 2, settlement_methods: ["NOT_REQUIRED", "PREPAID"],
+        room_charge_mappings: null,
+        package_type: "STAY_BUNDLE", plan_overrides: { max_concurrent_devices: 3 }, renewable: true, max_purchases_per_stay: 2,
+      },
+    });
+    p.mockResolvedValue({});
+    render(<InternetPackagesPage />);
+    await screen.findByText("Free WiFi");
+    fireEvent.click(screen.getByRole("button", { name: /^edit$/i }));
+    // The unknown condition is shown, read-only, as kept.
+    const kept = await screen.findByTestId("preserved-rules");
+    expect(kept.textContent).toContain("STAY_STATUS");
+    expect(kept.textContent).toContain("kept as is");
+    fireEvent.change(screen.getByTestId("name"), { target: { value: "Free WiFi Plus" } });
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    await waitFor(() => expect(p).toHaveBeenCalledTimes(1));
+    const body = p.mock.calls[0][1];
+    expect(body.display).toEqual({ name: "Free WiFi Plus", description: "Lobby and pool", badge: "NEW" });
+    expect(body.eligibility_rules).toContainEqual({ type: "STAY_STATUS", value: { statuses: ["IN_HOUSE"] } });
+    expect(body.eligibility_rules).toContainEqual({ type: "AUTH_METHOD", value: { methods: ["voucher"] } });
+    expect(body.grant_tiers).toEqual([{ order: 10, grant: { match: { type: "VIP", value: { is_vip: true } } } }]);
+    expect(body).toMatchObject({
+      package_type: "STAY_BUNDLE", plan_overrides: { max_concurrent_devices: 3 }, renewable: true, max_purchases_per_stay: 2,
+      price_minor: 0, currency: "USD", currency_exponent: 2, acquisition_methods: ["NOT_REQUIRED", "PREPAID"],
+      room_charge_mappings: [],
+    });
+    // A rename changes nothing clients pay or receive, so no password is asked or sent.
+    expect(body).not.toHaveProperty("password");
+  });
+
+  // AUDIT O-21: changing what clients pay is a step-up.
+  it("a price change asks for the password once and sends it with the same body", async () => {
+    routes({
+      "/commercial-packages": list([{ ...PKG, price_minor: 500, currency: "USD", currency_exponent: 2 }]),
+      "/commercial-packages/plans": list([PLAN]),
+      "/commercial-packages/pk1/current": {
+        package_id: "pk1", code: "FREEWIFI", revision_id: "r1", revision_no: 1, service_plan_revision_id: "rev-gold",
+        display: { name: "Free WiFi" }, duration_policy: { end_mode: "MANUAL_END" },
+        eligibility_rules: [], grant_tiers: [{ order: 10, value: {} }],
+        price_minor: 500, currency: "USD", currency_exponent: 2, settlement_methods: ["PREPAID"], room_charge_mappings: null,
+      },
+      "/modules": { modules: { paid_access: { id: "paid_access", label: "Paid access", licensed: true, enabled: true, ready: true } } },
+    });
+    p.mockResolvedValue({});
+    render(<InternetPackagesPage />);
+    await screen.findByText("Free WiFi");
+    fireEvent.click(screen.getByRole("button", { name: /^edit$/i }));
+    const price = await screen.findByLabelText("Price");
+    fireEvent.change(price, { target: { value: "7.50" } });
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    // Nothing is sent until the password is given.
+    const confirm = await screen.findByRole("dialog", { name: /confirm the change of terms/i });
+    expect(p).not.toHaveBeenCalled();
+    fireEvent.change(within(confirm).getByLabelText(/confirm your password/i), { target: { value: "pw-op" } });
+    fireEvent.click(within(confirm).getByRole("button", { name: /save changes/i }));
+    await waitFor(() => expect(p).toHaveBeenCalledTimes(1));
+    expect(p.mock.calls[0][1]).toMatchObject({ price_minor: 750, currency: "USD", password: "pw-op", acquisition_methods: ["PREPAID"] });
+  });
+
+  it("asks for the password when the server says the save needs one, and resends the same body", async () => {
+    routes({
+      "/commercial-packages": list([PKG]), "/commercial-packages/plans": list([PLAN]),
+      "/commercial-packages/pk1/current": {
+        package_id: "pk1", code: "FREEWIFI", revision_id: "r1", revision_no: 1, service_plan_revision_id: "rev-gold",
+        display: { name: "Free WiFi" }, duration_policy: { end_mode: "MANUAL_END" },
+        eligibility_rules: [], grant_tiers: [{ order: 10, value: {} }],
+      },
+    });
+    p.mockRejectedValueOnce(new ApiError(401, { error: "reauth_required", message: "password confirmation required" }));
+    p.mockResolvedValueOnce({});
+    render(<InternetPackagesPage />);
+    await screen.findByText("Free WiFi");
+    fireEvent.click(screen.getByRole("button", { name: /^edit$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /save changes/i }));
+    const confirm = await screen.findByRole("dialog", { name: /confirm the change of terms/i });
+    fireEvent.change(within(confirm).getByLabelText(/confirm your password/i), { target: { value: "pw-op" } });
+    fireEvent.click(within(confirm).getByRole("button", { name: /save changes/i }));
+    await waitFor(() => expect(p).toHaveBeenCalledTimes(2));
+    expect(p.mock.calls[1][1]).toEqual({ ...p.mock.calls[0][1], password: "pw-op" });
+  });
+
+  it("Enable asks for the password before offering a disabled package again", async () => {
+    routes({ "/commercial-packages": list([{ ...PKG, active: false }]), "/commercial-packages/plans": list([PLAN]) });
+    p.mockResolvedValue({});
+    render(<InternetPackagesPage />);
+    await screen.findByText("Free WiFi");
+    fireEvent.click(screen.getByRole("button", { name: /^enable$/i }));
+    const dlg = await screen.findByRole("dialog", { name: /offer free wifi again/i });
+    expect(p).not.toHaveBeenCalled();
+    fireEvent.change(within(dlg).getByLabelText(/confirm your password/i), { target: { value: "pw-op" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: /offer it again/i }));
+    await waitFor(() => expect(p).toHaveBeenCalledWith("/commercial-packages/pk1/active", { active: true, password: "pw-op" }));
+  });
+
+  // AUDIT O-12: only the DEFAULT active account takes card checkouts.
+  it("warns about the card currency against the DEFAULT account, not any active one", async () => {
+    routes({
+      "/commercial-packages": list([PKG]), "/commercial-packages/plans": list([PLAN]),
+      "/modules": { modules: {
+        paid_access: { id: "paid_access", label: "Paid access", licensed: true, enabled: true, ready: true },
+        card_payment: { id: "card_payment", label: "Card payment", licensed: true, enabled: true, ready: true },
+      } },
+      "/payment-providers/accounts": { ready: true, readiness: [], extra_domains: [], accounts: [
+        { id: "a1", provider: "stripe", currency: "USD", status: "ACTIVE", is_default: false, provider_converts: false },
+        { id: "a2", provider: "paymob", currency: "EGP", status: "ACTIVE", is_default: true, provider_converts: false },
+      ] },
+    });
+    render(<InternetPackagesPage />);
+    await screen.findByText("Free WiFi");
+    fireEvent.click(screen.getByRole("button", { name: /add package/i }));
+    fireEvent.change(await screen.findByLabelText("Price"), { target: { value: "5" } });
+    fireEvent.click(await screen.findByTestId("method-check-ONLINE_PAYMENT"));
+    // A USD account exists and is active, but it is not the default, so USD is not offered by card.
+    expect((await screen.findByTestId("card-currency-note")).textContent).toMatch(/default payment account settles EGP, not USD/);
   });
 
   // DELETE… REFUSES WITH THE SERVER'S REASONS when anything uses the package, and offers Disable.

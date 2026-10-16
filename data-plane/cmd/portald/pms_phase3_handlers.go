@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // scdResolve/scdGrant mirror scd's Phase-3 contract. They are separate types from the guest-facing ones on
@@ -61,6 +62,10 @@ type scdGrantResp struct {
 	Method      string `json:"method"`
 	RedirectURL string `json:"redirect_url"`
 	State       string `json:"state"`
+	// DeviceID and GuestNetworkID come only with a DEVICE_LIMIT refusal: the device scd placed and its network,
+	// held server-side for the replacement page. Never forwarded to the guest.
+	DeviceID       string `json:"device_id"`
+	GuestNetworkID string `json:"guest_network_id"`
 }
 
 // The two classes portald may decide on its own. Everything else comes from scd: portald knows what it could
@@ -218,20 +223,28 @@ func (h *handler) authPMSPhase3(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) phase3Resolve(w http.ResponseWriter, r *http.Request, b *phase3Budget, in phase3In, device map[string]string) (scdResolveResp, bool) {
-	// Every verification field is forwarded, and the guest-supplied identity stops here. `device` is built by
-	// the appliance from its own neighbour table — the guest cannot supply ip, mac, stay or interface, and no
-	// field of phase3In can reach those keys.
-	body, _ := json.Marshal(map[string]any{
-		"room":               in.Room,
-		"verification":       in.Verification,
-		"first_name":         in.FirstName,
-		"last_name":          in.LastName,
-		"reservation_number": in.ReservationNumber,
-		"request_id":         in.RequestID,
-		"device":             device,
-	})
+	// Every verification field the guest FILLED is forwarded as typed, and the guest-supplied identity stops
+	// here. `device` is built by the appliance from its own neighbour table — the guest cannot supply ip, mac,
+	// stay or interface, and no field of phase3In can reach those keys.
+	//
+	// WHICH FIELDS THE SITE ACCEPTS IS scd's DECISION, not this hop's. scd reads the configured Room sign-in mode
+	// from the same record the portal draws its prompt from and refuses a request carrying a field that mode does
+	// not accept (cmd/scd/phase3_auth_mode.go). This hop only stops sending empty keys, so what scd judges is
+	// exactly what the page filled in -- the portal script fills only the one field its mode names -- and a
+	// blank key can never be mistaken for evidence of a second kind. Not looked up here: a second scd hop inside
+	// the guest-visible budget would buy nothing the enforcement point does not already guarantee.
+	body := map[string]any{"room": in.Room, "request_id": in.RequestID, "device": device}
+	for k, v := range map[string]string{
+		"verification": in.Verification, "first_name": in.FirstName,
+		"last_name": in.LastName, "reservation_number": in.ReservationNumber,
+	} {
+		if strings.TrimSpace(v) != "" {
+			body[k] = v
+		}
+	}
+	raw, _ := json.Marshal(body)
 	var out scdResolveResp
-	if !h.scdPhase3Call(b, "http://unix/v1/phase3/auth/pms/resolve", body, &out) {
+	if !h.scdPhase3Call(b, "http://unix/v1/phase3/auth/pms/resolve", raw, &out) {
 		// This covers an abandoned hop as well as a refused one: when the budget expires mid-flight the hop
 		// returns a context error and lands here. scd said nothing, so nothing about what the guest typed is
 		// known — TECHNICAL is the only honest class.
@@ -259,7 +272,7 @@ func (h *handler) phase3Grant(w http.ResponseWriter, r *http.Request, b *phase3B
 			return
 		}
 		req["method"] = method
-		req["return_base"] = portalOrigin(r)
+		req["return_base"] = h.returnBase(r)
 	}
 	body, _ := json.Marshal(req)
 	var out scdGrantResp
@@ -280,6 +293,9 @@ func (h *handler) phase3Grant(w http.ResponseWriter, r *http.Request, b *phase3B
 		writeJSONPortal(w, http.StatusOK, phase3Out{OK: true, RedirectTo: to})
 		return
 	}
+	if out.FailureClass == "DEVICE_LIMIT" && h.phase3ToReplace(w, r, authContextID, out) {
+		return
+	}
 	if out.Outcome != "VERIFIED" || out.SessionID == "" {
 		// A grant that did not produce a session produced NO access. Reporting success here would leave the
 		// guest staring at a "you are connected" page on a network that will not carry their traffic. The
@@ -288,6 +304,32 @@ func (h *handler) phase3Grant(w http.ResponseWriter, r *http.Request, b *phase3B
 		return
 	}
 	writeJSONPortal(w, http.StatusOK, phase3Out{OK: true, SessionID: out.SessionID, RedirectTo: "/success"})
+}
+
+// phase3ToReplace sends a room guest whose stay has every device place taken to the replacement page, with the
+// same rules as every other client (contract ONEGATE_DEVICE_MANAGEMENT §3, audit H-6). Their identity is already
+// proved -- scd refused the GRANT, not the sign-in -- so this discloses nothing a wrong room could learn. The
+// verified sign-in (the auth context portald itself sent) and the device scd placed are held server-side in a
+// commerce session, exactly as the voucher and account paths hold theirs; the page then lists the stay's devices
+// and moves a place through scd's client_device_action. It reports false -- the device-limit sentence is
+// answered as before -- when there is nowhere to hold the proof (the Phase-2 portal surface is off) or scd did not
+// name the device.
+func (h *handler) phase3ToReplace(w http.ResponseWriter, r *http.Request, authContextID string, out scdGrantResp) bool {
+	authContextID = strings.TrimSpace(authContextID)
+	if h.commerceSessions == nil || authContextID == "" || out.DeviceID == "" || out.GuestNetworkID == "" {
+		return false
+	}
+	token, err := newCommerceToken()
+	if err != nil {
+		return false
+	}
+	sess := commerceSession{authContextID: authContextID, deviceID: out.DeviceID, guestNetworkID: out.GuestNetworkID,
+		expiry: time.Now().Add(commerceSessionTTL)}
+	h.commerceSessions.put(token, sess)
+	setPortalCookie(w, r, commerceCookie, token, commerceSessionTTL)
+	slog.Info("phase3 guest at the stay's device limit: offered the replacement page")
+	writeJSONPortal(w, http.StatusOK, phase3Out{OK: true, RedirectTo: "/devices/replace"})
+	return true
 }
 
 // scdPhase3Call performs one internal hop, under the BUDGET's context rather than the request's. That is what

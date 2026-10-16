@@ -47,6 +47,8 @@ the keys are unchanged, [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md)). Legen
 | voucher-code-settings | W | **W** | R | R | R | – | R |
 | account-password-settings | W | **W** | R | R | R | – | R |
 | sessions (incl. disconnect) | W | W | **W** | **W** | – | R | R |
+| usage | W | R | **R** | **R** | – | **R** | R |
+| commercial-packages | W | **W** | – | – | – | **R** | R |
 | guests | W | W | **W** | **W** | – | R | R |
 | pms-providers (+test/cache/health) | W | W | R | R | – | R | R |
 | auth-methods | W | W | R | R | – | R | R |
@@ -57,6 +59,8 @@ the keys are unchanged, [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md)). Legen
 | guest-signin-credentials (`View_Guest_SignIn_Credentials`) | W | R | **R** | **R** | – | – | **–** |
 | guest-signin-protection (`Manage_Guest_SignIn_Protection`) | W | **W** | R | R | – | – | R |
 | pms-reconciliation (`View_PMS_Reconciliation`) | R | R | R | R | – | – | R |
+| pms-event-decisions (decide a PMS message in review; review-expiry setting) | W | **W** | – | – | – | – | – |
+| pms-stay-identity (guest names and reservation numbers on Stays, PMS activity, transfers) | R | R | **R** | **R** | – | – | **–** |
 
 | guest-signin-restrictions (`Release_Guest_SignIn_Restriction`) | W | **W** | **W** | **W** | – | – | R |
 | walled-garden | W | W | R | R | – | R | R |
@@ -70,7 +74,16 @@ the keys are unchanged, [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md)). Legen
 | portal-https | W | W | – | – | – | – | R |
 | audit | W(R) | R | R | R | – | R | R |
 | reports | R | R | R | R | – | R | R |
-| backups (view/trigger) | W | W | R | R | – | R | R |
+| backups | W | R | R | R | – | – | R |
+| backup-download | W | W | – | – | – | – | – |
+
+**usage** is the Usage explorer: the sessions a role already reads, summed per room, account, voucher or
+device. It is read-only for every role. **commercial-packages** is Internet packages and Service plans; the
+Payment methods screen also lists packages and their prices, which is why the payments role reads it. Both rows
+were added on 2026-10-16 when the Admin Console's role table was found to have drifted from edged's (it offered
+Usage explorer to three roles edged refused, and hid the package editors from the Site IT manager). The console
+no longer keeps its own copy: `hotel-admin/lib/role-permissions.generated.json` is generated from edged's
+`rolePerms` and a test fails when the two differ.
 
 **portal-https** (`portal_https.read` = R, `portal_https.manage` = W) is the Portal HTTPS screen under
 Networking ([ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md](architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md)
@@ -79,6 +92,14 @@ Renew now. It follows `network`: the portal address is a network change and the 
 the address or the domain and Renew now additionally require the operator's password (step-up); Check now
 changes nothing and needs only **W**. Applying a new address still goes through the Client networks
 validate/apply/confirm flow, which needs `network` **W**.
+
+**backups** and **backup-download** are two keys (Product-Owner decision D-B, 2026-10-16). `backups` **R** sees
+the list, the retention policy and recovery readiness; **W** (site_admin) also takes, verifies and restores a
+backup and changes retention, each under the password step-up. `backup-download` is the only way to take a full
+database dump off the appliance: **site_admin and the IT manager only**, the operator's password every time
+(a single-use ticket valid for 60 seconds), and both the authorization and the download are audited. Every
+other role that reads backups sees the list and cannot download. Until 2026-10-16 every role with `backups`
+**R** could download without a password; this row and the code changed together.
 
 **The four guest sign-in keys (Room sign-in, in the Hotel module) are four keys on purpose, and none implies another.**
 
@@ -91,6 +112,16 @@ validate/apply/confirm flow, which needs `network` **W**.
   that can be applied. A PMS event is one-way once terminal, and a checkout boundary must be an *applied*
   departure event, so replaying an old one is not something the product can do — and a write permission would
   promise a power it does not have.
+* `pms-event-decisions` — **W** answers ONE PMS message waiting in review: *acknowledge* (no action needed) or
+  *link* (it concerns this stay, chosen from the stays it is re-matchable to). Both need the operator's
+  password and a reason, write one append-only disposition and an audit_log row, and change no stay or
+  entitlement. The same key sets the review-expiry setting (off by default; when on, only messages received
+  after it was switched on and waiting longer than the set days are recorded as expired). Site admin and IT
+  manager only (audit H-15, decision D-D).
+* `pms-stay-identity` — a field-level key, not a screen: whether Stays, PMS activity and the transfer lineage
+  show guest names and reservation numbers. With the room these are the room sign-in credential, so a site
+  viewer sees rooms, statuses and access but not who is staying (audit H-7); the desk roles keep them because
+  they identify the guest in front of them (and already read `guest-signin-credentials`).
 * `guest-signin-restrictions` — **W** releases ONE device's wait early, with a mandatory reason.
 * `code-requests` — **R** lists recent SMS / WhatsApp code requests (2026-10-12). Read-only for every role since 2026-10-15: its only write, letting a device try again by clearing its temporary-internet windows, was removed with the email code and its temporary internet (Email + Password self-service contract §1).
 * `code-reveal` — **W** reads a LIVE one-time code to the client it was sent to, with password and reason. Separate from `code-requests` because it lets the desk vouch for an address the client did not prove (contract §6.7).

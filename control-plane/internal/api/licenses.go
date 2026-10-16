@@ -27,10 +27,14 @@ type LicensesBase struct {
 
 // licenseTerms is the licence block of activate and of Set licence.
 type licenseTerms struct {
-	MaxConcurrentOnlineGuests int        `json:"max_concurrent_online_guests"`
-	ValidUntil                *time.Time `json:"valid_until"`
-	ValidDays                 int        `json:"valid_days"`
-	GracePeriodDays           *int       `json:"grace_period_days"`
+	MaxConcurrentOnlineGuests int `json:"max_concurrent_online_guests"`
+	// UnlimitedOnlineGuests must be sent, with max_concurrent_online_guests 0 or omitted, to issue a licence
+	// with NO concurrent cap. An omitted or zero cap used to mean "unlimited" silently; now it is refused, so
+	// an unlimited licence is always a deliberate choice.
+	UnlimitedOnlineGuests bool       `json:"unlimited_online_guests"`
+	ValidUntil            *time.Time `json:"valid_until"`
+	ValidDays             int        `json:"valid_days"`
+	GracePeriodDays       *int       `json:"grace_period_days"`
 	// Modules are the registered module ids the licence authorises (GET /cloud/v1/modules). Omitted or empty =
 	// core only. Unknown ids and unmet dependencies are refused with 400.
 	Modules []string `json:"modules"`
@@ -46,8 +50,13 @@ const (
 func (t licenseTerms) params(applianceID, createdBy string) (licensing.IssueParams, error) {
 	p := licensing.IssueParams{ApplianceID: applianceID, CreatedBy: createdBy,
 		MaxConcurrentOnlineGuests: t.MaxConcurrentOnlineGuests, GracePeriodDays: defaultGraceDays}
-	if t.MaxConcurrentOnlineGuests < 0 {
-		return p, errors.New("max_concurrent_online_guests cannot be negative (0 = unlimited)")
+	switch {
+	case t.MaxConcurrentOnlineGuests < 0:
+		return p, errors.New("max_concurrent_online_guests cannot be negative")
+	case t.UnlimitedOnlineGuests && t.MaxConcurrentOnlineGuests != 0:
+		return p, errors.New("give either max_concurrent_online_guests or unlimited_online_guests, not both")
+	case t.MaxConcurrentOnlineGuests == 0 && !t.UnlimitedOnlineGuests:
+		return p, errors.New("max_concurrent_online_guests must be 1 or more; for a licence with no cap send unlimited_online_guests: true")
 	}
 	_, _, ids, err := licensing.ModuleTerms(t.Modules)
 	if err != nil {
@@ -101,9 +110,29 @@ func (b *Base) setLicense(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := DBCtx(r)
 	defer cancel()
-	doc, _, err := b.Lic.Issue(ctx, p)
+	// Lock the appliance and re-check inside the transaction that issues: a retirement or a move that commits
+	// between the check above and the issue must not be followed by a fresh licence for a retiring box.
+	tx, err := b.DB.Begin(ctx)
 	if err != nil {
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "licence not issued: "+err.Error())
+		failInternal(w, r, "licence not issued", err)
+		return
+	}
+	defer tx.Rollback(ctx)
+	var lifecycle string
+	var retiring bool
+	if err := tx.QueryRow(ctx, `SELECT a.lifecycle_state, EXISTS (SELECT 1 FROM appliance_terminal_delivery td WHERE td.appliance_id=a.id)
+                                  FROM appliances a WHERE a.id=$1 FOR UPDATE`, id).Scan(&lifecycle, &retiring); err != nil ||
+		lifecycle != "assigned" || retiring {
+		Fail(w, r, http.StatusConflict, "invalid_state", "only an activated appliance can hold a licence")
+		return
+	}
+	doc, _, err := b.Lic.IssueTx(ctx, tx, p)
+	if err != nil {
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "licence not issued: "+publicError(r, err))
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		failInternal(w, r, "licence not issued", err)
 		return
 	}
 	audit.Op(r.Context(), b.DB, r, "license.issued", "appliance", id, map[string]any{
@@ -184,7 +213,7 @@ func (b *Base) licenseAction(action string) http.HandlerFunc {
 			Fail(w, r, http.StatusNotFound, CodeNotFound, "no current licence with that id")
 			return
 		case err != nil:
-			Fail(w, r, http.StatusBadRequest, CodeBadRequest, err.Error())
+			Fail(w, r, http.StatusBadRequest, CodeBadRequest, publicError(r, err))
 			return
 		}
 		verb := map[string]string{"suspend": "suspended", "resume": "resumed", "revoke": "revoked"}[action]
@@ -240,10 +269,18 @@ func (b *LicensesBase) ApplianceLicenseHandler(w http.ResponseWriter, r *http.Re
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"license_id":  licenseID,
 		"envelope":    json.RawMessage(envelope),
 		"revoked":     revoked,
 		"server_time": time.Now().UTC(),
-	})
+	}); err != nil || len(revoked) == 0 {
+		return
+	}
+	// The revocations reached the appliance over its authenticated channel, and the appliance keeps every
+	// revocation it is told about (license.Store.AddRevocation). From here on the licence row is no longer
+	// what holds the revocation, so deleting the site it was issued for cannot undo it (deleteSite).
+	_, _ = b.DB.Exec(ctx, `UPDATE licenses SET revocation_delivered_at = now()
+         WHERE $1::uuid = ANY(appliance_ids) AND status = 'revoked' AND id::text = ANY($2) AND revocation_delivered_at IS NULL`,
+		ident.ApplianceID, revoked)
 }

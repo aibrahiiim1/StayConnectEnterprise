@@ -1,0 +1,208 @@
+package api
+
+import (
+	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/json"
+	"encoding/pem"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
+	"github.com/stayconnect/enterprise/control-plane/internal/auth"
+	"github.com/stayconnect/enterprise/control-plane/internal/pki"
+)
+
+// withCA gives the fixture a real appliance CA, recorded the way ctrlapi records it at boot.
+func (f *fixture) withCA() {
+	f.t.Helper()
+	ca, err := pki.LoadOrCreate(filepath.Join(f.t.TempDir(), "ca.key"), 1)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `INSERT INTO appliance_ca_versions (version, cert_pem, subject, key_fingerprint, active)
+        VALUES (1,$1,$2,$3,true) ON CONFLICT (version) DO NOTHING`, string(ca.CertPEM()), ca.Subject(), ca.KeyFingerprint()); err != nil {
+		f.t.Fatal(err)
+	}
+	f.base.CA = ca
+}
+
+// issueCert files a CSR for the appliance and has Central sign it; returns the parsed certificate.
+func (f *fixture) issueCert(appID string) *x509.Certificate {
+	f.t.Helper()
+	_, key, _ := ed25519.GenerateKey(rand.Reader)
+	der, _ := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: pkix.Name{CommonName: "appliance"}}, key)
+	csr := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der})
+	if _, err := f.pool.Exec(f.ctx, `INSERT INTO appliance_certificate_requests (appliance_id, csr_pem, status) VALUES ($1,$2,'pending')`, appID, string(csr)); err != nil {
+		f.t.Fatal(err)
+	}
+	cb := &CertBase{Base: f.base, CA: f.base.CA, ClientValid: 90 * 24 * time.Hour}
+	sc, err := cb.issueCertForAppliance(f.ctx, httptest.NewRequest(http.MethodPost, "/", nil), appID, "test")
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	block, _ := pem.Decode(sc.CertPEM)
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return cert
+}
+
+// mtlsRequest runs one request through mtlsCertBinding presenting cert, as appliance appID.
+func (f *fixture) mtlsRequest(appID string, cert *x509.Certificate) int {
+	h := mtlsCertBinding(f.pool)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	req := httptest.NewRequest(http.MethodGet, "/v1/appliance/hello", nil)
+	req.TLS = &tls.ConnectionState{PeerCertificates: []*x509.Certificate{cert}}
+	req = req.WithContext(auth.ContextWithAppliance(req.Context(), &auth.ApplianceIdent{ApplianceID: appID}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec.Code
+}
+
+// ack posts a signed terminal acknowledgment over the (simulated) mTLS channel.
+func (f *fixture) ack(appID string, bx box, cert *x509.Certificate, a assignment.Ack) *httptest.ResponseRecorder {
+	assignment.SignAck(bx.priv, &a)
+	raw, _ := json.Marshal(a)
+	req := httptest.NewRequest(http.MethodPost, "/v1/appliance/assignment/ack", bytes.NewReader(raw))
+	req.TLS = &tls.ConnectionState{PeerCertificates: []*x509.Certificate{cert}}
+	req = req.WithContext(auth.ContextWithAppliance(req.Context(), &auth.ApplianceIdent{ApplianceID: appID}))
+	rec := httptest.NewRecorder()
+	f.base.AckHandler(rec, req)
+	return rec
+}
+
+// X-9: retirement is atomic. When the terminal assignment cannot be signed, the licence is NOT revoked and no
+// retirement is recorded: the appliance is exactly as it was and the operator can retry.
+func TestRetirementIsAtomic(t *testing.T) {
+	f := newFixture(t)
+	cust, site := f.customerSite("Atomic")
+	app := decode(t, f.register(newBox("SC-TEST-0006", "hwf-6")))["appliance_id"].(string)
+	f.activate(app, cust, site, 30)
+
+	// The signing key stops being allowed to sign.
+	if _, err := f.pool.Exec(f.ctx, `UPDATE assignment_signing_keys SET state='verify_only'`); err != nil {
+		t.Fatal(err)
+	}
+	rec := f.operatorCall(f.base.retire, http.MethodPost, app, map[string]any{"reason": "end of contract"})
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("retire with an unsignable terminal document: want 503, got %d %s", rec.Code, rec.Body.String())
+	}
+	if n := f.count(`SELECT count(*) FROM licenses WHERE $1::uuid = ANY(appliance_ids) AND status='active'`, app); n != 1 {
+		t.Fatal("a retirement that did not start must not have revoked the licence")
+	}
+	if n := f.count(`SELECT count(*) FROM appliance_terminal_delivery WHERE appliance_id=$1`, app); n != 0 {
+		t.Fatal("a retirement that did not start must leave no terminal delivery record")
+	}
+
+	// Signing allowed again: the same retirement goes through, licence revocation and terminal document together.
+	if _, err := f.pool.Exec(f.ctx, `UPDATE assignment_signing_keys SET state='active'`); err != nil {
+		t.Fatal(err)
+	}
+	if rec = f.operatorCall(f.base.retire, http.MethodPost, app, map[string]any{"reason": "end of contract"}); rec.Code != http.StatusOK {
+		t.Fatalf("retire: %d %s", rec.Code, rec.Body.String())
+	}
+	if n := f.count(`SELECT count(*) FROM licenses WHERE $1::uuid = ANY(appliance_ids) AND status='revoked'`, app); n != 1 {
+		t.Fatal("the licence must be revoked")
+	}
+	if n := f.count(`SELECT count(*) FROM appliance_terminal_delivery WHERE appliance_id=$1 AND delivery_state='terminal_delivery_pending'`, app); n != 1 {
+		t.Fatal("the terminal delivery must be pending")
+	}
+	if n := f.count(`SELECT count(*) FROM appliance_signed_assignments WHERE appliance_id=$1 AND state='decommissioned'`, app); n != 1 {
+		t.Fatal("a signed decommissioned assignment must be current")
+	}
+	// A second normal retire while one is in progress is refused.
+	if rec = f.operatorCall(f.base.retire, http.MethodPost, app, map[string]any{"reason": "again"}); rec.Code != http.StatusConflict {
+		t.Fatalf("a second normal retirement must be refused, got %d", rec.Code)
+	}
+}
+
+// P4: the signing guard fails closed -- a key Central has no record of does not sign.
+func TestUnregisteredAssignmentKeyDoesNotSign(t *testing.T) {
+	f := newFixture(t)
+	cust, site := f.customerSite("Guard")
+	app := decode(t, f.register(newBox("SC-TEST-0007", "hwf-7")))["appliance_id"].(string)
+	if _, err := f.pool.Exec(f.ctx, `DELETE FROM assignment_signing_keys`); err != nil {
+		t.Fatal(err)
+	}
+	rec := f.operatorCall(f.base.activate, http.MethodPost, app, map[string]any{
+		"customer_id": cust, "site_id": site, "reason": "x",
+		"license": map[string]any{"max_concurrent_online_guests": 5}})
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "not registered") {
+		t.Fatalf("an unregistered signing key must not sign: %d %s", rec.Code, rec.Body.String())
+	}
+	if n := f.count(`SELECT count(*) FROM appliances WHERE id=$1 AND lifecycle_state='pending_approval'`, app); n != 1 {
+		t.Fatal("nothing may be activated when the assignment cannot be signed")
+	}
+}
+
+// P4: a rotated-out certificate is refused on the mTLS listener after the overlap and then recorded as
+// revoked; the terminal ack is accepted only for a retirement in progress, and retires every certificate.
+func TestSupersededCertificatesAndAckRules(t *testing.T) {
+	f := newFixture(t)
+	f.withCA()
+	cust, site := f.customerSite("Certs")
+	bx := newBox("SC-TEST-0008", "hwf-8")
+	app := decode(t, f.register(bx))["appliance_id"].(string)
+	f.activate(app, cust, site, 30)
+	first := f.issueCert(app)
+	second := f.issueCert(app) // rotation
+
+	if c := f.mtlsRequest(app, second); c != http.StatusNoContent {
+		t.Fatalf("the current certificate: %d", c)
+	}
+	if c := f.mtlsRequest(app, first); c != http.StatusNoContent {
+		t.Fatalf("a just-rotated certificate is still accepted during the overlap: %d", c)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE appliance_certificates SET superseded_at = now() - interval '2 days' WHERE status='superseded'`); err != nil {
+		t.Fatal(err)
+	}
+	if c := f.mtlsRequest(app, first); c != http.StatusForbidden {
+		t.Fatalf("a certificate superseded two days ago must be refused, got %d", c)
+	}
+	if n, err := RevokeSupersededCertificates(f.ctx, f.base); err != nil || n != 1 {
+		t.Fatalf("housekeeping must revoke the one superseded certificate: %d %v", n, err)
+	}
+	if n := f.count(`SELECT count(*) FROM appliance_certificates WHERE appliance_id=$1 AND status='revoked'`, app); n != 1 {
+		t.Fatal("the superseded certificate must now be revoked")
+	}
+
+	// An ack with no retirement in progress is refused, whatever it says.
+	var ver int64
+	_ = f.pool.QueryRow(f.ctx, `SELECT version FROM appliance_signed_assignments WHERE appliance_id=$1`, app).Scan(&ver)
+	rec := f.ack(app, bx, second, assignment.Ack{ApplianceID: app, Version: ver, TerminalState: "decommissioned", AdoptedAt: time.Now().Unix()})
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("an ack without a retirement must be refused, got %d %s", rec.Code, rec.Body.String())
+	}
+	if n := f.count(`SELECT count(*) FROM appliances WHERE id=$1 AND lifecycle_state='assigned'`, app); n != 1 {
+		t.Fatal("a refused ack must not retire the appliance")
+	}
+
+	// A real retirement, acknowledged with the current terminal document.
+	if rec = f.operatorCall(f.base.retire, http.MethodPost, app, map[string]any{"reason": "returned"}); rec.Code != http.StatusOK {
+		t.Fatalf("retire: %d %s", rec.Code, rec.Body.String())
+	}
+	var signed []byte
+	_ = f.pool.QueryRow(f.ctx, `SELECT version, signed_doc FROM appliance_signed_assignments WHERE appliance_id=$1`, app).Scan(&ver, &signed)
+	var doc assignment.Document
+	_ = json.Unmarshal(signed, &doc)
+	rec = f.ack(app, bx, second, assignment.Ack{ApplianceID: app, Version: ver, TerminalState: doc.State,
+		Fingerprint: assignment.DocFingerprint(&doc), AdoptedAt: time.Now().Unix()})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ack: %d %s", rec.Code, rec.Body.String())
+	}
+	if n := f.count(`SELECT count(*) FROM appliances WHERE id=$1 AND lifecycle_state='decommissioned'`, app); n != 1 {
+		t.Fatal("the acknowledged appliance must be decommissioned")
+	}
+	if n := f.count(`SELECT count(*) FROM appliance_certificates WHERE appliance_id=$1 AND status <> 'revoked'`, app); n != 0 {
+		t.Fatal("every certificate of the retired appliance must be revoked")
+	}
+}

@@ -33,11 +33,9 @@ package main
 // internal/portaldesign, whose allowlist both this service and the portal apply.
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -53,12 +51,18 @@ const maxRevisions = 20
 
 // portalPreviewURL is portald's own sign-in page, on the loopback of this appliance. It is the source the
 // preview renders, so the preview cannot drift from what a guest receives.
-const portalPreviewURL = "http://127.0.0.1:8380/"
+const (
+	portalPreviewPath = "/"
+	portalPreviewURL  = portalHTTPBase + portalPreviewPath
+)
 
 // portalLanguagesURL is the portal's own shipped wording -- the map it renders into every guest's page.
 // Hotel Admin reads it through here so the Languages screen can show an operator the ACTUAL Italian a guest
 // receives, rather than an empty field with the English behind it as a placeholder.
-const portalLanguagesURL = "http://127.0.0.1:8380/api/languages"
+const (
+	portalLanguagesPath = "/api/languages"
+	portalLanguagesURL  = portalHTTPBase + portalLanguagesPath
+)
 
 type brandingDoc struct {
 	Design    map[string]any     `json:"design,omitempty"`
@@ -334,7 +338,7 @@ func (s *server) publishBranding(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if !s.reauth(req, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, req, "password confirmation required")
 		return
 	}
 	doc, err := s.loadBranding(req)
@@ -395,7 +399,7 @@ func (s *server) rollbackBranding(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if !s.reauth(req, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, req, "password confirmation required")
 		return
 	}
 	var want int
@@ -520,7 +524,7 @@ func (s *server) saveBrandingSettings(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 	if advancedChanged(in.Design, doc.Design) && !s.reauth(req, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required",
+		s.reauthRefused(w, req,
 			"confirm your password to change the portal's custom CSS or HTML. This page collects room numbers "+
 				"and voucher codes, so the styling and markup injected into it are confirmed separately.")
 		return
@@ -567,14 +571,9 @@ func (s *server) saveBrandingSettings(w http.ResponseWriter, req *http.Request) 
 // admin page around it -- and the frame needs no network at all, because the design is injected rather than
 // fetched.
 func (s *server) previewPortal(w http.ResponseWriter, req *http.Request) {
-	ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
-	defer cancel()
-	r, err := http.NewRequestWithContext(ctx, http.MethodGet, portalPreviewURL, nil)
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "internal", "preview request could not be built")
-		return
-	}
-	resp, err := http.DefaultClient.Do(r)
+	// Fetched on loopback and never through a redirect (portal_loopback.go): while HTTPS is active the portal's
+	// HTTP listener redirects every page, and following that took edged to Caddy and a 503.
+	status, body, err := s.portalGet(req.Context(), portalPreviewPath)
 	if err != nil {
 		// Said plainly: the preview is a convenience and its absence must not read as "your settings are
 		// broken". It is the PORTAL that is not answering.
@@ -583,9 +582,7 @@ func (s *server) previewPortal(w http.ResponseWriter, req *http.Request) {
 				"Your settings are unaffected.")
 		return
 	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
-	if err != nil || resp.StatusCode != http.StatusOK {
+	if status != http.StatusOK {
 		jsonErr(w, http.StatusServiceUnavailable, "portal_unreachable",
 			"the Client Portal service did not return its sign-in page, so a live preview cannot be shown.")
 		return
@@ -604,14 +601,7 @@ func (s *server) previewPortal(w http.ResponseWriter, req *http.Request) {
 // exactly when a cached copy would be wrong, and one loopback request per visit to a settings screen is not
 // a cost worth being clever about.
 func (s *server) portalLanguages(w http.ResponseWriter, req *http.Request) {
-	ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
-	defer cancel()
-	r, err := http.NewRequestWithContext(ctx, http.MethodGet, portalLanguagesURL, nil)
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "internal", "the request could not be built")
-		return
-	}
-	resp, err := http.DefaultClient.Do(r)
+	status, body, err := s.portalGet(req.Context(), portalLanguagesPath)
 	if err != nil {
 		// Named for what it is. "Failed to load languages" would send an operator looking at their own
 		// settings; it is the PORTAL service that is not answering.
@@ -620,9 +610,7 @@ func (s *server) portalLanguages(w http.ResponseWriter, req *http.Request) {
 				"shown. Your settings are unaffected.")
 		return
 	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
-	if err != nil || resp.StatusCode != http.StatusOK {
+	if status != http.StatusOK {
 		jsonErr(w, http.StatusServiceUnavailable, "portal_unreachable",
 			"the Client Portal service did not return its built-in wording.")
 		return

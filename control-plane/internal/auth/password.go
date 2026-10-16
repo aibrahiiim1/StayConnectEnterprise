@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -31,10 +32,43 @@ const (
 var (
 	ErrInvalidHash = errors.New("invalid argon2id encoded hash")
 	ErrMismatch    = errors.New("password mismatch")
+	// ErrBusy means every password-hashing slot stayed taken for argonWait: the caller answers 503.
+	ErrBusy = errors.New("password check busy")
 )
+
+// MEMORY IS BOUNDED BY CONCURRENCY, NOT BY THE RATE LIMIT. Each argon2id evaluation allocates m (64 MiB, or
+// whatever the stored hash says). The per-address login limit does not cap how many run at once across
+// addresses, so at most argonSlots run concurrently (256 MiB with the default parameters) and the rest wait
+// up to argonWait, then fail with ErrBusy. A stored hash asking for more than maxHashMemoryKiB is refused
+// outright rather than evaluated.
+const (
+	argonSlots       = 4
+	maxHashMemoryKiB = 256 * 1024
+)
+
+var argonWait = 5 * time.Second
+
+var argonSem = make(chan struct{}, argonSlots)
+
+func acquireArgon() error {
+	t := time.NewTimer(argonWait)
+	defer t.Stop()
+	select {
+	case argonSem <- struct{}{}:
+		return nil
+	case <-t.C:
+		return ErrBusy
+	}
+}
+
+func releaseArgon() { <-argonSem }
 
 // HashPassword returns the encoded argon2id hash of password.
 func HashPassword(password string) (string, error) {
+	if err := acquireArgon(); err != nil {
+		return "", err
+	}
+	defer releaseArgon()
 	salt := make([]byte, pwSaltLen)
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
@@ -70,6 +104,13 @@ func VerifyPassword(encoded, password string) error {
 	if err != nil {
 		return ErrInvalidHash
 	}
+	if mem == 0 || mem > maxHashMemoryKiB || iter == 0 || iter > 16 || threads == 0 || len(want) == 0 || len(want) > 64 {
+		return ErrInvalidHash
+	}
+	if err := acquireArgon(); err != nil {
+		return err
+	}
+	defer releaseArgon()
 	got := argon2.IDKey([]byte(password), salt, iter, mem, threads, uint32(len(want)))
 	if subtle.ConstantTimeCompare(want, got) != 1 {
 		return ErrMismatch

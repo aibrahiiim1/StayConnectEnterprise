@@ -33,6 +33,7 @@ import (
 var surfaceModules = map[string][]string{
 	"pms-stays":                 {lic.ModuleHospitality},
 	"pms-events":                {lic.ModuleHospitality},
+	"pms-event-decisions":       {lic.ModuleHospitality},
 	"pms-resolutions":           {lic.ModuleHospitality},
 	"guest-signin-attempts":     {lic.ModuleHospitality},
 	"guest-signin-credentials":  {lic.ModuleHospitality},
@@ -51,6 +52,11 @@ var surfaceModules = map[string][]string{
 	"payment-providers":         {lic.ModuleCardPayment},
 	"financial-review":          {lic.ModuleRoomCharge, lic.ModuleCardPayment},
 	"financial-ops":             {lic.ModuleRoomCharge, lic.ModuleCardPayment},
+	// The provider screens behind the optional sign-in methods. The menu offered them only to a site licensed for
+	// the method; the API now refuses them on the same rule, so a direct call cannot configure a sender or an
+	// identity provider for a method the site may not offer.
+	"social-providers":       {lic.ModuleSocialLogin},
+	"notification-providers": {lic.ModuleEmailOTP, lic.ModuleSMSOTP, lic.ModuleWhatsAppOTP},
 }
 
 // historySurfaces are the module-owned surfaces that hold HISTORY, AUDIT, RECONCILIATION or RECOVERY. They
@@ -64,6 +70,7 @@ var surfaceModules = map[string][]string{
 var historySurfaces = map[string]bool{
 	"pms-stays":                 true,
 	"pms-events":                true,
+	"pms-event-decisions":       true,
 	"pms-resolutions":           true,
 	"guest-signin-attempts":     true,
 	"guest-signin-credentials":  true,
@@ -301,7 +308,7 @@ func (s *server) putModule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
 	rep, ok := s.moduleReport(r.Context())

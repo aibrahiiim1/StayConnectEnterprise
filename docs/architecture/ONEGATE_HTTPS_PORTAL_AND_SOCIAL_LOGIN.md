@@ -232,7 +232,21 @@ they carry hostnames, the portal address, CSRs and certificate status — no gue
   fallback for the seconds that takes (about 30 s on PRE-LIVE) rather than serve a revoked certificate.
 * **portald switches to the fallback after two failed polls of scd** (15–30 s), so an scd restart does not flap
   guests between schemes.
-* **A production build never registers the social-login stub** (it accepts any identity named in its code).
+* **A production build never registers the social-login stub** (it accepts any identity named in its code) —
+  neither in scd (the stub provider) nor in portald (its consent page `/api/oauth/stub/authorize` and
+  `/authorize-confirm`, compiled only into a `-tags devlicense` build, `stub_oauth_dev.go`; a production portald
+  answers those paths as any unknown path). Even in a development build the stub only returns to this portal's
+  own `/auth/social/callback` on the origin it was reached on, and its page carries the portal CSP (audit P-2).
+* **form-action** lists `'self'`, the portal's own HTTPS names (so a form posted over HTTP and re-posted 307 to
+  `https://<canonical>` is not refused) and the payment adapters' declared hosted-checkout origins (so the card
+  checkout redirect is not refused). The package page also submits the choice by script and navigates with
+  `window.location`, which form-action does not govern (audit P-1, P-33).
+* **On the HTTP fallback** the portal keeps the whole journey on one origin: while the portal address is up, a
+  page load on any other name (a captive probe host, a site the client typed) is redirected to
+  `http://<portal address>/`; Android/Windows probes go to the portal address, or to the address the
+  connection reached — never to the `.local` `PORTALD_FQDN`, which Apple devices resolve by mDNS only. The card
+  provider's return URL is built from the canonical origin, never from the request's Host (audit P-15, P-21,
+  P-27). Every portal cookie is `Secure` when set over TLS (audit P-17).
 * **Central console:** the page is System → Portal certificates; reads need `fleet.view`, writes
   `security.manage` plus a password step-up.
 * **Central refuses certificate orders (503) while it is not configured**, so none pile up before the DNS token

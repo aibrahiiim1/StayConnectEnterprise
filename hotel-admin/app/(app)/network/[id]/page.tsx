@@ -367,10 +367,10 @@ export default function EditGuestNetworkPage() {
             <Card>
               <CardHeader><CardTitle>Client access</CardTitle></CardHeader>
               <CardBody className="space-y-4">
-                <SwitchRow label="Captive portal" hint="Clients see the sign-in page before they get online." checked={captivePortal} onChange={setCaptivePortal} disabled={ro} />
+                <SwitchRow label="Captive portal" hint="Clients see the sign-in page before they get online. With it off, nobody on this network can sign in, so it has no internet access (only allowed sites)." checked={captivePortal} onChange={setCaptivePortal} disabled={ro} />
                 <SwitchRow label="Internet access" hint="Clients can reach the internet once signed in." checked={internetAccess} onChange={setInternetAccess} disabled={ro} />
                 <SwitchRow label="NAT (masquerade)" hint="Client traffic leaves through the appliance's own address." checked={nat} onChange={setNat} disabled={ro} />
-                <SwitchRow label="Client isolation" hint="Client devices cannot reach each other." checked={clientIsolation} onChange={setClientIsolation} disabled={ro} />
+                <SwitchRow label="Client isolation" hint="The appliance drops traffic between client devices that passes through it. Devices on the same access point or switch port also need the access point's own client isolation switched on." checked={clientIsolation} onChange={setClientIsolation} disabled={ro} />
               </CardBody>
               {writable && (
                 <CardFooter className="justify-end">

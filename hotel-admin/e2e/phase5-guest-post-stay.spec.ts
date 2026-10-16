@@ -73,7 +73,17 @@ test.describe("the post-stay guest panel", () => {
 
   test("sends the PIN alone — no stay, room, profile or device", async ({ page }) => {
     const calls: Call[] = [];
-    await serve(page, [{ ok: true, auth_context_id: "ctx-1" }, { ok: true, session_id: "sess-1" }], calls);
+    // Verified with more than one free post-stay package: the server lists them and the guest chooses (P-3).
+    await serve(page, [
+      {
+        ok: true, needs_choice: true, auth_context_id: "ctx-1",
+        choices: [
+          { code: "POSTSTAY-BASIC", package_revision_id: "rev-basic", down_kbps: 4000 },
+          { code: "POSTSTAY-PLUS", package_revision_id: "rev-plus", down_kbps: 10000 },
+        ],
+      },
+      { ok: true, session_id: "sess-1" },
+    ], calls);
     await page.goto("/portal");
     await page.locator('[data-tab="poststay"]').click();
     await page.locator("#ps-pin").fill("K7M4RTQX");
@@ -87,9 +97,12 @@ test.describe("the post-stay guest panel", () => {
       "pms_interface_id", "last_name", "reservation_number", "device"]) {
       expect(calls[0].body).not.toHaveProperty(forbidden);
     }
-    // The second call carries the context the SERVER issued, and still no subject the page chose.
+    // The second call carries the context the SERVER issued and a package from the offers the SERVER returned
+    // -- still no stay, room, profile or device the page chose.
+    await page.locator("#ps-choices button.choice", { hasText: "POSTSTAY-PLUS" }).click();
     await expect.poll(() => calls.length).toBe(2);
-    expect(Object.keys(calls[1].body).sort()).toEqual(["auth_context_id"]);
+    expect(Object.keys(calls[1].body).sort()).toEqual(["auth_context_id", "package_revision_id"]);
+    expect(calls[1].body).toEqual({ auth_context_id: "ctx-1", package_revision_id: "rev-plus" });
   });
 
   test("every failure is the same message and reveals nothing", async ({ page }) => {

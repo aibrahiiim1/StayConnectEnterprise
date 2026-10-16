@@ -1,0 +1,53 @@
+{
+  "transition_id": "T0237",
+  "seq": 237,
+  "timestamp": "2026-10-16T20:01:31+03:00",
+  "timestamp_derivation": "Computed from the workstation clock (UTC+3) when this receipt was written, before the commit that introduces it.",
+  "record_type": "AUDIT_REMEDIATION_DEPLOYED_TO_PRE_LIVE_AND_CENTRAL",
+  "authorisation": "D52-D63 (2026-10-16) under the Product Owner's 'Full Remediation Mission' of 2026-10-16, including appliance migrations 0119-0126 and Central migration 0051; the standing PRE-LIVE deployment decision; D53 for Central.",
+  "delivery": {
+    "pull_request": null,
+    "branch": "delivery/audit-remediation",
+    "content_head": "dc32a52c94d30677108e50e210366374314022f0",
+    "contains": "PR #216 head 9963b669 (PR #216 stays OPEN and is not merged)",
+    "pr_state": "NOT YET OPENED -- READY FOR PRODUCT OWNER TESTING; not merged"
+  },
+  "delivered": [
+    "Remediation plan R0-R7 of the corrected system audit: containment (R0), enforcement correctness (R1), commerce and money (R2), Hotel/PMS (R3), Admin Console (R4), Client Portal (R5), Central (R6) and live acceptance (R7).",
+    "Appliance migrations 0119 (operator sign-in throttle, audit, forced password change), 0120 (disabled account holds its package; removed stays removed), 0121 (no stranded card purchase; payment account identity kept while paid), 0122 (plan controls enforced; usage counted incrementally), 0123 (roster departure is a checkout; review messages get a decision), 0124 (runtime roles hold only the privileges their code uses; Gate-P narrowing), 0125 (walled garden bounded by a hotel setting), 0126 (online-time accrual charges every second; found in acceptance). Factory-clean baseline regenerated through 0126.",
+    "Central migration 0051 (a retired serial re-registers as a new row; operator sessions) and down migrations for 0023-0034 and 0036.",
+    "New findings fixed during the mission: N-26 (portald held edged's group; scd's socket now has its own group stayconnect-scd) and N-27 (provisioning never switched on the durable throttle and keyed codes; it now sets SCD_DURABLE_THROTTLE=true and SCD_OTP_HMAC=true).",
+    "Acceptance fixes: online time is charged every second (0126); off-menu screens show 'not permitted'; pages request only what the role may read."
+  ],
+  "historical_corrections": {
+    "D-I": "Three checked-out stays' ACTIVE MANUAL_END entitlements moved to TERMINATED(CHECKOUT), each with an audit row entitlement.historical_correction; one stranded card purchase resolved by the 0121 sweeper.",
+    "D-D": "The 13,717 MANUAL_REVIEW messages already carried earlier recorded resolutions (13,716 NOT_A_DEPARTURE_ROSTER_SNAPSHOT historical cleanup, 1 ACCEPTED_STARTUP_DATA_GAP); the defect was the counter, fixed by 0123. No new decisions were made on them."
+  },
+  "verified_on_prelive": {
+    "acceptance": "About 170 live checks, all PASS after the three acceptance fixes; enforcement harness rerun 32/32 PASS.",
+    "console": "Admin Console sweeps for all 7 roles: 0 FAIL.",
+    "payments": "Real Chrome on the guest network paid by Stripe TEST twice.",
+    "central": "Central console sweep 12/12 pages clean; central-deploy.sh smoke 8/8 PASS.",
+    "not_verified": "Real phones (Safari/Chrome) on the guest Wi-Fi and the four FULL CHECK gates."
+  },
+  "deployment_provenance": "PRE-LIVE 172.21.60.25 read back on 2026-10-16: netd dc32a52c; scd dc32a52c; edged dc32a52c; pmsd dc32a52c; portald dc32a52c; acctd dc32a52c (all -tags=stayconnect_production, vcs.modified=false); keybootstrap e9b72aab; sitemigrate and svc-run 29a6b21f; DEPLOYED_BINARIES 6/6 OK; Admin Console release 20261016-163909 (dc32a52c, BUILD_ID oqUexMhXwKu9bx5LChDIz, artifact sha256 344e167d); schema 0126 (pre-deploy dump pre-remediation-dc32a52c-20261016T163801Z.dump); env SCD_DURABLE_THROTTLE=true, SCD_OTP_HMAC=true, NETD_MGMT_ADDR=auto; units netd, pmsd, portald, edged and caddy updated; group stayconnect-scd created. An earlier deployment the same day at 26de15a6 (dump 20261016T144526Z) is superseded by this one. Central 172.21.96.196: release onegate-central-832f58b1178f (ctrlapi 832f58b1, sha256 17c7e5a1; console BUILD_ID c1elYhQjwb4qF0qquLniX), migration 0051 applied after dump central-20261016T151711Z-pre-832f58b1178f.dump, smoke 8/8 PASS.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0236."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "head": "dc32a52c",
+  "head_note": "The last CONTENT commit of branch delivery/audit-remediation at the time of this receipt; governance commits follow it.",
+  "previous_delivery": "T0236",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

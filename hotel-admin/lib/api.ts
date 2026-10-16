@@ -123,6 +123,8 @@ export type Whoami = {
   roles: string[];
   site_id: string;
   expires_at: string;
+  /** The session can only change its password until this is false (edged 0119). */
+  must_change_password?: boolean;
 };
 
 // GuestAccessPlan — the local `ticket_templates` rows, renamed per the edge
@@ -421,6 +423,11 @@ export type Stay = {
   access_up_kbps?: number | null;
   access_max_devices?: number | null;
   access_active_devices?: number;
+  // Devices HOLDING A PLACE on the package -- what the device limit is enforced against. A device keeps its
+  // place after it signs out, so a stay can be at the limit with nobody online (audit H-14).
+  access_authorized_devices?: number;
+  // The caller may not see guest names or reservation numbers (audit H-7).
+  identity_hidden?: boolean;
 };
 
 /** One page of stays, with totals over EVERY stay that matches (not just this page). */
@@ -469,6 +476,15 @@ export type StayEvent = {
   external_reservation_id?: string | null;
   primary_guest?: string | null;
   stay_status?: string | null;
+  // A review message that carries a decision (acknowledged, linked, expired, answered by the guest list) no
+  // longer needs one. decision is that disposition.
+  decided?: boolean;
+  decision?: string | null;
+  // What the message itself names, for linking it (absent when the caller may not see reservations).
+  message_reservation?: string | null;
+  message_room?: string | null;
+  // The caller may not see guest names or reservation numbers (audit H-7).
+  identity_hidden?: boolean;
 };
 
 export type PmsResolution = {
@@ -664,6 +680,24 @@ export type EdgeOperator = {
   status: "active" | "disabled" | string;
   roles: string[];
   created_at: string;
+  /** Their next sign-in can only set a new password (edged 0119). */
+  must_change_password?: boolean;
+};
+
+/** Admin Console sign-in protection (edged /operators/signin-protection, migration 0119). */
+export type SigninProtection = {
+  account_max_failures: number;
+  account_window_seconds: number;
+  ip_max_failures: number;
+  ip_window_seconds: number;
+  lockout_seconds: number;
+  config_version: number;
+  updated_at?: string | null;
+  updated_by?: string | null;
+};
+export type SigninProtectionBound = {
+  key: keyof Pick<SigninProtection, "account_max_failures" | "account_window_seconds" | "ip_max_failures" | "ip_window_seconds" | "lockout_seconds">;
+  label: string; unit: string; min: number; max: number; default: number; explains: string;
 };
 
 export type WalledGardenRule = {
@@ -673,6 +707,14 @@ export type WalledGardenRule = {
   ports?: number[] | null;
   description?: string | null;
   created_at: string;
+  /** Wider than the site's widest-network policy (stored before it, or before it was narrowed). */
+  wider_than_policy?: boolean;
+};
+
+/** GET/PUT /walled-garden/policy (migration 0125): the widest network a rule may name. */
+export type WalledGardenPolicy = {
+  widest_prefix_len: number; min: number; max: number; default: number;
+  config_version: number; updated_at?: string | null; updated_by?: string | null;
 };
 
 export type PMSProvider = {
@@ -1384,6 +1426,9 @@ export type PmsInterface = {
 export type PmsRevision = {
   id: string; revision_no: number; source_timezone: string; posting_target_model: string;
   normalization_version: number; source_fingerprint?: string;
+  /** Revision columns an edit must carry forward (audit H-3). */
+  financial_base_currency?: string | null;
+  financial_base_currency_exponent?: number | null;
   // already redacted by edged; the client never un-redacts anything
   config: Record<string, unknown>;
   published: boolean;
@@ -1431,6 +1476,8 @@ export type PmsGuestNetworkRoute = {
 };
 
 export type PmsSourceConflict = {
+  /** Detected now from the connections' published configuration rather than read from a stored record. */
+  detected?: boolean;
   id: string; interface_a: string; interface_a_label?: string;
   interface_b: string; interface_b_label?: string;
   severity?: string; resolution?: string;
@@ -1745,9 +1792,18 @@ export type RosterReconciliationState = {
     is_default: boolean;
   };
   generation: number;
-  preview: ReconcileRun;
+  /** The LAST RECORDED run for this connection -- pmsd's automatic apply or an operator's dry run. Opening the
+   *  page runs nothing (audit H-13); a dry run is an explicit action. Null when nothing has run yet. */
+  last_run?: ReconcileRun | null;
+  last_run_mode?: "DRY_RUN" | "APPLY" | "";
+  last_run_at?: string | null;
+  /** Older appliances answered with a dry run computed on every open. */
+  preview?: ReconcileRun;
   undisposed_cases: number;
   pms_interface_id: string;
+  /** The connections a run can be about, the default first (audit H-21). */
+  interfaces?: { id: string; label: string; connector_kind: string; lifecycle_state: string;
+    published_generation: number; last_complete_sync_at?: string | null }[];
 };
 
 export type ReconcileRunRecord = ReconcileRun & {

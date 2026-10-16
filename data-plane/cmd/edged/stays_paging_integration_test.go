@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,7 +46,10 @@ func (f *apiFixture) getWithSearch(t *testing.T, path, search string) (int, map[
 func (f *apiFixture) seedStays(t *testing.T, n int) {
 	t.Helper()
 	ctx := context.Background()
-	tag := fmt.Sprintf("P%d", time.Now().UnixNano())
+	// The reservation ids are tag||i and the search also matches reservation numbers, so the tag must hold NO
+	// DIGITS: a nanosecond tag ending in "100" made "P…100"+"1" contain "1001", and the room-1001 search then
+	// matched 111 stays (i = 1, 10-19, 100-199) whenever the clock happened to line up.
+	tag := "P" + strings.Map(func(r rune) rune { return 'a' + (r - '0') }, fmt.Sprint(time.Now().UnixNano()))
 	if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `WITH
 		  pi AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)

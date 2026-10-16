@@ -11,19 +11,22 @@
 -- authorize a guest at the packet gate but not record it, which is the state that produces a guest online
 -- forever whose session still says PENDING_ENFORCEMENT.
 --
--- Derived from the iam_v2 objects referenced in cmd/netd. Functions, not tables, carry the writes: netd
--- moves no session state by raw UPDATE any more than anything else does.
+-- DERIVED STATEMENT BY STATEMENT from cmd/netd (audit B-7, migration 0124). netd executes exactly five iam_v2
+-- statements -- activate_session_enforcement, end_session_enforcement, allocate_class_generation,
+-- register_class_origin and one read of iam_v2.sessions -- and its startup self-check
+-- (writerguard.Verify(Phase3Requirements)) reads pg_proc / pg_trigger, which needs schema USAGE and, for the
+-- capability-scoped families, EXECUTE on begin_controlled_operation. Every writer it calls is SECURITY DEFINER,
+-- so what those writers call in turn (apply_entitlement_transition, the controlled-operation checks) runs as
+-- their owner and needs no grant here.
 
 GRANT USAGE ON SCHEMA iam_v2 TO svc_netd;
 
--- Read the session/device rows it enforces for.
+-- The one table read: Confirm() asks whether the promotion it just made is durable.
 GRANT SELECT ON iam_v2.sessions TO svc_netd;
-GRANT SELECT ON iam_v2.devices  TO svc_netd;
 
--- The controlled-operation opener and its guards, same minimum already given to the other writers.
+-- The startup capability check (writerguard.verifyCapability) requires that this role CAN open a controlled
+-- operation; netd opens none itself.
 GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text)    TO svc_netd;
-GRANT EXECUTE ON FUNCTION iam_v2.p3_controlled_operation_open(text)  TO svc_netd;
-GRANT EXECUTE ON FUNCTION iam_v2.p5_controlled_operation_open(text)  TO svc_netd;
 
 -- Enforcement lifecycle: promote a session once the tc class and the nft gate are both proven, and record
 -- that enforcement has gone away so durable state stops claiming a guest is active.
@@ -38,11 +41,19 @@ GRANT EXECUTE ON FUNCTION iam_v2.end_session_enforcement(uuid, uuid, uuid, text)
 GRANT EXECUTE ON FUNCTION iam_v2.allocate_class_generation(uuid, uuid, uuid) TO svc_netd;
 GRANT EXECUTE ON FUNCTION iam_v2.register_class_origin(uuid, uuid, uuid, uuid, text, integer, bigint, bigint, bigint, timestamptz) TO svc_netd;
 
--- Accounting ingest: netd samples the accountable class and submits absolute counters.
-GRANT EXECUTE ON FUNCTION iam_v2.ingest_absolute_counters(uuid, uuid, uuid, uuid, text, integer, bigint, bigint, bigint, timestamptz) TO svc_netd;
-
--- Offer recording, reached by the Phase-3 enforcement surface.
-GRANT EXECUTE ON FUNCTION iam_v2.record_auth_context_offer(uuid, uuid, uuid, uuid, integer, bigint, timestamptz) TO svc_netd;
+-- ---- what netd used to hold and does not call (removed by audit B-7) ------------------------------------
+--   SELECT on iam_v2.devices                            -- no netd statement reads it
+--   EXECUTE on iam_v2.apply_entitlement_transition      -- "the boundary self-check inspects this": it reads
+--                                                          pg_proc and needs no EXECUTE; netd moves no
+--                                                          entitlement state, and the writers it calls reach
+--                                                          the transition as their owner
+--   EXECUTE on iam_v2.ingest_absolute_counters          -- acctd is the caller (see the acctd file)
+--   EXECUTE on iam_v2.record_auth_context_offer         -- scd is the caller
+--   EXECUTE on iam_v2.p3_controlled_operation_open,
+--              iam_v2.p5_controlled_operation_open      -- called by the controlled-writer TRIGGERS in the
+--                                                          writer's context; netd writes no guarded table
+-- gatep-grants.sql asserts after every reconcile that netd holds no entitlement writer and no iam_v2 table
+-- write, so re-adding one of these fails the reconcile rather than widening netd silently.
 
 -- ---- and the grace grant that was never netd's to hold --------------------
 -- This file previously granted svc_netd EXECUTE on iam_v2.publish_checkout_grace_config, under the rationale
@@ -51,18 +62,8 @@ GRANT EXECUTE ON FUNCTION iam_v2.record_auth_context_offer(uuid, uuid, uuid, uui
 -- network-enforcement owner and has never called that function -- it only ever REFERENCED it, in the startup
 -- boundary self-check, which reads pg_proc and needs no EXECUTE at all.
 --
--- The over-grant survived the D32 retirement because the retirement was written from the perspective of the
--- service being fixed. edged's raw path was closed in code and in privilege, and netd -- which nobody was
--- looking at -- was left holding EXECUTE on the very writer the design had just declared unreachable. That is
--- the same "granted to the wrong service" mistake that hid the acctd accounting gap and the netd enforcement
--- gap, in the opposite direction: an unused privilege rather than a missing one, and therefore silent.
---
 -- Unconditional and idempotent: revoking a privilege that was never granted is a no-op.
 REVOKE EXECUTE ON FUNCTION iam_v2.publish_checkout_grace_config(uuid, uuid, uuid, integer, integer, integer, bigint, integer, text, integer) FROM svc_netd;
-
--- The boundary self-check inspects this before starting; entitlement transitions are driven by the
--- enforcement lifecycle above.
-GRANT EXECUTE ON FUNCTION iam_v2.apply_entitlement_transition(uuid, text, timestamptz, text) TO svc_netd;
 
 -- NOT granted: INSERT/UPDATE/DELETE on any iam_v2 table. netd's authority is exercised entirely through the
 -- controlled-writer functions above, so a bug in netd cannot move session or entitlement state directly.

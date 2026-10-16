@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/healthdir"
 )
 
 // Dir is shared with the startupbackoff trackers (tmpfs; reset on reboot).
@@ -17,17 +19,11 @@ const Dir = "/run/stayconnect/health"
 func path(name string) string { return filepath.Join(Dir, name+".alive") }
 
 // Touch stamps the service's liveness file with the current time.
+//
+// Written as a fresh file renamed into place (internal/healthdir), never by Chtimes or OpenFile on the existing
+// name: both follow a symlink, and the directory is shared with every service account (audit B-3).
 func Touch(name string) {
-	_ = os.MkdirAll(Dir, 0o777)
-	_ = os.Chmod(Dir, 0o777)
-	p := path(name)
-	now := time.Now()
-	if err := os.Chtimes(p, now, now); err != nil {
-		// File may not exist yet — create it, then it exists for next Touch.
-		if f, e := os.OpenFile(p, os.O_CREATE|os.O_WRONLY, 0o644); e == nil {
-			_ = f.Close()
-		}
-	}
+	_ = healthdir.WriteFile(Dir, name+".alive", nil)
 }
 
 // Report publishes a loop's DEGRADED state alongside its heartbeat. An empty reason means healthy.
@@ -36,11 +32,9 @@ func Touch(name string) {
 // makes is refused, or while it cannot read the counters at all. Both look identical to Age() — the loop is
 // progressing — and both silently lose usage. The reason has to travel with the heartbeat or nobody sees it.
 func Report(name, reason string) {
-	_ = os.MkdirAll(Dir, 0o777)
-	_ = os.Chmod(Dir, 0o777)
 	// Written whole each time, including the empty (healthy) case: a stale reason left behind after recovery
-	// would have an operator chasing a problem that is over.
-	_ = os.WriteFile(statusPath(name), []byte(reason), 0o644)
+	// would have an operator chasing a problem that is over. Never through a symlink (internal/healthdir).
+	_ = healthdir.WriteFile(Dir, name+".status", []byte(reason))
 }
 
 // Status returns the last reported degraded reason ("" when healthy) and whether the loop has reported at all.

@@ -7,6 +7,7 @@ package main
 // responses, and a blank/omitted secret on update keeps the stored value.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -631,6 +632,43 @@ func scanSocial(row interface{ Scan(...any) error }, p *edgeSocialProvider) erro
 	return nil
 }
 
+// socialMethodSwitches reads the Sign-in methods switch for each identity provider (auth_methods.social).
+// ok=false when it cannot be read.
+func (s *server) socialMethodSwitches(ctx context.Context) (map[string]bool, bool) {
+	var raw []byte
+	if err := s.db.QueryRow(ctx, `SELECT COALESCE(auth_methods->'social', '{}'::jsonb)::text FROM tenants WHERE id=$1`,
+		s.tenantID).Scan(&raw); err != nil {
+		return nil, false
+	}
+	var social map[string]struct {
+		Enabled bool `json:"enabled"`
+	}
+	if json.Unmarshal(raw, &social) != nil {
+		return nil, false
+	}
+	out := map[string]bool{}
+	for k, v := range social {
+		out[k] = v.Enabled
+	}
+	return out, true
+}
+
+// applySocialSwitch: a provider whose Sign-in methods switch is off is NOT offered, whatever its application
+// says -- scd removes it from the portal on exactly that switch (applySocialOffering). The badge used to read
+// "Offered" for a provider the portal did not show. An unreadable switch is reported as not offered (fail
+// closed), with its own reason.
+func applySocialSwitch(p *edgeSocialProvider, switches map[string]bool, ok bool) {
+	if !p.Offered {
+		return
+	}
+	switch {
+	case !ok:
+		p.Offered, p.OfferedReason = false, "method_unknown"
+	case !switches[p.Provider]:
+		p.Offered, p.OfferedReason = false, "method_off"
+	}
+}
+
 // decorateSocial adds what depends on the portal's current HTTPS state: the callback URLs and the offered line.
 func decorateSocial(p *edgeSocialProvider, st portalTLSState) {
 	p.CallbackURLs = portalHostnames(st)
@@ -837,6 +875,7 @@ func (s *server) listSocialProviders(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
 	}
+	switches, switchesOK := s.socialMethodSwitches(ctx)
 	rows, err := s.db.Query(ctx,
 		`SELECT `+socialCols+` FROM social_oauth_providers WHERE tenant_id=$1 ORDER BY provider, created_at`,
 		s.tenantID)
@@ -853,6 +892,7 @@ func (s *server) listSocialProviders(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		decorateSocial(&p, st)
+		applySocialSwitch(&p, switches, switchesOK)
 		out = append(out, p)
 	}
 	// The hostnames are returned beside the list too, so the Add form can offer them before any provider exists.
@@ -883,6 +923,8 @@ func (s *server) getSocialProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	decorateSocial(&p, st)
+	sw, swOK := s.socialMethodSwitches(ctx)
+	applySocialSwitch(&p, sw, swOK)
 	writeJSON(w, http.StatusOK, p)
 }
 
@@ -969,6 +1011,8 @@ func (s *server) createSocialProvider(w http.ResponseWriter, r *http.Request) {
 	})
 	s.reloadSocial()
 	decorateSocial(&p, st)
+	sw, swOK := s.socialMethodSwitches(ctx)
+	applySocialSwitch(&p, sw, swOK)
 	writeJSON(w, http.StatusCreated, p)
 }
 
@@ -1049,6 +1093,8 @@ func (s *server) patchSocialProvider(w http.ResponseWriter, r *http.Request) {
 	})
 	s.reloadSocial()
 	decorateSocial(&p, st)
+	sw, swOK := s.socialMethodSwitches(ctx)
+	applySocialSwitch(&p, sw, swOK)
 	writeJSON(w, http.StatusOK, p)
 }
 

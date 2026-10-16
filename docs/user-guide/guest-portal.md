@@ -46,7 +46,7 @@ license.
 | **Email** | Email address → **Send code**, then the 6-digit code → **Verify** | Needs a sender under **Email & SMS**. *Try a different email* starts again. |
 | **Phone** | Phone number with country code → **Send code**, then the 6-digit code → **Verify** | Needs a text-message sender under **Email & SMS**. |
 | **Social** | **Continue with Google / Apple / Facebook** | Leaves for the provider and comes back. Providers are set up under **Social login**. |
-| **Post-stay** | Post-stay PIN given at checkout → **Reconnect** | Lets a departed guest reconnect for a limited time (see **Hotel → Post-stay access**). |
+| **Post-stay** | Post-stay PIN given at checkout → **Reconnect** → choose a package when the site offers more than one free post-stay package (one is connected at once) | Lets a departed guest reconnect for a limited time (see **Hotel → Post-stay access**). Only free post-stay packages are offered; the device is online when the page moves to the success screen. |
 
 ## Messages clients can see
 
@@ -60,7 +60,8 @@ in it, and a wrong room and a wrong name give the same message. Examples (Englis
 | Too many attempts | "Too many attempts. Please wait N seconds and try again." with a live countdown, then "You can try again now." |
 | Wrong voucher | "That voucher code didn't work. Check the code and try again." |
 | Wrong account | "The username or password is incorrect." |
-| Voucher or account at its device limit | "This voucher (account) has reached its device limit. Disconnect another device and try again." |
+| Voucher, account or room at its device limit | The **Choose a device to replace** page, where the portal can hold the sign-in (it lists the package's devices and lets the client move a place to this device). Otherwise: "Every device place on this voucher (account / for this room) is in use. On a device that is online with it, remove one under “Your devices”, or contact the site team." — signing out does not free a place. |
+| Too many voucher attempts | "Too many attempts. Please wait a minute and try again." (not "invalid voucher") |
 | Appliance at its licensed number of online clients | "The Wi-Fi network is at capacity. Please try again shortly." |
 | Device not on a client network the appliance serves | "Your device isn't connected to this Wi-Fi network." |
 | Access ended | "Your Internet package has ended because the data allowance was used." / "…because the access time expired." |
@@ -83,7 +84,11 @@ asked to sign in again.
 ## "You're online"
 
 A tick, **You're online**, the time remaining (or *No time limit*), a **Status** link and a **Disconnect**
-button. **Status** opens a branded, translated page that says whether the device is online and, for an
+button. The time remaining is the appliance's own answer for this device — the earliest of the online time left,
+the access's hard end and the package's end — never a value from the page's address. A client who chose
+without signing in also sees their **return code** here (and on the payment page). The page offers nothing to
+buy. **Disconnect** works only from the device's own portal page; a disconnect that arrives any other way shows
+a page that asks to confirm. **Status** opens a branded, translated page that says whether the device is online and, for an
 online-time budget, how much time is left and when access ends; **Back** returns to this page. Where they apply:
 
 - **Time left** for online-time budgets: *"… of internet time left. This counts down only while you are

@@ -44,18 +44,24 @@ the StayConnect CA) validates **both** URLs cleanly — verified with
 
 ## Access restriction (management only — enforced at the firewall)
 
-Reachability is controlled by nftables (`deploy/nftables/stayconnect.nft`), not by a
-Caddy bind:
+Reachability is controlled by the ruleset netd renders (`internal/netcfg/render_nft.go`),
+not by a Caddy bind. The appliance has exactly two NICs and **the WAN is also the
+management interface** ([DEPLOYMENT_APPLIANCE.md](DEPLOYMENT_APPLIANCE.md) §1), so:
 
-- `:443` is accepted **only** on the management interface `ens160` to the management
-  IP (`iifname "ens160" ip daddr the retired development reference appliance tcp dport 443 accept`).
-- Client `:443` arriving on `br-lan` is DNAT'd to the **captive portal**
-  (`10.10.0.1:8343`) — it never reaches Caddy.
+- `:443` is accepted **only** on the WAN/management interface (`NETD_MGMT_IFACE`, `ens160`)
+  **to the WAN's own address**: `iifname "ens160" ip daddr <WAN address> tcp dport 443 accept`.
+  The address comes from `NETD_MGMT_ADDR`; provisioning sets it to `auto`, which netd resolves to
+  the interface's current primary IPv4 at every render and re-asserts when System network changes
+  it (`cmd/netd/nft_watch.go`). A literal address is still accepted, but System network then
+  refuses to move the WAN away from it (it would lock the console out).
+- An unauthenticated client's `:443` to any other host is dropped (no redirect: the appliance holds
+  no certificate for other people's names); only the portal address's `:443` reaches portald.
+  Nothing a client network sends reaches Caddy.
 - Client→management ranges (`172.16/12`, `192.168/16`) are dropped.
 
-So the Admin Console — DNS name or IP — is **not** exposed through br-lan, the client
-network, or as a public WAN service. Client services (portal, DNS, DHCP) are
-unaffected.
+So the Admin Console — DNS name or IP — is reachable on the WAN address (the management path)
+and **not** through a client network. Who can reach the WAN address is decided by the hotel's
+upstream network. Client services (portal, DNS, DHCP) are unaffected.
 
 ## Why the IP alias "just works" at the app layer
 

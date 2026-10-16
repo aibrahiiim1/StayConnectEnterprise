@@ -52,6 +52,7 @@ import { Table, TBody, TD, TH, THead, TR, TableWrap } from "@/components/ui/tabl
 import { useToast } from "@/components/ui/toast";
 import { ArrowUpRight, BedDouble, CheckCircle2, ShieldCheck, Undo2 } from "lucide-react";
 import { CodeList, CodeText } from "../payment-methods/codes";
+import { RoomChargeLiveNotice } from "@/components/room-charge-live-notice";
 
 const FIAS = "protel-fias";
 const ATTESTATION_MIN = 20;
@@ -91,16 +92,22 @@ export default function RoomChargePage() {
       setErr(e);
       setData({ interfaces: [], posting_target_models: [] });
     }
-    try {
-      const o = await api.get<{ data: { id: string; email?: string; display_name?: string }[] }>("/operators");
-      setApprovers(new Map((o?.data ?? []).map((x) => [x.id, x.email || x.display_name || ""])));
-    } catch { setApprovers(new Map()); }
+    // Approver names are a convenience; a role that may not read the operator list sees the ids instead and
+    // makes no request it would be refused.
+    if (roles !== null && canRead("operators", roles)) {
+      try {
+        const o = await api.get<{ data: { id: string; email?: string; display_name?: string }[] }>("/operators");
+        setApprovers(new Map((o?.data ?? []).map((x) => [x.id, x.email || x.display_name || ""])));
+      } catch { setApprovers(new Map()); }
+    } else {
+      setApprovers(new Map());
+    }
     // Module readiness is advisory on this page: the table is still correct without it.
     try {
       const m = await api.get<SiteModules>("/modules");
       setReadiness(m?.modules?.room_charge?.readiness ?? []);
     } catch { /* readiness unknown; the note is simply not shown */ }
-  }, []);
+  }, [roles]);
   useEffect(() => { if (readable) load(); }, [readable, load]);
 
   const postingWithheld = readiness.includes("PMS_POSTING_NOT_AUTHORISED");
@@ -169,6 +176,7 @@ export default function RoomChargePage() {
   return (
     <PageShell>
       {header}
+      <RoomChargeLiveNotice />
       {!isSiteAdmin && (
         <ReadOnlyNotice>Approving a PMS interface for room charge is a site administrator decision.</ReadOnlyNotice>
       )}

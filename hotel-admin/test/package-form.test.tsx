@@ -12,7 +12,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { PackageForm, type PlanOption } from "@/app/(app)/internet-packages/package-form";
-import { FORBIDDEN_RULE_TYPES, SUPPORTED_RULE_TYPES } from "@/lib/commerce-form";
+import { CONTRADICTORY_PRIOR_PURCHASE, FORBIDDEN_RULE_TYPES, SUPPORTED_RULE_TYPES, SPEED_STEPS_REFUSAL } from "@/lib/commerce-form";
 
 // The Free access device switch is a Radix Switch, which measures itself; jsdom has no ResizeObserver.
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
@@ -288,10 +288,16 @@ describe("PackageForm", () => {
       // The allowance is a dedicated control, not a row; the requires_prior rule is the only row (row 0).
       expect((screen.getByTestId("rule-mode-0") as HTMLSelectElement).value).toBe("requires_prior");
       expect(screen.queryByTestId("rule-type-1")).toBeNull();
+      // THE PAIR IS A CONTRADICTION (audit O-9): "only clients with no earlier purchase" AND "only clients with
+      // one" offers the package to nobody. It is read back so it can be fixed, but saving it is refused.
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+      expect(onSave).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert").textContent).toBe(CONTRADICTORY_PRIOR_PURCHASE);
+      // Removing the requires-prior row makes it saveable, with the allowance exactly as stored.
+      fireEvent.click(screen.getByTestId("remove-rule-0"));
       fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
       expect(onSave.mock.calls[0][0].payload.eligibility_rules).toEqual([
         { type: "PRIOR_PURCHASE", value: { forbids_prior: true, within_hours: 24, also_by_device: false } },
-        { type: "PRIOR_PURCHASE", value: { requires_prior: true } },
       ]);
     });
 
@@ -338,23 +344,47 @@ describe("PackageForm", () => {
     expect(payload).not.toHaveProperty("room_charge_mappings");
   });
 
-  it("carries the existing rules and tiers through a save unchanged", () => {
+  it("carries the existing rules through a save, and refuses speed steps until they are removed", () => {
     const onSave = vi.fn();
     render(<PackageForm mode="edit" plans={plans} onSave={onSave} initial={{
       ...initial,
       rules: [{ type: "AUTH_METHOD", methods: "pms, voucher" }],
       tiers: [{ order: 10, down_kbps: 5000 }, { order: 5, down_kbps: 1000 }],
     }} />);
+    // Speed steps were never applied (audit O-5): the form says so, and will not save them.
+    expect(screen.getByTestId("speed-steps-notice").textContent).toContain(SPEED_STEPS_REFUSAL);
     fireEvent.change(screen.getByTestId("name"), { target: { value: "Renamed" } });
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getAllByText(SPEED_STEPS_REFUSAL).length).toBeGreaterThan(1);
 
+    fireEvent.click(screen.getByTestId("remove-speed-steps"));
+    expect(screen.queryByTestId("speed-steps-notice")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
     const payload = onSave.mock.calls[0][0].payload;
     expect(payload.eligibility_rules).toEqual([
       { type: "AUTH_METHOD", value: { methods: ["pms", "voucher"] } },
     ]);
-    expect(payload.grant_tiers.map((t: { order: number }) => t.order)).toEqual([5, 10]);
+    expect(payload.grant_tiers).toEqual([{ order: 5, grant: {} }]);
     // A package loaded with no price section is Free, and is saved as Free.
     expect(payload.acquisition_methods).toEqual(["NOT_REQUIRED"]);
     expect(payload.price_minor).toBe(0);
+  });
+});
+
+// AUDIT O-4: the per-night allowance is given only to clients who signed in with their room, and such a
+// package is not offered to other clients nor issued as vouchers. The copy says exactly that.
+describe("PackageForm — the per-night allowance says who receives it", () => {
+  it("states that only room sign-ins receive it, and warns when Voucher is ticked", () => {
+    render(<PackageForm mode="edit" plans={plans} onSave={() => {}} initial={{
+      ...initial,
+      allocation: { mode: "PER_STAY_NIGHT", gb_per_night: "1", min_gb: "", max_gb: "" },
+      acquisition: { price: "0", currency: "USD", methods: ["NOT_REQUIRED", "PREPAID"], room_charge: [] },
+    }} />);
+    const note = screen.getByTestId("per-night-audience-note").textContent ?? "";
+    expect(note).toContain("only to clients who signed in with their room");
+    expect(note).toContain("not offered to clients who signed in with a voucher, an account");
+    expect(note).toContain("cannot be issued as vouchers");
+    expect(screen.getByTestId("per-night-voucher-note").textContent).toMatch(/vouchers cannot be issued/i);
   });
 });

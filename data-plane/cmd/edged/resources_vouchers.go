@@ -369,9 +369,10 @@ func (s *server) voucherHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// issueVouchers mints a batch. NOT a step-up action: it creates a secret rather than revealing one, and the
-// codes it returns have never existed before this request. The operator id still comes from the SESSION,
-// because "who printed these" is a fact about the server's knowledge, not a field a client may choose.
+// issueVouchers mints a batch. A STEP-UP ACTION (T30): a batch is up to 500 cards worth access at the
+// package's price, so printing one is a money decision, not only a secret being created -- the console
+// session alone does not authorise it. The operator id comes from the SESSION, because "who printed these" is
+// a fact about the server's knowledge, not a field a client may choose.
 func (s *server) issueVouchers(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		PackageRevisionID string  `json:"package_revision_id"`
@@ -379,9 +380,14 @@ func (s *server) issueVouchers(w http.ResponseWriter, r *http.Request) {
 		Note              string  `json:"note,omitempty"`
 		ValidFrom         *string `json:"valid_from,omitempty"`
 		ValidUntil        *string `json:"valid_until,omitempty"`
+		Password          string  `json:"password"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid", "malformed request")
+		return
+	}
+	if !s.reauth(r, in.Password) {
+		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required to issue vouchers")
 		return
 	}
 	// Validated HERE as well as in scd, because a 400 an operator can read beats a 400 relayed from a
@@ -463,6 +469,11 @@ func (s *server) revokeVoucher(w http.ResponseWriter, r *http.Request) {
 		label = sess.Email
 	}
 	id := chi.URLParam(r, "id")
+	// Checked before it is placed in scd's path: an id is a uuid, never a path fragment.
+	if !uuidRe.MatchString(id) {
+		jsonErr(w, http.StatusNotFound, "not_found", "voucher not found")
+		return
+	}
 	st, resp, err := s.scd.call(r.Context(), http.MethodPost, "/v1/vouchers/"+id+"/revoke",
 		map[string]any{"operator_id": actor, "operator_label": label, "reason": in.Reason})
 	if err != nil {
@@ -534,6 +545,10 @@ func (s *server) revealVoucherCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
+	if !uuidRe.MatchString(id) {
+		jsonErr(w, http.StatusNotFound, "not_found", "voucher not found")
+		return
+	}
 	st, resp, err := s.scd.call(r.Context(), http.MethodPost, "/v1/vouchers/"+id+"/reveal",
 		map[string]any{"operator_id": actor, "operator_label": label, "reason": in.Reason})
 	if err != nil {
@@ -704,6 +719,10 @@ func (s *server) rotateVoucherKeyGeneration(w http.ResponseWriter, r *http.Reque
 		label = sess.Email
 	}
 	id := chi.URLParam(r, "id")
+	if !uuidRe.MatchString(id) {
+		jsonErr(w, http.StatusNotFound, "not_found", "key generation not found")
+		return
+	}
 	st, resp, err := s.scd.call(r.Context(), http.MethodPost,
 		"/v1/voucher-key-generations/"+id+"/supersede",
 		map[string]any{"operator_id": actor, "operator_label": label, "reason": in.Reason})

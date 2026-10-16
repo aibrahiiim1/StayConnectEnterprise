@@ -27,7 +27,6 @@ func renderSuccess(t *testing.T) string {
 	p := buildGuestPage(nil, map[string]any{}, "n0nce", "tl.", "dev.", "unit.")
 	if err := tpl.Execute(&buf, successView{
 		guestPage: p, SessionID: "sess-1", DurationSeconds: 3600, HumanRemaining: "1 h",
-		CommerceEnabled: false,
 	}); err != nil {
 		t.Fatalf("render: %v", err)
 	}
@@ -216,7 +215,7 @@ func TestRemainingTimePanelIsHiddenForOrdinaryPackages(t *testing.T) {
 	if !strings.Contains(head, "hidden") {
 		t.Fatalf("the remaining-time panel is not hidden by default: %s", head)
 	}
-	if !strings.Contains(panel, "st.time_mode !== 'AGGREGATE_ONLINE_TIME'") {
+	if !strings.Contains(panel, "st.time_mode !== 'AGGREGATE_ONLINE_TIME' && !st.online_time_allowance") {
 		t.Fatal("the panel is revealed without checking the package's time mode")
 	}
 	if !strings.Contains(panel, "box.hidden = false") {

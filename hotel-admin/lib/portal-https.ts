@@ -150,6 +150,11 @@ export function offeredWords(reason: string | null | undefined, provider: string
       return `Not offered: ${PROVIDER_LABELS[provider] ?? provider} needs your hotel portal domain (see Portal HTTPS).`;
     case "callback_not_registered":
       return "Not offered: the callback URL of the portal's current address is not ticked as registered.";
+    // The Sign-in methods switch for this provider (edged applySocialSwitch).
+    case "method_off":
+      return `Not offered: ${PROVIDER_LABELS[provider] ?? provider} is switched off under Sign-in methods.`;
+    case "method_unknown":
+      return "Not offered: the Sign-in methods setting could not be read.";
     default:
       return `Not offered (${reason}).`;
   }

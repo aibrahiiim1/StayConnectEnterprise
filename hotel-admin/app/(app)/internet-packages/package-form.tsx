@@ -17,6 +17,7 @@ import { useEffect, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
 import { Switch } from "@/components/ui/misc";
+import { Callout } from "@/components/ui/error-banner";
 import { Trash2, Plus, ChevronDown, ChevronRight } from "lucide-react";
 import { durationToSeconds } from "@/lib/units";
 import {
@@ -30,6 +31,9 @@ import {
   END_MODE_LABELS,
   RULE_TYPE_LABELS,
   buildPublishPayload,
+  SPEED_STEPS_REFUSAL,
+  tiersArePlain,
+  plainTiers,
   buildAcquisition,
   newAcquisitionForm,
   type AcquisitionForm,
@@ -45,8 +49,10 @@ import {
   isPaidPrice,
   WITHIN_HOURS_MIN,
   WITHIN_HOURS_MAX,
+  type PreservedRule,
 } from "@/lib/commerce-form";
 import { moduleLicensedIn } from "@/lib/commerce-form";
+import { cardCurrencyProblem, type CardAccountView } from "@/lib/card-currency";
 import { AcquisitionSection } from "./acquisition-section";
 import { TravelAgentPicker } from "./travel-agent-picker";
 
@@ -102,6 +108,10 @@ export type PackageFormInitial = {
   allocation?: AllocationForm;
   /** The package's price, currency, acquisition methods and room-charge mappings, handed back unchanged. */
   acquisition?: AcquisitionForm;
+  /** Stored conditions of a type this form does not edit: shown read-only and republished exactly as loaded. */
+  preservedRules?: PreservedRule[];
+  /** The loaded display object; the edited name is merged into it so nothing else in it is dropped. */
+  display?: Record<string, unknown> | null;
 };
 
 function emptyRule(type: RuleType): EligibilityRuleForm {
@@ -131,7 +141,7 @@ const num = (v: unknown): number | null => {
 
 export function PackageForm({
   mode, initial, plans, busy, onSave, onCancel, modules = null, roomChargeInterfaces = null, clientGroups = null,
-  cardCurrencies = null,
+  cardAccount = null,
 }: {
   mode: "add" | "edit";
   initial?: PackageFormInitial;
@@ -146,8 +156,9 @@ export function PackageForm({
   roomChargeInterfaces?: RoomChargeInterface[] | "error" | null;
   /** GET /client-groups: the groups an audience can name. null while loading; "error" when they cannot be read. */
   clientGroups?: ClientGroupOption[] | "error" | null;
-  /** The currencies the site's ACTIVE payment accounts settle (upper-case). null = unknown: no claim is made. */
-  cardCurrencies?: string[] | null;
+  /** The site's DEFAULT ACTIVE payment account (the one checkouts use); "none" when there is none; null =
+   *  unknown, and then no claim is made about card currencies. */
+  cardAccount?: CardAccountView | "none" | null;
 }) {
   // HOSPITALITY decides whether hotel conditions and the per-night allowance are offered at all.
   const hotel = moduleLicensedIn("hospitality", modules ?? null);
@@ -194,7 +205,6 @@ export function PackageForm({
   const planHeadingID = `${ids}-plan`;
   const endHeadingID = `${ids}-end`;
   const allocHeadingID = `${ids}-alloc`;
-  const stepsHeadingID = `${ids}-steps`;
 
   const selected = plans.find((p) => p.plan_id === planID);
   // Recomputed on every render, so it follows the plan, the mode and the three numbers immediately.
@@ -215,6 +225,8 @@ export function PackageForm({
       service_plan_revision_id: selected.current_revision_id || "pending",
       rules, tiers, duration,
       visible_from: visFrom || undefined, visible_until: visUntil || undefined,
+      preserved_rules: initial?.preservedRules,
+      display: initial?.display,
     });
     if (res.error || !res.payload) { setError(res.error ?? "Please check the form"); return; }
     const allocErr = validateAllocation(alloc);
@@ -229,8 +241,6 @@ export function PackageForm({
 
   const setRule = (i: number, patch: Partial<EligibilityRuleForm>) =>
     setRules((rs) => rs.map((r, j) => (j === i ? ({ ...r, ...patch } as EligibilityRuleForm) : r)));
-  const setTier = (i: number, patch: Partial<GrantTierForm>) =>
-    setTiers((ts) => ts.map((t, j) => (j === i ? { ...t, ...patch } : t)));
 
   // THE AUDIENCE AND THE FREE ALLOWANCE ARE RULES LIKE ANY OTHER -- one CLIENT_GROUP rule and one
   // forbids-prior PRIOR_PURCHASE rule in the same list the generic rows edit. Each dedicated control finds its
@@ -410,9 +420,19 @@ export function PackageForm({
                   .map((r) => `${r.nights} nights → ${r.gb} GB`).join(" · ")}
               </div>
             )}
-            <p className="text-xs text-muted-foreground">
-              Clients who did not sign in with their room are not offered this package.
+            {/* TRUE AS STATED (audit O-4): a per-night allowance needs a stay to count nights of, so the
+                appliance offers and grants such a package only to a client who signed in with their room. */}
+            <p className="text-xs text-muted-foreground" data-testid="per-night-audience-note">
+              This allowance is given only to clients who signed in with their room, because it is counted from
+              their stay. The package is not offered to clients who signed in with a voucher, an account, an email
+              or phone code, a social account or open access, and it cannot be issued as vouchers.
             </p>
+            {acq.methods.includes("PREPAID") && (
+              <p className="text-xs text-warning-subtle-foreground" role="status" data-testid="per-night-voucher-note">
+                Voucher is ticked below, but vouchers cannot be issued for a package with a per-night allowance.
+                Untick Voucher, or choose the plan&rsquo;s allowance instead.
+              </p>
+            )}
           </div>
         )}
 
@@ -471,14 +491,12 @@ export function PackageForm({
       </div>
 
       <AcquisitionSection value={acq} onChange={setAcq} modules={modules} interfaces={roomChargeInterfaces} />
-      {/* A card payment is never converted: a package priced in a currency no active account settles is not
-          offered by card. Said here, beside the price, rather than discovered by a client after choosing. */}
-      {paid && acq.methods.includes("ONLINE_PAYMENT") && Array.isArray(cardCurrencies)
-        && !cardCurrencies.includes((acq.currency || "").trim().toUpperCase()) && (
+      {/* WHETHER CLIENTS WILL BE OFFERED CARD FOR THIS PRICE, by the rule scd applies: the DEFAULT active account
+          settles the package currency, or it lets its provider convert that currency (lib/card-currency).
+          Said here, beside the price, rather than discovered by a client after choosing. */}
+      {paid && acq.methods.includes("ONLINE_PAYMENT") && cardCurrencyProblem(cardAccount, acq.currency) && (
         <p className="text-xs text-warning-subtle-foreground" role="status" data-testid="card-currency-note">
-          {cardCurrencies.length === 0
-            ? "No active payment account exists yet, so this package will not be offered by card until one is added under Payment methods."
-            : `Your active payment account${cardCurrencies.length > 1 ? "s settle" : " settles"} ${cardCurrencies.join(", ")}, not ${(acq.currency || "").toUpperCase()}. A card payment is never converted, so this package will not be offered by card until the price currency or the account matches.`}
+          {cardCurrencyProblem(cardAccount, acq.currency)}
         </p>
       )}
 
@@ -665,11 +683,40 @@ export function PackageForm({
           </div>
           );
         })}
+        {/* CONDITIONS THIS FORM DOES NOT EDIT. A stored rule of a type the console has no control for (a newer
+            appliance's, or one set outside this screen) is kept and saved again exactly as it is, never dropped. */}
+        {(initial?.preservedRules ?? []).length > 0 && (
+          <div className="mt-2 space-y-1" data-testid="preserved-rules">
+            {(initial?.preservedRules ?? []).map((r, i) => (
+              <div key={i} className="rounded-md border border-border bg-surface/50 px-3 py-1.5 text-xs">
+                <span className="font-mono">{r.type}</span>{" "}
+                <span className="font-mono text-muted-foreground">{JSON.stringify(r.value)}</span>{" "}
+                <span className="text-muted-foreground">— kept as is</span>
+              </div>
+            ))}
+            <p className="text-xs text-muted-foreground">
+              These conditions cannot be changed here. They are saved again unchanged.
+            </p>
+          </div>
+        )}
       </div>
 
-      {/* ADVANCED. Sale window and speed steps are real controls and stay available, but they are not part of
-          creating an ordinary package, and putting them in the main flow is what made this form feel like
-          configuration rather than administration. */}
+      {/* SPEED STEPS WERE NEVER APPLIED (audit O-5): clients always got the service plan's speed. They are no
+          longer offered. A package that still carries them says so, and one click replaces them with the single
+          plain step every package has; the appliance refuses to save them otherwise. */}
+      {!tiersArePlain(tiers) && (
+        <div data-testid="speed-steps-notice">
+          <Callout tone="warning" title="Speed steps are not applied">
+            <p>{SPEED_STEPS_REFUSAL}</p>
+            <Button type="button" variant="outline" size="sm" className="mt-2" data-testid="remove-speed-steps"
+              onClick={() => setTiers((ts) => plainTiers(ts))}>Remove speed steps</Button>
+          </Callout>
+        </div>
+      )}
+
+      {/* ADVANCED. The sale window is a real control and stays available, but it is not part of creating an
+          ordinary package, and putting it in the main flow is what made this form feel like configuration
+          rather than administration. */}
       <div>
         <button type="button" className="text-sm text-muted flex items-center gap-1"
           onClick={() => setAdvanced((v) => !v)} aria-expanded={advanced}>
@@ -680,23 +727,6 @@ export function PackageForm({
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Offer from"><Input data-testid="visible-from" type="datetime-local" value={visFrom} onChange={(e) => setVisFrom(e.target.value)} /></Field>
               <Field label="Offer until"><Input data-testid="visible-until" type="datetime-local" value={visUntil} onChange={(e) => setVisUntil(e.target.value)} /></Field>
-            </div>
-            <div role="group" aria-labelledby={stepsHeadingID}>
-              <div className="flex items-center justify-between mb-1">
-                <span id={stepsHeadingID} className="block text-label text-foreground">Speed steps (applied in order, kbps)</span>
-                <Button type="button" variant="ghost" onClick={() => setTiers((ts) => [...ts, { order: (ts.length + 1) * 10 }])}><Plus size={14} /> Add step</Button>
-              </div>
-              {tiers.map((t, i) => (
-                <div key={i} className="flex gap-2 items-center mb-2" data-testid={`tier-${i}`}>
-                  <Input data-testid={`tier-order-${i}`} aria-label={`Step ${i + 1}: order`} type="number" className="w-24" value={String(t.order)} onChange={(e) => setTier(i, { order: e.target.value })} />
-                  <Input data-testid={`tier-down-${i}`} aria-label={`Step ${i + 1}: download kbps`} type="number" min={0} placeholder="down kbps" value={String(t.down_kbps ?? "")} onChange={(e) => setTier(i, { down_kbps: e.target.value })} />
-                  <Input data-testid={`tier-up-${i}`} aria-label={`Step ${i + 1}: upload kbps`} type="number" min={0} placeholder="up kbps" value={String(t.up_kbps ?? "")} onChange={(e) => setTier(i, { up_kbps: e.target.value })} />
-                  <Button type="button" variant="ghost" data-testid={`remove-tier-${i}`} aria-label={`Remove step ${i + 1}`} onClick={() => setTiers((ts) => ts.filter((_, j) => j !== i))}><Trash2 size={14} /></Button>
-                </div>
-              ))}
-              <p className="text-xs text-muted-foreground">
-                Leave a single step with no speeds unless you need different speeds for different clients.
-              </p>
             </div>
           </div>
         )}

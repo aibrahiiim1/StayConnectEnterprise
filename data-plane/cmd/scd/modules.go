@@ -124,9 +124,10 @@ func (s *server) siteAcquisitionMethods(ctx context.Context) iamv2.SiteMethods {
 		Card:       snap.Effective(lic.ModuleCardPayment),
 		RoomCharge: snap.Effective(lic.ModuleRoomCharge),
 	}
-	// Card payment is never converted, so a package is offered by card only in a currency an ACTIVE account
-	// settles (iamv2.SiteMethods.CardCurrencies). The confirm would otherwise refuse it one step later
-	// (PAYMENT_ACCOUNT_CURRENCY), after the client had already chosen.
+	// The client pays in the package currency. A package is offered by card only in the default account's
+	// currency or, when that account is provider-converts and its provider converts, in a currency the
+	// provider presents (iamv2.SiteMethods.CardApplicable). The payment gate would otherwise refuse it one step
+	// later (PAYMENT_ACCOUNT_CURRENCY), after the client had already chosen.
 	if m.Card && s.db != nil {
 		// The DEFAULT active account is the one a checkout uses (p4_resolve_payment_account_v2): its currency,
 		// and -- when it is marked provider-converts and its provider can -- the presentment currencies the

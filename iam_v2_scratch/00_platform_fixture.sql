@@ -183,6 +183,42 @@ CREATE TABLE IF NOT EXISTS public.social_oauth_states (
   consumed_at   timestamptz,
   code_verifier text,
   nonce         text);
+-- Admin Console sign-in protection and throttle (migration 0119), copied verbatim so the edged sign-in
+-- integration suites find the tables whichever schema they run against.
+CREATE TABLE IF NOT EXISTS public.operator_signin_protection (
+  id                     boolean PRIMARY KEY DEFAULT true CONSTRAINT osp_singleton CHECK (id),
+  account_max_failures   integer NOT NULL DEFAULT 5
+    CONSTRAINT osp_account_max CHECK (account_max_failures BETWEEN 3 AND 20),
+  account_window_seconds integer NOT NULL DEFAULT 900
+    CONSTRAINT osp_account_window CHECK (account_window_seconds BETWEEN 60 AND 86400),
+  ip_max_failures        integer NOT NULL DEFAULT 20
+    CONSTRAINT osp_ip_max CHECK (ip_max_failures BETWEEN 5 AND 500),
+  ip_window_seconds      integer NOT NULL DEFAULT 900
+    CONSTRAINT osp_ip_window CHECK (ip_window_seconds BETWEEN 60 AND 86400),
+  lockout_seconds        integer NOT NULL DEFAULT 900
+    CONSTRAINT osp_lockout CHECK (lockout_seconds BETWEEN 60 AND 86400),
+  config_version         bigint  NOT NULL DEFAULT 1 CONSTRAINT osp_version CHECK (config_version >= 1),
+  updated_at             timestamptz NOT NULL DEFAULT now(),
+  updated_by             text
+);
+CREATE TABLE IF NOT EXISTS public.operator_signin_protection_changes (
+  id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  changed_by         text NOT NULL CONSTRAINT ospc_actor CHECK (length(btrim(changed_by)) > 0),
+  change_reason      text NOT NULL CONSTRAINT ospc_reason CHECK (length(btrim(change_reason)) > 0),
+  old_values         jsonb,
+  new_values         jsonb NOT NULL,
+  new_config_version bigint NOT NULL,
+  changed_at         timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.operator_signin_throttle (
+  scope             text NOT NULL CONSTRAINT ost_scope CHECK (scope IN ('account','ip','reauth')),
+  key_hash          text NOT NULL CONSTRAINT ost_key_hex CHECK (key_hash ~ '^[0-9a-f]{64}$'),
+  failures          integer NOT NULL DEFAULT 0 CONSTRAINT ost_failures CHECK (failures >= 0),
+  window_started_at timestamptz NOT NULL DEFAULT now(),
+  last_failure_at   timestamptz NOT NULL DEFAULT now(),
+  locked_until      timestamptz,
+  PRIMARY KEY (scope, key_hash)
+);
 INSERT INTO public.appliances(id, tenant_id, site_id, serial, name) VALUES
   ('44444444-4444-4444-4444-444444444444','11111111-1111-1111-1111-111111111111',
    '22222222-2222-2222-2222-222222222222','APP-FIXTURE-0001','fixture-appliance')

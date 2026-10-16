@@ -31,7 +31,9 @@ Common rules:
 * The package is **derived from proof**, never named by the caller. A device id that is not the client's matches
   nothing and answers like an id that never existed.
 * The target must be **offline**. scd/edged first take it off the network by the operator-disconnect path
-  (session ended `DEVICE_REPLACED` / `DEVICE_RELEASED` / `admin`, nft deny, shaping class removed), then call the
+  (session ended `DEVICE_REPLACED` / `DEVICE_RELEASED` / `ADMIN` through the controlled session-end writer
+  `end_session_enforcement` — which can also end a session still `PENDING_ENFORCEMENT` — then nft deny and shaping
+  class removed), then call the
   function. A session that came back in between makes the function refuse (`REFUSED_ONLINE`).
 * **Daily limit** (clients only): at most `client_device_changes_per_day` successful changes per package per 24 h
   (setting, default 3, hard bounds 1–10 — the protection against passing one package around cannot be switched
@@ -98,10 +100,25 @@ path; see ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md §14.
 ## 7. Verified on PRE-LIVE, and what remains
 
 See §8 of the acceptance checklist (docs/acceptance/HTTPS-Portal-Real-Device-Acceptance-Checklist.md, section G)
-and `scripts/device-management-e2e-test.sh`. Not changed here and recorded as product decisions: whether a
-package should allow automatic slot recycling for long-idle devices; the room-sign-in (PMS Phase-3) path still
-answers the device limit with a sentence (it does not create a commerce session), so the replacement page is
-offered for account, email-account, voucher, code/social and open sign-ins.
+and `scripts/device-management-e2e-test.sh`. Not changed here and recorded as a product decision: whether a
+package should allow automatic slot recycling for long-idle devices.
+
+**The replacement page is offered for every sign-in** — account, email account, voucher (including one-step
+redemption), code/social, open selection and **room sign-in** (portal audit H-6, 2026-10-16). A room guest whose
+stay has every place taken has already proved the stay (scd refused the *grant*, not the sign-in), so being told
+"every place is in use" discloses nothing a wrong room could learn. scd's DEVICE_LIMIT refusal names, for portald
+only, the device it placed and its network; portald holds the verified room sign-in in a commerce session exactly
+as for every other method and sends the guest to **Choose a device to replace**. `client_device_action` already
+derives the package from the stay (`auth_contexts.stay_id`), and activation admits the replacing device on the
+strength of its own room sign-in for the same stay (`iamv2_session_activate.go`). The daily-change limit, the
+offline-target rule and the audit are the same as for every client. Where the portal has nowhere to hold the
+sign-in (the Phase-2 portal surface is off) the sentence remains, and it now says how a place is actually freed:
+"…remove one under “Your devices” on a device that is online with it, or contact the site team" — signing out
+does not free a place (§1).
+
+A retry on the replacement page after the place has moved (activation failed, a double tap, a reload) activates
+on the place this device already holds; it never replaces a second device or spends a second change. Devices are
+numbered as in the online page's "Your devices" panel.
 
 ## 8. A client's device on the Wi-Fi: what can go wrong, and what the product does
 

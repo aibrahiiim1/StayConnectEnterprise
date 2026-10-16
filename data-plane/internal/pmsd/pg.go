@@ -45,10 +45,18 @@ func (r *pgRepo) Close() error {
 	return nil
 }
 
+// ListActiveInterfaces returns the ACTIVE interfaces, plus every DRAINING one that still has room charges to
+// finish (audit H-8). Contract section 10: DRAINING is "no new auth/purchases/postings; outbox drains", so a
+// wind down that dropped the link at once stranded charges that were already authorized -- it behaved like a
+// stop, not a drain. Once iam_v2.pms_interface_has_undrained_postings (0123) answers false the interface leaves
+// this list and its worker stops as before. The Stay-Event applier keeps to ACTIVE interfaces only.
 func (r *pgRepo) ListActiveInterfaces(ctx context.Context, tenantID, siteID string) ([]Interface, error) {
 	rows, err := r.pool.Query(ctx, `SELECT tenant_id::text, site_id::text, id::text, connector_kind,
 		lifecycle_state, COALESCE(current_revision_id::text,'') FROM iam_v2.pms_interfaces
-		WHERE tenant_id=$1 AND site_id=$2 AND lifecycle_state='ACTIVE'`, tenantID, siteID)
+		WHERE tenant_id=$1 AND site_id=$2
+		  AND (lifecycle_state='ACTIVE'
+		       OR (lifecycle_state='DRAINING'
+		           AND iam_v2.pms_interface_has_undrained_postings(tenant_id, site_id, id)))`, tenantID, siteID)
 	if err != nil {
 		return nil, err
 	}

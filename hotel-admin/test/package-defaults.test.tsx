@@ -16,6 +16,8 @@ const plans = [{ plan_id: "plan-gold", code: "GOLD", name: "Gold", current_revis
 const on = { id: "x", label: "x", licensed: true, enabled: true, ready: true, effective: true, readiness: [], reasons: [] };
 const modules = { modules: { paid_access: { ...on, id: "paid_access" }, card_payment: { ...on, id: "card_payment" } } } as never;
 
+const usdAccount = { currency: "USD", provider: "stripe", provider_converts: false };
+
 function ready() {
   fireEvent.change(screen.getByTestId("code"), { target: { value: "X" } });
   fireEvent.change(screen.getByTestId("service-plan"), { target: { value: "plan-gold" } });
@@ -24,7 +26,7 @@ function ready() {
 describe("Package defaults", () => {
   it("a new Free package is once per client; giving it a price makes it repeatable; free again restores the limit", () => {
     const onSave = vi.fn();
-    render(<PackageForm mode="add" plans={plans} onSave={onSave} modules={modules} cardCurrencies={["USD"]} />);
+    render(<PackageForm mode="add" plans={plans} onSave={onSave} modules={modules} cardAccount={usdAccount} />);
     expect((screen.getByTestId("free-access") as HTMLSelectElement).value).toBe("once");
     fireEvent.change(screen.getByLabelText("Price"), { target: { value: "5" } });
     expect((screen.getByTestId("free-access") as HTMLSelectElement).value).toBe("unlimited");
@@ -34,7 +36,7 @@ describe("Package defaults", () => {
   });
 
   it("an explicit choice is the operator's, whatever the price does", () => {
-    render(<PackageForm mode="add" plans={plans} onSave={() => {}} modules={modules} cardCurrencies={["USD"]} />);
+    render(<PackageForm mode="add" plans={plans} onSave={() => {}} modules={modules} cardAccount={usdAccount} />);
     fireEvent.change(screen.getByTestId("free-access"), { target: { value: "every" } });
     fireEvent.change(screen.getByLabelText("Price"), { target: { value: "5" } });
     expect((screen.getByTestId("free-access") as HTMLSelectElement).value).toBe("every");
@@ -47,22 +49,44 @@ describe("Package defaults", () => {
       code: "DAY", name: "Day", planID: "plan-gold", planRevisionID: "rev-1", rules: [], tiers: [{ order: 10 }],
       duration: { end_mode: "MANUAL_END" }, acquisition: { price: "5", currency: "USD", methods: ["ONLINE_PAYMENT"], room_charge: [] },
     } as never;
-    render(<PackageForm mode="edit" initial={initial} plans={plans} onSave={() => {}} modules={modules} cardCurrencies={["USD"]} />);
+    render(<PackageForm mode="edit" initial={initial} plans={plans} onSave={() => {}} modules={modules} cardAccount={usdAccount} />);
     expect((screen.getByTestId("free-access") as HTMLSelectElement).value).toBe("unlimited");
     fireEvent.change(screen.getByLabelText("Price"), { target: { value: "0" } });
     expect((screen.getByTestId("free-access") as HTMLSelectElement).value).toBe("unlimited");
   });
 
-  it("says when no active account settles the package's currency, and nothing when it is unknown", () => {
-    const { unmount } = render(<PackageForm mode="add" plans={plans} onSave={() => {}} modules={modules} cardCurrencies={["GBP"]} />);
+  it("says when the DEFAULT account does not settle the package's currency, and nothing when it is unknown", () => {
+    const { unmount } = render(<PackageForm mode="add" plans={plans} onSave={() => {}} modules={modules}
+      cardAccount={{ currency: "GBP", provider: "stripe", provider_converts: false }} />);
     fireEvent.change(screen.getByLabelText("Price"), { target: { value: "5" } });
     fireEvent.click(screen.getByTestId("method-check-ONLINE_PAYMENT"));
-    expect(screen.getByTestId("card-currency-note").textContent).toMatch(/settles GBP, not USD/);
+    expect(screen.getByTestId("card-currency-note").textContent).toMatch(/default payment account settles GBP, not USD/);
     unmount();
-    render(<PackageForm mode="add" plans={plans} onSave={() => {}} modules={modules} cardCurrencies={null} />);
+    render(<PackageForm mode="add" plans={plans} onSave={() => {}} modules={modules} cardAccount={null} />);
     fireEvent.change(screen.getByLabelText("Price"), { target: { value: "5" } });
     fireEvent.click(screen.getByTestId("method-check-ONLINE_PAYMENT"));
     expect(screen.queryByTestId("card-currency-note")).toBeNull();
     ready();
+  });
+
+  it("a Stripe default account set to convert takes USD with no warning; Paymob set to convert does not", () => {
+    const { unmount } = render(<PackageForm mode="add" plans={plans} onSave={() => {}} modules={modules}
+      cardAccount={{ currency: "GBP", provider: "stripe", provider_converts: true }} />);
+    fireEvent.change(screen.getByLabelText("Price"), { target: { value: "5" } });
+    fireEvent.click(screen.getByTestId("method-check-ONLINE_PAYMENT"));
+    expect(screen.queryByTestId("card-currency-note")).toBeNull();
+    unmount();
+    render(<PackageForm mode="add" plans={plans} onSave={() => {}} modules={modules}
+      cardAccount={{ currency: "EGP", provider: "paymob", provider_converts: true }} />);
+    fireEvent.change(screen.getByLabelText("Price"), { target: { value: "5" } });
+    fireEvent.click(screen.getByTestId("method-check-ONLINE_PAYMENT"));
+    expect(screen.getByTestId("card-currency-note").textContent).toMatch(/its provider does not convert USD/);
+  });
+
+  it("says when there is no default active account at all", () => {
+    render(<PackageForm mode="add" plans={plans} onSave={() => {}} modules={modules} cardAccount="none" />);
+    fireEvent.change(screen.getByLabelText("Price"), { target: { value: "5" } });
+    fireEvent.click(screen.getByTestId("method-check-ONLINE_PAYMENT"));
+    expect(screen.getByTestId("card-currency-note").textContent).toMatch(/no default active payment account/);
   });
 });

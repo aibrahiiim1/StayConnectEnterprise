@@ -60,6 +60,13 @@ func (s *Service) UpdateSettings(ctx context.Context, u SettingsUpdate, actor st
 				"%d appliance hostname(s) live in %s; the zone cannot change while they exist", inUse, before.ZoneName)
 		}
 	}
+	// A CAA RECORD PINS THE PRODUCTION ACCOUNT. Leaving production after CAA is applied would order from an
+	// account the zone's CAA does not name, and every order would fail. Refused, with what to do instead.
+	if u.ACMEDirectory != nil && *u.ACMEDirectory != before.ACMEDirectory && before.CAAAppliedAt != nil &&
+		before.ACMEDirectory == DirectoryProduction {
+		return Settings{}, refuse(http.StatusConflict, "caa_pins_production",
+			"CAA is applied and pins the production ACME account, so Central stays on production. Remove the zone's CAA records first if staging is really needed.")
+	}
 	after, err := SaveSettings(ctx, s.DB, u, actor)
 	if err != nil {
 		return Settings{}, err
@@ -173,6 +180,14 @@ func (s *Service) ApplyCAA(ctx context.Context, actor string) (*CAAResult, error
 	st, err := LoadSettings(ctx, s.DB)
 	if err != nil {
 		return nil, err
+	}
+	// PRODUCTION FIRST, THEN CAA. The CAA record pins issuance to ONE ACME account (accounturi). Staging and
+	// production are different accounts, so a CAA applied while on staging names the staging account and
+	// makes Let's Encrypt refuse every production order for the zone. Only the TEST directory override (Pebble)
+	// is exempt, because it has no production.
+	if st.ACMEDirectory != DirectoryProduction && s.Opts.DirectoryURL == "" {
+		return nil, refuse(http.StatusConflict, "caa_needs_production",
+			"Switch the ACME directory to production first: CAA pins the current ACME account, and the staging account would block every production certificate.")
 	}
 	if ok, why := s.Availability(st); !ok {
 		return nil, refuse(http.StatusConflict, "not_configured", "%s", why)

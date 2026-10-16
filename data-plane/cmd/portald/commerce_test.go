@@ -194,8 +194,10 @@ func TestCommercePackagesUsesSessionPins(t *testing.T) {
 	}
 }
 
-// The guest commerce panel renders on /success ONLY when the portal surface is ON.
-func TestSuccessCommercePanelGatedByFlag(t *testing.T) {
+// "You're online" offers nothing to buy, with the Phase-2 portal surface on or off (audit P-16): every device
+// there is online with its sign-in spent, and the panel that used to sit there sold a client what they had just
+// bought, labelled every quote free and confirmed without a method.
+func TestSuccessPageOffersNoPackagePanel(t *testing.T) {
 	for _, on := range []bool{false, true} {
 		cap := &capture{}
 		h, closeFn := newBridgeHandler(t, on, cap)
@@ -203,9 +205,8 @@ func TestSuccessCommercePanelGatedByFlag(t *testing.T) {
 		w := httptest.NewRecorder()
 		h.success(w, r)
 		body := w.Body.String()
-		has := strings.Contains(body, `data-commerce="on"`)
-		if has != on {
-			t.Fatalf("commerce panel present=%v, want %v (portalOn=%v)", has, on, on)
+		if strings.Contains(body, `data-commerce="on"`) || strings.Contains(body, "/api/commerce/") {
+			t.Fatalf("the online page carries a package panel (portalOn=%v)", on)
 		}
 		closeFn()
 	}

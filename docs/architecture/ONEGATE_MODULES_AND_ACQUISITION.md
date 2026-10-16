@@ -117,6 +117,21 @@ offered(pkg, client) = resolver.effective(module of method)      -- four gates, 
 A package with no applicable method is not listed. Every gate is re-checked when the quote is created **and**
 when it is confirmed or executed; the earlier page state is never trusted.
 
+For Card, `applicable` includes the currency: the default account settles the package currency or its provider
+converts it (`iamv2.SiteMethods.CardApplicable`, the one function the Room sign-in offer and choice, the listing,
+the quote and the confirm all ask). A package whose data allowance is `PER_STAY_NIGHT` is applicable only to a
+stay-bound client (Room sign-in); it is never listed, quoted or confirmed for any other client, and vouchers are
+not issued for it (2026-10-16, audit O-4).
+
+**What a revision must state, and who may change it (2026-10-16, audit O-1/O-15/O-21).** A new revision of an
+existing package carries `price_minor`, `currency`, `currency_exponent`, `acquisition_methods` and
+`room_charge_mappings` explicitly, or is refused (`commercial_fields_required`) — a republish never infers the
+commercial terms. `package_type`, `plan_overrides`, `renewable` and `max_purchases_per_stay` are carried from the
+current revision when absent. Changing the price, currency, methods or pinned service-plan revision, revising a
+service plan, reactivating a package and issuing vouchers each need the operator's password. A payment
+account's provider, merchant, mode, currency and credentials cannot change while one of its checkouts is open
+(migration 0121); add a new account instead.
+
 ## 6. Acquisition flows
 
 ### 6.1 Free
@@ -218,9 +233,15 @@ package → quote (pins interface, mapping, stay, currency) → purchase AWAITIN
   verified identity — and it carries no MAC. **MAC identifies a Device only.**
 * `auth_contexts`, `entitlements` carry `anonymous_subject_id`; the one-subject CHECKs include it; auth method
   `OPEN` requires it; one live entitlement per anonymous subject is a unique index, like every other subject.
-* **Resume and recovery:** a random 256-bit resume token (HttpOnly portal cookie) and a short recovery code shown
-  on the pending and success pages, both stored only as HMACs (`iam_v2.anonymous_subject_credentials`) and
-  rate-limited by the existing sign-in protection.
+* **Resume and recovery:** a random 256-bit resume token (HttpOnly portal cookie `og_resume`, Secure over TLS,
+  30 days, cleared on sign-out) and a short recovery code shown on the package, payment pending and success
+  pages while the sign-in lasts, both stored only as HMACs (`iam_v2.anonymous_subject_credentials`) and
+  rate-limited by the existing sign-in protection. **The resume token is bound to the device it was issued to**:
+  its HMAC covers the token and the device's MAC (from the kernel neighbour table), so a copied cookie resumes
+  nothing on another device; another device uses the recovery code. A code the client types is sent alone and
+  is never overridden by the cookie. The open-selection token never replaces the remembered-device credential
+  `og_client` (portal audit P-4, P-11, P-12). Tokens issued before this rule stop resolving; the device's own
+  live entitlement and the recovery code still bring the client back.
 * **Device bindings stay separate:** a returning device first joins the live entitlement it is bound to (purchase
   → auth context → device). Only a device with no live entitlement gets a new anonymous subject, and free-package
   limits (`PRIOR_PURCHASE`) are evaluated against the device's history, so a new subject never resets quota.

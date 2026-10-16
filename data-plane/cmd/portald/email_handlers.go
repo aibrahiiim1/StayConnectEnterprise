@@ -49,7 +49,7 @@ func (h *handler) authMethods(w http.ResponseWriter, r *http.Request) {
 	payload, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	// THE DEVICE'S PENDING CODE RIDES WITH THE METHODS: the page opens on the code box when one is in flight.
 	if h.pendingOTP != nil && resp.StatusCode == http.StatusOK {
-		if p, ok := h.pendingOTP.get(pendingKey(r)); ok {
+		if p, ok := h.pendingOTP.get(h.pendingKey(r)); ok {
 			var m map[string]any
 			if json.Unmarshal(payload, &m) == nil {
 				m["pending_otp"] = map[string]any{"channel": p.Channel, "challenge_id": p.ChallengeID,
@@ -74,6 +74,15 @@ type otpReqIn struct {
 }
 
 func (h *handler) authOTPRequest(w http.ResponseWriter, r *http.Request) {
+	// ONLY THE PORTAL'S OWN PAGE MAY ASK FOR A MESSAGE (audit P-18). This route sends an SMS or WhatsApp message
+	// to a number in the body, and it accepted any body type: a page on any origin could submit it as a no-cors
+	// text/plain "simple request" -- no preflight -- and make the portal message a number of its choosing from a
+	// guest's device. A JSON content type forces a CORS preflight, which portald never grants, and a request
+	// that carries another origin is refused outright.
+	if !jsonContentType(r) || h.crossSite(r) {
+		jsonErr(w, http.StatusForbidden, "request refused")
+		return
+	}
 	var in otpReqIn
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		jsonErr(w, 400, "bad body")
@@ -129,7 +138,7 @@ func (h *handler) authOTPRequest(w http.ResponseWriter, r *http.Request) {
 			if ttl <= 0 || ttl > time.Hour {
 				ttl = 10 * time.Minute
 			}
-			h.pendingOTP.put(pendingKey(r), pendingOTP{Channel: in.Channel, ChallengeID: out.ChallengeID,
+			h.pendingOTP.put(pendingKeyFor(ip, mac), pendingOTP{Channel: in.Channel, ChallengeID: out.ChallengeID,
 				DestMasked: maskDestination(in.Channel, in.Destination), dest: strings.TrimSpace(in.Destination),
 				ExpiresAt: time.Now().Add(ttl)})
 		}
@@ -188,7 +197,7 @@ func (h *handler) authOTPVerify(w http.ResponseWriter, r *http.Request) {
 	// session the voucher and account forms get is issued here, and the page is told where to go next.
 	if resp.StatusCode == http.StatusOK {
 		if h.pendingOTP != nil {
-			h.pendingOTP.clear(pendingKey(r))
+			h.pendingOTP.clear(pendingKeyFor(ip, mac))
 		}
 		if h.tryIAMv2AuthMode(w, r, payload, true) {
 			return

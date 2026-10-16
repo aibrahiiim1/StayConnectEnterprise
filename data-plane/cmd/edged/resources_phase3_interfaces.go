@@ -82,6 +82,8 @@ type pmsInterfaceRow struct {
 
 func (s *server) pmsInterfacesRoutes() http.Handler {
 	r := chi.NewRouter()
+	// A malformed id is "no such interface", never a uuid cast error surfacing as HTTP 500 (audit H-22).
+	r.Use(rejectMalformedRouteID)
 	r.Get("/", s.listPMSInterfaces)
 	r.Get("/{id}", s.getPMSInterface)
 	r.Get("/{id}/revisions", s.listPMSInterfaceRevisions)
@@ -111,6 +113,27 @@ func (s *server) pmsInterfacesRoutes() http.Handler {
 	// nothing connects.
 	r.Post("/{id}/lifecycle", s.setPMSInterfaceLifecycle)
 	return r
+}
+
+// rejectMalformedRouteID answers 404 for /{id}/... when the first path segment is not a uuid.
+func rejectMalformedRouteID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// RoutePath is the path left for THIS sub-router (chi sets it on Mount): "" or "/" is the collection.
+		rctx := chi.RouteContext(r.Context())
+		rest := ""
+		if rctx != nil {
+			rest = strings.Trim(rctx.RoutePath, "/")
+		}
+		seg := rest
+		if i := strings.Index(rest, "/"); i >= 0 {
+			seg = rest[:i]
+		}
+		if seg != "" && !uuidRe.MatchString(seg) {
+			jsonErr(w, http.StatusNotFound, "not_found", "no such PMS interface")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 type setLifecycleReq struct {
@@ -154,7 +177,7 @@ func (s *server) setPMSInterfaceLifecycle(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
 
@@ -304,6 +327,10 @@ type pmsRevisionRow struct {
 	PostingTargetModel   string `json:"posting_target_model"`
 	NormalizationVersion int    `json:"normalization_version"`
 	SourceFingerprint    string `json:"source_fingerprint,omitempty"`
+	// The currency pair is a revision COLUMN, not a config key; the console reads it to carry it through an
+	// edit (audit H-3), because a draft authored without it silently drops it.
+	FinancialBaseCurrency *string `json:"financial_base_currency,omitempty"`
+	FinancialCurrencyExp  *int    `json:"financial_base_currency_exponent,omitempty"`
 	// Config is the Revision's declarative configuration, REDACTED before it leaves the process — see
 	// redactRevisionConfig. A Revision's config is operator-authored and can acquire anything over time.
 	Config json.RawMessage `json:"config"`
@@ -347,8 +374,16 @@ func redactRevisionConfig(raw []byte) json.RawMessage {
 	return out
 }
 
+// notSecretConfigKeys are configuration settings whose NAME happens to contain a secret-ish word but whose value
+// is a plain operational number. max_auth_cache_age_seconds contains "auth", so it was redacted on every read --
+// and the console, which never saves "[redacted]", then dropped it from every edited draft (audit H-3).
+var notSecretConfigKeys = map[string]bool{"max_auth_cache_age_seconds": true}
+
 func redactMap(m map[string]any) {
 	for k, v := range m {
+		if notSecretConfigKeys[k] {
+			continue
+		}
 		lower := strings.ToLower(k)
 		hit := false
 		for _, s := range secretishKeys {
@@ -403,7 +438,8 @@ func (s *server) listPMSInterfaceRevisions(w http.ResponseWriter, r *http.Reques
 	rows, err := s.db.Query(ctx, `
 		SELECT rev.id::text, rev.revision_no, rev.source_timezone, rev.posting_target_model,
 		       rev.normalization_version, COALESCE(rev.source_fingerprint,''), rev.config,
-		       (rev.id = i.current_revision_id) AS published
+		       (rev.id = i.current_revision_id) AS published,
+		       rev.financial_base_currency::text, rev.financial_base_currency_exponent::int
 		  FROM iam_v2.pms_interface_revisions rev
 		  JOIN iam_v2.pms_interfaces i ON i.id = rev.pms_interface_id
 		 WHERE rev.tenant_id=$1 AND rev.site_id=$2 AND rev.pms_interface_id=$3::uuid
@@ -419,7 +455,8 @@ func (s *server) listPMSInterfaceRevisions(w http.ResponseWriter, r *http.Reques
 		var cfg []byte
 		var published *bool
 		if err := rows.Scan(&e.ID, &e.RevisionNo, &e.SourceTimezone, &e.PostingTargetModel,
-			&e.NormalizationVersion, &e.SourceFingerprint, &cfg, &published); err != nil {
+			&e.NormalizationVersion, &e.SourceFingerprint, &cfg, &published,
+			&e.FinancialBaseCurrency, &e.FinancialCurrencyExp); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 			return
 		}
@@ -515,6 +552,10 @@ type publishRevisionReq struct {
 	ExpectedRevisionID string `json:"expected_revision_id"`
 	ReasonCode         string `json:"reason_code"`
 	Password           string `json:"password"`
+	// ConfirmRoomChargeReset must be true to publish a revision that would take room charge off this
+	// connection: the published revision carries an onboarded posting target and the new one does not
+	// (audit H-3). Without it the publish is refused with room_charge_reset_unconfirmed and nothing changes.
+	ConfirmRoomChargeReset bool `json:"confirm_room_charge_reset"`
 }
 
 func (s *server) publishPMSInterfaceRevision(w http.ResponseWriter, r *http.Request) {
@@ -534,7 +575,7 @@ func (s *server) publishPMSInterfaceRevision(w http.ResponseWriter, r *http.Requ
 	}
 	// Step-up, for the same reason the reason code is required.
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
 	sess := sessFrom(r.Context())
@@ -583,15 +624,39 @@ func (s *server) publishPMSInterfaceRevision(w http.ResponseWriter, r *http.Requ
 	// interface's Revision, and every subsequent resolution would be decided against a configuration written
 	// for a different PMS.
 	var revNo int
-	err = tx.QueryRow(ctx, `SELECT revision_no FROM iam_v2.pms_interface_revisions
+	var newTarget string
+	err = tx.QueryRow(ctx, `SELECT revision_no, COALESCE(posting_target_model,'') FROM iam_v2.pms_interface_revisions
 		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3::uuid AND id=$4::uuid`,
-		s.tenantID, s.siteID, id, strings.TrimSpace(in.RevisionID)).Scan(&revNo)
+		s.tenantID, s.siteID, id, strings.TrimSpace(in.RevisionID)).Scan(&revNo, &newTarget)
 	if errors.Is(err, pgx.ErrNoRows) {
 		jsonErr(w, http.StatusBadRequest, "revision_invalid", "that revision does not belong to this interface")
 		return
 	}
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+
+	// ROOM CHARGE WOULD BE SWITCHED OFF (audit H-3). Room charge is onboarded ON A REVISION: financial
+	// onboarding records its posting target there, and a revision authored in the console always starts at
+	// UNSET. Publishing such a revision over an onboarded one therefore takes room charge off the connection
+	// until it is onboarded again -- silently, until now. It is still allowed, but only once the operator has
+	// been told and has confirmed.
+	var curTarget string
+	if current != "" {
+		_ = tx.QueryRow(ctx, `SELECT COALESCE(posting_target_model,'') FROM iam_v2.pms_interface_revisions
+			WHERE tenant_id=$1 AND site_id=$2 AND id=$3::uuid`, s.tenantID, s.siteID, current).Scan(&curTarget)
+	}
+	roomChargeReset := curTarget != "" && curTarget != postingTargetUnset &&
+		(newTarget == "" || newTarget == postingTargetUnset)
+	if roomChargeReset && !in.ConfirmRoomChargeReset {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": "room_charge_reset_unconfirmed",
+			"message": "Publishing this version turns room charge off for this connection: its posting target was " +
+				"set by financial onboarding on the version in use, and this version has none. Guests will no " +
+				"longer be offered charge to room until the connection is onboarded again. Confirm to publish anyway.",
+			"current_posting_target_model": curTarget,
+		})
 		return
 	}
 
@@ -611,6 +676,7 @@ func (s *server) publishPMSInterfaceRevision(w http.ResponseWriter, r *http.Requ
 		"revision_no":          revNo,
 		"previous_revision_id": current,
 		"reason_code":          in.ReasonCode,
+		"room_charge_reset":    roomChargeReset,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"current_revision_id": strings.TrimSpace(in.RevisionID), "revision_no": revNo})
 }
@@ -669,7 +735,7 @@ func (s *server) rotatePMSInterfaceSecret(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if !s.reauth(r, in.Password) {
-		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
 	sess := sessFrom(r.Context())
@@ -811,9 +877,9 @@ const (
 	// back to while the transport is down — the tables would answer "no such Stay" for a hotel full of guests.
 	roomAuthNeverSynced = "MIRROR_NEVER_SYNCHRONIZED"
 
-	// A COMPLETE SYNC IS PARTWAY THROUGH. Some of the truth has been applied and the rest has not, which is the
-	// one state where local Stay data is genuinely inconsistent rather than merely stale. Brief and
-	// self-clearing; the operator needs to know it is temporary, not investigate it.
+	// A COMPLETE SYNC IS PARTWAY THROUGH. Kept as a known code for older consoles; it is no longer a readiness
+	// REASON (audit H-12): a resync builds an unpublished generation, the published roster keeps answering, and
+	// p3_feed_authorizes (0060) authorises from it while the transport is down.
 	roomAuthResyncInFlight = "RESYNC_IN_FLIGHT"
 
 	// THE GUEST LIST IS ARRIVING, not absent. Distinct from NOT_IN_SYNC on purpose: the feed is healthy and a
@@ -957,11 +1023,13 @@ func (s *server) interfaceHealthRow(ctx context.Context, id string) (interfaceHe
 		         WHEN rt.pinned_revision_id IS DISTINCT FROM pr.id
 		                                                       THEN '`+roomAuthRevisionUnpin+`'
 		         -- TRANSPORT DOWN: the mirror answers instead. Sign-in survives if a complete sync has
-		         -- actually happened and none is in flight; those two are the whole of the offline branch.
+		         -- actually happened -- that is the whole of the offline branch of p3_feed_authorizes (0060).
+		         -- A resync in flight does NOT close it: the published roster is untouched until a replacement
+		         -- completes, so the last good roster keeps authorising guests, and saying "down" here sent
+		         -- staff after an outage guests were not having (audit H-12).
 		         WHEN COALESCE(rt.transport_status,'UNKNOWN') <> 'CONNECTED' THEN
 		           CASE
 		             WHEN rt.last_complete_sync_at IS NULL     THEN '`+roomAuthNeverSynced+`'
-		             WHEN rt.resync_started_at IS NOT NULL     THEN '`+roomAuthResyncInFlight+`'
 		             ELSE ''
 		           END
 		         -- TRANSPORT UP: the live-feed branch, unchanged.
@@ -1058,6 +1126,10 @@ type setPMSRouteReq struct {
 // resolver can make sense of — so setting a route means setting it, not adding to it.
 func (s *server) setPMSRoute(w http.ResponseWriter, r *http.Request) {
 	gnID := strings.TrimSpace(chi.URLParam(r, "guest_network_id"))
+	if !uuidRe.MatchString(gnID) {
+		jsonErr(w, http.StatusNotFound, "not_found", "client network not found at this site")
+		return
+	}
 	var in setPMSRouteReq
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
@@ -1066,6 +1138,10 @@ func (s *server) setPMSRoute(w http.ResponseWriter, r *http.Request) {
 	ifaceID := strings.TrimSpace(in.InterfaceID)
 	if ifaceID == "" {
 		jsonErr(w, http.StatusBadRequest, "validation", "pms_interface_id is required")
+		return
+	}
+	if !uuidRe.MatchString(ifaceID) {
+		jsonErr(w, http.StatusNotFound, "not_found", "PMS interface not found at this site")
 		return
 	}
 	mode := strings.TrimSpace(in.RoutingMode)
@@ -1167,6 +1243,10 @@ func (s *server) setPMSRoute(w http.ResponseWriter, r *http.Request) {
 // unmapped_guest_networks — so removal is not a hole, it is an answer.
 func (s *server) clearPMSRoute(w http.ResponseWriter, r *http.Request) {
 	gnID := strings.TrimSpace(chi.URLParam(r, "guest_network_id"))
+	if !uuidRe.MatchString(gnID) {
+		jsonErr(w, http.StatusNotFound, "not_found", "client network not found at this site")
+		return
+	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	tag, err := s.db.Exec(ctx, `DELETE FROM iam_v2.guest_network_pms_map
@@ -1275,6 +1355,11 @@ type sourceConflictRow struct {
 	InterfaceBLabel string `json:"interface_b_label,omitempty"`
 	Severity        string `json:"severity,omitempty"`
 	Resolution      string `json:"resolution,omitempty"`
+	// Detected: derived now from the connections' own published configuration -- two connections whose
+	// published versions dial the same source (equal source fingerprints) -- rather than read from a stored
+	// record. Nothing ever wrote pms_source_conflicts, so the page listed nothing while a duplicate could exist
+	// (audit H-11); detection from facts already recorded needs no writer and cannot go stale.
+	Detected bool `json:"detected,omitempty"`
 }
 
 func (s *server) pmsSourceConflictsRoutes() http.Handler {
@@ -1316,6 +1401,43 @@ func (s *server) listSourceConflicts(w http.ResponseWriter, r *http.Request) {
 		out = append(out, e)
 	}
 	if rows.Err() != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	rows.Close()
+	recorded := map[string]bool{}
+	for _, c := range out {
+		recorded[c.InterfaceA+"/"+c.InterfaceB] = true
+	}
+	drows, err := s.db.Query(ctx, `
+		SELECT a.id::text, COALESCE(a.display_label,''), b.id::text, COALESCE(b.display_label,'')
+		  FROM iam_v2.pms_interfaces a
+		  JOIN iam_v2.pms_interface_revisions ra ON ra.id = a.current_revision_id
+		  JOIN iam_v2.pms_interfaces b
+		    ON b.tenant_id = a.tenant_id AND b.site_id = a.site_id AND a.id < b.id
+		  JOIN iam_v2.pms_interface_revisions rb ON rb.id = b.current_revision_id
+		 WHERE a.tenant_id=$1 AND a.site_id=$2
+		   AND a.lifecycle_state <> 'DECOMMISSIONED' AND b.lifecycle_state <> 'DECOMMISSIONED'
+		   AND ra.source_fingerprint IS NOT NULL AND ra.source_fingerprint = rb.source_fingerprint
+		 ORDER BY a.id, b.id LIMIT 100`, s.tenantID, s.siteID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	defer drows.Close()
+	for drows.Next() {
+		var e sourceConflictRow
+		if err := drows.Scan(&e.InterfaceA, &e.InterfaceALabel, &e.InterfaceB, &e.InterfaceBLabel); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+			return
+		}
+		if recorded[e.InterfaceA+"/"+e.InterfaceB] {
+			continue
+		}
+		e.ID, e.Severity, e.Detected = "detected:"+e.InterfaceA+":"+e.InterfaceB, "DUPLICATE_SOURCE", true
+		out = append(out, e)
+	}
+	if drows.Err() != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
 	}

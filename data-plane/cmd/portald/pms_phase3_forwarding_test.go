@@ -154,3 +154,37 @@ func TestPhase3EmptyVerificationStillReachesSCDAsEmpty(t *testing.T) {
 		t.Fatalf("a blank verification was transformed into %#v on the hop", got["verification"])
 	}
 }
+
+// ONLY FILLED FIELDS CROSS THE HOP, and each one as typed. scd enforces the site's Room sign-in mode and
+// refuses a request carrying a field that mode does not accept; a blank key forwarded beside the real one
+// must never look like a second kind of evidence, and a filled one must never be dropped here, because
+// deciding what the site accepts is scd's job, not this hop's.
+func TestPhase3ForwardsOnlyTheFieldsTheGuestFilled(t *testing.T) {
+	stub := &scdStub{resolve: scdResolveResp{Outcome: "NOT_VERIFIED", FailureClass: "CREDENTIAL"}}
+	h := stubHandler(t, stub)
+
+	phase3Post(t, h, map[string]any{
+		"room": "7102", "last_name": "Example", "first_name": "", "verification": "  ",
+		"reservation_number": "", "request_id": "11111111-2222-4333-8444-555555555555",
+	})
+	got := stub.bodies[0]
+	for _, k := range []string{"first_name", "verification", "reservation_number"} {
+		if _, present := got[k]; present {
+			t.Fatalf("the empty %q was forwarded to scd: %#v", k, got)
+		}
+	}
+	if got["last_name"] != "Example" {
+		t.Fatalf("the filled last_name did not reach scd: %#v", got)
+	}
+
+	// A body carrying several filled fields is forwarded whole: scd, which knows the mode, refuses it.
+	stub2 := &scdStub{resolve: scdResolveResp{Outcome: "NOT_VERIFIED", FailureClass: "CREDENTIAL"}}
+	h2 := stubHandler(t, stub2)
+	phase3Post(t, h2, map[string]any{
+		"room": "7102", "last_name": "Example", "reservation_number": "ABC-99",
+		"request_id": "11111111-2222-4333-8444-555555555555",
+	})
+	if b := stub2.bodies[0]; b["last_name"] != "Example" || b["reservation_number"] != "ABC-99" {
+		t.Fatalf("filled fields were dropped on the hop instead of being judged by scd: %#v", b)
+	}
+}

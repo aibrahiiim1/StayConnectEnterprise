@@ -33,6 +33,12 @@ The socket path only skips the browser; activation itself still happens in Centr
 `--allow-weak` permits a <10-char password (management-network-only boxes). This is a
 deliberate per-appliance provisioning action, never a shipped default.
 
+Since migration 0119 a seeded account with `--allow-weak` (or any password under 10 characters) is marked
+*must change password*: its first sign-in can do nothing but set a new password of at least 10 characters.
+Sign-in is also throttled (5 wrong passwords per account, 20 per address, in 15 minutes lock it for 15
+minutes); re-running `seed-admin` resets the password and ends a running lockout on that account, exactly as
+a site admin's reset from Operators does.
+
 ## Reset the appliance identity/activation state (same customer only)
 
 Wipes identity + credentials; **preserves** WAN/LAN + client-network config, trust anchors,

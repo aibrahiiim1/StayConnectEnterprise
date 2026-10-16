@@ -196,6 +196,9 @@ type PackageRevisionRow struct {
 	TimeAccountingMode string
 	Display            map[string]any
 	DurationPolicy     map[string]any
+	// DataAllocationMode is the revision's data_allocation_policy mode (FIXED when absent). A PER_STAY_NIGHT
+	// package needs a stay to compute its allowance, so the non-room paths never offer it (applicableMethods).
+	DataAllocationMode string
 }
 
 // PlanRevisionRow carries the grant parameters snapshotted into a quote.

@@ -195,9 +195,16 @@ const guestScripts = `
   var sel = document.getElementById('lang');
   if (sel) sel.addEventListener('change', function () {
     try { localStorage.setItem('sc-lang', sel.value); } catch (e) {}
-    try { document.cookie = 'sc-lang=' + encodeURIComponent(sel.value) + '; path=/; max-age=31536000; SameSite=Lax'; } catch (e) {}
+    try { document.cookie = 'sc-lang=' + encodeURIComponent(sel.value) + '; path=/; max-age=31536000; SameSite=Lax' + (location.protocol === 'https:' ? '; Secure' : ''); } catch (e) {}
     location.reload();
   });
+  // A refusal the server rendered is where attention goes (audit P-24): a screen reader announces role=alert
+  // only when it changes, and a page that ARRIVES with one says nothing unless focus is moved to it.
+  var alertEl = document.querySelector('.notice[role=alert], .page-lead[role=alert]');
+  if (alertEl) {
+    if (!alertEl.hasAttribute('tabindex')) alertEl.setAttribute('tabindex', '-1');
+    try { alertEl.focus({ preventScroll: false }); } catch (e) { alertEl.focus(); }
+  }
 })();
 </script>` + guestHelpScript + `
 `
@@ -428,6 +435,7 @@ const landingHTML = `<!doctype html>
       </div>
       <button class="primary" type="submit"><span data-i18n="btn.reconnect" data-i18n-en="Reconnect">{{index .T "btn.reconnect"}}</span></button>
     </form>
+    <div id="ps-choices" role="group" aria-label="{{index .T "pms.choose"}}" style="display:none"></div>
     <div class="err" id="ps-err" role="alert" data-for="ps-pin"></div>
   </div>
 
@@ -725,7 +733,8 @@ const landingHTML = `<!doctype html>
       try { localStorage.setItem(LANG_KEY, code); } catch (e) {}
       try {
         // A year, path-wide. SameSite=Lax so the redirect back from a sign-in POST still carries it.
-        document.cookie = LANG_KEY + '=' + encodeURIComponent(code) + '; path=/; max-age=31536000; SameSite=Lax';
+        document.cookie = LANG_KEY + '=' + encodeURIComponent(code) + '; path=/; max-age=31536000; SameSite=Lax' +
+          (location.protocol === 'https:' ? '; Secure' : '');
       } catch (e) {}
     }
 
@@ -1486,38 +1495,89 @@ const landingHTML = `<!doctype html>
       });
     });
 
-    async function submitPostStay(pin, errEl) {
+    async function postStayCall(body) {
       let j = {};
       let reached = true;
       try {
         const r = await fetch('/auth/post-stay-pin', {
-          method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pin: pin })
+          method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
         });
         j = await r.json().catch(function(){ reached = false; return {}; });
       } catch (e) { reached = false; j = {}; }
+      return { j: j, reached: reached };
+    }
+
+    async function submitPostStay(pin, errEl) {
+      const res = await postStayCall({ pin: pin });
+      const j = res.j;
+      // A single post-stay package is converted by the server in the same request: the answer is the session.
       if (j.ok && j.session_id) {
         window.location = (j.redirect_to || '/success') + '?s=' + encodeURIComponent(j.session_id);
         return;
       }
-      if (j.ok && j.auth_context_id) {
-        // Verified. The conversion is a second call carrying the context the server just issued.
-        let k = {};
-        try {
-          const r2 = await fetch('/auth/post-stay-pin', {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ auth_context_id: j.auth_context_id })
-          });
-          k = await r2.json().catch(function(){ return {}; });
-        } catch (e) { k = {}; }
-        if (k.ok && k.session_id) {
-          window.location = (k.redirect_to || '/success') + '?s=' + encodeURIComponent(k.session_id);
-          return;
-        }
+      // Verified, with more than one package: the guest chooses, and the conversion is a second call carrying
+      // the context the server just issued AND the package chosen from the offers it returned.
+      if (j.ok && j.needs_choice && j.auth_context_id && (j.choices || []).length) {
+        renderPostStayChoices(j.auth_context_id, j.choices, errEl);
+        return;
       }
       // Every other ANSWER is the same message -- wrong PIN, expired, revoked, locked out, the room re-let, or
       // post-stay not being offered here at all. A request that never reached the server is not an answer, and
       // telling a guest whose connection dropped to re-check a PIN they typed correctly helps nobody.
-      errEl.textContent = reached ? PHASE3_FAIL() : PHASE3_UNREACHED();
+      errEl.textContent = res.reached ? PHASE3_FAIL() : PHASE3_UNREACHED();
+    }
+
+    function renderPostStayChoices(authContextID, choices, errEl) {
+      const box = document.getElementById('ps-choices');
+      const form = document.getElementById('form-poststay');
+      box.innerHTML = '';
+      const h = document.createElement('p');
+      h.className = 'choices-title';
+      h.dataset.i18n = 'pms.choose';
+      h.dataset.i18nEn = BUILTIN.en['pms.choose'];
+      h.textContent = t('pms.choose');
+      box.appendChild(h);
+      choices.forEach(function(c) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'choice';
+        const text = document.createElement('span');
+        text.className = 'c-text';
+        const name = document.createElement('span');
+        name.className = 'c-name';
+        name.dir = 'auto';
+        name.textContent = c.code;
+        text.appendChild(name);
+        const down = Math.round((c.down_kbps || 0) / 1000);
+        if (down > 0) {
+          const detail = document.createElement('span');
+          detail.className = 'c-detail';
+          detail.textContent = t('unit.mbps').split('{n}').join(String(down));
+          text.appendChild(detail);
+        }
+        b.appendChild(text);
+        b.insertAdjacentHTML('beforeend', ICON_CHEV);
+        b.addEventListener('click', async function() {
+          box.querySelectorAll('button').forEach(function(x){ x.disabled = true; });
+          errEl.textContent = '';
+          const res = await postStayCall({ auth_context_id: authContextID, package_revision_id: c.package_revision_id });
+          if (res.j.ok && res.j.session_id) {
+            window.location = (res.j.redirect_to || '/success') + '?s=' + encodeURIComponent(res.j.session_id);
+            return;
+          }
+          // The context is one-time: after a refused conversion the choices cannot be trusted, so they are taken
+          // down and the guest signs in with the PIN again.
+          box.innerHTML = '';
+          box.style.display = 'none';
+          form.style.display = '';
+          errEl.textContent = res.reached ? PHASE3_FAIL() : PHASE3_UNREACHED();
+        });
+        box.appendChild(b);
+      });
+      form.style.display = 'none';
+      box.style.display = 'block';
+      const first = box.querySelector('button.choice');
+      if (first) first.focus();
     }
 
     // phase3ClearFailure takes the page OUT of its failure state, including the countdown that writes to the
@@ -1723,20 +1783,47 @@ const packagesHTML = guestHead + `
     <button class="btn btn--outline" type="submit">{{index .T "pkg.voucher.btn"}}</button>
   </form>{{end}}
   <!-- A way back to the sign-in page: signing out ends this sign-in (main.go endPortalSignIn). -->
-  <form method="post" action="/logout"><button class="link" type="submit">{{index .T "pkg.signout"}}</button></form>
+  <form method="post" action="/logout"><input type="hidden" name="leave" value="{{.Leave}}"><button class="link" type="submit">{{index .T "pkg.signout"}}</button></form>
 </div>` + guestFoot + `
 </main>
 </div>` + guestScripts + `
 <script nonce="{{.Nonce}}">
   // One tap, one acquisition: once a package is sent, the others stand still until the next page arrives.
+  //
+  // THE CHOICE IS SENT BY SCRIPT AND THE PAGE NAVIGATES ITSELF (audit P-1). "Pay by card" ends on the payment
+  // provider's hosted checkout, another origin. A plain form submission whose redirect leaves the portal is
+  // checked against the page's form-action policy at every hop (Chromium, WebKit), so the provider's page could be
+  // refused with nothing shown. Here the server answers {"next": url} and the page goes there with
+  // window.location, which form-action does not govern -- exactly as the room sign-in has always done. Without
+  // fetch the form submits as it always did, and form-action lists the providers' checkout origins for that case.
   (function () {
+    function stillAll() {
+      var bs = document.querySelectorAll('.choice-list button');
+      for (var k = 0; k < bs.length; k++) bs[k].disabled = true;
+    }
+    function safeNext(n) {
+      return typeof n === 'string' && ((n.charAt(0) === '/' && n.charAt(1) !== '/') || n.indexOf('https://') === 0);
+    }
     var forms = document.querySelectorAll('.choice-list form');
     for (var i = 0; i < forms.length; i++) {
-      forms[i].addEventListener('submit', function () {
-        setTimeout(function () {
-          var bs = document.querySelectorAll('.choice-list button');
-          for (var k = 0; k < bs.length; k++) bs[k].disabled = true;
-        }, 0);
+      forms[i].addEventListener('submit', function (e) {
+        var f = e.currentTarget;
+        if (!window.fetch || !window.URLSearchParams || !window.FormData) {
+          setTimeout(stillAll, 0);
+          return;
+        }
+        e.preventDefault();
+        stillAll();
+        fetch(f.getAttribute('action'), {
+          method: 'POST', credentials: 'same-origin', cache: 'no-store',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json', 'X-OneGate-Nav': '1' },
+          body: new URLSearchParams(new FormData(f)).toString()
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (j) { window.location.href = (j && safeNext(j.next)) ? j.next : '/packages'; })
+          // No answer: the choice may or may not have been made, so the package page is asked again rather than
+          // the form being sent a second time.
+          .catch(function () { window.location.href = '/packages'; });
       });
     }
   })();
@@ -1758,16 +1845,27 @@ const payHTML = guestHead + `
 <div class="sc-body">
   <h1 class="page-title">{{index .T "pay.title"}}</h1>
   <p class="page-lead" id="pay-lead" role="status" aria-live="polite">{{if .Cancelled}}{{index .T "pay.cancelled"}}{{else if .Room}}{{index .T "room.pending"}}{{else}}{{index .T "pay.lead"}}{{end}}</p>
-  <div class="actions" id="pay-actions" hidden><a class="btn" href="/">{{index .T "pay.again"}}</a></div>
+  {{with .ReturnCode}}<div class="notice show" role="status"><strong>{{index $.T "open.code.title"}}: <span dir="ltr" class="return-code">{{.}}</span></strong><br>{{index $.T "open.code.lead"}}</div>{{end}}
+  <!-- A client who left the payment page is offered another way at once (audit P-7); the page keeps checking. -->
+  <div class="actions" id="pay-actions"{{if not .Cancelled}} hidden{{end}}><a class="btn" href="/packages">{{index .T "pay.other"}}</a><a class="btn btn--outline" href="/">{{index .T "pay.again"}}</a></div>
 </div>` + guestFoot + `
 </main>
 </div>` + guestScripts + `
 <script nonce="{{.Nonce}}">
   (function () {
     var p = {{.PurchaseID}};
+    var room = {{.Room}};
     var lead = document.getElementById('pay-lead');
     var words = {{.JS}};
+    // THE WAIT IS THE CHECKOUT'S OWN LIFETIME, AND A RELOAD DOES NOT RESTART IT (audit P-7). The first time this
+    // purchase's page opens is remembered on the device; the limit is the site's card checkout expiry, which the
+    // server reports, plus a minute for the provider's answer. A room charge has no checkout and keeps 20 minutes.
     var started = Date.now();
+    try {
+      var k = 'og-pay-' + p, v = sessionStorage.getItem(k);
+      if (v && !isNaN(+v)) started = +v; else sessionStorage.setItem(k, String(started));
+    } catch (e) {}
+    var limit = 20 * 60 * 1000;
     function show(key) { lead.textContent = words[key] || lead.textContent; }
     function done() { document.getElementById('pay-actions').hidden = false; }
     function poll() {
@@ -1777,10 +1875,12 @@ const payHTML = guestHead + `
           if (s.state === 'connected' && s.redirect) { show('pay.connecting'); window.location.href = s.redirect; return; }
           // Paid, but the email account behind it must verify its address first: the page that says how.
           if (s.state === 'granted' && s.activation === 'VERIFICATION_REQUIRED') { window.location.href = '/account/verification'; return; }
-          if (s.state === 'failed') { show('pay.failed'); done(); return; }
-          if (s.state === 'review') { show('pay.review'); done(); return; }
+          // A room charge is not a card payment, and its words say so (audit P-26).
+          if (s.state === 'failed') { show(room ? 'room.failed' : 'pay.failed'); done(); return; }
+          if (s.state === 'review') { show(room ? 'room.review' : 'pay.review'); done(); return; }
           if (s.state === 'granted' && s.activation) { show('err.connect'); done(); return; }
-          if (Date.now() - started > 20 * 60 * 1000) { show('pay.review'); done(); return; }
+          if (s.checkout_expiry_seconds > 0) limit = (s.checkout_expiry_seconds + 60) * 1000;
+          if (Date.now() - started > limit) { show(room ? 'room.review' : 'pay.review'); done(); return; }
           setTimeout(poll, 3000);
         })
         .catch(function () { setTimeout(poll, 5000); });
@@ -1833,7 +1933,7 @@ const statusHTML = guestHead + `
   {{end}}
   <div class="actions">
     <a class="btn btn--outline" href="{{.BackHref}}">{{index .T "online.back"}}</a>
-    <form method="POST" action="/logout"><button class="btn btn--outline" type="submit">{{index .T "online.disconnect"}}</button></form>
+    <form method="POST" action="/logout"><input type="hidden" name="leave" value="{{.Leave}}"><button class="btn btn--outline" type="submit">{{index .T "online.disconnect"}}</button></form>
   </div>
 </div>` + guestFoot + `
 </main>
@@ -1872,144 +1972,20 @@ const successHTML = guestHead + `
   <div class="status-icon" aria-hidden="true">` + iconCheck + `</div>
   <h1 class="page-title">{{index .T "online.title"}}</h1>
   <p class="page-lead">{{index .T "online.lead"}}</p>
-  <div class="fact">
-    {{if .DurationSeconds}}<span class="fact-label">{{index .T "online.remaining"}}</span><span class="fact-value">{{.HumanRemaining}}</span>
-    {{else}}<span class="fact-label">{{index .T "online.remaining"}}</span><span class="fact-value">{{index .T "online.unlimited"}}</span>{{end}}
-  </div>
+  <!-- The time left is the appliance's own answer for this device (main.go success), never the page's URL. It is
+       not shown at all when the appliance could not be asked. -->
+  {{if .HumanRemaining}}<div class="fact"><span class="fact-label">{{index .T "online.remaining"}}</span><span class="fact-value">{{.HumanRemaining}}</span></div>
+  {{else if .Unlimited}}<div class="fact"><span class="fact-label">{{index .T "online.remaining"}}</span><span class="fact-value">{{index .T "online.unlimited"}}</span></div>{{end}}
+  {{with .ReturnCode}}<div class="notice show" role="status"><strong>{{index $.T "open.code.title"}}: <span dir="ltr" class="return-code">{{.}}</span></strong><br>{{index $.T "open.code.lead"}}</div>{{end}}
   <div class="actions">
-    <a class="btn btn--outline" href="/status?s={{.SessionID}}&amp;t={{.DurationSeconds}}">{{index .T "online.status"}}</a>
-    <form method="POST" action="/logout"><button class="btn btn--outline" type="submit">{{index .T "online.disconnect"}}</button></form>
+    <a class="btn btn--outline" href="/status{{with .SessionID}}?s={{.}}{{end}}">{{index .T "online.status"}}</a>
+    <form method="POST" action="/logout"><input type="hidden" name="leave" value="{{.Leave}}"><button class="btn btn--outline" type="submit">{{index .T "online.disconnect"}}</button></form>
   </div>
   {{with .Reminder}}<!-- AN EMAIL ACCOUNT NOT VERIFIED YET: when, and Resend. Online all the same (account_handlers.go). -->
   <div class="section" id="acct-reminder">
     <p class="lead" role="status"{{with .At}} data-acct-at="{{.}}" data-acct-tmpl="{{$.Reminder.Tmpl}}"{{end}}>{{.Text}}</p>
     <div class="actions"><form method="post" action="/auth/account/resend" id="form-acct-resend">{{with $.SessionID}}<input type="hidden" name="s" value="{{.}}">{{end}}<button class="btn btn--outline" type="submit">{{index $.T "acct.resend"}}</button></form></div>
   </div>{{end}}
-
-  {{if .CommerceEnabled}}
-  <div id="commerce" class="section" data-commerce="on">
-    <h2 dir="auto">{{index .CX "cx.title"}}</h2>
-    <div id="cx-list" aria-busy="true">{{index .CX "cx.loading"}}</div>
-    <div id="cx-quote" hidden></div>
-    <div id="cx-note" role="status" aria-live="polite"></div>
-  </div>
-  <script nonce="{{.Nonce}}">
-  (function(){
-    // The panel's words, in the guest's language with English underneath (commerce_strings.go). Portal-only:
-    // this table is not part of the dictionary a hotel overrides.
-    var CX = {{.CXJS}};
-    function cx(k){ return CX[k] || k; }
-    var list = document.getElementById('cx-list');
-    var quoteBox = document.getElementById('cx-quote');
-    var note = document.getElementById('cx-note');
-    var busy = false;
-    function num(n){ return String(n); }
-    function fmtBytes(n){
-      if(!n) return cx('cx.unlimited');
-      var u=['cx.b','cx.kb','cx.mb','cx.gb','cx.tb']; var i=0;
-      while(n>=1024&&i<u.length-1){n/=1024;i++;}
-      return fill(cx(u[i]), 'n', n.toFixed(n<10&&i>0?1:0));
-    }
-    function fmtDur(s){
-      if(!s) return cx('cx.unlimited');
-      var h=Math.floor(s/3600), m=Math.floor((s%3600)/60), out=[];
-      if(h>0) out.push(fill(t('unit.h'), 'n', h));
-      if(m>0 || h===0) out.push(fill(t('unit.min'), 'n', m));
-      return out.join(' ');
-    }
-    // An end-mode CODE is never shown: each known code has its words, and one this page does not know reads
-    // as the hotel's own arrangement.
-    function endWords(code){ var k = 'cx.end.' + String(code || 'MANUAL_END'); return CX[k] || cx('cx.end.other'); }
-    function devices(d){ return fill(cx('cx.devices'), 'n', num(d.max_concurrent_devices||1)); }
-    function unavailable(msg){ note.className='cx-err'; note.textContent = msg||cx('cx.unavailable'); }
-    function clearNote(){ note.className=''; note.textContent=''; }
-    // NOTHING TO OFFER IS NOT AN ERROR ON THIS PAGE. The guest reading it is already online: the sign-in that
-    // got them here is spent, so the list is refused or empty. Showing "unavailable" or "none" under a
-    // success message reads as if their connection failed, so the panel simply goes away.
-    var panel = document.getElementById('commerce');
-    function nothingToOffer(){ panel.hidden = true; }
-    function loadPackages(){
-      clearNote();
-      fetch('/api/commerce/packages', {headers:{'Accept':'application/json'}}).then(function(r){
-        if(!r.ok){ nothingToOffer(); return null; }
-        return r.json();
-      }).then(function(data){
-        if(!data){ return; }
-        list.removeAttribute('aria-busy');
-        var pkgs = (data.packages||[]);
-        if(pkgs.length===0){ nothingToOffer(); return; }
-        list.innerHTML='';
-        pkgs.forEach(function(p){
-          var d = p.display||{};
-          var el = document.createElement('div'); el.className='pkg';
-          var speed = (d.down_kbps? fill(cx('cx.down'), 'n', Math.round(d.down_kbps/1000)):'')+
-                      (d.up_kbps? (' / '+fill(cx('cx.up'), 'n', Math.round(d.up_kbps/1000))):'');
-          // The name is the hotel's, in whatever script it was written: isolated, but aligned with the page.
-          el.innerHTML = '<h3><bdi></bdi></h3><div class="meta"></div>';
-          el.querySelector('bdi').textContent = d.name || cx('cx.default');
-          el.querySelector('.meta').textContent = [
-            speed,
-            fill(cx('cx.data'), 'v', fmtBytes(d.data_quota_bytes)),
-            fill(cx('cx.time'), 'v', fmtDur(d.time_quota_seconds)),
-            devices(d),
-            fill(cx('cx.ends'), 'v', endWords(d.end_mode)),
-          ].filter(Boolean).join(' · ');
-          var btn = document.createElement('button'); btn.type='button'; btn.textContent=cx('cx.select'); btn.className='btn btn--sm';
-          btn.addEventListener('click', function(){ requestQuote(p.package_id, btn); });
-          el.appendChild(btn);
-          list.appendChild(el);
-        });
-      }).catch(function(){ nothingToOffer(); });
-    }
-    function requestQuote(pkgId, btn){
-      if(busy) return; busy=true; if(btn) btn.disabled=true; clearNote();
-      fetch('/api/commerce/quote', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({package_id: pkgId})})
-        .then(function(r){ return r.ok? r.json() : null; })
-        .then(function(q){
-          busy=false; if(btn) btn.disabled=false;
-          if(!q || !q.quote_id){ unavailable(); return; }
-          showQuote(q);
-        }).catch(function(){ busy=false; if(btn) btn.disabled=false; unavailable(); });
-    }
-    function showQuote(q){
-      var d = q.display||{};
-      quoteBox.hidden=false;
-      quoteBox.innerHTML =
-        '<div class="pkg"><h3></h3>'+
-        '<div class="meta"></div>'+
-        '<div class="meta"></div>'+
-        '<button type="button" id="cx-confirm" class="btn btn--sm"></button></div>';
-      quoteBox.querySelector('h3').textContent = cx('cx.confirm.title');
-      var metas = quoteBox.querySelectorAll('.meta');
-      metas[0].textContent = (d.name||cx('cx.default'))+' — '+cx('cx.free')+' · '+devices(d)+' · '+
-        fill(cx('cx.ends'), 'v', endWords(d.end_mode));
-      // The offer's expiry, in the device's own clock and the page's language; nothing if it is not a time.
-      var ts = Date.parse(q.expires_at || ''), when = '';
-      if(!isNaN(ts)){
-        try { when = new Date(ts).toLocaleString(document.documentElement.lang || undefined); } catch (e) { when = new Date(ts).toLocaleString(); }
-      }
-      if(when) metas[1].textContent = fill(cx('cx.expires'), 'date', when); else metas[1].hidden = true;
-      var cbtn = document.getElementById('cx-confirm');
-      cbtn.textContent = cx('cx.confirm');
-      cbtn.addEventListener('click', function(){ confirmQuote(q.quote_id, cbtn); });
-      list.hidden = true;
-    }
-    function confirmQuote(quoteId, cbtn){
-      if(busy) return; busy=true; cbtn.disabled=true; clearNote();
-      fetch('/api/commerce/confirm', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({quote_id: quoteId})})
-        .then(function(r){ return r.ok? r.json() : null; })
-        .then(function(res){
-          busy=false;
-          if(!res || !res.entitlement_id){ cbtn.disabled=false; unavailable(cx('cx.expired')); return; }
-          quoteBox.innerHTML = '<div class="pkg"><h3></h3><div class="meta"></div></div>';
-          quoteBox.querySelector('h3').textContent = cx('cx.active.title');
-          quoteBox.querySelector('.meta').textContent = cx('cx.active');
-        }).catch(function(){ busy=false; cbtn.disabled=false; unavailable(); });
-    }
-    loadPackages();
-  })();
-  </script>
-  {{end}}
 
   <!-- YOUR TIME (Phase 6, DARK). Hidden until the appliance answers with an aggregate package. TWO CLOCKS,
        BOTH SHOWN: remaining online time counts down only while connected; the hard expiry is a calendar
@@ -2041,7 +2017,7 @@ const successHTML = guestHead + `
     fetch('/status', {headers:{'Accept':'application/json'}})
       .then(function(r){ return r.ok ? r.json() : null; })
       .then(function(st){
-        if(!st || st.time_mode !== 'AGGREGATE_ONLINE_TIME') return;  // every other package: nothing changes
+        if(!st || (st.time_mode !== 'AGGREGATE_ONLINE_TIME' && !st.online_time_allowance)) return;  // no time allowance: nothing changes
         main.textContent = fill(t('tl.left'), 't', human(st.remaining_online_seconds));
         if(st.hard_expiry){
           var when = day(st.hard_expiry);

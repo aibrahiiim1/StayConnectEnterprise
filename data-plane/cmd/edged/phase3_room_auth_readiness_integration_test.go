@@ -255,9 +255,10 @@ func TestIntegration_API_TransportDownWithTrustedMirrorStaysReady(t *testing.T) 
 	}
 }
 
-// The other half of the same surface: while the transport is down, a resync in flight IS a real reason, and it
-// gets its own code so the operator can be told it is temporary rather than sent to investigate.
-func TestIntegration_API_TransportDownDuringResyncReportsResyncInFlight(t *testing.T) {
+// AUDIT H-12. While the transport is down a resync in flight does NOT close room sign-in: the published roster
+// is untouched until a replacement completes, and p3_feed_authorizes (0060) authorises from it. Readiness used
+// to report RESYNC_IN_FLIGHT ("down") here while guests were signing in from the mirror.
+func TestIntegration_API_TransportDownDuringResyncStaysReady(t *testing.T) {
 	f := newAPI(t)
 	iface, rev1, _ := f.seedInterface(t)
 	f.runtimeState(t, iface, rev1, "DISCONNECTED", "RESYNC_IN_PROGRESS", "CONTINUOUS",
@@ -266,9 +267,9 @@ func TestIntegration_API_TransportDownDuringResyncReportsResyncInFlight(t *testi
 	f.beginResync(t, iface, time.Now().Add(-time.Minute))
 
 	ready, reason := f.readiness(t, iface)
-	if ready || reason != roomAuthResyncInFlight {
-		t.Fatalf("a mirror partway through a refresh must report %q; got ready=%v reason=%q",
-			roomAuthResyncInFlight, ready, reason)
+	if !ready || reason == roomAuthResyncInFlight {
+		t.Fatalf("a disconnected interface with a published roster and a resync in flight must stay ready "+
+			"(the mirror authorises); got ready=%v reason=%q", ready, reason)
 	}
 }
 

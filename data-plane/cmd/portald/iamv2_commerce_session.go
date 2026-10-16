@@ -47,6 +47,7 @@ type iamv2AuthReply struct {
 	RecoveryCode string `json:"recovery_code,omitempty"`
 	// ResumeToken is the remembered-device credential (client_resume.go); IdentityLabel the masked factor.
 	ResumeToken   string `json:"resume_token,omitempty"`
+	ResumeDays    int    `json:"resume_days,omitempty"`
 	IdentityLabel string `json:"identity_label,omitempty"`
 }
 
@@ -105,8 +106,13 @@ func (h *handler) tryIAMv2AuthMode(w http.ResponseWriter, r *http.Request, paylo
 	}
 	// A verified factor earned this device a resume credential (client_resume.go): keep it, so the next
 	// reconnection from this device greets the Client instead of asking for another code.
-	if reply.ResumeToken != "" {
-		setClientResumeCookie(w, reply.ResumeToken)
+	//
+	// NOT FOR OPEN SELECTION (audit P-4). An open-selection reply's resume_token is the ANONYMOUS subject's token,
+	// a different credential that lives in og_resume (acquisition.go authOpen). Writing it here overwrote the
+	// device's Welcome-back credential, so "Continue without signing in" silently made the device forget its
+	// Client.
+	if reply.ResumeToken != "" && reply.Method != "OPEN" {
+		setClientResumeCookie(w, r, reply.ResumeToken, reply.ResumeDays)
 	}
 	if h.commerceSessions == nil {
 		// The store is only constructed when the Phase-2 portal surface is on. Authenticating with nowhere to
@@ -163,25 +169,16 @@ func (h *handler) tryIAMv2AuthMode(w http.ResponseWriter, r *http.Request, paylo
 	// A VOUCHER IS REDEEMED IN ONE STEP. The client entered a code; there is nothing to choose. The code grants
 	// exactly the package revision it was printed for, and is spent in the same transaction as the grant.
 	if reply.Method == "VOUCHER" {
-		if !h.redeemVoucher(w, r, sess) {
+		if !h.redeemVoucher(w, r, sess, token) {
 			h.landing(w, r, msgVoucherInvalid)
 		}
 		return true
 	}
 	h.commerceSessions.put(token, sess)
-	http.SetCookie(w, &http.Cookie{
-		Name:  commerceCookie,
-		Value: token,
-		Path:  "/",
-		// HttpOnly: the page never needs to read this, and script that cannot read it cannot leak it.
-		HttpOnly: true,
-		// SameSite=Lax: the captive portal is same-site; Lax still blocks the cross-site POST shapes.
-		SameSite: http.SameSiteLaxMode,
-		Expires:  time.Now().Add(commerceSessionTTL),
-		// Secure is deliberately NOT set: a captive portal is reached over plain HTTP before the guest has
-		// any access at all, and a Secure cookie would simply never be sent, breaking the flow it protects.
-		// The token is short-lived, single-purpose, and carries no guest data.
-	})
+	// HttpOnly (the page never reads it), SameSite=Lax (the captive portal is same-site; Lax still blocks the
+	// cross-site POST shapes), Secure over TLS only (cookies.go): on the HTTP fallback a Secure cookie would never
+	// be sent back. The token is short-lived, single-purpose, and carries no guest data.
+	setPortalCookie(w, r, commerceCookie, token, commerceSessionTTL)
 	// NOT /success. The guest has authenticated; they have not acquired anything yet.
 	next("/packages")
 	return true
@@ -195,7 +192,16 @@ func (h *handler) packagesPage(w http.ResponseWriter, r *http.Request) {
 		h.landing(w, r, "Please sign in again.")
 		return
 	}
-	h.packagesFor(w, r, sess, "")
+	// A refusal the page's script was told about (backToPackages) is shown once, here. A client who comes to the
+	// package list has chosen to choose again: a card purchase they left is no longer where "/" sends them.
+	notice := sess.notice
+	if notice != "" || sess.purchaseID != "" {
+		if c, err := r.Cookie(commerceCookie); err == nil {
+			sess.notice, sess.purchaseID = "", ""
+			h.commerceSessions.put(c.Value, sess)
+		}
+	}
+	h.packagesFor(w, r, sess, notice)
 }
 
 // backToPackages answers a refused acquisition. THE CLIENT STAYS SIGNED IN: while their commerce session is
@@ -206,10 +212,38 @@ func (h *handler) packagesPage(w http.ResponseWriter, r *http.Request) {
 func (h *handler) backToPackages(w http.ResponseWriter, r *http.Request, msg string) {
 	sess, ok := h.resolveCommerceSession(r)
 	if !ok {
+		if navJSON(r) {
+			h.navigate(w, r, "/packages")
+			return
+		}
 		h.landing(w, r, msg)
 		return
 	}
+	if navJSON(r) {
+		// The page's script submitted the choice: it is told to load the package page, which shows this reason
+		// once (the session carries it, never the URL).
+		if c, err := r.Cookie(commerceCookie); err == nil {
+			sess.notice = msg
+			h.commerceSessions.put(c.Value, sess)
+		}
+		h.navigate(w, r, "/packages")
+		return
+	}
 	h.packagesFor(w, r, sess, msg)
+}
+
+// navJSON reports whether the page's own script submitted this form and asked to be TOLD where to go, rather
+// than redirected (packagesHTML). A redirect to a payment provider's hosted checkout is a cross-origin hop of a
+// form submission, which form-action governs; window.location is a navigation, which it does not (audit P-1).
+func navJSON(r *http.Request) bool { return r.Header.Get("X-OneGate-Nav") == "1" }
+
+// navigate sends the client to `to`: a 303 for a plain form, {"next": to} for the page's script.
+func (h *handler) navigate(w http.ResponseWriter, r *http.Request, to string) {
+	if navJSON(r) {
+		writeJSONPortal(w, http.StatusOK, map[string]any{"next": to})
+		return
+	}
+	http.Redirect(w, r, to, http.StatusSeeOther)
 }
 
 // packagesFor lists the session's eligible packages, with an optional refusal above them.
@@ -242,20 +276,14 @@ func (h *handler) packagesFor(w http.ResponseWriter, r *http.Request, sess comme
 		// card account does not settle left an email-account client with nothing).
 		msg := "No internet packages are available for you right now."
 		if out.FreeAllowanceUsed {
-			msg = "You've used your free access here, and no other package is available for you right now. Please contact the site team."
+			msg = msgFreeUsedNothingElse
 		}
 		h.renderPackages(w, r, nil, "", sess.identityLabel, false, msg)
 		return
 	}
-	code := sess.returnCode
-	if code != "" {
-		// Shown once: the page that displays it is the only place it is ever rendered.
-		if c, err := r.Cookie(commerceCookie); err == nil {
-			sess.returnCode = ""
-			h.commerceSessions.put(c.Value, sess)
-		}
-	}
-	h.renderPackages(w, r, out.Packages, code, sess.identityLabel, out.FreeAllowanceUsed, errMsg)
+	// The return code stays with the server-held session for its life (ten minutes) and is shown on this page, the
+	// payment pending page and the success page (contract MODULES §6.5, audit P-11). It is never put in a URL.
+	h.renderPackages(w, r, out.Packages, sess.returnCode, sess.identityLabel, out.FreeAllowanceUsed, errMsg)
 }
 
 // acquirePackage runs quote -> confirm -> activate server-side.
@@ -265,11 +293,15 @@ func (h *handler) packagesFor(w http.ResponseWriter, r *http.Request, sess comme
 // acquire against someone else's context by editing a form.
 func (h *handler) acquirePackage(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		h.landing(w, r, "Bad request.")
+		h.backToPackages(w, r, "Bad request.")
 		return
 	}
 	sess, ok := h.resolveCommerceSession(r)
 	if !ok {
+		if navJSON(r) {
+			h.navigate(w, r, "/packages")
+			return
+		}
 		h.landing(w, r, "Please sign in again.")
 		return
 	}
@@ -310,17 +342,19 @@ func (h *handler) acquirePackage(w http.ResponseWriter, r *http.Request) {
 	}
 	confirm, ok := post("/v1/commerce/confirm", map[string]any{
 		"quote_id": quote["quote_id"], "device_id": sess.deviceID,
-		"guest_network_id": sess.guestNetworkID, "return_base": portalOrigin(r)})
+		"guest_network_id": sess.guestNetworkID, "return_base": h.returnBase(r)})
 	if pending, _ := confirm["awaiting_settlement"].(bool); pending {
 		// CARD PAYMENT: nothing is granted yet. The client pays on the provider's page, and comes back to a page
 		// that asks where the purchase stands.
 		pid, _ := confirm["purchase_id"].(string)
 		if u, _ := confirm["redirect_url"].(string); strings.HasPrefix(u, "https://") {
-			http.Redirect(w, r, u, http.StatusSeeOther)
+			h.rememberPurchase(r, sess, pid)
+			h.navigate(w, r, u)
 			return
 		}
 		if validPurchaseID(pid) {
-			http.Redirect(w, r, "/pay/return?p="+pid, http.StatusSeeOther)
+			h.rememberPurchase(r, sess, pid)
+			h.navigate(w, r, "/pay/return?p="+pid)
 			return
 		}
 	}
@@ -341,7 +375,7 @@ func (h *handler) acquirePackage(w http.ResponseWriter, r *http.Request) {
 		h.backToPackages(w, r, "Your device isn't connected to this Wi-Fi network.")
 		return
 	case activateDeviceLimit:
-		h.toReplace(w, r, sess, "", false)
+		h.toReplace(w, r, sess, "", navJSON(r))
 		return
 	case activateCapacity:
 		h.backToPackages(w, r, guestCapacityMessage)
@@ -353,6 +387,10 @@ func (h *handler) acquirePackage(w http.ResponseWriter, r *http.Request) {
 		h.backToPackages(w, r, "We could not bring your device online. Please try again in a moment.")
 		return
 	case activateVerification:
+		if navJSON(r) {
+			h.navigate(w, r, "/account/verification")
+			return
+		}
 		h.renderAccountPage(w, r, nil, true, accountNote{})
 		return
 	default:
@@ -364,7 +402,20 @@ func (h *handler) acquirePackage(w http.ResponseWriter, r *http.Request) {
 		sess.acquired = true
 		h.commerceSessions.put(c.Value, sess)
 	}
-	http.Redirect(w, r, "/success?s="+url.QueryEscape(sid), http.StatusSeeOther)
+	h.navigate(w, r, "/success?s="+url.QueryEscape(sid))
+}
+
+// rememberPurchase records, in the client's commerce session, the card purchase it just started. The landing page
+// then sends a client who comes back to "/" to the page that asks where that purchase stands instead of the
+// package list (P-25); the purchase id is the device's own, and the page re-identifies the device server-side.
+func (h *handler) rememberPurchase(r *http.Request, sess commerceSession, pid string) {
+	if !validPurchaseID(pid) || h.commerceSessions == nil {
+		return
+	}
+	if c, err := r.Cookie(commerceCookie); err == nil {
+		sess.purchaseID = pid
+		h.commerceSessions.put(c.Value, sess)
+	}
 }
 
 // renderPackages draws the selection page: branded and in the guest's language, like every guest page. The
@@ -478,8 +529,23 @@ func (h *handler) activateEnforced(r *http.Request, sess commerceSession, entitl
 	return sid, ""
 }
 
-// portalOrigin is the origin the client reached the portal on (scheme://host), for the provider's return URL.
-// The host is the one the captive client already used; anything odd yields "" and card payment is refused.
+// returnBase is the portal origin a payment provider sends the client back to (audit P-15). It is the PORTAL'S
+// OWN origin, never the Host header the client sent: over HTTPS the canonical name scd reports; on the HTTP
+// fallback the portal address when it is answering, else the address the client's connection reached
+// (fallbackOrigin). Only when none of those is known does it fall back to the request's own origin.
+func (h *handler) returnBase(r *http.Request) string {
+	st := h.tlsState()
+	if st.HTTPSActive && st.Canonical != "" {
+		return "https://" + st.Canonical
+	}
+	if o := h.fallbackOrigin(r); o != "" {
+		return o
+	}
+	return portalOrigin(r)
+}
+
+// portalOrigin is the origin the client reached the portal on (scheme://host), the last resort for returnBase
+// and the email link. Anything odd yields "" and card payment is refused.
 func portalOrigin(r *http.Request) string {
 	host := r.Host
 	if host == "" || strings.ContainsAny(host, "/\\ @?#") || len(host) > 255 {

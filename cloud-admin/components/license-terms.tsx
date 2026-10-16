@@ -93,7 +93,11 @@ export function LicenseTermsFields({
           onChange={(e) => set({ maxGuests: e.target.value })}
         />
       </Field>
-      <Field label="Grace period (days)" required hint="How long it keeps working after the end date.">
+      <Field
+        label="Grace period (days)"
+        required
+        hint="How long it keeps admitting clients after the end date. 0 = no grace: it stops at the end date."
+      >
         <Input inputMode="numeric" value={value.graceDays} onChange={(e) => set({ graceDays: e.target.value })} />
       </Field>
       <div className="space-y-2 sm:col-span-2">

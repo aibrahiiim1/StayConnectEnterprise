@@ -19,6 +19,7 @@ func TestRetentionDefaultsMatchTheSweepsOwn(t *testing.T) {
 	want := map[string]int{
 		"KEEP_BINARIES": 5, "KEEP_RELEASES": 5, "KEEP_DB": 7,
 		"KEEP_CONFIG": 3, "DISK_WARN": 80, "DISK_CRIT": 90,
+		"SITE_BACKUP_DAYS": 30, "SITE_BACKUP_KEEP": 7,
 	}
 	for _, s := range retentionSchema {
 		if want[s.Key] != s.Default {
@@ -48,6 +49,13 @@ func TestRecoveryFloorsCannotBeSetToZero(t *testing.T) {
 	}
 	if byKey["KEEP_DB"].Min < 1 {
 		t.Error("database backups may be set to zero")
+	}
+	// D-H: the seven newest nightly site backups are always kept; the floor is the Product Owner's.
+	if byKey["SITE_BACKUP_KEEP"].Min < 7 {
+		t.Error("the newest-site-backups floor may be set below seven")
+	}
+	if byKey["SITE_BACKUP_DAYS"].Min < 1 {
+		t.Error("site backups may be removed the day they are taken")
 	}
 }
 

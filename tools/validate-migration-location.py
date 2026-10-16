@@ -85,21 +85,7 @@ NUMBERED = re.compile(r"^(\d{4})_(.+)\.(up|down)\.sql$")
 # the Central database, so they are recorded, not invented. Removing a name from this list is how the debt
 # gets paid; adding one needs a reason in the commit that does it.
 UNPAIRED_PREDATING_THIS_CHECK = {
-    "control-plane/migrations": {
-        "0023_appliance_pki",
-        "0024_reassign_replace_alertstatus",
-        "0025_lifecycle_grace_state",
-        "0026_appliance_commands",
-        "0027_offline_activation",
-        "0028_appliance_updates",
-        "0029_appliance_signed_assignments",
-        "0030_assignment_signing_keys",
-        "0031_commercial_controls",
-        "0032_assignment_key_lifecycle",
-        "0033_terminal_delivery_and_registry",
-        "0034_drop_legacy_sessions_appliance_fk",
-        "0036_pending_appliance_nullable",
-    },
+    "control-plane/migrations": set(),  # emptied by the audit remediation: 0023-0034 and 0036 gained down migrations
 }
 
 _failures = []

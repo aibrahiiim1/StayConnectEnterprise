@@ -10,46 +10,33 @@
 -- surface reports fine for a path that is not actually writing. acctd does not crash on it, so nothing
 -- surfaced it except looking at the log while traffic was flowing.
 --
--- (ingest_absolute_counters was granted to svc_netd earlier because netd references it too. netd is not the
--- caller here; acctd is. Granting the service that mentions a function rather than the one that calls it is
--- how this stayed missing.)
---
--- Derived from the iam_v2 objects referenced in cmd/acctd.
+-- DERIVED STATEMENT BY STATEMENT from cmd/acctd and internal/enforce (audit B-7, migration 0124). Every write
+-- acctd performs goes through a SECURITY DEFINER writer, so it holds NO table write in iam_v2 -- which is what
+-- migration 0039 said and asserted, and what this file had drifted away from (INSERT/UPDATE on five accounting
+-- tables, EXECUTE on the device-authorization and boundary-termination writers). gatep-grants.sql re-asserts
+-- 0039's shape after every reconcile, so the drift cannot recur silently.
 
 GRANT USAGE ON SCHEMA iam_v2 TO svc_acctd;
 
--- ---- accounting: the records acctd owns -----------------------------------
-GRANT SELECT, INSERT, UPDATE ON iam_v2.accounting_records         TO svc_acctd;
-GRANT SELECT, INSERT, UPDATE ON iam_v2.accounting_checkpoints     TO svc_acctd;
-GRANT SELECT, INSERT, UPDATE ON iam_v2.delayed_accounting_records TO svc_acctd;
-GRANT SELECT, INSERT, UPDATE ON iam_v2.entitlement_boundary_watermarks TO svc_acctd;
-GRANT SELECT, INSERT, UPDATE ON iam_v2.session_entitlement_bindings    TO svc_acctd;
-
--- ---- what it plans and meters against (read only) -------------------------
--- The enforcement plan joins sessions to entitlements and their pinned revisions. acctd must never alter
--- what a package or plan IS, so every one of these is SELECT.
-GRANT SELECT ON iam_v2.sessions                  TO svc_acctd;
-GRANT SELECT ON iam_v2.entitlements              TO svc_acctd;
-GRANT SELECT ON iam_v2.devices                   TO svc_acctd;
-GRANT SELECT ON iam_v2.service_plans             TO svc_acctd;
-GRANT SELECT ON iam_v2.service_plan_revisions    TO svc_acctd;
-GRANT SELECT ON iam_v2.internet_packages         TO svc_acctd;
-GRANT SELECT ON iam_v2.internet_package_revisions TO svc_acctd;
-GRANT SELECT ON iam_v2.purchases                 TO svc_acctd;
-GRANT SELECT ON iam_v2.stays                     TO svc_acctd;
-GRANT SELECT ON iam_v2.pms_interfaces            TO svc_acctd;
+-- ---- what it reads ----------------------------------------------------------------------------------------
+--   sessions, entitlements, service_plan_revisions   the enforcement plan (PlanForSite), the expiry candidates
+--                                                    (EnforceExpiries) and the live-session list the counters
+--                                                    are keyed by.
+--   accounting_records, session_entitlement_bindings the pre-Phase-6 data-crossing expression, used only on a
+--                                                    schema without iam_v2.p6_data_crossing (enforce.go
+--                                                    dataCrossingLegacy). Read-only.
+-- acctd must never alter what a package or plan IS, so every one of these is SELECT.
+GRANT SELECT ON iam_v2.sessions                     TO svc_acctd;
+GRANT SELECT ON iam_v2.entitlements                 TO svc_acctd;
+GRANT SELECT ON iam_v2.service_plan_revisions       TO svc_acctd;
+GRANT SELECT ON iam_v2.accounting_records           TO svc_acctd;
+GRANT SELECT ON iam_v2.session_entitlement_bindings TO svc_acctd;
 
 -- ---- the controlled writers it drives -------------------------------------
+-- begin_controlled_operation: the startup capability check (writerguard.verifyCapability) requires it.
 GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text)   TO svc_acctd;
-GRANT EXECUTE ON FUNCTION iam_v2.p3_controlled_operation_open(text) TO svc_acctd;
-GRANT EXECUTE ON FUNCTION iam_v2.p5_controlled_operation_open(text) TO svc_acctd;
+-- The absolute counter ingest, once per live session per tick (cmd/acctd/phase3_accounting.go).
 GRANT EXECUTE ON FUNCTION iam_v2.ingest_absolute_counters(uuid, uuid, uuid, uuid, text, integer, bigint, bigint, bigint, timestamptz) TO svc_acctd;
-GRANT EXECUTE ON FUNCTION iam_v2.register_class_origin(uuid, uuid, uuid, uuid, text, integer, bigint, bigint, bigint, timestamptz) TO svc_acctd;
-GRANT EXECUTE ON FUNCTION iam_v2.apply_entitlement_transition(uuid, text, timestamptz, text) TO svc_acctd;
-GRANT EXECUTE ON FUNCTION iam_v2.authorize_entitlement_device(uuid, uuid, timestamptz) TO svc_acctd;
-GRANT EXECUTE ON FUNCTION iam_v2.rebind_session_entitlement(uuid, uuid, timestamptz) TO svc_acctd;
-GRANT EXECUTE ON FUNCTION iam_v2.terminate_entitlement_at_boundary(uuid, timestamptz, text) TO svc_acctd;
-GRANT EXECUTE ON FUNCTION iam_v2.entitlement_usage_bytes(uuid, timestamptz) TO svc_acctd;
 
 -- The DATA-quota crossing the expiry sweep derives for every candidate it considers.
 --
@@ -67,44 +54,31 @@ GRANT EXECUTE ON FUNCTION iam_v2.entitlement_usage_bytes(uuid, timestamptz) TO s
 -- privilege survives a reconcile, and that a migration-only grant does not.
 GRANT EXECUTE ON FUNCTION iam_v2.p6_data_crossing(uuid) TO svc_acctd;
 
--- The rest of the Phase-6 expiry sweep, here for the same reason and proven the hard way.
---
--- Granting only p6_data_crossing fixed the denial the appliance was logging and immediately exposed the next
--- one: the sweep got past its candidate query and failed on p6_tick_online_time, then on
--- p6_suspend_over_budget. Every one of these is granted by a migration (0040–0042) and by no per-service
--- file, so the whole set is removed by the first reconcile and the sweep cannot complete a single pass.
---
--- They are listed together because they are one operation. A sweep that can derive a crossing but not act on
--- it is not partially working; it fails on every pass, quietly, in a background job whose only symptom is a
--- log line. Enumerated explicitly rather than granted by wildcard so each one remains a decision.
---
--- No new capability: this is exactly the set migrations 0040–0042 already grant, written where a reconcile
--- will keep it.
+-- The rest of the Phase-6 expiry sweep, here for the same reason and proven the hard way: the expiry writer,
+-- the fail-closed suspension and the aggregate online-time tick (enforce.go EnforceExpiries). They are listed
+-- together because they are one operation; enumerated explicitly rather than granted by wildcard so each one
+-- remains a decision.
 GRANT EXECUTE ON FUNCTION iam_v2.p6_expire_entitlement(uuid) TO svc_acctd;
-GRANT EXECUTE ON FUNCTION iam_v2.p6_due_terminal(uuid) TO svc_acctd;
 GRANT EXECUTE ON FUNCTION iam_v2.p6_suspend_over_budget(uuid, uuid) TO svc_acctd;
 GRANT EXECUTE ON FUNCTION iam_v2.p6_tick_online_time(
   uuid, uuid, timestamptz, int, uuid[], timestamptz[]) TO svc_acctd;
 
+-- ---- what acctd used to hold and does not use (removed by audit B-7) --------------------------------------
+--   INSERT, UPDATE on accounting_records, accounting_checkpoints, delayed_accounting_records,
+--                     entitlement_boundary_watermarks, session_entitlement_bindings
+--                     -- every accounting write is ingest_absolute_counters', as its owner; a raw write to
+--                        these tables is refused by the controlled-writer guard anyway
+--   SELECT on accounting_checkpoints, delayed_accounting_records, entitlement_boundary_watermarks, devices,
+--             service_plans, internet_packages, internet_package_revisions, purchases, stays, pms_interfaces,
+--             session_online_watermarks, entitlement_devices, entitlement_termination_evidence
+--                     -- no acctd statement reads them; the definer tick and expiry writer read them as owner
+--   EXECUTE on register_class_origin (netd's), apply_entitlement_transition, authorize_entitlement_device,
+--              rebind_session_entitlement, entitlement_usage_bytes, p6_due_terminal,
+--              terminate_entitlement_at_boundary, p3/p5_controlled_operation_open
+--                     -- none is called by acctd. terminate_entitlement_at_boundary was the pre-0041 expiry
+--                        fallback (enforce.go, phase6Writers=false); that path also needs UPDATE on the
+--                        device-authorization tables, which acctd has never held, so it could not complete as
+--                        this role, and 0039 named the function as one acctd must not execute.
+--
 -- NOT granted: DELETE on anything, and no write to packages, plans or their revisions. Metering must never
 -- be able to change what was sold.
-
--- ---------------------------------------------------------------------------------------------------------
--- PHASE-6 AGGREGATE ONLINE TIME: three reads migration 0036 granted and Gate-P did not keep
--- ---------------------------------------------------------------------------------------------------------
--- Mirrored here because gatep-grants.sql revokes ALL privileges from the service roles and runs AFTER the
--- numbered migrations, so a privilege that lives only in a migration is revoked moments after it is granted.
--- VERIFIED ABSENT ON PRE-LIVE 172.21.60.25: has_table_privilege(svc_acctd, <each>, SELECT) = false on all
--- three, while the tables exist. So this is not a rebuild hypothetical -- the aggregate-online-time reads
--- are unprivileged on the live appliance today, and the reconcile that installs this file is what restores
--- them.
---
--- SELECT only, on three tables acctd already accounts against:
---   session_online_watermarks        the durable charged-through instant; without it a replayed or delayed
---                                   tick cannot be told from a new one, which is the whole point of 0036.
---   entitlement_devices             which device a session belongs to, for the per-device attribution.
---   entitlement_termination_evidence why an entitlement ended, so accrual stops at the right instant rather
---                                   than at the next tick.
-GRANT SELECT ON iam_v2.session_online_watermarks        TO svc_acctd;
-GRANT SELECT ON iam_v2.entitlement_devices              TO svc_acctd;
-GRANT SELECT ON iam_v2.entitlement_termination_evidence TO svc_acctd;

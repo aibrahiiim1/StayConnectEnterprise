@@ -62,7 +62,8 @@ GRANT SELECT ON iam_v2.stay_events                     TO svc_edged;
 -- Posting permission (Amendment A1, migration 0100): the stay's blocks and the pre-send aborts are readable;
 -- the only block an operator writes is ADMIN_BLOCK, through its definer.
 GRANT SELECT ON iam_v2.stay_posting_blocks             TO svc_edged;
-GRANT SELECT ON iam_v2.posting_presend_aborts          TO svc_edged;
+-- (posting_presend_aborts is not read by edged -- the reason comes from p4_attempt_not_sent_reason below; SELECT
+--  removed, audit B-7, migration 0124.)
 GRANT EXECUTE ON FUNCTION iam_v2.p4_admin_posting_block(uuid,uuid,uuid,text,text,uuid) TO svc_edged;
 -- Whether the stay has a room charge in progress, and why an attempt was not sent: two narrow definers instead of
 -- reads of the posting and attempt-event ledgers.
@@ -70,7 +71,8 @@ GRANT EXECUTE ON FUNCTION iam_v2.p4_stay_room_charge_open(uuid) TO svc_edged;
 GRANT EXECUTE ON FUNCTION iam_v2.p4_attempt_not_sent_reason(uuid) TO svc_edged;
 -- The financial mirror maximum age (migration 0103, D48): read it and its change log; change it only through the
 -- audited definer.
-GRANT SELECT ON iam_v2.pms_interface_financial_settings, iam_v2.pms_interface_financial_setting_changes TO svc_edged;
+-- The change log is not read by any edged statement; SELECT on it removed (audit B-7, migration 0124).
+GRANT SELECT ON iam_v2.pms_interface_financial_settings TO svc_edged;
 GRANT EXECUTE ON FUNCTION iam_v2.p4_financial_mirror_max_age_seconds(uuid,uuid,uuid) TO svc_edged;
 GRANT EXECUTE ON FUNCTION iam_v2.p4_set_financial_mirror_max_age(uuid,uuid,uuid,integer,text,uuid) TO svc_edged;
 
@@ -317,11 +319,10 @@ GRANT SELECT  ON iam_v2.voucher_code_settings_changes                           
 -- route: "a departure the engine could not place is resolved by the PMS sending one it CAN place". The only
 -- apply=true caller is pmsd, automatically, on a complete published generation.
 GRANT EXECUTE ON FUNCTION iam_v2.pms_roster_reconcile(uuid, uuid, uuid, bigint, text, boolean, text)     TO svc_edged;
-GRANT EXECUTE ON FUNCTION iam_v2.pms_roster_of_generation(uuid, uuid, uuid, bigint)                      TO svc_edged;
-GRANT EXECUTE ON FUNCTION iam_v2.pms_known_room_inventory(uuid, uuid, uuid, bigint, integer)             TO svc_edged;
-GRANT EXECUTE ON FUNCTION iam_v2.pms_rebaseline_room_inventory(uuid, uuid, uuid, bigint, text, text)     TO svc_edged;
-GRANT EXECUTE ON FUNCTION iam_v2.pms_dispose_snapshot_cases(uuid, uuid, uuid, text, text)                TO svc_edged;
-GRANT EXECUTE ON FUNCTION iam_v2.pms_accept_startup_data_gap(uuid, uuid, uuid, text, text)               TO svc_edged;
+-- NOT granted (audit B-7, migration 0124): pms_roster_of_generation, pms_known_room_inventory, pms_rebaseline_room_inventory,
+-- pms_dispose_snapshot_cases and pms_accept_startup_data_gap. No edged statement calls them -- the console has no
+-- route that rebaselines the room inventory, disposes snapshot cases or accepts a startup data gap -- and the
+-- reconcile reaches the roster and the inventory as its own owner. A route that needs one adds it back here.
 GRANT EXECUTE ON FUNCTION iam_v2.pms_integration_blockers(uuid, uuid)                                    TO svc_edged;
 
 -- ---- the two settings groups, read and write through their functions --------------------------------------
@@ -330,16 +331,14 @@ GRANT EXECUTE ON FUNCTION iam_v2.pms_integration_blockers(uuid, uuid)           
 GRANT EXECUTE ON FUNCTION iam_v2.pms_connection_settings_get(uuid, uuid, uuid)                           TO svc_edged;
 GRANT EXECUTE ON FUNCTION iam_v2.pms_connection_settings_set(uuid, uuid, uuid, text, text, integer, integer, integer, integer, integer) TO svc_edged;
 GRANT EXECUTE ON FUNCTION iam_v2.pms_reconciliation_settings_get(uuid, uuid)                             TO svc_edged;
-GRANT EXECUTE ON FUNCTION iam_v2.pms_reconciliation_settings_set(uuid, uuid, integer, integer, text, text, integer, integer) TO svc_edged;
+-- The reconciliation settings are written through the VERSIONED writer pms_reconciliation_settings_set_checked
+-- (0123, granted below); the unversioned pms_reconciliation_settings_set is no longer called (audit B-7, migration 0124).
 
 -- ---- the reads the screens do directly. SELECT only, table by table --------------------------------------
 GRANT SELECT ON iam_v2.pms_connection_settings              TO svc_edged;
-GRANT SELECT ON iam_v2.pms_connection_settings_changes      TO svc_edged;
 GRANT SELECT ON iam_v2.pms_reconciliation_settings          TO svc_edged;
-GRANT SELECT ON iam_v2.pms_reconciliation_settings_changes  TO svc_edged;
-GRANT SELECT ON iam_v2.pms_room_inventory                   TO svc_edged;
-GRANT SELECT ON iam_v2.pms_room_inventory_changes           TO svc_edged;
-GRANT SELECT ON iam_v2.pms_resync_coverage                  TO svc_edged;
+-- (audit B-7, migration 0124: the two settings change logs, pms_room_inventory, pms_room_inventory_changes and pms_resync_coverage
+--  are read by no edged statement, so they are not granted.)
 GRANT SELECT ON iam_v2.pms_roster_reconciliation_runs       TO svc_edged;
 GRANT SELECT ON iam_v2.pms_unanswered_review_events         TO svc_edged;
 GRANT SELECT ON iam_v2.pms_case_resolutions                 TO svc_edged;
@@ -381,13 +380,13 @@ GRANT EXECUTE ON FUNCTION
 -- and changes a switch through one definer function that writes the change row in the same transaction. No
 -- table write privilege: the change log is mandatory by privilege.
 GRANT SELECT ON iam_v2.site_module_changes TO svc_edged;
-GRANT EXECUTE ON FUNCTION iam_v2.site_module_get(uuid,uuid)                         TO svc_edged;
+-- (site_module_get is not granted: edged reports module state from scd, not from the getter -- audit B-7, migration 0124.)
 GRANT EXECUTE ON FUNCTION iam_v2.site_module_set(uuid,uuid,text,boolean,text,text)  TO svc_edged;
 
 -- ACQUISITION (migration 0095): usage by access source reads the anonymous subject; the Vouchers screen reads
 -- who revoked what and why.
 GRANT SELECT ON iam_v2.anonymous_access_subjects TO svc_edged;
-GRANT SELECT ON iam_v2.voucher_revocations       TO svc_edged;
+-- (voucher_revocations: read by no edged statement; SELECT removed, audit B-7, migration 0124.)
 
 -- CARD PAYMENT (migration 0096): the Payment methods screen reads accounts (never their secrets), their change
 -- history, the extra payment domains and checkout state. Every write goes through scd.
@@ -463,14 +462,56 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.client_groups, iam_v2.client_grou
 GRANT SELECT, INSERT ON iam_v2.client_group_changes TO svc_edged;
 
 -- ---- 0111/0112: reporting only ----------------------------------------------------------------------------
--- The Admin Console reports temporary verification windows and card settlement reports, and shows which
--- accounts the provider converts for. It writes none of them.
-GRANT SELECT ON iam_v2.verification_access_grants TO svc_edged;
+-- The Admin Console reports card settlement reports, and shows which accounts the provider converts for. It
+-- writes none of them. (The temporary verification window was removed with the email code it served; its
+-- history rows are kept and read by nothing, so SELECT on verification_access_grants is gone -- audit B-7, migration 0124.)
 
 -- ---- 0115: card disputes and chargebacks are reviewed; a full refund's access termination is evidenced ----
 -- The financial review screen reads the cases and the evidence, and resolves a case through one definer
 -- (KEEP_ACCESS / END_ACCESS, operator and reason required, a resolution written once).
 GRANT SELECT ON iam_v2.card_reversal_reviews, iam_v2.refund_access_terminations TO svc_edged;
 GRANT EXECUTE ON FUNCTION iam_v2.p4_resolve_reversal_review(uuid, uuid, uuid, text, text, text) TO svc_edged;
-GRANT SELECT ON iam_v2.payment_account_conversion, iam_v2.payment_account_conversion_changes,
-                iam_v2.payment_settlement_reports TO svc_edged;
+-- (payment_account_conversion_changes: no edged statement reads it; SELECT removed, audit B-7, migration 0124.)
+GRANT SELECT ON iam_v2.payment_account_conversion, iam_v2.payment_settlement_reports TO svc_edged;
+
+-- ---- 0123: PMS review decisions and the roster settings writer ---------------------------------------------
+-- One decision per review message (acknowledge with a reason, or link to a re-matchable stay), the stays a
+-- message can be linked to, the versioned roster-settings writer, and the review-expiry setting (read, versioned
+-- write, change log). Every write is a definer that appends its own record; edged writes no table.
+-- GUARDED on 0123 being present (audit B-20), so the reconcile runs on a database rolled back below it.
+DO $g0123e$
+BEGIN
+  IF to_regprocedure('iam_v2.pms_review_decide(uuid,uuid,uuid,text,uuid,text,text)') IS NULL
+     OR to_regprocedure('iam_v2.pms_review_expiry_settings_set(uuid,uuid,bigint,boolean,integer,text,text)') IS NULL THEN
+    RAISE NOTICE 'migration 0123 is not applied -- PMS review-decision grants skipped';
+    RETURN;
+  END IF;
+  GRANT EXECUTE ON FUNCTION iam_v2.pms_reconciliation_settings_set_checked(uuid, uuid, bigint, integer, integer, integer, integer, text, text) TO svc_edged;
+  GRANT EXECUTE ON FUNCTION iam_v2.pms_review_link_candidates(uuid, uuid, uuid)                          TO svc_edged;
+  GRANT EXECUTE ON FUNCTION iam_v2.pms_review_decide(uuid, uuid, uuid, text, uuid, text, text)           TO svc_edged;
+  GRANT EXECUTE ON FUNCTION iam_v2.pms_review_expiry_settings_get(uuid, uuid)                            TO svc_edged;
+  GRANT EXECUTE ON FUNCTION iam_v2.pms_review_expiry_settings_set(uuid, uuid, bigint, boolean, integer, text, text) TO svc_edged;
+END $g0123e$;
+-- (No SELECT on pms_review_expiry_settings or its change log: edged reads the setting through the getter and
+--  shows no history -- audit B-7, migration 0124. A history screen gets a definer reader, not a table grant.)
+
+-- ---- the walled-garden policy (migration 0125) ------------------------------------------------------
+-- The widest network a walled-garden rule may name. edged enforces it on every rule create and edit, reads it
+-- and writes it ONLY through the functions (the setter keeps the append-only change row), and reads the
+-- history. The settings table itself is granted to nobody.
+-- GUARDED on 0125 being present (audit B-20), so the reconcile runs on a database rolled back below it.
+--
+-- SELECT on the change log is KEPT although no edged statement reads it yet: it is migration 0125's own grant,
+-- read-only on an append-only history, and 0125 runs after 0124, so withdrawing it belongs to 0125's owner (a
+-- history screen, or a definer reader in its place). Every other unread settings log was withdrawn by 0124.
+DO $g0125$
+BEGIN
+  IF to_regprocedure('iam_v2.walled_garden_settings_set(uuid,uuid,integer,text,text)') IS NULL
+     OR to_regclass('iam_v2.walled_garden_settings_changes') IS NULL THEN
+    RAISE NOTICE 'migration 0125 is not applied -- walled-garden policy grants skipped';
+    RETURN;
+  END IF;
+  GRANT EXECUTE ON FUNCTION iam_v2.walled_garden_settings_get(uuid,uuid)                  TO svc_edged;
+  GRANT EXECUTE ON FUNCTION iam_v2.walled_garden_settings_set(uuid,uuid,integer,text,text) TO svc_edged;
+  GRANT SELECT  ON iam_v2.walled_garden_settings_changes                                  TO svc_edged;
+END $g0125$;

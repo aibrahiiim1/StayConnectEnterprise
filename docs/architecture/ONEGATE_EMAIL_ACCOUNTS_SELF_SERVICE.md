@@ -134,14 +134,30 @@ that portald keeps in an HttpOnly cookie; it is the "recently authenticated" pro
   `<username>.removed-<id8>.invalid` (RFC 2606 `.invalid`, so no mail is ever sent to it; scd retires its queued
   emails). The address can register again at once, and every purchase, entitlement and session keeps pointing at
   the account it belonged to. A removed account is listed only under the Removed filter; a live account cannot
-  take a username carrying the marker. Audited `guest_account.removed` / `guest_account.deleted`.
-* **Mark email verified** (`POST …/verify-email`): staff vouch for the address; restores normal status, package
-  untouched. Audited `guest_account.email_marked_verified`.
+  take a username carrying the marker. Audited `guest_account.removed` / `guest_account.deleted`. Remove asks for
+  the operator's password (body `{"password": …}`). **A removed account is final**: every later edit, password
+  set or verification email is refused (409 `removed`), and the database itself refuses enabling or renaming it
+  (migration 0120 trigger `guest_access_account_removed_is_final`).
+* **Disable / Enable** (`PATCH …/{id} {"enabled": false|true}`, decision D-A, 2026-10-16): Disable ends the
+  account's live sessions through scd (as Remove does; refused up front, with nothing changed, when the appliance
+  cannot take a device off the network) and moves its live package **ACTIVE → SUSPENDED** through the ordinary
+  transition writer with reason `ACCOUNT_DISABLED` (`iam_v2.account_entitlements_follow_access`, migration 0120).
+  Enable moves a package Disable suspended **SUSPENDED → ACTIVE** (reason `ACCOUNT_ENABLED`) while it is still
+  inside its window. The validity clock keeps running while suspended: the window is not moved, and a package
+  whose window ended meanwhile stays suspended for the expiry sweep. A suspension for any other reason (an
+  over-budget online-time package) is not lifted by Enable. Audited `guest_account.disabled` /
+  `guest_account.enabled` with the counts.
+* **Edit** (`PATCH …/{id}`): an optional field (name, notes, valid from, valid until) sent as `null` is cleared; an
+  absent field is kept. A validity window that ends before it starts is refused. Name ≤ 120 and notes ≤ 1000
+  characters.
+* **Mark email verified** (`POST …/verify-email {"password", "reason"}`): staff vouch for the address; restores
+  normal status, package untouched. It is the **code-reveal** power (vouching for an address the client did not
+  prove), so it needs `code-reveal` **W** — the voucher station does not hold it — plus the password and a reason
+  of 4–500 characters. Audited `guest_account.email_marked_verified` with the reason.
 * **New verification period** (`POST …/restart-verification`): deadline = now + the site's deadline setting, the
   grace hour available again; lifts a suspension, package untouched. Audited `guest_account.verification_restarted`.
-* Not provided: releasing one device from a package so another can take its slot. The database primitive is
-  deliberately closed to service roles; a staff release needs its own scoped, audited definer function (a
-  migration and a Product Owner decision).
+* Releasing one device's place on a package is the Devices screen's (migration 0118,
+  [ONEGATE_DEVICE_MANAGEMENT.md](ONEGATE_DEVICE_MANAGEMENT.md)); Remove frees the places of the account's devices.
 * Removing an account does not reset the per-device registration cap or a free package's prior-purchase rule for
   the device; both are abuse protections.
 

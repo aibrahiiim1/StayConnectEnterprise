@@ -129,7 +129,14 @@ func TestLineageIsTransitiveAcrossSeveralReplacements(t *testing.T) {
 		  (tenant_id,site_id,name,parent_interface,bridge_name,gateway_cidr,gateway_ip,subnet_cidr,enabled)
 		VALUES ($1,$2,'gen2','br-lan','br-g-gen2','10.82.0.1/24','10.82.0.1','10.82.0.0/24',false) RETURNING id::text`,
 		p2Tenant, p2Site)
-	for _, pair := range [][2]string{{first, second}, {second, p2GN}} {
+	// Its OWN current network, not the shared fixture network p2GN. Replacement rows are append-only history and
+	// are never cleaned up, so chaining onto p2GN added another pair of ancestors to p2GN's lineage on every run:
+	// the test passed on a fresh database and failed on every later run against the same one.
+	current := mustOne(t, db, `INSERT INTO public.guest_networks
+		  (tenant_id,site_id,name,parent_interface,bridge_name,gateway_cidr,gateway_ip,subnet_cidr,enabled)
+		VALUES ($1,$2,'gen3','br-lan','br-g-gen3','10.83.0.1/24','10.83.0.1','10.83.0.0/24',false) RETURNING id::text`,
+		p2Tenant, p2Site)
+	for _, pair := range [][2]string{{first, second}, {second, current}} {
 		if _, err := db.Exec(ctx, `INSERT INTO iam_v2.guest_network_replacements
 			  (tenant_id,site_id,original_network_id,successor_network_id,state,network_type,parent_interface,
 			   vlan_id,reason,created_by,applied_at,settled_at)
@@ -140,7 +147,7 @@ func TestLineageIsTransitiveAcrossSeveralReplacements(t *testing.T) {
 	}
 
 	rows, err := db.Query(ctx, `SELECT ancestor_id::text, depth FROM iam_v2.guest_network_lineage
-		 WHERE tenant_id=$1 AND site_id=$2 AND network_id=$3 ORDER BY depth`, p2Tenant, p2Site, p2GN)
+		 WHERE tenant_id=$1 AND site_id=$2 AND network_id=$3 ORDER BY depth`, p2Tenant, p2Site, current)
 	if err != nil {
 		t.Fatalf("lineage: %v", err)
 	}

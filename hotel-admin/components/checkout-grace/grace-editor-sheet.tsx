@@ -37,7 +37,6 @@ import { Field, Input, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { cn } from "@/lib/utils";
-import { HelpSection, HelpTip } from "@/components/help";
 
 const STEPS = ["Terms", "Review and publish"];
 
@@ -299,37 +298,15 @@ export function GraceEditorSheet({
                   </Field>
                 </SheetSection>
 
-                <SheetSection
-                  title="Eligibility"
-                  actions={
-                    <HelpTip title="Eligibility">
-                      <HelpSection>
-                        <p>
-                          Every guest who still has active internet access when they check out qualifies — free, paid
-                          or included with the room. A guest with no active access at checkout gets no Grace Period. Each stay
-                          receives it once.
-                        </p>
-                        <p>
-                          &ldquo;Stay rules after checkout&rdquo; is how long after checkout the stay still counts for
-                          stay-based package rules.
-                        </p>
-                      </HelpSection>
-                    </HelpTip>
-                  }
-                >
-                  <Field
-                    label="Stay rules after checkout"
-                    hint="It never removes the Grace Period from a guest who qualifies."
-                    error={err("eligibilityValue")}
-                  >
-                    <DurationInput
-                      value={draft.eligibilityValue}
-                      unit={draft.eligibilityUnit}
-                      onValue={(v) => set("eligibilityValue", v)}
-                      onUnit={(u) => set("eligibilityUnit", u)}
-                      unitLabel="Stay rules after checkout unit"
-                    />
-                  </Field>
+                {/* NO "STAY RULES AFTER CHECKOUT" FIELD (audit H-19). The eligibility window was saved with every
+                    policy and read by nothing: who qualifies is decided from the guest's access AT checkout. The
+                    value already in force is carried through unchanged; there is nothing for an operator to set. */}
+                <SheetSection title="Eligibility">
+                  <p className="text-sm text-muted-foreground">
+                    Every guest who still has active internet access when they check out qualifies — free, paid or
+                    included with the room. A guest with no active access at checkout gets no Grace Period. Each stay
+                    receives it once.
+                  </p>
                 </SheetSection>
 
                 <section aria-label="Guest will receive" className="rounded-lg border border-primary/20 bg-primary-subtle/40 p-4">

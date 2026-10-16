@@ -74,12 +74,9 @@ func Test0046DownRecreatesEveryDroppedTable(t *testing.T) {
 	}
 }
 
-func TestEveryUpFrom0037HasADown(t *testing.T) {
+func TestEveryUpHasADown(t *testing.T) {
 	ups, _ := filepath.Glob("*.up.sql")
-	for _, u := range ups {
-		if u < "0037" {
-			continue // 0023–0036 predate the down-file rule
-		}
+	for _, u := range ups { // 0023–0036 predated the rule and got their downs later; there are no exceptions now
 		if _, err := os.Stat(strings.TrimSuffix(u, ".up.sql") + ".down.sql"); err != nil {
 			t.Errorf("%s has no down migration", u)
 		}

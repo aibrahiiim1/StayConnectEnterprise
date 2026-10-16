@@ -18,8 +18,20 @@ states) is defined once in the [OneGate design system](../../design-system/READM
 
 - **Sign-in.** The login page is titled *OneGate Admin Console*: **Email or username**, **Password**,
   **Sign in**. There is no single sign-on, no multi-factor step and no "forgot password"; an operator with
-  the Site admin role changes passwords under **System → Operators**. The session is re-checked every
-  30 seconds; if it has ended you are returned to the login page.
+  the Site admin role resets other operators' passwords under **System → Operators**, and every operator
+  changes their own with **Change my password** at the foot of the sidebar (current password required; every
+  other place they are signed in is signed out). The session is re-checked every 30 seconds; if it has ended
+  you are returned to the login page. After signing in you are returned only to a page of this console.
+- **Wrong passwords are limited.** From the second wrong password each attempt waits longer (1 s, 2 s, 4 s
+  ...); 5 wrong passwords for one account, or 20 from one address, within 15 minutes lock that account or
+  address for 15 minutes (*"Too many failed sign-in attempts. Wait … and try again."*). The same applies to
+  every password confirmation. An unknown account name is treated exactly like a known one. Every failure and
+  every lockout is recorded in **Activity** with the address it came from, never the password. The numbers
+  are a setting: **System → Operators → Sign-in protection**. Resetting an operator's password ends their
+  lockout.
+- **A password that must be replaced.** If you sign in with a password shorter than 10 characters (such as a
+  provisioning default) or one an administrator set for you with *Must choose their own password*, the
+  console shows only **Set a new password** until you have replaced it.
 - **The sidebar and "Find a screen…".** The menu has seven groups: **Overview · Internet offering ·
   Clients · Client Portal · Hotel · Networking · System** (*Clients* and *Client Portal* were formerly *Guests* and
   *Guest portal*; **Hotel** replaces the former *Property management system* and *Charges* groups and also holds
@@ -41,7 +53,7 @@ states) is defined once in the [OneGate design system](../../design-system/READM
   refused. The appliance enforces the same rules on every request. The role for each page is listed below;
   a summary table is at the end of this document.
 - **"Not enabled on this appliance".** Some features are switched on per appliance (for example the Hotel
-  charge pages, Post-stay access, Online-time budgets or Client devices). A switched-off feature is left out of the menu;
+  charge pages, Post-stay access or Online-time budgets). A switched-off feature is left out of the menu;
   if you open it by address, the page says **"Not enabled on this appliance"**, explains that this is a
   configuration and not a fault, and states that client internet, sign-in, the PMS connection, sessions and
   accounting are unaffected. Turning a feature on is a deployment decision for Semantics support, not an
@@ -128,14 +140,21 @@ What clients are offered on the portal, and what those packages are doing for cl
   Clicking a package opens a side sheet with what it gives, its saved versions and a support reference.
 - **Add package / Edit** (large dialog): Name (what the client sees), Short code (fixed once created),
   Service plan (required, with a summary of what it gives), **How long access lasts**, **Data allowance**
-  (the service plan's allowance or an amount per night of the stay, with minimum/maximum), **Who this package is
+  (the service plan's allowance or an amount per night of the stay, with minimum/maximum — a per-night package is
+  given only to clients who signed in with their room; it is not offered to voucher, account, email, phone or
+  social clients, and vouchers cannot be issued for it), **Who this package is
   offered to** (conditions; empty means everyone who signs in — the condition types are grouped **General**
   and **Hotel (PMS stay)**, the Hotel group holding the conditions that only mean something for a PMS stay:
   nights staying, room type, rate plan, VIP guest, travel agent and which PMS the stay came from; travel agents are
   chosen from a searchable list of the agents the PMS has named on stays, several at once, and a name not yet seen
-  can still be added — a name with a comma stays one agent), and advanced options (offer from/until,
-  speed steps). Saving records a new permanent version; clients already online keep the terms they connected
-  under. Packages are free to the client.
+  can still be added — a name with a comma stays one agent), and advanced options (offer from/until). Saving
+  records a new permanent version; clients already online keep the terms they connected under. Packages are
+  free to the client.
+- **Speed steps are not offered.** They were shown to clients and never applied — a client always gets the speed,
+  device limit and allowances of the package's **service plan** — so a package carries one plain step. A package
+  saved earlier with speed steps shows *Speed steps are not applied* and a **Remove speed steps** button; it
+  cannot be saved until they are removed. To sell different speeds, give each speed its own service plan and
+  package.
 - **Disable** ("Stop offering it") — **reason + password confirmation**. Clients stop being offered it at
   once; anyone online keeps their access; it can be enabled again at any time. **Enable** needs no dialog.
 - **Delete** (from the side sheet) — first checks whether anything still refers to the package. If so, the
@@ -154,11 +173,21 @@ The technical service that packages hand out.
   package*; filter and search; table Plan, Speed, Devices, Time, Data, Used by. A side sheet shows what the
   service plan grants, the packages using it and its saved versions.
 - **Add plan / Edit** (dialog): Plan code (fixed), Display name, Download and Upload speed (Mbps; empty =
-  unlimited), Devices at once, **When the device limit is reached** (*Refuse the new device*, *Disconnect
-  the oldest device*, *Ask an operator to approve*), Total time allowance (hours or days), Data allowance
-  (GB), Disconnect after inactivity (minutes), Maximum single session (hours), **How the speed is shared**
-  (per device or shared across the client's devices) and **How time is counted** (currently only *Validity
-  window — time runs from purchase*). Saving creates a new version.
+  unlimited), Devices at once, **When the device limit is reached** (*Refuse the new device*, or *Disconnect
+  the oldest device* — the client's earliest device is disconnected and its place given to the new one; this
+  is recorded), Total time allowance (hours or days), Data allowance (GB), Disconnect after inactivity
+  (minutes), Maximum single session (hours), **How the speed is shared** (per device or shared across the
+  client's devices) and **How time is counted** (currently only *Validity window — time runs from purchase*).
+  Saving creates a new version. *Ask an operator to approve* is not offered and cannot be saved: there is no
+  approval workflow (plans saved with it earlier still show it, marked *not available*).
+- **What the limits do (enforced by the appliance):**
+  - **Total time allowance** is time *online*, added up across the client's devices (two devices online for an
+    hour use two hours). Access ends when it runs out, or when the package's duration ends if that is first.
+    The portal's *time left* counts down the same allowance.
+  - **Disconnect after inactivity** ends a device's connection after that long with no traffic. The package is
+    not used up: the device signs in again and carries on.
+  - **Maximum single session** ends a connection that long after it started; the device can sign in again
+    straight away.
 - **After saving:** an **"Apply these settings to packages?"** card lists the packages using the service plan with a
   checkbox each; **Apply to selected packages** or **Not now**. Only future clients are affected; nobody's
   access changes mid-session. The same card is offered later for packages still on older settings.
@@ -209,18 +238,26 @@ recorded.
 A username and password a client can sign in with, instead of a room number or voucher. Which package the
 client may take is decided by the rules on Internet packages.
 
-- **Shows:** tiles *Accounts*, *Able to sign in*, *Devices online*, *Locked out*; the switch **Offer
-  username-and-password sign-in** on the portal; search; table Account, Devices (active of max, *At the
-  limit*), Status, Valid until, Last sign-in, Sign-ins.
+- **Shows:** tiles *Accounts*, *Able to sign in*, *Devices online*; the switch **Offer
+  username-and-password sign-in** on the portal (part of Sign-in methods: only the roles that may change sign-in
+  methods can flip it; it governs the accounts staff create, while self-service Email accounts follow the Email
+  accounts switch); search; table Account, Devices (active of max, *At the limit*), Status, Valid until, Last
+  sign-in, Sign-ins.
 - **Add account:** Username (what the client types; one character is allowed), Name (staff reference only),
   Password (typed, with show/hide and a soft warning for short passwords, or generated), Valid from, Valid
   until, Notes.
-- **Row actions:** **Edit**, **Password** (type or generate a new one; optionally *Disconnect this account's
-  devices now*), **Disable / Enable**, **Disconnect** (when devices are online — confirmation dialog),
-  **Delete** (confirmation dialog that suggests Disable instead).
+- **Row actions:** **Edit** (emptying Name, Notes or a date clears it; *Valid until* must be later than *Valid
+  from*), **Password** (type or generate a new one; optionally *Disconnect this account's devices now*),
+  **Disable** (confirmation dialog: the devices online are disconnected and the package is paused) / **Enable**
+  (resumes a package Disable paused, if it has not ended — its end date does not move while paused),
+  **Disconnect** (when devices are online — confirmation dialog), **Remove** (confirmation dialog with your
+  password; suggests Disable instead). A removed account cannot be enabled, renamed or edited again.
+- **Manage:** verification state, packages and their devices. **Mark email verified** asks for a reason and your
+  password and is offered only to roles that may vouch for an address (Site admin, Site IT manager, Client
+  services). **Device** opens the device view for roles that can see Devices; its actions need Active sessions
+  write.
 - **One-time reveal:** after creating an account or setting a password, *"Password for {username}"* is shown
-  once with **Copy** and **I have it**. It cannot be looked up again. No reason or password confirmation is
-  asked on this page.
+  once with **Copy** and **I have it**. It cannot be looked up again.
 - **Who can change it:** Site admin, Site IT manager, Client services, Client relations, Voucher operator.
   **Read-only:** Site viewer.
 
@@ -252,21 +289,21 @@ accounting samples behind them.
   for the heaviest users; the table shows each source's downloaded, uploaded and total data and its
   allowance. Email, phone and social sign-ins are not listed as sources; the devices that used them still
   appear under **By device**. Room and stay detail appears only for a Hotel room/stay.
+- **Period:** *Last 7 days*, *Last 30 days* (default), *Last 90 days*, *Last 12 months* or two dates. Every total
+  on the page — the list, a source's detail and a device — covers that period; the allowance is the whole
+  package's, and it is the allowance the appliance enforces (the package's own, else its service plan's).
 - **By device:** look up a MAC address; a note reminds you that a device is not a person.
 - **Drill-down:** the source's totals and allowance, the devices used, the sessions, and **Show evidence**
-  to load the raw samples, with their own total next to the session's. Read-only.
+  to load the raw samples, with their own total next to the session's (the first 2,000 of a very long session,
+  said as such). Read-only.
 - **Who can see it:** Site admin, Site IT manager, Client services, Client relations, Payments operator, Site
   viewer.
 
-### Client devices — `/guest-device-self-service`
-Whether a signed-in client may remove one of their own devices that is not connected, to free its place for
-another, from the portal's *"You're online"* page.
-
-- **Shows:** two tiles kept separate — **This site offers it** (On/Off) and **Available in this
-  release** (Yes/Not yet) — and a sentence explaining what clients can do with that combination.
-- **Switch on / Switch off** — an inline confirmation with an **optional reason**.
-- **Who can change it:** Site admin, Site IT manager. **Read-only:** Client services, Client relations,
-  Payments operator, Site viewer. May be *Not enabled on this appliance*.
+### Client devices — retired
+The former *Client devices* screen (`/guest-device-self-service`) is no longer in the menu (2026-10-16). Its switch
+controlled nothing since clients manage their devices under *Your devices* on the portal, which is always on.
+Client devices are managed on **Devices**, where the number of device changes a client may make per day is set;
+an old bookmark to the retired address says so and links there.
 
 ### Online-time budgets — `/online-time`
 For packages sold as an amount of connected time: how much time is left. Time counts down only while a
@@ -291,9 +328,12 @@ disconnect clients already online.
   to the page where what the guest types is chosen (see **Hotel → Room sign-in**); **Email code** and **SMS code** (*Not available* until
   a sender exists and is switched on under Email & SMS); **Social login** (a checkbox per configured
   provider).
-- **Client sign-in protection:** *Maximum failed attempts*, *Observation window*, *Wait after too many
-  attempts* — each with its default and allowed range — the last change (who, when, from → to), **Save** and
-  **Discard**.
+- **Client sign-in protection** (counts wrong Room sign-in details only): *Maximum failed attempts*,
+  *Observation window*, *Wait after too many attempts* — each with its default and allowed range — the last
+  change (who, when, from → to, why), **Save** (asks for a reason and your password) and **Discard**.
+- A code method whose sender is missing shows *Not available* and cannot be switched on, but can always be
+  switched off. A *Test only* sender does not count as a sender in the installed console. An identity provider
+  whose switch is on but whose application is gone is still listed, so it can be switched off.
 - Which methods can be offered is also limited by the license.
 - **Who can change it:**
   - Methods: Site admin, Site IT manager. **Read-only:** Client services, Client relations, Site viewer.
@@ -402,8 +442,13 @@ and have no buttons, on purpose:
   stay, rooms with several stays, and stays past their departure date. The PMS resolves these, not this
   screen. Visible to Site admin, Site IT manager, Client services, Client relations, Site viewer.
 - **Roster reconciliation** — `/roster-reconciliation`: the automatic process that keeps the guest list
-  identical to the PMS — what blocks it, what the next run will do, and past runs. Visible to Site admin,
-  Site IT manager, Client services.
+  identical to the PMS — what blocks it, what the last run decided, and past runs. A stay the complete roster
+  no longer lists is checked out exactly like a PMS departure: its internet access ends (or moves to the
+  departure grace package) and its devices are disconnected. Opening the page changes nothing; **Run dry run**
+  (Site admin, Site IT manager) records what a run would do now without closing any stay. **When a roster is
+  trusted** (smallest roster acted on, most stays per run, rooms a sweep may miss, sweeps remembered) is
+  changed by Site admin and Site IT manager with a reason and their password; every change is versioned and in
+  the activity log. Visible to Site admin, Site IT manager, Client services, Client relations.
 
 ### Room sign-in — `/room-sign-in`
 What a guest types besides the room number when signing in with a room. It sits under Hotel because its
@@ -448,10 +493,19 @@ changed in the PMS.
 Every message the PMS sent (check-ins, check-outs, stay changes) and whether the guest list was updated from
 it. Answers "has Wi-Fi seen that check-in yet?"
 
-- **Shows:** live status; tiles *Last message*, *Applied*, *Needs a decision*, *Not matched to a stay*;
-  search and a filter by result; table About (room and guest), What happened, Result, times, and **Details**
-  (including the PMS's own message identifier to quote to the PMS vendor). Read-only.
-- **Who can see it:** Site admin, Site IT manager, Client services, Client relations, Site viewer.
+- **Shows:** live status; tiles *Last message*, *Applied*, *Needs a decision* (messages in review that carry
+  no decision yet), *Not matched to a stay*; search and a filter by result; table About (room and guest), What
+  happened, Result, times, and **Details** (including the PMS's own message identifier to quote to the PMS
+  vendor).
+- **Decisions (Site admin, Site IT manager):** in a waiting message's Details, **Acknowledge** (it needs no
+  action) or **Link to a stay** (chosen from the stays it can still be matched to: the same reservation, or for
+  a message without one, a stay that was in that room when it arrived). Both ask for a reason and the
+  password, are recorded in the activity log, and change no stay or internet access. **Automatic expiry of
+  waiting messages** — off by default; when switched on, a message that arrives after that moment and waits
+  longer than the set number of days (1–365, default 30) is recorded as expired. Messages already waiting are
+  never expired by it.
+- **Who can see it:** Site admin, Site IT manager, Client services, Client relations, Site viewer. A Site
+  viewer sees rooms and results but not guest names or reservation numbers (also on Stays).
 
 ### Guest sign-in checks — `/pms-resolutions`
 (Formerly *Client sign-in checks*.)
@@ -652,11 +706,12 @@ Whether each service on the appliance is running.
 
 - **Shows:** live status (refreshed every 10 seconds), a *"still starting after boot"* banner when relevant,
   count tiles by state, and the services table (state, health check, restarts, backoff, last failure,
-  uptime). A service opens a panel with details, recent logs (secrets and client details removed) and
-  recovery history.
+  uptime). A service opens a panel with details, recent logs and recovery history. Logs have secrets,
+  addresses, email addresses, client names, room numbers and PMS guest fields removed by the appliance.
 - **Actions:** **Recheck**; **Logs**; **Restart** — a dialog describing the impact for that service,
   **reason + password confirmation**.
-- **Who can change it:** Site admin, Site IT manager. **Read-only:** every other role.
+- **Who can change it:** Site admin, Site IT manager (including reading **Logs**). **Read-only:** every other
+  role, without the logs.
 
 ### Alerts — `/operational-alerts`
 Checkouts the configured policy could not handle on its own (for example when an emergency grace was used).
@@ -718,21 +773,38 @@ A complete copy of the site's data, taken nightly and on demand.
   up now** — **password confirmation**.
 - **Available backups:** date, Verified / Not checked, size; **Verify** (or Re-verify), **Download**, and
   **Restore** (verified backups only).
+- **Download** — **password confirmation**, every time; recorded in Activity twice (the confirmation and the
+  download). Offered only to the Site admin and the Site IT manager: a backup is a complete copy of the
+  site's data.
 - **Restore** — a dialog listing what is replaced and the six steps the appliance takes, **typed backup name +
   password confirmation**. Progress is shown until it finishes, then a *Last restore* card.
+- **Usage detail kept for** (Site admin; password + reason): how long the appliance keeps the detailed traffic
+  samples behind each session. Default **Unlimited** — nothing is removed. With a number of days (30 to 3650),
+  detail older than that is removed once an hour, only for sessions that have ended and packages that have
+  finished; totals per package and session are always kept. Every change and every removal is recorded and the
+  last removal is shown.
 - **Storage and retention** (collapsed): disk used, backups kept, nightly sweep time and how long things are
   kept; changing them needs **password confirmation**.
 - **Who can change it:** Site admin. **Read-only:** Site IT manager, Client services, Client relations, Site
-  viewer. (Download is offered to every role that can see the page.)
+  viewer. **Download:** Site admin and Site IT manager only; the other roles see the list and no Download.
 
 ### Operators — `/operators`
 Site staff accounts for this appliance.
 
-- **Table:** operator (with a *you* marker), role badges (remove with ×; add with **+ role**), status (*Can
-  sign in* / *Disabled*). **Change password** (typed twice, at least 10 characters) and **Disable**.
-  Adding a role, removing a role and disabling an operator are each confirmed in a dialog first.
+- **Table:** operator (with a *you* marker and *Must set a new password* where it applies), role badges
+  (remove with ×; add with **+ role**), status (*Can sign in* / *Disabled*). **Reset password** (typed twice,
+  at least 10 characters, not the account name) signs the operator out everywhere, ends a sign-in lockout on
+  their account and, by default, makes them choose their own password at the next sign-in (*Must choose their
+  own password at the next sign-in*). On your own row it is **Change my password**, which asks for your
+  current password. **Disable** signs the operator out at once. Adding a role, removing a role and disabling
+  an operator are each confirmed in a dialog first.
 - **Add operator:** email or username, name, password (at least 10 characters), role (the seven roles;
-  *Site viewer* by default).
+  *Site viewer* by default), and *Must choose their own password at the next sign-in* (on by default).
+- **Sign-in protection** (collapsed): wrong passwords before an account is locked (3–20, default 5), counting
+  window per account (60–86 400 s, default 900), wrong passwords from one address before it is locked (5–500,
+  default 20), counting window per address (60–86 400 s, default 900), lockout (60–86 400 s, default 900).
+  Changing them needs a **reason + password confirmation** and applies to the next attempt; a lockout already
+  running keeps its expiry.
 - You cannot remove your own Site admin role or disable yourself. There is no action to re-enable a disabled
   operator.
 - **Who can change it:** Site admin. **Read-only:** Site IT manager.
@@ -746,14 +818,13 @@ W = can change, R = read-only, — = not shown. The appliance enforces these on 
 | Page | Site admin | Site IT manager | Client services | Client relations | Voucher operator | Payments operator | Site viewer |
 |---|---|---|---|---|---|---|---|
 | Overview | R | R | R | R | R | R | R |
-| Internet packages, Service plans | W | — | — | — | — | — | R |
+| Internet packages, Service plans | W | W | — | — | — | R | R |
 | Vouchers (cards) | W | W | W | W | W | R | R |
 | Vouchers (show / export codes) | W | — | W | W | W | — | — |
 | Vouchers (code format, keys) | W | W | R | R | R | — | R |
 | Client accounts | W | W | W | W | W | — | R |
 | Active sessions | W | W | W | W | R | R | R |
 | Usage explorer | R | R | R | R | — | R | R |
-| Client devices | W | W | R | R | — | R | R |
 | Online-time budgets | R | R | R | R | R | R | R |
 | Sign-in methods | W | W | R | R | — | — | R |
 | Sign-in protection thresholds | W | W | R | R | — | — | R |
@@ -778,7 +849,9 @@ W = can change, R = read-only, — = not shown. The appliance enforces these on 
 | Activity | R | R | R | R | — | R | R |
 | Appliance & licence | W | W | R | R | R | R | R |
 | Backups | W | R | R | R | — | — | R |
-| Operators | W | R | — | — | — | — | — |
+| Backups (download) | W | W | — | — | — | — | — |
+| Diagnostics (service logs) | W | W | — | — | — | — | — |
+| Operators, Sign-in protection | W | R | — | — | — | — | — |
 
 ---
 
@@ -787,14 +860,21 @@ W = can change, R = read-only, — = not shown. The appliance enforces these on 
 | Action | Page | What is asked |
 |---|---|---|
 | Disable an internet package | Internet packages | Reason + password |
+| Enable (offer again) an internet package | Internet packages | Password |
+| Save a package with a changed price, currency, way to get it, or service plan | Internet packages | Password (a rename or a new condition needs none) |
+| Save changes to an existing service plan | Service plans | Password |
+| Apply current settings to packages | Service plans | Password, asked once for all the packages moved |
 | Delete a package or service plan | Internet packages, Service plans | Reason + password (refused while in use) |
 | Publish a Grace Period policy | Grace Period | Reason (from a list) + password |
 | Show a voucher code / export a batch | Vouchers | Reason + password, recorded |
 | Cancel a voucher card | Vouchers | Reason + password |
 | Change the voucher code format | Vouchers → Code security | Reason |
 | Retire a code key | Vouchers → Code security | Reason + password |
-| Issue vouchers | Vouchers | One-time reveal of the codes (no password) |
+| Issue vouchers | Vouchers | Password, then one-time reveal of the codes |
 | Create an account / set a password | Client accounts | One-time reveal of the password |
+| Remove a client account | Client accounts | Password |
+| Mark an email address verified | Client accounts → Manage | Reason + password |
+| Change client sign-in protection | Sign-in methods | Reason + password |
 | Reset a post-stay PIN | Post-stay access | Reason + password, then one-time reveal |
 | End post-stay access | Post-stay access | Reason + type `REVOKE` + password |
 | Put a PMS configuration live | PMS connection | Reason (from a list) + password |
@@ -810,4 +890,8 @@ W = can change, R = read-only, — = not shown. The appliance enforces these on 
 | Rotate the TLS certificate | TLS certificate | Reason + type `ROTATE` + password |
 | Restart a service | Diagnostics | Reason + password |
 | Back up now / change retention | Backups | Password |
+| Download a backup | Backups | Password (Site admin, Site IT manager) |
+| Change my password | Sidebar → Change my password | Current password |
+| Reset another operator's password | Operators | New password typed twice; they are signed out |
+| Change sign-in protection | Operators → Sign-in protection | Reason + password |
 | Restore a backup | Backups | Type the backup name + password |

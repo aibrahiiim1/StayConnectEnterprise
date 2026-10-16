@@ -9,12 +9,24 @@
 --   svc_edged  reads and writes the settings only through the definer functions (a role that could write the
 --              table directly could change a setting without a change row) and reads their history. Its DML on
 --              guest_access_accounts is granted in svc-edged-phase2-commerce-grants.sql.
-GRANT INSERT ON iam_v2.guest_access_accounts TO svc_scd;
-GRANT UPDATE (password_hash, email_verified_at, verification_deadline, verification_reminder_sent_at,
-              grace_until, grace_extensions_used) ON iam_v2.guest_access_accounts TO svc_scd;
-GRANT SELECT, INSERT, UPDATE ON iam_v2.account_email_tokens TO svc_scd;
-GRANT EXECUTE ON FUNCTION iam_v2.self_service_settings_get(uuid,uuid) TO svc_scd;
+--
+-- GUARDED on the migration being present (audit B-20): the reconcile must run on a database rolled back below
+-- 0117, where these tables, columns and functions do not exist, and a GRANT on a missing object fails the whole
+-- reconcile transaction. Statements stay one per line after the guard so the Gate-P grant parsers see them.
+DO $g0117$
+BEGIN
+  IF to_regclass('iam_v2.account_email_tokens') IS NULL
+     OR to_regprocedure('iam_v2.self_service_settings_get(uuid,uuid)') IS NULL THEN
+    RAISE NOTICE 'migration 0117 is not applied -- self-service grants skipped';
+    RETURN;
+  END IF;
+  GRANT INSERT ON iam_v2.guest_access_accounts TO svc_scd;
+  GRANT UPDATE (password_hash, email_verified_at, verification_deadline, verification_reminder_sent_at,
+                grace_until, grace_extensions_used) ON iam_v2.guest_access_accounts TO svc_scd;
+  GRANT SELECT, INSERT, UPDATE ON iam_v2.account_email_tokens TO svc_scd;
+  GRANT EXECUTE ON FUNCTION iam_v2.self_service_settings_get(uuid,uuid) TO svc_scd;
 
-GRANT EXECUTE ON FUNCTION iam_v2.self_service_settings_get(uuid,uuid) TO svc_edged;
-GRANT EXECUTE ON FUNCTION iam_v2.self_service_settings_set(uuid,uuid,boolean,integer,text,integer,integer,integer,integer,integer,integer,text,text) TO svc_edged;
-GRANT SELECT ON iam_v2.self_service_settings_changes TO svc_edged;
+  GRANT EXECUTE ON FUNCTION iam_v2.self_service_settings_get(uuid,uuid) TO svc_edged;
+  GRANT EXECUTE ON FUNCTION iam_v2.self_service_settings_set(uuid,uuid,boolean,integer,text,integer,integer,integer,integer,integer,integer,text,text) TO svc_edged;
+  GRANT SELECT ON iam_v2.self_service_settings_changes TO svc_edged;
+END $g0117$;

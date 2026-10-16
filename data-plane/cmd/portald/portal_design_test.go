@@ -21,6 +21,11 @@ func designHandler(t *testing.T, design map[string]any) *handler {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/v1/sessions/status" {
+			// The device these pages are drawn for is online: "You're online" is looked up, not read from its URL.
+			_, _ = w.Write([]byte(`{"ip":"10.77.0.42","session_id":"sess-1","active":true}`))
+			return
+		}
 		if r.URL.Path != "/v1/tenant/branding" {
 			_, _ = w.Write([]byte(`{}`))
 			return
@@ -67,7 +72,7 @@ var functionalIDs = []string{
 	"panel-accountlogin", "use-personal", "form-voucher", "voucher", "form-credentials", "ga-username", "ga-password",
 	"panel-email", "form-acct-signin", "acct-email", "acct-password", "form-acct-create", "acct-new-email",
 	"acct-new-password", "acct-new-password2", "form-acct-forgot", "acct-forgot-email", "panel-sms", "phone", "panel-pms", "form-pms", "pms-room", "pms-secondary", "pms-prompt",
-	"pms-err", "pms-choices", "panel-poststay", "form-poststay", "ps-pin", "ps-err", "panel-social",
+	"pms-err", "pms-choices", "panel-poststay", "form-poststay", "ps-pin", "ps-choices", "ps-err", "panel-social",
 	"social-providers", "alt-methods", "brand-help", "custom-html", "brand-terms-wrap", "brand-terms",
 	"info-btn", "info-panel",
 }

@@ -26,6 +26,12 @@
 #   systemctl reload stayconnect-caddy
 #
 {
+	# THE ADMIN API IS A UNIX SOCKET ONLY CADDY'S OWN ACCOUNT CAN OPEN (audit N-10). It used to listen on
+	# 127.0.0.1:2019 with no authentication, so any local account -- the captive portal's included -- could
+	# rewrite the routing of the Admin Console vhost. /run/caddy is 0700 caddy:caddy (RuntimeDirectory in
+	# stayconnect-caddy.service), and `systemctl reload` runs `caddy reload` as that same account.
+	admin unix//run/caddy/admin.sock
+
 	# Internal-only deployment: issue certs from Caddy's own local CA.
 	# Flip to public ACME by swapping `local_certs` for `email …` (and
 	# uncommenting `acme_ca` for staging).
@@ -67,6 +73,14 @@
 # the OAuth/social handlers redirect to 3rd-party consent pages.
 portal.stayconnect.local {
 	import security_headers
+
+	# NOT A WAN SURFACE (audit N-19). Clients reach the portal straight at portald (their own gateway's
+	# :8380, or the portal address's 443 -> :8343, DNAT'd by netd) and never this vhost: client networks may not
+	# reach the appliance's 443 at all. What did reach it was the WAN, where the name answered on the
+	# management address and portald trusted the loopback hop as forwarded HTTPS. Only the appliance itself may
+	# use it now; anything else is closed without an answer.
+	@not_local not remote_ip 127.0.0.1/8 ::1
+	abort @not_local
 
 	encode zstd gzip
 

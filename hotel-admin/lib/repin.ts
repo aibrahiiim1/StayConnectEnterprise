@@ -11,6 +11,11 @@
 //
 // So the repin is available on its own terms. It publishes a new PACKAGE revision pinned to the plan's
 // EXISTING current revision, and creates no service-plan revision at all.
+//
+// A repin changes the service plan a package hands out, so it is a step-up: the operator's password is asked
+// once and sent with every package it moves.
+
+import { DEFAULT_CURRENCY, currencyExponent } from "@/lib/commerce-form";
 
 export type PlanRef = {
   plan_id: string;
@@ -59,7 +64,73 @@ export type PackageCurrentDTO = {
   /** Absent means the plan's flat allowance. Carried across so a repin never silently flattens a
    *  per-night package back to a fixed one. */
   data_allocation_policy?: Record<string, unknown> | null;
+  // WHAT THE PACKAGE COSTS AND HOW CLIENTS GET IT. A repin that left these out republished every chosen
+  // package as Free -- card, room-charge and voucher packages alike (audit O-1). The server now refuses a
+  // revision without them; they are carried from here, exactly as stored.
+  price_minor?: number | null;
+  currency?: string | null;
+  currency_exponent?: number | null;
+  /** The stored acquisition methods; the publish body calls them acquisition_methods. */
+  settlement_methods?: string[] | null;
+  room_charge_mappings?: {
+    pms_interface_id: string; posting_code: string; tax_code?: string | null; tax_rate_bp?: number | null;
+  }[] | null;
+  // Revision fields with no control anywhere in the console, carried as loaded.
+  package_type?: string | null;
+  plan_overrides?: Record<string, unknown> | null;
+  renewable?: boolean | null;
+  max_purchases_per_stay?: number | null;
 };
+
+/** The commercial terms a revision of an existing package must state in full. */
+export type CommercialTerms = {
+  price_minor: number;
+  currency: string;
+  currency_exponent: number;
+  acquisition_methods: string[];
+  room_charge_mappings: { pms_interface_id: string; posting_code: string; tax_code?: string; tax_rate_bp?: number }[];
+};
+
+/**
+ * commercialTermsOf reads the package's stored commercial terms for a republish, or names what is missing.
+ *
+ * Nothing is guessed for a PRICED package: a missing currency, exponent or method list on one is reported, and
+ * the package is not republished, because the server would otherwise be handed a price nobody set. A Free
+ * package with no stored currency or methods is what every revision published before prices existed carries;
+ * it is stated the way the server stores it (USD/2, Free).
+ */
+export function commercialTermsOf(cur: PackageCurrentDTO): { terms?: CommercialTerms; missing: string[] } {
+  const missing: string[] = [];
+  const price = cur.price_minor;
+  if (typeof price !== "number" || !Number.isSafeInteger(price) || price < 0) missing.push("price_minor");
+  const free = price === 0;
+  let currency = (cur.currency ?? "").trim().toUpperCase();
+  if (!currency && free) currency = DEFAULT_CURRENCY;
+  if (!/^[A-Z]{3}$/.test(currency)) missing.push("currency");
+  const exponent = currency ? currencyExponent(currency, cur.currency_exponent) : null;
+  if (exponent === null) missing.push("currency_exponent");
+  let methods = (cur.settlement_methods ?? []).filter((m): m is string => typeof m === "string" && m !== "");
+  if (methods.length === 0 && free) methods = ["NOT_REQUIRED"];
+  if (methods.length === 0) missing.push("acquisition_methods");
+  // The reader always returns the key; null means "no mappings". Only a reader that omits it is a gap.
+  if (cur.room_charge_mappings === undefined) missing.push("room_charge_mappings");
+  if (missing.length > 0) return { missing };
+  return {
+    missing,
+    terms: {
+      price_minor: price as number,
+      currency,
+      currency_exponent: exponent as number,
+      acquisition_methods: methods,
+      room_charge_mappings: (cur.room_charge_mappings ?? []).map((m) => ({
+        pms_interface_id: m.pms_interface_id,
+        posting_code: m.posting_code,
+        ...(m.tax_code ? { tax_code: m.tax_code } : {}),
+        ...(typeof m.tax_rate_bp === "number" ? { tax_rate_bp: m.tax_rate_bp } : {}),
+      })),
+    },
+  };
+}
 
 /**
  * repinPayload rebuilds a package EXACTLY as it is, changing only which service-plan revision it pins.
@@ -74,7 +145,16 @@ export type PackageCurrentDTO = {
  */
 export function repinPayload(cur: PackageCurrentDTO, planRevisionID: string, fallbackName?: string) {
   const pick = <T,>(a: T | undefined, b: T | undefined): T | undefined => (a !== undefined ? a : b);
+  const { terms } = commercialTermsOf(cur);
   return {
+    // The price, currency, methods and room-charge codes, as stored. Absent only when they cannot be read in
+    // full -- and then the caller does not post (commercialTermsOf names what is missing).
+    ...(terms ?? {}),
+    // Fields no console screen edits, carried as loaded so a repin is not also a change of package kind.
+    ...(typeof cur.package_type === "string" && cur.package_type !== "" ? { package_type: cur.package_type } : {}),
+    ...(cur.plan_overrides !== undefined ? { plan_overrides: cur.plan_overrides } : {}),
+    ...(typeof cur.renewable === "boolean" ? { renewable: cur.renewable } : {}),
+    ...(cur.max_purchases_per_stay !== undefined ? { max_purchases_per_stay: cur.max_purchases_per_stay } : {}),
     code: cur.code,
     service_plan_revision_id: planRevisionID,
     display: cur.display ?? { name: fallbackName ?? cur.code },
@@ -95,6 +175,14 @@ export function repinPayload(cur: PackageCurrentDTO, planRevisionID: string, fal
       ? { data_allocation_policy: cur.data_allocation_policy }
       : {}),
   };
+}
+
+/** repinSkippedMessage says which packages were NOT moved because their stored terms could not be read in full. */
+export function repinSkippedMessage(skipped: { name: string; missing: string[] }[]): string | null {
+  if (skipped.length === 0) return null;
+  const list = skipped.map((s) => `${s.name} (missing ${s.missing.join(", ")})`).join("; ");
+  return `Not moved: ${list}. Their saved price details could not be read in full, so they were left exactly as ` +
+    "they are. Open each one under Internet packages, check its price and how clients get it, and save it.";
 }
 
 /** repinOutcomeMessage states the two things an operator needs after applying. */

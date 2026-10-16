@@ -20,9 +20,12 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"net"
+	"sync"
 	"time"
 
+	"github.com/stayconnect/enterprise/data-plane/internal/conntrack"
 	"github.com/stayconnect/enterprise/data-plane/internal/nft"
 )
 
@@ -84,6 +87,100 @@ func (g *nftGate) List(ctx context.Context) ([]gateElem, error) {
 		out = append(out, gateElem{Bridge: e.Iface, IP: e.IP, Expires: e.Expires})
 	}
 	return out, nil
+}
+
+// THE LEGACY SET IS KEPT EMPTY (audit B-14/B-15).
+//
+// auth_ipv4 is the pre-IAM-v2 authorization set. Nothing writes to it any more -- the legacy session domain and
+// its scd writer are gone -- but the forward chain still accepts whatever it holds, and nothing ever emptied it.
+// An element left behind there (by an old build, a restore, or a hand-run `nft add element`) would be internet
+// access that no session, entitlement or plan accounts for, and that no reconciliation would ever remove.
+//
+// So while netd owns Phase-3 enforcement, the legacy set is reconciled to EMPTY on every pass. This is a
+// separate sweeper rather than a gate method on purpose: the gate's contract -- it can only ever enumerate and
+// mutate the Phase-3 set -- is unchanged, and the sweeper does exactly one thing.
+type legacySet interface {
+	// Drain removes every element of the legacy set and reports how many it removed.
+	Drain(ctx context.Context) (int, error)
+}
+
+type nftLegacySet struct{ c *nft.Client }
+
+func newNFTLegacySet() *nftLegacySet { return &nftLegacySet{c: nft.New()} }
+
+func (l *nftLegacySet) Drain(ctx context.Context) (int, error) {
+	elems, err := l.c.ListIn(ctx, nft.AuthV4)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, e := range elems {
+		if err := l.c.DenyIn(ctx, nft.AuthV4, e.Iface, e.IP); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
+// flushingGate ENDS THE ADDRESS'S OPEN FLOWS WHEN ITS AUTHORIZATION IS REVOKED (audit B-1).
+//
+// The forward chain accepts `ct state established,related` before it looks at the authorization sets, so
+// removing an element stops only NEW connections: a download that was already running went on for as long as it
+// lasted -- unshaped, too, once its tc class was deleted, and uncounted. Every path that ends a guest's access
+// goes through Revoke (denyAccess: teardown, expiry, quota, DHCP loss, strays, fail-closed, quarantine), and
+// denyAccess runs BEFORE any tc class is removed, so flushing here ends the flows while their class still meters
+// them and leaves nothing to fall into the bridge's default class.
+//
+// A flush is a dump of the conntrack table, so it is not repeated for an address that has not been authorized
+// again since its last successful flush (a quarantined session is denied every pass).
+type flushingGate struct {
+	gate
+	flows conntrack.Flusher
+
+	mu sync.Mutex
+	// clean marks bridge|ip keys whose flows were flushed after their last revocation and that have not been
+	// authorized since. Absent means unknown, and unknown is flushed.
+	clean map[string]bool
+}
+
+func newFlushingGate(g gate, f conntrack.Flusher) *flushingGate {
+	return &flushingGate{gate: g, flows: f, clean: map[string]bool{}}
+}
+
+func (g *flushingGate) Authorize(ctx context.Context, bridge string, ip net.IP, ttl time.Duration) error {
+	g.mu.Lock()
+	delete(g.clean, gateKey(bridge, ip))
+	g.mu.Unlock()
+	return g.gate.Authorize(ctx, bridge, ip, ttl)
+}
+
+func (g *flushingGate) Revoke(ctx context.Context, bridge string, ip net.IP) error {
+	if err := g.gate.Revoke(ctx, bridge, ip); err != nil {
+		return err
+	}
+	key := gateKey(bridge, ip)
+	g.mu.Lock()
+	done := g.clean[key]
+	g.mu.Unlock()
+	if done || g.flows == nil || ip == nil {
+		return nil
+	}
+	n, err := g.flows.FlushAddrs(ctx, []net.IP{ip})
+	if err != nil {
+		// The authorization IS gone, so no new flow can start; what survives is whatever was already open. That
+		// is reported loudly but does not undo the revocation, and the next revocation tries again.
+		slog.Error("netd: authorization revoked but the address's open flows could not be ended",
+			"bridge", bridge, "ip", ip.String(), "err", err)
+		return nil
+	}
+	if n > 0 {
+		slog.Info("netd: ended the open flows of a revoked address", "bridge", bridge, "ip", ip.String(), "flows", n)
+	}
+	g.mu.Lock()
+	g.clean[key] = true
+	g.mu.Unlock()
+	return nil
 }
 
 // gateView is ONE reconciliation pass's snapshot of the Phase-3 authorization set.

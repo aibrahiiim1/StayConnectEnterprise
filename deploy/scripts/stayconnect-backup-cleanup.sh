@@ -14,7 +14,7 @@
 #
 set -uo pipefail
 
-CONF=/etc/stayconnect/backup-retention.conf
+CONF="${SC_CLEANUP_CONF:-/etc/stayconnect/backup-retention.conf}"   # overridable for the self-test only
 [ -r "$CONF" ] && . "$CONF"
 : "${KEEP_BINARIES:=5}"      # per binary name (ctrlapi / scd / edged / acctd)
 : "${KEEP_RELEASES:=5}"      # per UI app (cloud-admin / hotel-admin), on top of current+previous
@@ -22,10 +22,20 @@ CONF=/etc/stayconnect/backup-retention.conf
 : "${KEEP_CONFIG:=3}"        # config *.bak* files
 : "${DISK_WARN:=80}"         # % used -> warn
 : "${DISK_CRIT:=90}"         # % used -> critical
+: "${SITE_BACKUP_DAYS:=30}"   # nightly site backups older than this many days are removed...
+: "${SITE_BACKUP_KEEP:=7}"    # ...but the newest this-many sets are ALWAYS kept, whatever their age
+# The site backups live outside /opt/stayconnect (stayconnect-site-backup.sh writes them here).
+SITE_BACKUP_DIR="${SC_CLEANUP_SITE_DIR:-/var/backups/stayconnect}"
+# The policy file may hold only numbers within the bounds Hotel Admin enforces; anything else falls back to the
+# defaults rather than deleting by a value nobody set (fail safe: a broken file keeps more, never less).
+case "$SITE_BACKUP_DAYS" in (""|*[!0-9]*) SITE_BACKUP_DAYS=30;; esac
+case "$SITE_BACKUP_KEEP" in (""|*[!0-9]*) SITE_BACKUP_KEEP=7;; esac
+[ "$SITE_BACKUP_DAYS" -ge 1 ] || SITE_BACKUP_DAYS=30
+[ "$SITE_BACKUP_KEEP" -ge 7 ] || SITE_BACKUP_KEEP=7
 
-ROOT=/opt/stayconnect
-PINS=/etc/stayconnect/backup-retention.pins
-LOGDIR=/var/log/stayconnect
+ROOT="${SC_CLEANUP_ROOT:-/opt/stayconnect}"
+PINS="${SC_CLEANUP_PINS:-/etc/stayconnect/backup-retention.pins}"
+LOGDIR="${SC_CLEANUP_LOGDIR:-/var/log/stayconnect}"
 LOG="$LOGDIR/backup-cleanup.log"
 STATUS="$ROOT/backup-retention-status.json"
 TEXTFILE_DIRS=(/var/lib/node_exporter/textfile_collector /var/lib/prometheus/node-exporter)
@@ -105,6 +115,54 @@ retain_db() {
   done <<< "$sorted"
 }
 
+# THE NIGHTLY SITE BACKUPS (audit N-9 / decision D-H).
+#
+# stayconnect-site-backup.sh writes one SET per night into $SITE_BACKUP_DIR -- site-<stamp>.dump, its
+# .dump.meta.json and site-<stamp>-etc.tgz (a full copy of /etc/stayconnect, secrets included) -- and nothing
+# ever removed them: 1.2 GB on PRE-LIVE, every file world-readable. Retention is the hotel's setting
+# (SITE_BACKUP_DAYS, SITE_BACKUP_KEEP; Hotel Admin -> Backups), defaulting to 30 days with the 7 newest sets
+# always kept. A set is deleted only when it is BOTH beyond the newest SITE_BACKUP_KEEP AND older than
+# SITE_BACKUP_DAYS, and is not pinned. Nothing else in that directory is ever touched: only names of exactly
+# the shape the backup script writes, never a subdirectory (compliance/ and the milestone backups live there).
+#
+# Every artefact is also made 0600 root -- the backup script now writes them that way, and this repairs the
+# ones it wrote before.
+retain_site_backups() {
+  local dir="$SITE_BACKUP_DIR" now_s age_limit dump stamp kept=0 mtime f
+  [ -d "$dir" ] || return 0
+  now_s="$(date +%s)"
+  age_limit=$((SITE_BACKUP_DAYS * 86400))
+  # newest-first by the stamp in the name (UTC, sortable), never by mtime: a touched file must not look new.
+  while IFS= read -r dump; do
+    [ -z "$dump" ] && continue
+    stamp="$(basename "$dump" .dump)"; stamp="${stamp#site-}"
+    if is_pinned "$dump"; then R_PIN+=("site-backup|$dump|operator-pinned"); continue; fi
+    if [ "$kept" -lt "$SITE_BACKUP_KEEP" ]; then
+      R_KEEP+=("site-backup|$dump|within newest $SITE_BACKUP_KEEP"); kept=$((kept+1)); continue
+    fi
+    # AGE FROM THE STAMP TOO, not from mtime: a set copied back or touched would otherwise look new and be kept
+    # for ever. The stamp is UTC (site-YYYYMMDD-HHMMSS); an unparsable one keeps the set rather than guessing.
+    mtime="$(date -u -d "${stamp:0:8} ${stamp:9:2}:${stamp:11:2}:${stamp:13:2}" +%s 2>/dev/null || echo "$now_s")"
+    if [ $((now_s - mtime)) -le "$age_limit" ]; then
+      R_KEEP+=("site-backup|$dump|younger than $SITE_BACKUP_DAYS days"); continue
+    fi
+    for f in "$dir/site-$stamp.dump" "$dir/site-$stamp.dump.meta.json" "$dir/site-$stamp-etc.tgz" "$dir/site-$stamp.manifest.json"; do
+      [ -f "$f" ] && R_DEL+=("site-backup|$f|older than $SITE_BACKUP_DAYS days and beyond the newest $SITE_BACKUP_KEEP")
+    done
+  done < <(find "$dir" -maxdepth 1 -type f -regextype posix-extended -regex '.*/site-[0-9]{8}-[0-9]{6}\.dump' -printf '%f\n' 2>/dev/null | sort -r | sed "s#^#$dir/#")
+}
+
+# site_backup_permissions makes every site-backup artefact 0600 and the directory 0700, root-owned.
+site_backup_permissions() {
+  local dir="$SITE_BACKUP_DIR"
+  [ -d "$dir" ] || return 0
+  chown root:root "$dir" 2>/dev/null; chmod 0700 "$dir" 2>/dev/null
+  find "$dir" -maxdepth 1 -type f -regextype posix-extended \
+    -regex '.*/site-[0-9]{8}-[0-9]{6}(\.dump|\.dump\.meta\.json|-etc\.tgz|\.manifest\.json)' \
+    -exec chown root:root {} + -exec chmod 0600 {} + 2>/dev/null
+  return 0
+}
+
 symlink_target() { readlink -f "$1" 2>/dev/null; }
 
 # ---- build plan per role -----------------------------------------------------
@@ -172,6 +230,9 @@ plan_appliance() {
   # KEEP_DB of them are retained.
   retain_db "db-dump" "$KEEP_DB" $(ls -1d "$ROOT"/backups/db/*.sql.gz 2>/dev/null)
 
+  # The nightly site backups (stayconnect-site-backup.timer), under the hotel's retention setting.
+  retain_site_backups
+
   # A verification marker whose archive is gone is inert -- scd re-checks size and mtime before trusting one,
   # so an orphan can never make a missing backup look restorable -- but it should not outlive its subject.
   for m in "$ROOT"/backups/db/*.verified; do
@@ -213,6 +274,9 @@ if [ "$JSON_ONLY" = 0 ]; then
   echo "-- KEEP --";                      printf '  %s\n' "${R_KEEP[@]:-  (none)}"
   echo "-- DELETE --";                    printf '  %s\n' "${R_DEL[@]:-  (none)}"
 fi
+
+# Site-backup permissions are repaired on every applied run, whatever else happens: it deletes nothing.
+[ "$APPLY" = 1 ] && [ "$ROLE" = appliance ] && site_backup_permissions
 
 # Fail-safe: if role unknown or rollback path invalid, never delete.
 SAFE_TO_DELETE=1
@@ -264,6 +328,7 @@ json_arr() { local first=1; printf '['; for e in "$@"; do [ -z "$e" ] && continu
   [ -n "$NEWEST_DB" ] && NEWEST_DB_AT="$(date -u -r "$NEWEST_DB" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
   printf '  "newest_db_backup": "%s", "newest_db_backup_at": "%s",\n' "$NEWEST_DB" "$NEWEST_DB_AT"
   printf '  "keep_binaries": %s, "keep_releases": %s, "keep_db": %s, "keep_config": %s,\n' "$KEEP_BINARIES" "$KEEP_RELEASES" "$KEEP_DB" "$KEEP_CONFIG"
+  printf '  "site_backup_days": %s, "site_backup_keep": %s,\n' "$SITE_BACKUP_DAYS" "$SITE_BACKUP_KEEP"
   printf '  "protected_items": %s,\n' "$(json_arr "${R_PROT[@]:-}")"
   printf '  "pinned_items": %s,\n' "$(json_arr "${R_PIN[@]:-}")"
   printf '  "retained_items": %s,\n' "$(json_arr "${R_KEEP[@]:-}")"

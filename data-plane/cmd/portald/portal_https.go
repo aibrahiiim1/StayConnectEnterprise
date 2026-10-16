@@ -24,7 +24,6 @@ import (
 	"io"
 	"log"
 	"log/slog"
-	"math"
 	"net"
 	"net/http"
 	"os"
@@ -51,6 +50,7 @@ type portalTLSState struct {
 	OneGateHostname string   `json:"onegate_hostname"`
 	CustomDomain    string   `json:"custom_domain"`
 	PortalIP        string   `json:"portal_ip"`
+	PortalIPActive  bool     `json:"portal_ip_active"`
 	FallbackReason  string   `json:"fallback_reason"`
 	Hostnames       []string `json:"portal_hostnames"`
 	CertDir         string   `json:"cert_dir"`
@@ -104,6 +104,12 @@ func (st portalTLSState) sanitize() portalTLSState {
 	if st.Canonical == "" {
 		st.HTTPSActive = false
 	}
+	// The portal address becomes a redirect target, so it must be a plain IPv4 address and nothing else.
+	if ip := net.ParseIP(strings.TrimSpace(st.PortalIP)); ip == nil || ip.To4() == nil || ip.IsLoopback() || ip.IsUnspecified() {
+		st.PortalIP, st.PortalIPActive = "", false
+	} else {
+		st.PortalIP = ip.To4().String()
+	}
 	return st
 }
 
@@ -152,6 +158,8 @@ func (h *handler) refreshTLSState(ctx context.Context) {
 	}
 	h.portalTLS.failures = 0
 	h.portalTLS.st = st
+	// The portal's HTTPS names may be where a form posted over HTTP is re-posted (307): form-action allows them.
+	setPortalFormOrigins(st)
 	if prev.HTTPSActive != st.HTTPSActive || prev.Canonical != st.Canonical {
 		slog.Info("portal https: state changed", "https_active", st.HTTPSActive, "canonical", st.Canonical,
 			"fallback_reason", st.FallbackReason)
@@ -211,7 +219,25 @@ var httpExempt = map[string]bool{
 func (h *handler) httpFront(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		st := h.tlsState()
-		if !st.HTTPSActive || st.Canonical == "" || httpExempt[r.URL.Path] {
+		if httpExempt[r.URL.Path] {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if !st.HTTPSActive || st.Canonical == "" {
+			// THE HTTP FALLBACK HAS ONE ORIGIN TOO (audit P-27). A captive device arrives on whatever name it
+			// probed -- captive.apple.com, connectivitycheck.gstatic.com, a site the guest typed -- and every
+			// cookie the portal set was then tied to that name, so a step that changed host (the card provider's
+			// return, a link) arrived without the sign-in. While the portal address is answering, a page load on
+			// any other name is sent to http://<portal address>/ first, so the whole journey lives on one origin.
+			// Only GET/HEAD page loads: a form posts to the origin its page came from, which is then this one.
+			if st.PortalIPActive && st.PortalIP != "" && (r.Method == http.MethodGet || r.Method == http.MethodHead) &&
+				requestHost(r) != st.PortalIP && !fallbackPassThrough(r.URL.Path) {
+				if probePaths[r.URL.Path] {
+					slog.Info("captive probe redirected to the portal address", "path", r.URL.Path, "from", clientIPString(r))
+				}
+				http.Redirect(w, r, "http://"+st.PortalIP+requestPathAndQuery(r), http.StatusFound)
+				return
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -232,6 +258,43 @@ func (h *handler) httpFront(next http.Handler) http.Handler {
 		}
 		http.Redirect(w, r, origin+requestPathAndQuery(r), code)
 	})
+}
+
+// fallbackPassThrough are the HTTP fallback's paths that are answered on whatever name they arrive: a page's own
+// sub-resources and the JSON its scripts read (they follow the page, which is already on the portal's origin).
+func fallbackPassThrough(path string) bool {
+	return strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/assets/")
+}
+
+// fallbackOrigin is the HTTP fallback's own origin (audit P-21, P-15): the portal address while it is answering,
+// otherwise the address the device's connection actually reached -- the network's gateway, which nftables
+// redirects to the portal for a device that is not signed in. Never the .local name in PORTALD_FQDN: Apple
+// devices resolve .local over multicast DNS only, so a redirect there never arrives. "" when neither is known.
+func (h *handler) fallbackOrigin(r *http.Request) string {
+	if st := h.tlsState(); st.PortalIPActive && st.PortalIP != "" {
+		return "http://" + st.PortalIP
+	}
+	if ip := connectionLocalIP(r); ip != nil {
+		return "http://" + ip.String()
+	}
+	return ""
+}
+
+// connectionLocalIP is the appliance address this request's TCP connection arrived on (after nftables DNAT), or nil.
+func connectionLocalIP(r *http.Request) net.IP {
+	a, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr)
+	if !ok || a == nil {
+		return nil
+	}
+	host, _, err := net.SplitHostPort(a.String())
+	if err != nil {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || ip.To4() == nil || ip.IsLoopback() || ip.IsUnspecified() {
+		return nil
+	}
+	return ip.To4()
 }
 
 // requestPathAndQuery is the request's path and query, rebuilt from the parsed URL: never a scheme or a host a
@@ -444,35 +507,20 @@ func (h *handler) captivePortalAPI(w http.ResponseWriter, r *http.Request) {
 // session, and how long it has left when that is known. Any failure answers "captive": a device told it is
 // captive opens the portal, which is the recoverable mistake; one wrongly told it is online is stranded.
 func (h *handler) deviceOnline(ctx context.Context, ip net.IP) (bool, *int64) {
-	if ip == nil || h.scd == nil {
-		return false, nil
-	}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://unix/v1/sessions/status?ip="+ip.String(), nil)
-	resp, err := h.scd.Do(req)
-	if err != nil {
-		return false, nil
-	}
-	defer resp.Body.Close()
-	var st scdStatus
-	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&st) != nil {
-		return false, nil
-	}
+	st, ok := h.deviceStatus(ctx, ip)
 	// NOTHING BUT A SESSION IS ONLINE. The temporary-access window the email code used to open went with the
 	// email code (self-service contract section 1): no pre-auth Internet exists, so a device without a session
 	// is captive.
-	if !st.Active {
+	if !ok || !st.Active {
 		return false, nil
 	}
-	if st.RemainingOnlineSeconds != nil && *st.RemainingOnlineSeconds >= 0 && !math.IsInf(*st.RemainingOnlineSeconds, 0) {
-		n := int64(*st.RemainingOnlineSeconds)
+	// THE EARLIEST OF THE CLOCKS (audit P-22). Online time left counts only while connected; the hard expiry and
+	// the package's calendar end arrive whether the minutes were used or not. Access ends at whichever comes
+	// first, so that is what the device is told -- the online time alone overstated it whenever the window
+	// closed sooner.
+	if d := st.remaining(time.Now()); d != nil {
+		n := int64(d.Seconds())
 		return true, &n
-	}
-	if st.HardExpiry != "" {
-		if t, err := time.Parse(time.RFC3339, st.HardExpiry); err == nil {
-			if n := int64(time.Until(t).Seconds()); n >= 0 {
-				return true, &n
-			}
-		}
 	}
 	return true, nil
 }

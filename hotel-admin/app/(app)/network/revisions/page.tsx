@@ -23,6 +23,7 @@ import { HelpList, HelpSection } from "@/components/help";
 import {
   HealthCheckList, REVISION_STATE, RevisionStateBadge, ValidationIssueList, useNetworkAccess,
 } from "@/components/network/shared";
+import { isReauth, useNetworkChangeStepUp } from "@/components/network/change-step-up";
 
 /** Presentation only: which states a person should look at. */
 const NEEDS = new Set(["pending_confirmation", "rolled_back", "failed"]);
@@ -65,17 +66,24 @@ export default function RevisionsPage() {
     }
   }
 
-  async function onConfirm(id: string) {
-    setBusy({ id, kind: "confirm" }); setErr(null);
-    try { await api.post(`/network/revisions/${id}/confirm`); toast.success("Configuration confirmed"); load(); }
-    catch (e) { setErr(errMsg(e)); }
-    finally { setBusy(null); }
+  // Keep and Roll back need the operator's password (the server requires it).
+  const stepUp = useNetworkChangeStepUp();
+
+  function onConfirm(id: string) {
+    stepUp.ask("confirm", async (password) => {
+      setBusy({ id, kind: "confirm" }); setErr(null);
+      try { await api.post(`/network/revisions/${id}/confirm`, { password }); toast.success("Configuration confirmed"); load(); }
+      catch (e) { if (isReauth(e)) throw e; setErr(errMsg(e)); }
+      finally { setBusy(null); }
+    });
   }
-  async function onRollback(id: string) {
-    setBusy({ id, kind: "rollback" }); setErr(null);
-    try { await api.post(`/network/revisions/${id}/rollback`); toast.success("Configuration rolled back"); load(); }
-    catch (e) { setErr(errMsg(e)); }
-    finally { setBusy(null); }
+  function onRollback(id: string) {
+    stepUp.ask("rollback", async (password) => {
+      setBusy({ id, kind: "rollback" }); setErr(null);
+      try { await api.post(`/network/revisions/${id}/rollback`, { password }); toast.success("Configuration rolled back"); load(); }
+      catch (e) { if (isReauth(e)) throw e; setErr(errMsg(e)); }
+      finally { setBusy(null); }
+    });
   }
 
   const d = open ? detail[open.id] : undefined;
@@ -293,6 +301,7 @@ export default function RevisionsPage() {
           )}
         </SheetContent>
       </Sheet>
+      {stepUp.dialog}
     </PageShell>
   );
 }

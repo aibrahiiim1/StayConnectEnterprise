@@ -32,6 +32,7 @@ import { SettingField } from "@/components/ui/patterns";
 import { Table, TBody, TD, TH, THead, TR, TableWrap } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { AccountDialog } from "./account-dialog";
+import { cardAccepts, defaultCardAccount } from "@/lib/card-currency";
 import { CodeList, CodeText } from "./codes";
 import { Globe, Pencil, Plus, PlugZap, Trash2 } from "lucide-react";
 
@@ -62,35 +63,57 @@ export function domainProblem(raw: string): string | null {
 
 const KIND_LABEL: Record<string, string> = { account: "Provider account", domains: "Payment domains", settings: "Timings" };
 
-type PackageCurrencyRow = { package_id: string; code: string; active?: boolean; price_minor?: number | null; currency?: string | null; settlement_methods?: string[] | null };
+type PackageCurrencyRow = {
+  package_id: string; code: string; name?: string | null; active?: boolean; current_revision_id?: string | null;
+  price_minor?: number | null; currency?: string | null;
+};
 
 /**
- * CurrencyMismatchNotice — a card payment is never converted (the appliance refuses a settlement in a currency
- * the account does not settle), so a package priced in any other currency is NOT offered by card. Found live:
- * a GBP test account and a USD package, and the client told "card payment is not available" after choosing.
- * This names the packages concerned next to the accounts, where the operator can fix either side.
+ * CurrencyMismatchNotice — names the live card-priced packages clients will NOT be offered by card, by the rule
+ * scd applies (lib/card-currency): only the DEFAULT active account settles, in its own currency, or in one its
+ * provider converts when it is marked provider-converts. Found live: a GBP test account and a USD package, and
+ * the client told "card payment is not available" after choosing.
+ *
+ * The package list does not carry how a package is acquired, so the methods of each live priced package are
+ * read from its current configuration -- the list's rows never had a `settlement_methods` field, and the
+ * filter that used to rely on one matched nothing, so this notice never appeared (audit O-12).
  */
-function CurrencyMismatchNotice({ accounts }: { accounts: AccountsResp | null }) {
-  const [pkgs, setPkgs] = useState<PackageCurrencyRow[] | null>(null);
+export function CurrencyMismatchNotice({ accounts }: { accounts: AccountsResp | null }) {
+  const [pkgs, setPkgs] = useState<{ name: string; currency: string }[] | null>(null);
   useEffect(() => {
-    api.get<{ data?: PackageCurrencyRow[] } | PackageCurrencyRow[]>("/commercial-packages")
-      .then((r) => setPkgs(Array.isArray(r) ? r : r?.data ?? []))
-      .catch(() => setPkgs([]));
+    let live = true;
+    (async () => {
+      try {
+        const r = await api.get<{ data?: PackageCurrencyRow[] } | PackageCurrencyRow[]>("/commercial-packages");
+        const rows = (Array.isArray(r) ? r : r?.data ?? [])
+          .filter((p) => p.active !== false && !!p.current_revision_id && (p.price_minor ?? 0) > 0);
+        const byCard = await Promise.all(rows.map(async (p) => {
+          try {
+            const cur = await api.get<{ settlement_methods?: string[] | null; currency?: string | null }>(`/commercial-packages/${p.package_id}/current`);
+            return (cur?.settlement_methods ?? []).includes("ONLINE_PAYMENT")
+              ? { name: p.name || p.code, currency: ((cur?.currency ?? p.currency) ?? "").trim().toUpperCase() }
+              : null;
+          } catch { return null; /* unreadable: no claim about it */ }
+        }));
+        if (live) setPkgs(byCard.filter((x): x is { name: string; currency: string } => x !== null));
+      } catch { if (live) setPkgs([]); }
+    })();
+    return () => { live = false; };
   }, []);
-  const settles = useMemo(() => new Set((accounts?.accounts ?? []).filter((a) => a.status === "ACTIVE").map((a) => (a.currency ?? "").trim().toUpperCase()).filter(Boolean)), [accounts]);
-  // A default account the provider converts for takes other currencies: nothing to warn about here (the
-  // provider may still refuse a currency it does not support, which the client is told at checkout).
-  const converts = (accounts?.accounts ?? []).some((a) => a.status === "ACTIVE" && a.is_default && a.provider_converts);
-  if (!accounts || settles.size === 0 || !pkgs || converts) return null;
-  const mismatched = pkgs.filter((p) => p.active !== false && (p.price_minor ?? 0) > 0
-    && (p.settlement_methods ?? []).includes("ONLINE_PAYMENT") && !settles.has((p.currency ?? "").trim().toUpperCase()));
-  if (mismatched.length === 0) return null;
+  const acct = useMemo(() => (accounts ? defaultCardAccount(accounts.accounts ?? []) : null), [accounts]);
+  if (!acct || !pkgs) return null;
+  const withheld = acct === "none" ? pkgs : pkgs.filter((p) => !cardAccepts(acct, p.currency));
+  if (withheld.length === 0) return null;
   return (
     <p className="mt-3 rounded-md border border-warning/40 bg-warning-subtle px-3.5 py-2.5 text-xs text-warning-subtle-foreground" role="status" data-testid="card-currency-mismatch">
       <strong>Not offered by card:</strong>{" "}
-      {mismatched.map((p) => `${p.code} (${(p.currency ?? "").toUpperCase()})`).join(", ")}. Your active account
-      {settles.size > 1 ? "s settle " : " settles "}{Array.from(settles).join(", ")} and a card payment is never
-      converted, so these packages are withheld from the card option until their price or the account currency matches.
+      {withheld.map((p) => `${p.name} (${p.currency})`).join(", ")}.{" "}
+      {acct === "none"
+        ? "There is no default active account, and card checkouts use only the default account."
+        : acct.provider_converts
+          ? `Card checkouts use the default account, which settles ${acct.currency}; its provider does not convert these currencies for it.`
+          : `Card checkouts use the default account, which settles ${acct.currency} and is not set to let the provider convert.`}{" "}
+      These packages are withheld from the card option until their price currency or the default account matches.
     </p>
   );
 }
@@ -280,10 +303,18 @@ function AccountsCard({
                       {a.conversion_supported ? (
                         <div className="flex flex-col items-start gap-1">
                           <Badge tone={a.provider_converts ? "ok" : "default"}>{a.provider_converts ? "Provider converts" : "Not converted"}</Badge>
+                          {/* ONLY THE DEFAULT ACCOUNT TAKES CARD CHECKOUTS, so conversion on any other account would
+                              change nothing a client sees; the server refuses it (audit O-24). */}
                           {writable && (
-                            <Button size="sm" variant="ghost" onClick={() => setConverting(a)}>
+                            <Button size="sm" variant="ghost" disabled={!a.is_default} onClick={() => setConverting(a)}
+                              aria-describedby={!a.is_default ? `convert-default-only-${a.id}` : undefined}>
                               {a.provider_converts ? "Stop converting" : "Let the provider convert"}
                             </Button>
+                          )}
+                          {!a.is_default && (
+                            <span id={`convert-default-only-${a.id}`} className="text-xs text-muted-foreground" data-testid={`convert-default-only-${a.id}`}>
+                              Applies only to the default account, which every card checkout uses.
+                            </span>
                           )}
                         </div>
                       ) : (

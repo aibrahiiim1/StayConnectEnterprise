@@ -381,14 +381,16 @@ function RouteDialog({
   onSave: (mode: string, interfaceID: string) => void | Promise<void>;
 }) {
   const [iface, setIface] = useState("");
-  const [mode, setMode] = useState("MAPPED");
+  // A LEGACY ROW (routing_mode ALL_ACTIVE_INTERFACES) COULD NOT BE CHANGED (audit H-16): the dialog sent its
+  // stored mode back, and edged accepts only MAPPED -- so every save of such a row was refused. The only mode
+  // that exists is MAPPED, so that is what is always sent; saving a legacy row converts it.
+  const legacy = !!network?.current && network.current.routing_mode !== "MAPPED";
 
   // Reset from the row each time the dialog opens, so "Change" starts on what is configured and "Point at a PMS"
   // starts on the only sensible default rather than on whatever was picked last time.
   useEffect(() => {
     if (!open) return;
     setIface(network?.current?.pms_interface_id ?? interfaces[0]?.id ?? "");
-    setMode(network?.current?.routing_mode ?? "MAPPED");
   }, [open, network, interfaces]);
 
   return (
@@ -401,8 +403,14 @@ function RouteDialog({
       busy={busy}
       error={error}
       disabled={!iface}
-      onSubmit={() => onSave(mode, iface)}
+      onSubmit={() => onSave("MAPPED", iface)}
     >
+      {legacy && (
+        <p className="text-sm text-muted-foreground" data-testid="legacy-route-note">
+          This mapping was saved by an older version as &ldquo;every active PMS&rdquo;, which always behaved as this
+          one PMS. Saving stores it as this one PMS.
+        </p>
+      )}
       <Field
         label="Property management system"
         hint="Only connections with a saved configuration can be chosen."

@@ -157,7 +157,8 @@ describe("checkout grace states what is actually in force", () => {
     expect(within(strip).getByText("1 GB")).toBeTruthy();
     expect(screen.getByTestId("grace-sentence").textContent).toMatch(/30 minutes after checkout/);
     const details = screen.getByLabelText("Policy details");
-    expect(within(details).getByText("2 h")).toBeTruthy();
+    // The eligibility window is no longer shown: the converter never read it (audit H-19).
+    expect(within(details).queryByText("Stay rules after checkout")).toBeNull();
     expect(within(details).getByText(/Up to 2 devices/)).toBeTruthy();
     expect(within(details).getByText(/built automatically from this policy/)).toBeTruthy();
   });

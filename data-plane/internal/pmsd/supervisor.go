@@ -10,6 +10,16 @@ import (
 
 var errAssignmentChanged = &typedErr{code: CodeAssignmentChanged}
 
+// workerLifecycle reports whether a connection in this lifecycle state keeps its PMS link (and so its worker).
+//
+//	ACTIVE    yes.
+//	DRAINING  yes, while room charges are still queued -- wind down lets them finish (contract section 10,
+//	          "outbox drains"; audit H-8). The repository lists a DRAINING interface only while
+//	          iam_v2.pms_interface_has_undrained_postings is true, so the worker stops once the outbox is empty.
+//	          This is what distinguishes wind down from pause.
+//	anything else: no.
+func workerLifecycle(state string) bool { return state == "ACTIVE" || state == "DRAINING" }
+
 // supervisor runs a single-goroutine reconcile loop over the ACTIVE PMS Interfaces within the assigned
 // Tenant/Site scope, keeping exactly one worker per Interface. It compares the COMPLETE desired identity
 // (interface id + current revision id), contains worker panics (logging only a closed event, never the
@@ -69,7 +79,9 @@ func (s *supervisor) reconcile(ctx context.Context) error {
 		if iface.TenantID != s.assign.TenantID || iface.SiteID != s.assign.SiteID {
 			continue // defense in depth: never accept a cross-scope row
 		}
-		if iface.LifecycleState != "ACTIVE" {
+		// ACTIVE, or DRAINING with room charges still to finish: the repo lists a DRAINING interface only while
+		// iam_v2.pms_interface_has_undrained_postings says so, and drops it once the outbox is empty (H-8).
+		if !workerLifecycle(iface.LifecycleState) {
 			continue
 		}
 		next[iface.ID] = struct{}{}

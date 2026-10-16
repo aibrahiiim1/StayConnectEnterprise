@@ -88,7 +88,8 @@ func TestDeriveLicense(t *testing.T) {
 		{"grace, 1 day past", l("active", -day, 7, 30), LicenseGrace},
 		{"grace ends exactly now", l("active", -7*day, 7, 30), LicenseGrace},
 		{"expired after grace", l("active", -8*day, 7, 30), LicenseExpired},
-		{"grace 0 falls back to offline grace (appliance rule)", l("active", -20*day, 0, 30), LicenseGrace},
+		// X-4: grace 0 is NO grace; the offline allowance is cloud staleness, never a renewal grace.
+		{"grace 0 is no grace, whatever the offline allowance", l("active", -time.Second, 0, 30), LicenseExpired},
 		{"no grace at all", l("active", -time.Second, 0, 0), LicenseExpired},
 		{"suspended beats time", l("suspended", -100*day, 0, 0), LicenseSuspended},
 		{"revoked", l("revoked", 100*day, 30, 30), LicenseRevoked},

@@ -29,6 +29,7 @@ package main
 // the evidence it is waiting for. Counting honestly never needed a button.
 
 import (
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -81,7 +82,8 @@ func (s *server) scanReconciliationCases(w http.ResponseWriter, r *http.Request,
 		 ORDER BY repeat_count DESC, last_seen_at DESC
 		 LIMIT 500`, all...)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "cases_unreadable", err.Error())
+		slog.Error("pms reconciliation: read failed", "code", "cases_unreadable", "err", err)
+		jsonErr(w, http.StatusInternalServerError, "cases_unreadable", "the reconciliation data could not be read")
 		return nil, false
 	}
 	defer rows.Close()
@@ -92,7 +94,8 @@ func (s *server) scanReconciliationCases(w http.ResponseWriter, r *http.Request,
 		if err := rows.Scan(&c.CaseKey, &c.Reservation, &c.Room, &c.RepeatCount, &c.Generations,
 			&c.FirstSeenAt, &c.LastSeenAt, &c.EventAt, &c.LatestEventID, &c.ReviewCode,
 			&c.CandidateStays, &c.CandidateStayID, &c.RosterPresent, &c.ResolutionState); err != nil {
-			jsonErr(w, http.StatusInternalServerError, "cases_unreadable", err.Error())
+			slog.Error("pms reconciliation: read failed", "code", "cases_unreadable", "err", err)
+			jsonErr(w, http.StatusInternalServerError, "cases_unreadable", "the reconciliation data could not be read")
 			return nil, false
 		}
 		// Every case is answered by the PMS, whatever its classification. The state says which evidence.
@@ -134,7 +137,8 @@ func (s *server) reconciliationSummary(w http.ResponseWriter, r *http.Request) {
 		 WHERE tenant_id=$1 AND site_id=$2
 		 GROUP BY resolution_state`, s.tenantID, s.siteID)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "summary_unreadable", err.Error())
+		slog.Error("pms reconciliation: read failed", "code", "summary_unreadable", "err", err)
+		jsonErr(w, http.StatusInternalServerError, "summary_unreadable", "the reconciliation data could not be read")
 		return
 	}
 	defer rows.Close()
@@ -149,7 +153,8 @@ func (s *server) reconciliationSummary(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var b bucket
 		if err := rows.Scan(&b.State, &b.Cases, &b.RecordedRows); err != nil {
-			jsonErr(w, http.StatusInternalServerError, "summary_unreadable", err.Error())
+			slog.Error("pms reconciliation: read failed", "code", "summary_unreadable", "err", err)
+			jsonErr(w, http.StatusInternalServerError, "summary_unreadable", "the reconciliation data could not be read")
 			return
 		}
 		totalCases += b.Cases
@@ -183,7 +188,8 @@ func (s *server) listMultiOccupancyRooms(w http.ResponseWriter, r *http.Request)
 		 WHERE tenant_id=$1 AND site_id=$2
 		 ORDER BY stays_in_room DESC, room LIMIT 500`, s.tenantID, s.siteID)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "rooms_unreadable", err.Error())
+		slog.Error("pms reconciliation: read failed", "code", "rooms_unreadable", "err", err)
+		jsonErr(w, http.StatusInternalServerError, "rooms_unreadable", "the reconciliation data could not be read")
 		return
 	}
 	defer rows.Close()
@@ -197,7 +203,8 @@ func (s *server) listMultiOccupancyRooms(w http.ResponseWriter, r *http.Request)
 	for rows.Next() {
 		var o roomOut
 		if err := rows.Scan(&o.Room, &o.StaysInRoom, &o.EarliestArrival, &o.LatestPlannedDeparture); err != nil {
-			jsonErr(w, http.StatusInternalServerError, "rooms_unreadable", err.Error())
+			slog.Error("pms reconciliation: read failed", "code", "rooms_unreadable", "err", err)
+			jsonErr(w, http.StatusInternalServerError, "rooms_unreadable", "the reconciliation data could not be read")
 			return
 		}
 		out = append(out, o)
@@ -215,7 +222,8 @@ func (s *server) listStaysPastDeparture(w http.ResponseWriter, r *http.Request) 
 		 WHERE tenant_id=$1 AND site_id=$2
 		 ORDER BY days_past_departure DESC, room LIMIT 500`, s.tenantID, s.siteID)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "stays_unreadable", err.Error())
+		slog.Error("pms reconciliation: read failed", "code", "stays_unreadable", "err", err)
+		jsonErr(w, http.StatusInternalServerError, "stays_unreadable", "the reconciliation data could not be read")
 		return
 	}
 	defer rows.Close()
@@ -236,7 +244,8 @@ func (s *server) listStaysPastDeparture(w http.ResponseWriter, r *http.Request) 
 		var o stayOut
 		if err := rows.Scan(&o.StayID, &o.Room, &o.Reservation, &o.Arrival, &o.Departure,
 			&o.DaysPast, &o.RosterPresent, &o.RoomReLet); err != nil {
-			jsonErr(w, http.StatusInternalServerError, "stays_unreadable", err.Error())
+			slog.Error("pms reconciliation: read failed", "code", "stays_unreadable", "err", err)
+			jsonErr(w, http.StatusInternalServerError, "stays_unreadable", "the reconciliation data could not be read")
 			return
 		}
 		out = append(out, o)

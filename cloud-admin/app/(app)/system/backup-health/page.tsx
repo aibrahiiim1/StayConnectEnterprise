@@ -22,7 +22,13 @@ type Status = {
   keep_binaries: number; keep_releases: number; keep_db: number; keep_config: number;
   protected_items?: string[]; pinned_items?: string[]; retained_items?: string[]; delete_items?: string[];
 };
-type Resp = { available: boolean; message?: string; status?: Status; pins?: string[] };
+/** The database backups themselves: the newest finished dump on disk and the last run of the daily backup. */
+type DatabaseBackup = {
+  newest_file?: string | null; newest_at?: string | null; newest_bytes?: number;
+  last_attempt_at?: string | null; last_success_at?: string | null; last_failure_at?: string | null;
+  last_error?: string | null; healthy: boolean; problem?: string | null;
+};
+type Resp = { available: boolean; message?: string; status?: Status; pins?: string[]; database_backup?: DatabaseBackup };
 
 const diskTone = (a: string) => (a === "critical" ? "err" : a === "warning" ? "warn" : "ok");
 
@@ -74,6 +80,7 @@ export default function BackupHealthPage() {
   }, []);
 
   const s = data?.available ? data.status : undefined;
+  const db = data?.database_backup;
 
   return (
     <PageShell>
@@ -117,6 +124,29 @@ export default function BackupHealthPage() {
       />
 
       <ErrorBanner err={err} />
+      {db && !db.healthy && (
+        <Callout tone="danger" title="Database backup problem">{db.problem}</Callout>
+      )}
+      {db && (
+        <section aria-label="Database backup" className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <StatCard
+            label="Newest database backup"
+            icon={db.healthy ? <ShieldCheck /> : <AlertTriangle />}
+            tone={db.healthy ? "ok" : "err"}
+            value={<span className="text-headline">{db.newest_at ? formatRelative(db.newest_at) : "None"}</span>}
+            hint={db.newest_file ? db.newest_file.split("/").pop() : "No dump on this host"}
+          />
+          <StatCard
+            label="Last backup run"
+            icon={<History />}
+            tone={db.last_failure_at && (!db.last_success_at || db.last_failure_at > db.last_success_at) ? "err" : "ok"}
+            value={<span className="text-headline">{db.last_attempt_at ? formatRelative(db.last_attempt_at) : "Not recorded"}</span>}
+            hint={db.last_failure_at && (!db.last_success_at || db.last_failure_at > db.last_success_at)
+              ? `Failed: ${db.last_error || "see the host log"}`
+              : db.last_success_at ? "Succeeded" : "No run recorded yet"}
+          />
+        </section>
+      )}
       {data && !data.available && (
         <Callout tone="warning" title="Backup status unavailable">{data.message}</Callout>
       )}

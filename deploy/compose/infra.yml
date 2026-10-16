@@ -15,7 +15,9 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: stayconnect
-      POSTGRES_PASSWORD: stayconnect
+      # Generated per appliance by provision-fresh-appliance.sh (secrets/pg-superuser.env); the fallback exists only
+      # for development hosts and for appliances whose cluster was initialised before it (audit N-10).
+      POSTGRES_PASSWORD: ${STAYCONNECT_PG_PASSWORD:-stayconnect}
       POSTGRES_DB: stayconnect
     ports:
       - "127.0.0.1:5432:5432"

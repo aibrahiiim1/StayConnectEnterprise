@@ -51,6 +51,8 @@ type phase3 struct {
 	// is scoped to, and the durable monotonic generation that lets netd refuse a stale or replayed one.
 	scope planScope
 	plans *planCounter
+	// lastPurge is when the accounting retention purge last ran (purgeAccountingDetail).
+	lastPurge time.Time
 }
 
 // newPhase3 constructs the enforcement arm whenever the Phase-3 ENFORCEMENT PLANE is on. It returns nil while
@@ -85,7 +87,7 @@ func newPhase3(cfg iamv2.PMSConfig, a *acctd, tenant, site string, scope planSco
 	// The bound is deliberately a few sweep intervals rather than one: a tick delayed by ordinary load is
 	// still real observed time and should be charged in full, while a gap that long means the service was
 	// not running and must not be.
-	enf = enf.WithAggregateOnlineTime(aggregateChargeBoundSeconds(envInt("ACCTD_TICK_SECONDS", 1)))
+	enf = enf.WithAggregateOnlineTime(aggregateChargeBoundSeconds(tickSeconds(os.Getenv)))
 	if p6, err := iamv2.LoadPhase6ConfigFromEnv(os.Getenv); err != nil {
 		slog.Error("phase6 configuration is unreadable; aggregate ACQUISITION stays OFF, "+
 			"but accrual for any entitlement already in that mode continues", "err", err)
@@ -130,6 +132,56 @@ func (p *phase3) enforceExpiries(ctx context.Context) {
 		slog.Info("phase3: access ended at its true time",
 			"entitlement", x.EntitlementID, "reason", x.Reason, "effective_at", x.At,
 			"sessions_ended", x.Sessions, "devices_revoked", x.Devices)
+	}
+}
+
+// enforceSessionLimits ends the sessions whose plan's idle timeout or maximum continuous session has been
+// reached. Idle is judged only when the accounting pass of THIS tick (the one stamped now) completed cleanly.
+func (p *phase3) enforceSessionLimits(ctx context.Context, now time.Time) {
+	if p == nil {
+		return
+	}
+	judgeIdle := p.acctDegraded == "" && p.lastPassOK.Equal(now)
+	ended, err := p.enf.EnforceSessionLimits(ctx, p.tenant, p.site, now, judgeIdle)
+	if err != nil {
+		slog.Error("phase3: plan session limits could not be enforced", "err", err)
+		return
+	}
+	for _, x := range ended {
+		slog.Info("phase3: session ended by its plan's limit", "session", x.SessionID,
+			"entitlement", x.EntitlementID, "reason", x.Reason, "effective_at", x.At)
+	}
+}
+
+// The retention purge runs at most once per purgeInterval, a bounded number of batches at a time, so a site that
+// has just shortened its retention catches up over a few hours instead of holding a long transaction on the
+// table every tick writes to. While a site's retention is unlimited (the default) each run is one cheap read.
+const (
+	purgeInterval   = time.Hour
+	purgeBatch      = 5000
+	purgeMaxBatches = 20
+)
+
+// purgeAccountingDetail runs the accounting-detail retention purge when it is due.
+func (p *phase3) purgeAccountingDetail(ctx context.Context, now time.Time) {
+	if p == nil || (!p.lastPurge.IsZero() && now.Sub(p.lastPurge) < purgeInterval) {
+		return
+	}
+	p.lastPurge = now
+	total := 0
+	for i := 0; i < purgeMaxBatches; i++ {
+		n, err := p.enf.PurgeAccountingDetail(ctx, p.tenant, p.site, purgeBatch)
+		if err != nil {
+			slog.Error("phase3: accounting retention purge failed", "err", err)
+			return
+		}
+		total += n
+		if n < purgeBatch {
+			break
+		}
+	}
+	if total > 0 {
+		slog.Info("phase3: accounting detail older than the site's retention removed", "records", total)
 	}
 }
 

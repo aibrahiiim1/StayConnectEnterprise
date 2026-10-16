@@ -22,6 +22,7 @@ import { ArrowLeft, ArrowRight, Cable, Network, Plus, Radio, X } from "lucide-re
 import { cn, errMsg } from "@/lib/utils";
 import { HelpList, HelpSection } from "@/components/help";
 import { HealthCheckList, SwitchRow, ValidationIssueList, useNetworkAccess } from "@/components/network/shared";
+import { isReauth, useNetworkChangeStepUp } from "@/components/network/change-step-up";
 import {
   VlanAddressingTable, VlanIdList, newVlanRow, vlanPlanProblems, withSuggestedAddressing, type VlanRow,
 } from "@/components/network/vlan-plan";
@@ -236,7 +237,14 @@ export default function NewGuestNetworkPage() {
     } catch { /* the banner works without it */ }
   }
 
-  async function onRunApply() {
+  // Apply, Keep and Roll back need the operator's password (the server requires it).
+  const stepUp = useNetworkChangeStepUp();
+
+  function onRunApply() {
+    stepUp.ask("apply", (password) => runApply(password));
+  }
+
+  async function runApply(password: string) {
     setBusy(true); setErr(null); setIssues(null);
     try {
       let c = created;
@@ -263,27 +271,34 @@ export default function NewGuestNetworkPage() {
         summary: vlanTagged && vlans.length > 1
           ? `create ${vlans.length} client networks on ${parentInterface}`
           : `create client network ${name}`,
+        password,
       });
       setApplied(a);
       if (a.state === "pending_confirmation") void readDeadline(a.revision_id);
-    } catch (e) { setErr(errMsg(e)); }
+    } catch (e) { if (isReauth(e)) throw e; setErr(errMsg(e)); }
     finally { setBusy(false); }
   }
 
-  async function onConfirm() {
+  function onConfirm() {
     if (!applied) return;
-    setActing("confirm"); setErr(null);
-    try { await api.post(`/network/revisions/${applied.revision_id}/confirm`); router.push("/network"); }
-    catch (e) { setErr(errMsg(e)); }
-    finally { setActing(null); }
+    const id = applied.revision_id;
+    stepUp.ask("confirm", async (password) => {
+      setActing("confirm"); setErr(null);
+      try { await api.post(`/network/revisions/${id}/confirm`, { password }); router.push("/network"); }
+      catch (e) { if (isReauth(e)) throw e; setErr(errMsg(e)); }
+      finally { setActing(null); }
+    });
   }
 
-  async function onRollback() {
+  function onRollback() {
     if (!applied) return;
-    setActing("rollback"); setErr(null);
-    try { await api.post(`/network/revisions/${applied.revision_id}/rollback`); setApplied(null); setDeadline(null); }
-    catch (e) { setErr(errMsg(e)); }
-    finally { setActing(null); }
+    const id = applied.revision_id;
+    stepUp.ask("rollback", async (password) => {
+      setActing("rollback"); setErr(null);
+      try { await api.post(`/network/revisions/${id}/rollback`, { password }); setApplied(null); setDeadline(null); }
+      catch (e) { if (isReauth(e)) throw e; setErr(errMsg(e)); }
+      finally { setActing(null); }
+    });
   }
 
   const portalNote = gatewayIp ? `http://${gatewayIp}:8380` : "the gateway IP on port 8380";
@@ -589,10 +604,10 @@ export default function NewGuestNetworkPage() {
 
           {step === 4 && (
             <div className="space-y-4">
-              <SwitchRow label="Captive portal" hint="Clients see the sign-in page before they get online." checked={captivePortal} onChange={setCaptivePortal} />
+              <SwitchRow label="Captive portal" hint="Clients see the sign-in page before they get online. With it off, nobody on this network can sign in, so it has no internet access (only allowed sites)." checked={captivePortal} onChange={setCaptivePortal} />
               <SwitchRow label="Internet access" hint="Clients can reach the internet once signed in." checked={internetAccess} onChange={setInternetAccess} />
               <SwitchRow label="NAT (masquerade)" hint="Client traffic leaves through the appliance's own address." checked={nat} onChange={setNat} />
-              <SwitchRow label="Client isolation" hint="Client devices cannot reach each other." checked={clientIsolation} onChange={setClientIsolation} />
+              <SwitchRow label="Client isolation" hint="The appliance drops traffic between client devices that passes through it. Devices on the same access point or switch port also need the access point's own client isolation switched on." checked={clientIsolation} onChange={setClientIsolation} />
             </div>
           )}
 
@@ -744,6 +759,7 @@ export default function NewGuestNetworkPage() {
           )}
         </CardFooter>
       </Card>
+      {stepUp.dialog}
     </PageShell>
   );
 }

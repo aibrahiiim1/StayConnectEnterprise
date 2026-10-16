@@ -24,6 +24,11 @@ EnvironmentFile=-/etc/stayconnect/central-endpoint.env
 ExecStart=/opt/stayconnect/bin/ctrlapi serve
 Restart=on-failure
 RestartSec=2
+# A CEILING, NOT A BUDGET. Password checks are argon2id at 64 MiB each and ctrlapi runs at most four at once
+# (internal/auth/password.go), so steady state is far below this; the cap exists so nothing -- a flood of
+# sign-in attempts, a leak -- can take the host's memory from Postgres. MemoryHigh throttles before MemoryMax kills.
+MemoryHigh=768M
+MemoryMax=1G
 # Root, because ctrlapi reads and WRITES trust material under /etc/stayconnect (see ReadWritePaths). The
 # service is otherwise fenced in below.
 User=root

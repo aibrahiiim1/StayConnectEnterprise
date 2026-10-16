@@ -15,7 +15,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ShieldAlert } from "lucide-react";
-import { api, GuestSignInProtection } from "@/lib/api";
+import { api, ApiError, GuestSignInProtection } from "@/lib/api";
+import { ConfirmDialog } from "@/components/ui/dialog";
+import { REASON_MAX_CHARS, REASON_MIN_CHARS } from "@/lib/reason";
 import { Card, CardBody, CardFooter, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -54,6 +56,10 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
   const [err, setErr] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
   const [note, setNote] = useState("");
+  // A change applies to every client on the site, so it is confirmed with a reason and the operator's password
+  // (edged refuses it otherwise).
+  const [confirming, setConfirming] = useState(false);
+  const [saveErr, setSaveErr] = useState<unknown>(null);
 
   const load = useCallback(async () => {
     try {
@@ -83,22 +89,26 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
   };
   const anyInvalid = !!(errors.max || errors.window || errors.restriction);
 
-  async function save() {
+  async function save({ reason, password }: { reason: string; password: string }) {
     setSaving(true);
     setNote("");
+    setSaveErr(null);
     try {
       const next = await api.put<GuestSignInProtection>("/guest-signin-protection", {
         max_failed_attempts: Number(draft!.max),
         observation_window_seconds: Number(draft!.window),
         restriction_seconds: Number(draft!.restriction),
+        reason: reason.trim(),
+        password,
       });
       setPolicy(next);
       setDraft(draftOf(next));
       setErr(null);
+      setConfirming(false);
       setNote("Saved. The next sign-in attempt is judged by these numbers — nothing needs restarting.");
       toast.success("Protection settings saved", "The next sign-in attempt is judged by these numbers.");
     } catch (e) {
-      setErr(e);
+      setSaveErr(e instanceof ApiError && e.code === "reauth_required" ? new Error("Your password was not accepted.") : e);
     } finally {
       setSaving(false);
     }
@@ -116,9 +126,11 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
             <HelpTip title="Client sign-in protection">
               <HelpSection>
                 <p>
-                  After too many incorrect sign-in details from the <strong>same device</strong>, that device is
-                  asked to wait before it can try again. It protects clients from someone working through room
-                  numbers, and it is always on — these settings decide how strict it is, not whether it runs.
+                  After too many incorrect <strong>Room sign-in</strong> details (a room number and the detail
+                  from the booking) from the <strong>same device</strong>, that device is asked to wait before it can
+                  try again. It protects clients from someone working through room numbers, and it is always on —
+                  these settings decide how strict it is, not whether it runs. Other sign-in methods are not counted
+                  here.
                 </p>
               </HelpSection>
             </HelpTip>
@@ -214,11 +226,27 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
           {dirty && !saving && (
             <Button variant="ghost" onClick={() => setDraft(draftOf(policy))}>Discard</Button>
           )}
-          <Button onClick={() => void save()} disabled={!dirty || saving || anyInvalid}>
+          <Button onClick={() => { setSaveErr(null); setConfirming(true); }} disabled={!dirty || saving || anyInvalid}>
             {saving ? "Saving…" : "Save protection settings"}
           </Button>
         </CardFooter>
       )}
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={(v) => !v && !saving && setConfirming(false)}
+        title="Change client sign-in protection?"
+        description={`From the next attempt: ${draft.max} attempts within ${draft.window} seconds, then a ${draft.restriction}-second wait.`}
+        consequences={["Applies to every client on this site until it is changed again. Waits already running are not shortened."]}
+        confirmLabel="Save protection settings"
+        requireReason
+        reasonMinLength={REASON_MIN_CHARS}
+        reasonMaxLength={REASON_MAX_CHARS}
+        reasonPlaceholder="For example: conference floor, guests kept mistyping the surname"
+        requirePassword
+        busy={saving}
+        error={saveErr}
+        onConfirm={save}
+      />
     </Card>
   );
 }

@@ -49,6 +49,10 @@ const CONFIGURE: Record<string, { href: string; label: string }> = {
   social_login: { href: "/social-providers", label: "Identity providers" },
 };
 
+// THE IDENTITY MODULES have no switch on this page: the site turns them on or off as sign-in methods, and scd
+// reports that setting as the module's `enabled` (data-plane/internal/modules/resolver.go `identity`).
+const IDENTITY_MODULES = new Set(["sms_otp", "email_otp", "whatsapp_otp", "social_login"]);
+
 // Display order: hospitality, then the paid-access chain, then identity, then platform.
 const LICENCE_STATE_WORDS: Record<string, string> = {
   Active: "Active", GracePeriod: "Grace period", Restricted: "Restricted", Expired: "Expired",
@@ -250,7 +254,12 @@ function ModuleCard({
           <Gate label="Available" on={mod.deployed} />
           <Gate label="Licensed" on={mod.licensed} />
           {/* Without the licence, "switched on" and "ready" answer nothing a client could use: shown as a dash. */}
-          <Gate label="Switched on" on={mod.licensed ? (mod.switchable ? mod.enabled : true) : null} note={mod.licensed && !mod.switchable ? "No local switch" : undefined} />
+          {/* THE ANSWER IS THE REPORT'S `enabled`, FOR EVERY MODULE. It used to print "Yes" for any module without
+              a switch on this page -- so an identity module (SMS, email, WhatsApp, social sign-in) that the
+              site had switched OFF on Sign-in methods read "Switched on: Yes" (audit O-25). scd already answers
+              that question from the Sign-in methods settings; the note says where it is set. */}
+          <Gate label="Switched on" on={mod.licensed ? mod.enabled : null}
+            note={mod.licensed && !mod.switchable ? (IDENTITY_MODULES.has(mod.id) ? "Set on Sign-in methods" : "No local switch") : undefined} />
           <Gate label="Ready" on={mod.licensed ? mod.ready : null} />
         </dl>
         {reasons.length > 0 && (
@@ -268,6 +277,11 @@ function ModuleCard({
             <Button size="sm" variant={mod.enabled ? "outline" : "primary"} onClick={() => onToggle(!mod.enabled)}>
               {mod.enabled ? "Switch off" : "Switch on"}
             </Button>
+          )}
+          {IDENTITY_MODULES.has(mod.id) && mod.licensed && (
+            <Link href="/sign-in-methods" className="inline-flex items-center gap-0.5 text-xs text-primary underline-offset-4 hover:underline">
+              Sign-in methods <ArrowUpRight className="size-3.5" aria-hidden />
+            </Link>
           )}
           {conf && mod.licensed && mod.manageable && (
             <Link href={conf.href} className="inline-flex items-center gap-0.5 text-xs text-primary underline-offset-4 hover:underline">

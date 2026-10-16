@@ -57,7 +57,8 @@ reconcile(){ docker exec "$C" psql -v ON_ERROR_STOP=1 -U postgres -d "$DB" -q -f
 KEPT_PAIRS=(
   "svc_acctd|iam_v2.p6_data_crossing(uuid)"
   "svc_acctd|iam_v2.p6_expire_entitlement(uuid)"
-  "svc_acctd|iam_v2.p6_due_terminal(uuid)"
+  # p6_due_terminal is NOT here any more: acctd never calls it -- p6_expire_entitlement does, as its owner --
+  # and audit B-7 removed the caller grant (deploy/gatep/svc-acctd-iamv2-accounting-grants.sql).
   "svc_acctd|iam_v2.p6_suspend_over_budget(uuid, uuid)"
   "svc_acctd|iam_v2.p6_tick_online_time(uuid, uuid, timestamptz, int, uuid[], timestamptz[])"
   "svc_scd|iam_v2.p3_feed_authorizes(uuid, uuid, uuid, uuid, timestamptz)"

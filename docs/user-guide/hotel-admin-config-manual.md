@@ -184,15 +184,19 @@ Make sure anything the sign-in page needs before sign-in is listed under
 
 **Service plan** (**Internet offering → Service plans → Add plan**) — the technical
 recipe: plan code, display name, download/upload speed (Mbps; empty = unlimited),
-**devices at once** and what happens when the limit is reached, total time
-allowance, data allowance (GB), disconnect after inactivity, maximum single
-session, and whether the speed is per device or shared. Saving creates a new
-version; you are then offered **Apply these settings to packages?** for future
-clients.
+**devices at once** and what happens when the limit is reached (refuse the new
+device, or disconnect the oldest one), total time allowance (time online, added
+up across the client's devices), data allowance (GB), disconnect after
+inactivity, maximum single session, and whether the speed is per device or
+shared. The appliance enforces every one of them; inactivity and the maximum
+session end only the connection — the device can sign in again. Saving creates
+a new version; you are then offered **Apply these settings to packages?** for
+future clients. Speeds come from the service plan: packages have no speed steps.
 
 **Internet package** (**Internet offering → Internet packages → Add package**) —
 what the client is offered: name, short code, the service plan, how long access
-lasts, the data allowance (the service plan's, or per night of the stay), and **who it is
+lasts, the data allowance (the service plan's, or per night of the stay — per night is given only to
+clients who signed in with their room, and never issued as vouchers), and **who it is
 offered to** (conditions, grouped **General** and **Hotel (PMS stay)**; empty
 means everyone who signs in). Packages are free to
 the client. Only the Site admin can create or change packages and service plans (the
@@ -272,7 +276,9 @@ password sign-in, an alternative to vouchers:
      three, and refuses sign-in rather than guess if it matches more than one
      guest in the room;
    - **Room number + surname**, **Room number + first name** or **Room number +
-     reservation number** — only that detail is accepted.
+     reservation number** — only that detail is accepted. The appliance enforces
+     this itself: a sign-in that sends any other detail is refused, whatever
+     sent it.
 
    The choice saves immediately. A site still on the older *either* setting
    sees a warning; choosing one of the options replaces it.

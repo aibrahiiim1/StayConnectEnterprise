@@ -13,6 +13,9 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/nft"
 )
 
 // Site-wide settings + the read-mostly resources: auth-methods, walled
@@ -135,8 +138,55 @@ func (s *server) authMethodsRoutes() http.Handler {
 
 // validateAuthMethodsPatch refuses a patch the portal could not act on, so a bad value is reported here
 // rather than becoming a sign-in method that silently never works.
+//
+// EVERY KEY IS KNOWN AND EVERY SHAPE IS CHECKED. The merge used to store any top-level key it was given, with any
+// value -- {"voucher":"yes"} and {"anything":{"enabled":"maybe"}} were saved -- so a typo or a stale client
+// wrote configuration nothing reads, or a value that would not parse back into tenantcfg.AuthMethods and broke
+// every reader of the document. Only the methods tenantcfg serves are accepted, each as an object of the fields
+// it actually has.
 func validateAuthMethodsPatch(patch map[string]json.RawMessage) error {
+	if len(patch) == 0 {
+		return errors.New("nothing to change: send at least one sign-in method")
+	}
+	keys := make([]string, 0, len(patch))
+	for k := range patch {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		raw := patch[k]
+		switch k {
+		case "voucher", "email_account", "sms", "whatsapp", "guest_account", "open":
+			if err := validateMethodObject(k, raw, simpleMethodFields); err != nil {
+				return err
+			}
+		case "social":
+			var providers map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &providers); err != nil || providers == nil {
+				return errors.New("social must be an object keyed by identity provider")
+			}
+			for p, v := range providers {
+				if !socialAllowedProviders[p] {
+					return fmt.Errorf("social.%s is not an identity provider (google, apple, facebook or microsoft)", p)
+				}
+				if err := validateMethodObject("social."+p, v, simpleMethodFields); err != nil {
+					return err
+				}
+			}
+		case "pms":
+			if err := validateMethodObject(k, raw, pmsMethodFields); err != nil {
+				return err
+			}
+		case "portal", "email":
+			// checked below
+		default:
+			return fmt.Errorf("%q is not a sign-in method this appliance serves", k)
+		}
+	}
 	if rawPortal, ok := patch["portal"]; ok {
+		if err := validateMethodObject("portal", rawPortal, portalFields); err != nil {
+			return err
+		}
 		var p struct {
 			PrimaryMethod      *string `json:"primary_method"`
 			RememberDeviceDays *int    `json:"remember_device_days"`
@@ -189,6 +239,55 @@ func validateAuthMethodsPatch(patch map[string]json.RawMessage) error {
 	return nil
 }
 
+// The JSON kind each field of a method object must have.
+type amKind int
+
+const (
+	amBool amKind = iota
+	amString
+	amInt
+)
+
+// The fields tenantcfg reads for each kind of method (internal/tenantcfg). template_id is the legacy plan link
+// some stored objects still carry; it is accepted so a stored object can be saved back unchanged.
+var (
+	simpleMethodFields = map[string]amKind{"enabled": amBool, "template_id": amString}
+	pmsMethodFields    = map[string]amKind{"enabled": amBool, "template_id": amString, "provider": amString,
+		"mode": amString, "max_failures_per_room": amInt, "lockout_window_minutes": amInt}
+	portalFields = map[string]amKind{"primary_method": amString, "remember_device_days": amInt}
+)
+
+// validateMethodObject refuses anything but an object of the known fields with the right JSON kinds.
+func validateMethodObject(name string, raw json.RawMessage, fields map[string]amKind) error {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil || obj == nil {
+		return fmt.Errorf("%s must be an object", name)
+	}
+	for f, v := range obj {
+		kind, ok := fields[f]
+		if !ok {
+			return fmt.Errorf("%s.%s is not a setting of this sign-in method", name, f)
+		}
+		var bad bool
+		switch kind {
+		case amBool:
+			var b bool
+			bad = json.Unmarshal(v, &b) != nil
+		case amString:
+			var s string
+			bad = json.Unmarshal(v, &s) != nil
+		case amInt:
+			var n int
+			bad = json.Unmarshal(v, &n) != nil
+		}
+		if bad {
+			want := map[amKind]string{amBool: "true or false", amString: "text", amInt: "a whole number"}[kind]
+			return fmt.Errorf("%s.%s must be %s", name, f, want)
+		}
+	}
+	return nil
+}
+
 // portalPrimaryMethods are the methods that may lead the landing page (contract §6.2).
 var portalPrimaryMethods = map[string]bool{"pms": true, "email_account": true, "sms": true, "whatsapp": true, "guest_account": true, "voucher": true}
 
@@ -201,6 +300,9 @@ type wgRule struct {
 	Ports       []int     `json:"ports,omitempty"`
 	Description *string   `json:"description,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
+	// WiderThanPolicy marks a rule stored before the site's widest-network policy (or wider than it now): it is
+	// listed so the operator can see and correct it, and the console says so.
+	WiderThanPolicy bool `json:"wider_than_policy,omitempty"`
 }
 
 func validWGRule(kind, value string) bool {
@@ -218,11 +320,66 @@ func validWGRule(kind, value string) bool {
 	return false
 }
 
+// wgPolicy is the site's walled-garden policy (migration 0125): the widest network a rule may name.
+type wgPolicy struct {
+	WidestPrefixLen int        `json:"widest_prefix_len"`
+	Min             int        `json:"min"`
+	Max             int        `json:"max"`
+	Default         int        `json:"default"`
+	ConfigVersion   int64      `json:"config_version"`
+	UpdatedAt       *time.Time `json:"updated_at,omitempty"`
+	UpdatedBy       *string    `json:"updated_by,omitempty"`
+}
+
+const (
+	wgWidestDefault = 24
+	wgWidestMin     = 16
+	wgWidestMax     = 32
+)
+
+func (s *server) walledGardenPolicy(ctx context.Context) (wgPolicy, error) {
+	p := wgPolicy{Min: wgWidestMin, Max: wgWidestMax, Default: wgWidestDefault}
+	err := s.db.QueryRow(ctx, `SELECT widest_prefix_len, config_version, updated_at, updated_by
+	    FROM iam_v2.walled_garden_settings_get($1::uuid, $2::uuid)`, s.tenantID, s.siteID).
+		Scan(&p.WidestPrefixLen, &p.ConfigVersion, &p.UpdatedAt, &p.UpdatedBy)
+	return p, err
+}
+
+// wgInput is one rule as an operator writes it.
+type wgInput struct {
+	Kind        string `json:"kind"`
+	Value       string `json:"value"`
+	Ports       []int  `json:"ports"`
+	Description string `json:"description"`
+}
+
+// check validates a rule against its shape and, for an address or network, the site's policy (audit N-7):
+// 0.0.0.0/0 and every network wider than the policy are refused, and so are targets a garden entry is
+// meaningless for. It returns the refusal to show the operator, or "".
+func (in *wgInput) check(widest int) string {
+	in.Kind, in.Value = strings.TrimSpace(in.Kind), strings.TrimSpace(in.Value)
+	if !validWGRule(in.Kind, in.Value) {
+		return "kind must be domain|ip|cidr with a valid value"
+	}
+	for _, p := range in.Ports {
+		if p < 1 || p > 65535 {
+			return "ports must be 1..65535"
+		}
+	}
+	if in.Kind == "ip" || in.Kind == "cidr" {
+		if why := nft.GardenTargetRefusal(in.Value, widest); why != "" {
+			return why
+		}
+	}
+	return ""
+}
+
 func (s *server) walledGardenRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
 		ctx, cancel := dbCtx(req)
 		defer cancel()
+		pol, perr := s.walledGardenPolicy(ctx)
 		rows, err := s.db.Query(ctx, `
             SELECT id, kind, value, COALESCE(ports, '{}'), description, created_at
               FROM walled_garden_rules WHERE tenant_id = $1 ORDER BY created_at DESC
@@ -239,31 +396,82 @@ func (s *server) walledGardenRoutes() http.Handler {
 				jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
 				return
 			}
+			if perr == nil && (rr.Kind == "ip" || rr.Kind == "cidr") {
+				rr.WiderThanPolicy = nft.GardenTargetRefusal(rr.Value, pol.WidestPrefixLen) != ""
+			}
 			out = append(out, rr)
 		}
 		writeList(w, out)
 	})
-	r.Post("/", func(w http.ResponseWriter, req *http.Request) {
-		var in struct {
-			Kind        string `json:"kind"`
-			Value       string `json:"value"`
-			Ports       []int  `json:"ports"`
-			Description string `json:"description"`
-		}
-		if err := decodeJSON(req, &in); err != nil || !validWGRule(in.Kind, in.Value) {
-			jsonErr(w, http.StatusBadRequest, "bad_request", "kind must be domain|ip|cidr with a valid value")
+	// THE POLICY: read by everyone who can see the garden; changed with a password and a reason, audited.
+	r.Get("/policy", func(w http.ResponseWriter, req *http.Request) {
+		ctx, cancel := dbCtx(req)
+		defer cancel()
+		pol, err := s.walledGardenPolicy(ctx)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "internal", "the walled-garden policy could not be read")
 			return
 		}
-		for _, p := range in.Ports {
-			if p < 1 || p > 65535 {
-				jsonErr(w, http.StatusBadRequest, "bad_request", "ports must be 1..65535")
-				return
-			}
+		writeJSON(w, http.StatusOK, pol)
+	})
+	r.Put("/policy", func(w http.ResponseWriter, req *http.Request) {
+		var in struct {
+			WidestPrefixLen int    `json:"widest_prefix_len"`
+			Reason          string `json:"reason"`
+			Password        string `json:"password"`
+		}
+		if err := decodeJSON(req, &in); err != nil {
+			jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")
+			return
+		}
+		if in.WidestPrefixLen < wgWidestMin || in.WidestPrefixLen > wgWidestMax {
+			jsonErr(w, http.StatusBadRequest, "validation",
+				fmt.Sprintf("the widest network must be between /%d and /%d", wgWidestMin, wgWidestMax))
+			return
+		}
+		if r := strings.TrimSpace(in.Reason); len(r) < 4 || len(r) > 500 {
+			jsonErr(w, http.StatusBadRequest, "validation", "a reason of 4-500 characters is required")
+			return
+		}
+		// A wider garden is a weaker captive portal: the same step-up as every other security setting.
+		actor, ok := s.stepUpActor(w, req, in.Password)
+		if !ok {
+			return
 		}
 		ctx, cancel := dbCtx(req)
 		defer cancel()
+		before, _ := s.walledGardenPolicy(ctx)
+		var version int64
+		if err := s.db.QueryRow(ctx, `SELECT iam_v2.walled_garden_settings_set($1::uuid,$2::uuid,$3,$4,$5)`,
+			s.tenantID, s.siteID, in.WidestPrefixLen, actor, in.Reason).Scan(&version); err != nil {
+			jsonErr(w, http.StatusBadRequest, "validation", pgErr(err))
+			return
+		}
+		s.audit(req, "walled_garden.policy_changed", "walled_garden_policy", s.siteID, map[string]any{
+			"from_widest_prefix_len": before.WidestPrefixLen, "to_widest_prefix_len": in.WidestPrefixLen,
+			"reason": strings.TrimSpace(in.Reason), "config_version": version})
+		pol, _ := s.walledGardenPolicy(ctx)
+		writeJSON(w, http.StatusOK, pol)
+	})
+	r.Post("/", func(w http.ResponseWriter, req *http.Request) {
+		var in wgInput
+		if err := decodeJSON(req, &in); err != nil {
+			jsonErr(w, http.StatusBadRequest, "bad_request", "kind must be domain|ip|cidr with a valid value")
+			return
+		}
+		ctx, cancel := dbCtx(req)
+		defer cancel()
+		pol, err := s.walledGardenPolicy(ctx)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "internal", "the walled-garden policy could not be read")
+			return
+		}
+		if why := in.check(pol.WidestPrefixLen); why != "" {
+			jsonErr(w, http.StatusBadRequest, "bad_request", why)
+			return
+		}
 		var id string
-		err := s.db.QueryRow(ctx, `
+		err = s.db.QueryRow(ctx, `
             INSERT INTO walled_garden_rules (tenant_id, site_id, kind, value, ports, description)
             VALUES ($1, NULL, $2, $3, NULLIF($4::int[], '{}'), NULLIF($5,''))
             RETURNING id
@@ -273,25 +481,67 @@ func (s *server) walledGardenRoutes() http.Handler {
 			return
 		}
 		s.audit(req, "walled_garden.created", "walled_garden_rule", id,
-			map[string]any{"kind": in.Kind, "value": in.Value})
+			map[string]any{"kind": in.Kind, "value": in.Value, "ports": in.Ports, "description": in.Description})
 		s.pokeSCD(req, "/v1/admin/walled-garden/reload")
 		writeJSON(w, http.StatusCreated, map[string]string{"id": id})
+	})
+	// EDIT (audit N-7: there was no way to correct a rule but delete and re-add). The same checks as create; the
+	// audit row carries what the rule was and what it is now.
+	r.Put("/{id}", func(w http.ResponseWriter, req *http.Request) {
+		id := chi.URLParam(req, "id")
+		var in wgInput
+		if err := decodeJSON(req, &in); err != nil {
+			jsonErr(w, http.StatusBadRequest, "bad_request", "kind must be domain|ip|cidr with a valid value")
+			return
+		}
+		ctx, cancel := dbCtx(req)
+		defer cancel()
+		pol, err := s.walledGardenPolicy(ctx)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "internal", "the walled-garden policy could not be read")
+			return
+		}
+		if why := in.check(pol.WidestPrefixLen); why != "" {
+			jsonErr(w, http.StatusBadRequest, "bad_request", why)
+			return
+		}
+		var oldKind, oldValue string
+		var oldPorts []int
+		if err := s.db.QueryRow(ctx, `SELECT kind, value, COALESCE(ports,'{}') FROM walled_garden_rules
+		    WHERE id = $1 AND tenant_id = $2`, id, s.tenantID).Scan(&oldKind, &oldValue, &oldPorts); err != nil {
+			jsonErr(w, http.StatusNotFound, "not_found", "rule not found")
+			return
+		}
+		if _, err := s.db.Exec(ctx, `UPDATE walled_garden_rules
+		    SET kind = $3, value = $4, ports = NULLIF($5::int[], '{}'), description = NULLIF($6,'')
+		  WHERE id = $1 AND tenant_id = $2`, id, s.tenantID, in.Kind, in.Value, in.Ports, in.Description); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "internal", "update failed")
+			return
+		}
+		s.audit(req, "walled_garden.updated", "walled_garden_rule", id, map[string]any{
+			"from": map[string]any{"kind": oldKind, "value": oldValue, "ports": oldPorts},
+			"to":   map[string]any{"kind": in.Kind, "value": in.Value, "ports": in.Ports, "description": in.Description}})
+		s.pokeSCD(req, "/v1/admin/walled-garden/reload")
+		writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "updated"})
 	})
 	r.Delete("/{id}", func(w http.ResponseWriter, req *http.Request) {
 		id := chi.URLParam(req, "id")
 		ctx, cancel := dbCtx(req)
 		defer cancel()
-		tag, err := s.db.Exec(ctx,
-			`DELETE FROM walled_garden_rules WHERE id = $1 AND tenant_id = $2`, id, s.tenantID)
+		var kind, value string
+		var ports []int
+		err := s.db.QueryRow(ctx, `DELETE FROM walled_garden_rules WHERE id = $1 AND tenant_id = $2
+		    RETURNING kind, value, COALESCE(ports,'{}')`, id, s.tenantID).Scan(&kind, &value, &ports)
+		if errors.Is(err, pgx.ErrNoRows) {
+			jsonErr(w, http.StatusNotFound, "not_found", "rule not found")
+			return
+		}
 		if err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "delete failed")
 			return
 		}
-		if tag.RowsAffected() == 0 {
-			jsonErr(w, http.StatusNotFound, "not_found", "rule not found")
-			return
-		}
-		s.audit(req, "walled_garden.deleted", "walled_garden_rule", id, nil)
+		s.audit(req, "walled_garden.deleted", "walled_garden_rule", id,
+			map[string]any{"kind": kind, "value": value, "ports": ports})
 		s.pokeSCD(req, "/v1/admin/walled-garden/reload")
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 	})
@@ -654,6 +904,9 @@ func (s *server) listBackupRecords(w http.ResponseWriter, req *http.Request) {
 // are logged into the request-scoped audit payload but never fail the write:
 // the periodic reconcilers guarantee convergence anyway.
 func (s *server) pokeSCD(req *http.Request, path string) {
+	if s.scd == nil { // a test server with no scd: the reconcilers converge on their own
+		return
+	}
 	if _, _, err := s.scd.call(req.Context(), http.MethodPost, path, nil); err != nil {
 		s.audit(req, "scd.poke_failed", "scd", path, map[string]any{"error": err.Error()})
 	}

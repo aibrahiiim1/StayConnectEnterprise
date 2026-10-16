@@ -12,8 +12,20 @@ import { api } from "@/lib/api";
 import { useSidebarCollapsed } from "@/lib/sidebar-state";
 import { useCapabilities, surfaceAvailable } from "@/lib/capabilities";
 import { SurfaceNotEnabled } from "@/components/surface-not-enabled";
+import { NotPermitted } from "@/components/not-permitted";
+import { canRead } from "@/lib/roles";
 import { ToastProvider } from "@/components/ui/toast";
 import { WhoamiProvider, useWhoamiSession } from "@/lib/whoami-context";
+import { ForcedPasswordChange } from "@/components/forced-password-change";
+
+// SCREENS REACHED BY LINK, NOT FROM THE MENU. They are opened from other pages (PMS connection, Stays), so the
+// menu's table does not list them; without this a role that cannot read them saw a shell of 403 banners instead
+// of the "not permitted" page (found in PRE-LIVE acceptance, 2026-10-16). Every other route outside the menu is a
+// server redirect.
+const OFF_MENU_SCREENS: { href: string; resource: string; label: string }[] = [
+  { href: "/pms-reconciliation", resource: "pms-reconciliation", label: "Unresolved departures" },
+  { href: "/roster-reconciliation", resource: "pms-roster-reconciliation", label: "Roster reconciliation" },
+];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -104,7 +116,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
   if (!me) return null;
 
+  // A SESSION THAT MUST REPLACE ITS PASSWORD SEES NOTHING ELSE. edged refuses every other call for it, so the
+  // shell would only render a screen of refusals. Once the password is changed the page reloads into the console.
+  if (me.must_change_password) {
+    return (
+      <ForcedPasswordChange email={me.email} onLogout={onLogout} onChanged={() => window.location.reload()} />
+    );
+  }
+
   const roles = me.roles ?? [];
+  // WHETHER THE OPERATOR'S ROLE MAY READ THE SCREEN THEY ARE ON (audit L-2). The menu hides it; a URL or a
+  // bookmark still reaches it, and the page used to open as a shell of 403 banners. The same table the menu
+  // uses decides, and the page does not mount, so it sends nothing that would be refused.
+  const activeItem = NAV_ITEMS.find((i) => i.href === activeNavHref(pathname))
+    ?? OFF_MENU_SCREENS.find((i) => pathname === i.href || pathname.startsWith(i.href + "/"));
+  const notPermitted = activeItem && !canRead(activeItem.resource, roles) ? activeItem.label : null;
 
   return (
     // THE SIDEBAR "JUMPING BACK TO THE TOP" WAS THE WINDOW SCROLLING, NOT THE MENU MOVING.
@@ -208,7 +234,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           */}
           <main ref={mainRef} className="min-w-0 flex-1 overflow-y-auto">
             <div className="mx-auto w-full max-w-[104rem] px-4 py-5 sm:px-6 sm:py-6 lg:px-8">
-              {!capsKnown ? <Skeleton className="h-64" /> : unavailable ? <SurfaceNotEnabled label={unavailable} /> : children}
+              {!capsKnown ? <Skeleton className="h-64" />
+                : unavailable ? <SurfaceNotEnabled label={unavailable} />
+                : notPermitted ? <NotPermitted label={notPermitted} />
+                : children}
             </div>
           </main>
         </div>

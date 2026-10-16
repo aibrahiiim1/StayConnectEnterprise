@@ -9,9 +9,47 @@ import {
   serializeDuration,
   validateSaleWindow,
   tiersInOrder,
+  SPEED_STEPS_REFUSAL,
+  tiersArePlain,
+  plainTiers,
   buildPublishPayload,
+  validateRuleSet,
+  validateTiers,
+  revisionNeedsPassword,
+  describePublishRefusal,
+  CONTRADICTORY_PRIOR_PURCHASE,
   type PublishFormState,
 } from "@/lib/commerce-form";
+import {
+  preservedRulesOf, tiersToForm, revisionCarryOf, revisionTermsOf, rulesToForm,
+} from "@/app/(app)/internet-packages/form-mapping";
+
+describe("form-mapping — loading keeps what the form does not edit (audit O-15)", () => {
+  it("keeps an unknown rule type verbatim instead of dropping it", () => {
+    const stored = [
+      { Type: "STAY_STATUS", Value: { statuses: ["IN_HOUSE"] } },
+      { type: "AUTH_METHOD", value: { methods: ["voucher"] } },
+    ];
+    expect(rulesToForm(stored)).toEqual([{ type: "AUTH_METHOD", methods: "voucher" }]);
+    expect(preservedRulesOf(stored)).toEqual([{ type: "STAY_STATUS", value: { statuses: ["IN_HOUSE"] } }]);
+  });
+  it("keeps a tier's match condition and other grant keys", () => {
+    expect(tiersToForm([{ Order: 20, Value: { up_kbps: 100, match: { type: "VIP" }, note: "x" } }])).toEqual([
+      { order: 20, down_kbps: "", up_kbps: 100, extra: { match: { type: "VIP" }, note: "x" } },
+    ]);
+    expect(tiersToForm([{ order: 10, value: { down_kbps: 5 } }])).toEqual([{ order: 10, down_kbps: 5, up_kbps: "" }]);
+  });
+  it("carries package_type, plan_overrides, renewable and max_purchases_per_stay exactly as loaded", () => {
+    expect(revisionCarryOf({ package_type: "STAY_BUNDLE", plan_overrides: null, renewable: false, max_purchases_per_stay: 1 }))
+      .toEqual({ package_type: "STAY_BUNDLE", plan_overrides: null, renewable: false, max_purchases_per_stay: 1 });
+    // A field the reader did not return is left out: the server carries it.
+    expect(revisionCarryOf({})).toEqual({});
+  });
+  it("reads today's terms the way the form will send them", () => {
+    expect(revisionTermsOf({ price_minor: 0, currency: "", settlement_methods: null, service_plan_revision_id: "r" }))
+      .toEqual({ price_minor: 0, currency: "USD", currency_exponent: 2, acquisition_methods: ["NOT_REQUIRED"], service_plan_revision_id: "r" });
+  });
+});
 
 describe("supported / forbidden rule types", () => {
   // THE PMS DIMENSIONS ARE NOW OFFERED, and that is a product decision rather than a relaxation. They were
@@ -125,7 +163,7 @@ describe("buildPublishPayload — free-only, no PMS/settlement fields", () => {
   const base: PublishFormState = {
     code: "FREEWIFI", name: "Free WiFi", service_plan_revision_id: "plan-rev-1",
     rules: [{ type: "AUTH_METHOD", methods: "account,voucher" }],
-    tiers: [{ order: 10, down_kbps: 5000 }],
+    tiers: [{ order: 10 }],
     duration: { end_mode: "MANUAL_END" },
   };
   it("builds a valid payload with no price/settlement/PMS keys anywhere", () => {
@@ -135,14 +173,96 @@ describe("buildPublishPayload — free-only, no PMS/settlement fields", () => {
     for (const forbidden of ["price", "settlement", "pms", "tax", "amount", "currency"]) {
       expect(json.toLowerCase()).not.toContain(forbidden);
     }
-    expect(payload!.grant_tiers).toEqual([{ order: 10, grant: { down_kbps: 5000 } }]);
+    expect(payload!.grant_tiers).toEqual([{ order: 10, grant: {} }]);
     expect(payload!.eligibility_rules).toEqual([{ type: "AUTH_METHOD", value: { methods: ["account", "voucher"] } }]);
   });
   it("rejects missing code / plan / tiers / bad duration / bad window", () => {
     expect(buildPublishPayload({ ...base, code: "" }).error).toBeTruthy();
     expect(buildPublishPayload({ ...base, service_plan_revision_id: "" }).error).toBeTruthy();
     expect(buildPublishPayload({ ...base, tiers: [] }).error).toBeTruthy();
+    // Speed steps were never applied (audit O-5): more than one step, or a step with speeds, is refused.
+    expect(buildPublishPayload({ ...base, tiers: [{ order: 10 }, { order: 20 }] }).error).toBe(SPEED_STEPS_REFUSAL);
+    expect(buildPublishPayload({ ...base, tiers: [{ order: 10, down_kbps: 5000 }] }).error).toBe(SPEED_STEPS_REFUSAL);
+    expect(buildPublishPayload({ ...base, tiers: [{ order: 10, down_kbps: "" }] }).error).toBeUndefined();
     expect(buildPublishPayload({ ...base, duration: { end_mode: "VALIDITY_WINDOW" } }).error).toMatch(/positive/);
     expect(buildPublishPayload({ ...base, visible_from: "2026-08-02T00:00", visible_until: "2026-08-01T00:00" }).error).toMatch(/before/);
+  });
+
+  // AUDIT O-9: the free-access limit and "requires an earlier purchase" together offer the package to nobody.
+  it("refuses the free-access limit together with a requires-prior condition, in a sentence", () => {
+    const res = buildPublishPayload({ ...base, rules: [
+      { type: "PRIOR_PURCHASE", mode: "forbids_prior" },
+      { type: "PRIOR_PURCHASE", mode: "requires_prior" },
+    ] });
+    expect(res.payload).toBeUndefined();
+    expect(res.error).toBe(CONTRADICTORY_PRIOR_PURCHASE);
+    expect(validateRuleSet([{ type: "PRIOR_PURCHASE", mode: "requires_prior" }])).toBeNull();
+    expect(validateRuleSet([{ type: "PRIOR_PURCHASE", mode: "forbids_prior", within_hours: "24" }])).toBeNull();
+  });
+
+  // O-16 and D-C meet here: since D-C a package has one plain step, so a second step (duplicate order or not)
+  // is refused by the speed-steps rule before the order is even compared.
+  it("refuses two speed steps with the same order", () => {
+    expect(buildPublishPayload({ ...base, tiers: [{ order: 10 }, { order: "10", down_kbps: 1 }] }).error)
+      .toBe(SPEED_STEPS_REFUSAL);
+    expect(validateTiers([{ order: 10 }, { order: 10 }])).toBe("Speed steps: two steps have the order 10. Give each step its own order.");
+    expect(validateTiers([{ order: 10 }, { order: 20 }])).toBeNull();
+  });
+
+  // AUDIT O-15: what the form does not edit is handed back, not dropped.
+  it("merges the name into the loaded display, appends preserved rules verbatim, and keeps tier extras", () => {
+    const { payload } = buildPublishPayload({
+      ...base, name: "Renamed",
+      display: { name: "Old", description: "Lobby", badge: "NEW" },
+      preserved_rules: [{ type: "STAY_STATUS", value: { statuses: ["IN_HOUSE"] } }],
+      tiers: [{ order: 10, extra: { match: { type: "VIP", value: { is_vip: true } } } }],
+    });
+    expect(payload!.display).toEqual({ name: "Renamed", description: "Lobby", badge: "NEW" });
+    expect(payload!.eligibility_rules).toEqual([
+      { type: "AUTH_METHOD", value: { methods: ["account", "voucher"] } },
+      { type: "STAY_STATUS", value: { statuses: ["IN_HOUSE"] } },
+    ]);
+    expect(payload!.grant_tiers).toEqual([{ order: 10, grant: { match: { type: "VIP", value: { is_vip: true } } } }]);
+  });
+});
+
+describe("revisionNeedsPassword — the step-up for a change of terms (audit O-21)", () => {
+  const before = { price_minor: 500, currency: "USD", currency_exponent: 2, acquisition_methods: ["PREPAID", "ONLINE_PAYMENT"], service_plan_revision_id: "rev-1" };
+  it("is not needed for a save that keeps the terms (method order does not matter)", () => {
+    expect(revisionNeedsPassword(before, { ...before, acquisition_methods: ["ONLINE_PAYMENT", "PREPAID"], currency: "usd" })).toBe(false);
+  });
+  it("is needed when the price, currency, exponent, methods or plan change", () => {
+    expect(revisionNeedsPassword(before, { ...before, price_minor: 600 })).toBe(true);
+    expect(revisionNeedsPassword(before, { ...before, currency: "EUR" })).toBe(true);
+    expect(revisionNeedsPassword(before, { ...before, currency_exponent: 3 })).toBe(true);
+    expect(revisionNeedsPassword(before, { ...before, acquisition_methods: ["PREPAID"] })).toBe(true);
+    expect(revisionNeedsPassword(before, { ...before, service_plan_revision_id: "rev-2" })).toBe(true);
+  });
+  it("is never needed for a new package", () => {
+    expect(revisionNeedsPassword(null, before)).toBe(false);
+  });
+});
+
+describe("describePublishRefusal — the server's reason is kept (audit O-18)", () => {
+  it("names the duration section and keeps the reason", () => {
+    expect(describePublishRefusal("invalid_duration_policy: the end time is in the past"))
+      .toBe("How long access lasts: The end time is in the past.");
+    expect(describePublishRefusal("invalid_duration_policy")).toBe("How long access lasts: The server refused this setting.");
+  });
+  it("leaves a sentence it does not recognise alone, so the caller shows it unchanged", () => {
+    expect(describePublishRefusal("Speed steps 10 and 10 have the same order.")).toBeNull();
+  });
+});
+
+describe("speed steps — one plain step per package (audit O-5)", () => {
+  it("recognises the plain step", () => {
+    expect(tiersArePlain([{ order: 10 }])).toBe(true);
+    expect(tiersArePlain([{ order: 10, down_kbps: "", up_kbps: "" }])).toBe(true);
+    expect(tiersArePlain([{ order: 10, up_kbps: 1000 }])).toBe(false);
+    expect(tiersArePlain([{ order: 10 }, { order: 20 }])).toBe(false);
+  });
+  it("replaces speed steps with the lowest-order plain step", () => {
+    expect(plainTiers([{ order: 30, down_kbps: 1 }, { order: 5, up_kbps: 2 }])).toEqual([{ order: 5 }]);
+    expect(plainTiers([])).toEqual([{ order: 10 }]);
   });
 });

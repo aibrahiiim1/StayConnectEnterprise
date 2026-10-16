@@ -249,21 +249,53 @@ describe("License operations", () => {
     expect(calls.find((c) => c.url === "/api/cloud/v1/licenses/l1/revoke")!.body).toEqual({ reason: "contract ended" });
   });
 
-  it("Renew or change posts new terms and a reason to /appliances/{id}/license", async () => {
+  it("Renew or change starts from the CURRENT terms: saving unchanged keeps the grace period and the end date", async () => {
     const user = userEvent.setup();
+    const a = appliance("activated");
+    a.license = { ...a.license, grace_period_days: 7, valid_until: "2031-03-15T23:59:59Z" };
     const { calls } = mockFetch([
-      detail(appliance("activated")),
+      detail(a),
       { method: "POST", match: "/api/cloud/v1/appliances/a1/license", body: { ok: true } },
     ]);
     renderAs(PLATFORM_ME, <AppliancePage params={{ id: "a1" }} />);
     await user.click(await screen.findByRole("button", { name: "Renew or change" }));
     const dialog = await screen.findByRole("dialog", { name: "Renew or change license" });
-    await user.type(within(dialog).getByLabelText(/^Reason/), "annual renewal");
+    expect(within(dialog).getByLabelText(/Grace period/)).toHaveValue("7");
+    expect(within(dialog).getByLabelText(/Ends on/)).toHaveValue("2031-03-15");
+    await user.type(within(dialog).getByLabelText(/^Reason/), "add a module later");
     await user.click(within(dialog).getByRole("button", { name: "Save new license" }));
     await waitFor(() => expect(calls.some((c) => c.url === "/api/cloud/v1/appliances/a1/license")).toBe(true));
     expect(calls.find((c) => c.url === "/api/cloud/v1/appliances/a1/license")!.body).toEqual({
-      max_concurrent_online_guests: 500, valid_days: 365, grace_period_days: 30, modules: [], reason: "annual renewal",
+      max_concurrent_online_guests: 500, valid_until: "2031-03-15T23:59:59Z", grace_period_days: 7, modules: [],
+      reason: "add a module later",
     });
+  });
+
+  it("in grace (past the end date) there is no Suspend: Central cannot re-sign an expired licence", async () => {
+    const a = appliance("activated");
+    a.license = { ...a.license, state: "grace" };
+    mockFetch([detail(a)]);
+    renderAs(PLATFORM_ME, <AppliancePage params={{ id: "a1" }} />);
+    expect(await screen.findByRole("button", { name: "Renew or change" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Suspend/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Revoke/ })).toBeInTheDocument();
+  });
+
+  it("an activating appliance can be retired", async () => {
+    mockFetch([detail({ ...appliance("activating"), activating_on: "certificate" })]);
+    renderAs(PLATFORM_ME, <AppliancePage params={{ id: "a1" }} />);
+    expect(await screen.findByRole("button", { name: /Retire appliance/ })).toBeInTheDocument();
+  });
+
+  it("Advanced offers the offline activation package only when a request is on file", async () => {
+    mockFetch([detail({ ...appliance("activated"), offline_request_pending: false })]);
+    const { unmount } = renderAs(PLATFORM_ME, <AppliancePage params={{ id: "a1" }} />);
+    await screen.findByRole("heading", { name: "License" });
+    expect(screen.queryByRole("button", { name: /Offline activation package/ })).not.toBeInTheDocument();
+    unmount();
+    mockFetch([detail({ ...appliance("activated"), offline_request_pending: true })]);
+    renderAs(PLATFORM_ME, <AppliancePage params={{ id: "a1" }} />);
+    expect(await screen.findByRole("button", { name: /Offline activation package/ })).toBeInTheDocument();
   });
 
   it("Retire explains the two phases and sends the typed serial and the emergency choice", async () => {

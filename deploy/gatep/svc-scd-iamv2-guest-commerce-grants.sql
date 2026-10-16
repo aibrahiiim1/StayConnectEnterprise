@@ -34,9 +34,26 @@ GRANT SELECT, INSERT         ON iam_v2.settlements  TO svc_scd;
 -- ---- what the purchase becomes -------------------------------------------
 -- The entitlement and the IAM-v2 session are the authoritative grant of access.
 -- SELECT is needed to enforce device limits and to reconnect an existing
--- entitlement rather than issue a second one.
-GRANT SELECT, INSERT, UPDATE ON iam_v2.entitlements TO svc_scd;
-GRANT SELECT, INSERT, UPDATE ON iam_v2.sessions     TO svc_scd;
+-- entitlement rather than issue a second one; INSERT because the Room Login and
+-- post-stay grants insert the entitlement (internal/staygrant, internal/poststay)
+-- and the admission path opens the session (openSessionTx).
+--
+-- NO TABLE-LEVEL UPDATE ON EITHER (audit B-7, migration 0124; migration 0033 already
+-- said so for sessions). scd issues no UPDATE statement against iam_v2.sessions --
+-- a session is ended through end_session_enforcement (0121) and promoted by netd --
+-- and none against iam_v2.entitlements: status moves through
+-- apply_entitlement_transition, every other term is fixed at grant.
+--
+-- What scd DOES need is the row LOCK: `SELECT ... FROM iam_v2.entitlements ... FOR
+-- UPDATE` (cmd/scd/iamv2_session_activate.go, internal/staygrant), and PostgreSQL
+-- allows a row lock only to a role holding UPDATE on at least one column. So the
+-- grant is ONE column, status -- the column the controlled-writer guard
+-- (p3_entitlement_controlled_writer) refuses to change outside
+-- apply_entitlement_transition. The lock works; a raw UPDATE that changes anything
+-- is refused, by the privilege for every other column and by the guard for status.
+GRANT SELECT, INSERT          ON iam_v2.entitlements TO svc_scd;
+GRANT UPDATE (status)         ON iam_v2.entitlements TO svc_scd; -- row lock only; see above
+GRANT SELECT, INSERT          ON iam_v2.sessions     TO svc_scd;
 
 -- SELECT (and only SELECT) on the device bindings. Opening a session fires
 -- iam_v2.p6_session_requires_authorized_binding, a trigger that runs with the WRITER's rights and reads

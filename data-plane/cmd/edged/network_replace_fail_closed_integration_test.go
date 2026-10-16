@@ -291,9 +291,9 @@ func TestIntegration_NetworkReplace_ThePreflightDoesNotBlockUnrelatedRevisions(t
 	f.app.commerce = f.commerceAdmin(t)
 	parent := uniqueParent()
 	netID, _ := f.seedReplaceable(t, parent, "10.167.0.0/24", "10.167.0.1")
-	// A package that cannot be carried forward: its duration policy was valid when published and is not now.
+	// A package that cannot be carried forward: its stored duration policy is one this build refuses to publish.
 	f.seedNetworkPackage(t, "stuck-"+parent, netID, map[string]string{
-		"duration_policy": `'{"end_mode":"FIXED_AT","ends_at":"2020-01-01T00:00:00Z"}'::jsonb`,
+		"duration_policy": `'{"end_mode":"AT_CHECKOUT"}'::jsonb`,
 	})
 	replID, _ := f.stageAndMaterialise(t, netID, parent, 85)
 	stuckRev := f.seedRevision(t, "active")

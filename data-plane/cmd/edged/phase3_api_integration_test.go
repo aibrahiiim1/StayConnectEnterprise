@@ -215,6 +215,10 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 			mountResource(r, s, "pms-financial-onboarding", s.pmsFinancialOnboardingRoutes)
 			mountResource(r, s, "pms-routing", s.pmsRoutingRoutes)
 			mountResource(r, s, "pms-source-conflicts", s.pmsSourceConflictsRoutes)
+			// Review decisions and roster reconciliation (audit remediation H-5, H-13, H-15).
+			mountResource(r, s, "pms-event-decisions", s.pmsEventDecisionsRoutes)
+			mountResource(r, s, "pms-roster-reconciliation", s.rosterReconciliationRoutes)
+			mountResource(r, s, "stay-transfers", s.stayTransfersRoutes)
 			// Guest sign-in attempts, both halves. Mounted here so the list, the detail and the credential
 			// proxy are all exercised through the real router, the real role matrix and a real database.
 			mountResource(r, s, "guest-signin-attempts", s.signInAttemptsRoutes)
@@ -236,6 +240,8 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 			// Client networks: create, batch create, replace and delete are site-database work in edged (only
 			// validate/apply/confirm/rollback reach netd), so they are exercised here against a real schema.
 			mountResource(r, s, "network", s.networkRoutes)
+			// The walled garden and its widest-network policy (0125).
+			mountResource(r, s, "walled-garden", s.walledGardenRoutes)
 			// Client accounts and the generated-password format (0104): paging, search, newest-first and the
 			// format setting are exercised through the real router, role matrix and database.
 			mountResource(r, s, "guest-accounts", s.guestAccountsRoutes)
@@ -256,6 +262,10 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 			r.Route("/device-settings", func(r chi.Router) {
 				r.Use(s.resourcePermission("auth-methods"))
 				r.Mount("/", s.deviceSettingsRoutes())
+			})
+			r.Route("/accounting-retention", func(r chi.Router) {
+				r.Use(s.resourcePermission("backups"))
+				r.Mount("/", s.accountingRetentionRoutes())
 			})
 		})
 	})

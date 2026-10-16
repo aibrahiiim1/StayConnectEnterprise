@@ -13,9 +13,11 @@ package main
 // which is tenant configuration rather than account storage.
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -46,13 +48,29 @@ func (s *server) getGuestAccountPortal(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	var enabled *bool
-	_ = s.db.QueryRow(ctx,
-		`SELECT (auth_methods #>> '{guest_account,enabled}')::boolean FROM tenants WHERE id=$1`, s.tenantID).Scan(&enabled)
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": enabled != nil && *enabled})
+	// A failed read is reported, not answered as "hidden": the switch would otherwise show a state the appliance
+	// never said it was in.
+	if err := s.db.QueryRow(ctx,
+		`SELECT (auth_methods #>> '{guest_account,enabled}')::boolean FROM tenants WHERE id=$1`, s.tenantID).Scan(&enabled); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "the sign-in configuration could not be read")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": enabled != nil && *enabled,
+		"can_change": permFor(sessRoles(r), "auth-methods", permWrite)})
 }
 
 // setGuestAccountPortal enables/disables the portal tab.
+//
+// IT IS A SIGN-IN METHOD SWITCH, so it is governed like one. The route sits under guest-accounts (the desk and
+// the voucher station hold WRITE there to create accounts), but which ways a client may sign in is the
+// auth-methods decision, read-only for those roles -- so the handler requires auth-methods WRITE as well, and
+// records the change as the same auth_methods.updated audit the Sign-in methods screen writes.
 func (s *server) setGuestAccountPortal(w http.ResponseWriter, r *http.Request) {
+	if !permFor(sessRoles(r), "auth-methods", permWrite) {
+		jsonErr(w, http.StatusForbidden, "forbidden",
+			"role lacks access to auth-methods: whether the portal offers client accounts is set on Sign-in methods")
+		return
+	}
 	var in struct {
 		Enabled bool `json:"enabled"`
 	}
@@ -69,8 +87,17 @@ func (s *server) setGuestAccountPortal(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "update failed")
 		return
 	}
-	s.audit(r, "guest_account.portal_toggled", "auth_methods", "guest_account", map[string]any{"enabled": in.Enabled})
+	s.audit(r, "auth_methods.updated", "tenant", s.tenantID,
+		map[string]any{"methods_changed": []string{"guest_account"}, "enabled": in.Enabled})
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": in.Enabled})
+}
+
+// sessRoles is the calling operator's roles, or none.
+func sessRoles(r *http.Request) []string {
+	if sess := sessFrom(r.Context()); sess != nil {
+		return sess.Roles
+	}
+	return nil
 }
 
 // validUsername: 1..64 chars, letters/digits/._-@ and no spaces or control
@@ -134,6 +161,18 @@ func (s *server) createGuestAccount(w http.ResponseWriter, r *http.Request) {
 	in.Username = strings.TrimSpace(in.Username)
 	if !validUsername(in.Username) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "username must be 1-64 chars: letters, digits, . _ - @ (no spaces)")
+		return
+	}
+	if msg := accountValidityError(in.ValidFrom, in.ValidUntil); msg != "" {
+		jsonErr(w, http.StatusBadRequest, "bad_request", msg)
+		return
+	}
+	if in.DisplayName != nil && utf8.RuneCountInString(strings.TrimSpace(*in.DisplayName)) > accountDisplayNameMax {
+		jsonErr(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("the name is limited to %d characters", accountDisplayNameMax))
+		return
+	}
+	if in.Notes != nil && utf8.RuneCountInString(strings.TrimSpace(*in.Notes)) > accountNotesMax {
+		jsonErr(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("notes are limited to %d characters", accountNotesMax))
 		return
 	}
 	// Password: operator-typed, or server-generated when generate=true. The

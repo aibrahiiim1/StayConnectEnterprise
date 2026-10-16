@@ -195,7 +195,7 @@ export function AddReservationDialog({
       open={open}
       onOpenChange={onOpenChange}
       title="New reservation"
-      description="Pin a device to a fixed address. The device gets this address the next time it asks for one."
+      description="Pin a device to a fixed address. The reservation is staged: it reaches the DHCP server when you next apply the client-network changes, and the device gets the address the next time it asks for one after that."
       submitLabel="Add reservation"
       busyLabel="Adding…"
       busy={busy}

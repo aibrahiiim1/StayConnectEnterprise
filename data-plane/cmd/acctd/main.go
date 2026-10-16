@@ -47,7 +47,7 @@ func loadCfg() cfg {
 	return cfg{
 		DBURL:        envOr("ACCTD_DB_URL", "postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect?sslmode=disable"),
 		ScdSocket:    envOr("ACCTD_SCD_SOCKET", "/run/stayconnect/scd.sock"),
-		TickSeconds:  envInt("ACCTD_TICK_SECONDS", 1),
+		TickSeconds:  tickSeconds(os.Getenv),
 		LegacyBridge: envOr("ACCTD_LEGACY_BRIDGE", "br-lan"),
 	}
 }
@@ -57,13 +57,36 @@ func envOr(k, d string) string {
 	}
 	return d
 }
-func envInt(k string, d int) int {
-	if v := os.Getenv(k); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return n
-		}
+
+// The accounting tick is BOUNDED. It is an engineering parameter, not a hotel setting: every lease and plan
+// timer downstream assumes a tick of a second or so. netd admits a new guest on a short provisional lease that
+// only the next plan submission renews, and a submitted plan is current for planValidity -- so a tick of a
+// minute or more takes every guest offline once per cycle, with nothing failing loudly (audit B-25). Out-of-range
+// and unparseable values are clamped into range and said so, rather than silently honoured.
+const (
+	minTickSeconds = 1
+	maxTickSeconds = 10
+)
+
+// tickSeconds reads ACCTD_TICK_SECONDS, default 1, clamped to [minTickSeconds, maxTickSeconds].
+func tickSeconds(getenv func(string) string) int {
+	raw := getenv("ACCTD_TICK_SECONDS")
+	if raw == "" {
+		return 1
 	}
-	return d
+	n, err := strconv.Atoi(raw)
+	switch {
+	case err != nil:
+		slog.Warn("acctd: ACCTD_TICK_SECONDS is not a number; using 1", "value", raw)
+		return 1
+	case n < minTickSeconds:
+		slog.Warn("acctd: ACCTD_TICK_SECONDS below the minimum; clamped", "value", n, "used", minTickSeconds)
+		return minTickSeconds
+	case n > maxTickSeconds:
+		slog.Warn("acctd: ACCTD_TICK_SECONDS above the maximum; clamped", "value", n, "used", maxTickSeconds)
+		return maxTickSeconds
+	}
+	return n
 }
 
 type snapshot map[string]snapEntry
@@ -194,10 +217,16 @@ func main() {
 			// Phase 3 runs on the same tick over its OWN session domain: measure first (so this tick's usage
 			// is attributed before anything is closed out), then enforce expiry at its true time, then submit
 			// the derived plan to netd — the single shaping writer. All three are no-ops while dark.
-			if n := p3.accountingPass(rootCtx, a.shp, netdShaping, c.LegacyBridge, time.Now()); n > 0 {
+			now := time.Now()
+			if n := p3.accountingPass(rootCtx, a.shp, netdShaping, c.LegacyBridge, now); n > 0 {
 				slog.Debug("phase3: accounting samples ingested", "count", n)
 			}
+			// The plan's per-session limits (idle timeout, maximum continuous session) come next, so a session
+			// they end is closed before the expiry sweep accrues online time against it. Idle is judged only
+			// when the accounting pass above completed cleanly: an unread meter is not an idle guest.
+			p3.enforceSessionLimits(rootCtx, now)
 			p3.enforceExpiries(rootCtx)
+			p3.purgeAccountingDetail(rootCtx, now)
 			aggOwner.sweep(rootCtx)
 			p3.reconcileShaping(rootCtx, netdShaping, c.LegacyBridge)
 			// Liveness heartbeat: proves the accounting loop is PROGRESSING (not

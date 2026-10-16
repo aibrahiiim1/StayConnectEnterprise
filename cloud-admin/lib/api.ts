@@ -167,6 +167,8 @@ export type ApplianceLicense = {
   valid_until?: string | null;
   grace_ends_at?: string | null;
   max_concurrent_online_guests?: number | null;
+  /** The current license's grace period in days; 0 = no grace. */
+  grace_period_days?: number | null;
   license_version?: number | null;
   /** Module ids the current license authorises; [] = core only; null with no license. */
   modules?: string[] | null;

@@ -35,9 +35,9 @@ const MANAGE = {
     devices: [{ mac: "02:aa:bb:cc:dd:01", status: "AUTHORIZED", online: false, first_authorized: iso(now - 2 * HOUR) }] }],
 };
 
-function wire() {
+function wire(roles: string[] = ["site_admin"]) {
   get.mockImplementation((path: string) => {
-    if (path === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
+    if (path === "/auth/whoami") return Promise.resolve({ roles });
     if (path === "/guest-accounts/portal") return Promise.resolve({ enabled: true });
     if (path === "/guest-accounts/s1/manage") return Promise.resolve(MANAGE);
     if (typeof path === "string" && path.startsWith("/guest-accounts?")) {
@@ -50,6 +50,13 @@ function wire() {
 
 beforeEach(() => { get.mockReset(); post.mockReset(); del.mockReset(); wire(); });
 afterEach(() => { cleanup(); vi.resetModules(); });
+
+// The confirmation opened on top of the page (or of the Manage dialog): the last dialog, once it says what it asks.
+const topDialog = (text: RegExp) => waitFor(() => {
+  const last = screen.getAllByRole("dialog").at(-1)!;
+  if (!text.test(last.textContent ?? "")) throw new Error("the confirmation is not open yet");
+  return last;
+});
 
 const row = (name: string) => screen.getByText(name).closest("tr") as HTMLElement;
 
@@ -85,8 +92,16 @@ describe("Client accounts — manage and remove", () => {
     expect(within(dialog).getByText("02:aa:bb:cc:dd:01")).toBeTruthy();
     expect(within(dialog).getByText("Holds a slot")).toBeTruthy();
 
+    // MARK VERIFIED VOUCHES FOR AN ADDRESS: a reason and the operator's password, then edged (audit C-4).
     await userEvent.click(within(dialog).getByRole("button", { name: /mark email verified/i }));
-    await waitFor(() => expect(post).toHaveBeenCalledWith("/guest-accounts/s1/verify-email"));
+    const confirm = await topDialog(/password|disconnected/i);
+    const confirmBtn = within(confirm).getByRole("button", { name: /^mark verified$/i });
+    expect(confirmBtn).toBeDisabled();
+    await userEvent.type(within(confirm).getByLabelText(/reason/i), "shown at the desk");
+    await userEvent.type(within(confirm).getByLabelText(/password/i), "pw");
+    await userEvent.click(confirmBtn);
+    await waitFor(() => expect(post).toHaveBeenCalledWith("/guest-accounts/s1/verify-email",
+      { reason: "shown at the desk", password: "pw" }));
     await userEvent.click(within(dialog).getByRole("button", { name: /new verification period/i }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("/guest-accounts/s1/restart-verification"));
   });
@@ -99,8 +114,52 @@ describe("Client accounts — manage and remove", () => {
     await within(dialog).findByText("Day pass");
     await userEvent.click(within(dialog).getByRole("button", { name: /remove account/i }));
     expect(await screen.findByText(/its history is kept|history are kept/i)).toBeTruthy();
-    await userEvent.click(screen.getAllByRole("button", { name: /^remove account$/i }).at(-1)!);
-    await waitFor(() => expect(del).toHaveBeenCalledWith("/guest-accounts/s1"));
+    // REMOVE CANNOT BE UNDONE, so it asks for the password (audit C-19).
+    const confirm = screen.getAllByRole("dialog").at(-1)!;
+    await userEvent.type(within(confirm).getByLabelText(/password/i), "pw");
+    await userEvent.click(within(confirm).getByRole("button", { name: /^remove account$/i }));
+    await waitFor(() => expect(del).toHaveBeenCalledWith("/guest-accounts/s1", { password: "pw" }));
     expect(await screen.findByText(/has been removed/i)).toBeTruthy();
+  });
+});
+
+describe("Client accounts — what each role is offered (C-3, C-4, C-18)", () => {
+  it("the voucher station cannot vouch for an address, act on a device, or flip the portal switch", async () => {
+    wire(["voucher_operator"]);
+    await renderPage();
+    expect(screen.getByRole("switch", { name: /offer username-and-password sign-in/i })).toBeDisabled();
+    await userEvent.click(within(row("late@example.com")).getByRole("button", { name: /manage/i }));
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText("Day pass");
+    expect(within(dialog).queryByRole("button", { name: /mark email verified/i })).toBeNull();
+    // It still reads Active sessions, so the Device view is offered -- read-only.
+    expect(within(dialog).getByRole("button", { name: /^device$/i })).toBeTruthy();
+  });
+
+  it("the desk may vouch for an address but not flip a sign-in method", async () => {
+    wire(["front_office_operator"]);
+    await renderPage();
+    expect(screen.getByRole("switch", { name: /offer username-and-password sign-in/i })).toBeDisabled();
+    expect(screen.getByText(/your role cannot change which sign-in methods are offered/i)).toBeTruthy();
+    await userEvent.click(within(row("late@example.com")).getByRole("button", { name: /manage/i }));
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText("Day pass");
+    expect(within(dialog).getByRole("button", { name: /mark email verified/i })).toBeTruthy();
+  });
+});
+
+describe("Client accounts — Disable (decision D-A)", () => {
+  it("confirms, says what happens to the devices and the package, and reports what edged did", async () => {
+    const patch = (await import("@/lib/api")).api.patch as unknown as ReturnType<typeof vi.fn>;
+    patch.mockResolvedValue({ ...LATE, enabled: false, packages_suspended: 1, disconnected_sessions: 1 });
+    await renderPage();
+    await userEvent.click(within(row("late@example.com")).getByRole("button", { name: /^disable$/i }));
+    const confirm = await topDialog(/password|disconnected/i);
+    expect(within(confirm).getByText(/will be disconnected/i)).toBeTruthy();
+    expect(within(confirm).getByText(/package is paused/i)).toBeTruthy();
+    expect(patch).not.toHaveBeenCalled();
+    await userEvent.click(within(confirm).getByRole("button", { name: /^disable account$/i }));
+    await waitFor(() => expect(patch).toHaveBeenCalledWith("/guest-accounts/s1", { enabled: false }));
+    expect(await screen.findByText(/1 device disconnected; its package is paused/i)).toBeTruthy();
   });
 });

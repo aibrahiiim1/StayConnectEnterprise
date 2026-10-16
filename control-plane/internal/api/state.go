@@ -52,13 +52,16 @@ type LicenseFacts struct {
 	OfflineGraceDays int
 }
 
-// EffectiveGraceDays mirrors the appliance's own rule (license.Document.EffectiveGraceDays): the explicit
-// grace period when set, otherwise the offline allowance.
+// EffectiveGraceDays mirrors the appliance's own rule (license.Document.EffectiveGraceDays). Every licence
+// Central issues is a v3+ document, whose grace period is explicit: 0 means NO grace. Rows from before the
+// simple model had grace_period_days back-filled from the offline allowance by migration 0040, which is
+// exactly what the appliance applies to those older documents, so the stored value is the answer for every
+// row. OfflineGraceDays is the cloud-staleness allowance and never a renewal grace.
 func (l LicenseFacts) EffectiveGraceDays() int {
-	if l.GracePeriodDays > 0 {
-		return l.GracePeriodDays
+	if l.GracePeriodDays < 0 {
+		return 0
 	}
-	return l.OfflineGraceDays
+	return l.GracePeriodDays
 }
 
 // GraceEndsAt is valid_until plus the effective grace period.

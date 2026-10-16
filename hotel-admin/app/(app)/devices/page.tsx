@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type ClientDeviceRow, type DeviceSettings } from "@/lib/api";
-import { canWrite } from "@/lib/roles";
+import { canRead, canWrite } from "@/lib/roles";
 import { useOperatorRoles } from "@/lib/whoami-context";
 import { PageShell, PageHeader, Toolbar } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
@@ -23,6 +23,7 @@ import { useToast } from "@/components/ui/toast";
 import { Smartphone, Settings2 } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
 import { DeviceDetailDialog } from "@/components/devices/device-detail";
+import { REASON_HINT, REASON_MAX_CHARS, reasonOk } from "@/lib/reason";
 
 // THREE STATES, NOT TWO. "Online" is signed in with a live Internet session. A device can be on the Wi-Fi --
 // holding a DHCP lease, sitting at the sign-in page -- without that, and used to read as "Offline".
@@ -48,6 +49,9 @@ export default function DevicesPage() {
   const roles = useOperatorRoles();
   const mayWrite = roles === null ? false : canWrite("sessions", roles);
   const mayConfigure = roles === null ? false : canWrite("auth-methods", roles);
+  // The daily device-change limit is an auth-methods setting. A role that cannot read it (the voucher station, the
+  // payments role) is not shown the card at all -- it used to be, and the page opened on a 403 banner.
+  const maySeeSettings = roles === null ? false : canRead("auth-methods", roles);
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
   const [rows, setRows] = useState<ClientDeviceRow[] | null>(null);
@@ -104,7 +108,7 @@ export default function DevicesPage() {
         }
       />
 
-      <DeviceChangesCard canEdit={mayConfigure} />
+      {maySeeSettings && <DeviceChangesCard canEdit={mayConfigure} />}
 
       <Card className="overflow-hidden">
         <CardBody className="border-b border-border py-3">
@@ -213,7 +217,7 @@ function DeviceChangesCard({ canEdit }: { canEdit: boolean }) {
   }
 
   const n = Number(draft);
-  const valid = Number.isInteger(n) && n >= 1 && n <= 10 && reason.trim().length >= 4 && password !== "";
+  const valid = Number.isInteger(n) && n >= 1 && n <= 10 && reasonOk(reason) && password !== "";
   return (
     <Card>
       <CardBody className="space-y-3">
@@ -238,8 +242,8 @@ function DeviceChangesCard({ canEdit }: { canEdit: boolean }) {
             <Field label="Changes per day" hint="1 to 10">
               <Input type="number" min={1} max={10} value={draft} onChange={(e) => setDraft(e.target.value)} />
             </Field>
-            <Field label="Reason" required>
-              <Input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} />
+            <Field label="Reason" required hint={REASON_HINT}>
+              <Input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={REASON_MAX_CHARS} />
             </Field>
             <Field label="Your password" required hint="Confirms the change.">
               <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />

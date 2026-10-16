@@ -328,13 +328,6 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
                         hint: "Not online time: the Grace Period ends when the time runs out or the data allowance is used up.",
                       },
                       {
-                        label: "Stay rules after checkout",
-                        value: effective.eligibility_window_seconds
-                          ? fmtDuration(effective.eligibility_window_seconds)
-                          : "Not part of the emergency terms",
-                        hint: "How long after checkout the stay still counts for stay-based package rules. It never removes the Grace Period from a guest who qualifies.",
-                      },
-                      {
                         label: "Delivered as",
                         value: isEmergency
                           ? "Built-in emergency terms (no site package)"

@@ -13,6 +13,7 @@
 // sentence saying what the action will do to the person it is about.
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { api, ListResp, Whoami, EdgeOperator } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { Card, CardBody } from "@/components/ui/card";
@@ -30,6 +31,7 @@ import { Plus, X, Users } from "lucide-react";
 import { canWrite, SITE_ROLES, ROLE_LABELS, SiteRole } from "@/lib/roles";
 import { formatRelative } from "@/lib/utils";
 import { HelpList, HelpSection } from "@/components/help";
+import { OperatorSigninProtection } from "@/components/operator-signin-protection";
 
 const MIN_PASSWORD = 10;
 
@@ -46,10 +48,14 @@ export default function OperatorsPage() {
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<string>("site_viewer");
+  // A password an administrator chose is one the administrator knows: by default the operator replaces it at
+  // their first sign-in (edged must_change_password, 0119).
+  const [requireChangeNew, setRequireChangeNew] = useState(true);
 
   const [pwFor, setPwFor] = useState<EdgeOperator | null>(null);
   const [newPw, setNewPw] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
+  const [requireChangeReset, setRequireChangeReset] = useState(true);
 
   const [disabling, setDisabling] = useState<EdgeOperator | null>(null);
   const [removingRole, setRemovingRole] = useState<{ op: EdgeOperator; role: string } | null>(null);
@@ -66,7 +72,7 @@ export default function OperatorsPage() {
   }, []);
 
   function openNew() {
-    setEmail(""); setDisplayName(""); setPassword(""); setRole("site_viewer");
+    setEmail(""); setDisplayName(""); setPassword(""); setRole("site_viewer"); setRequireChangeNew(true);
     setFormErr(null);
     setShowNew(true);
   }
@@ -82,6 +88,7 @@ export default function OperatorsPage() {
         display_name: displayName.trim() || undefined,
         password,
         role,
+        require_change: requireChangeNew,
       });
       setShowNew(false);
       setPassword("");
@@ -103,8 +110,9 @@ export default function OperatorsPage() {
       setFormErr("The two passwords do not match."); setBusy(false); return;
     }
     try {
-      await api.post(`/operators/${pwFor.id}/set-password`, { password: newPw });
-      toast.success("Password changed", `The password for ${pwFor.email} has been changed.`);
+      await api.post(`/operators/${pwFor.id}/set-password`, { password: newPw, require_change: requireChangeReset });
+      toast.success("Password reset", `${pwFor.email} has been signed out everywhere${requireChangeReset ? " and must choose a new password at the next sign-in" : ""}.`);
+      await load();
       setPwFor(null);
       setNewPw(""); setConfirmPw("");
     } catch (e) { setFormErr(e); }
@@ -180,8 +188,10 @@ export default function OperatorsPage() {
               <HelpList
                 items={[
                   `Passwords must be at least ${MIN_PASSWORD} characters and are typed twice when changed.`,
-                  "Changing a password does not end the operator's current sessions.",
-                  "A disabled operator can no longer sign in.",
+                  "Resetting someone's password signs them out everywhere and ends a sign-in lockout on their account.",
+                  "A password you set for someone must, by default, be replaced by them at their next sign-in.",
+                  "Your own password is changed with Change my password, which asks for your current one.",
+                  "A disabled operator can no longer sign in, and is signed out at once.",
                 ]}
               />
             </HelpSection>
@@ -225,6 +235,9 @@ export default function OperatorsPage() {
                         {/* On a phone the status column is hidden; a disabled account still says so here. */}
                         {op.status !== "active" && (
                           <Badge tone="neutral" className="mt-1 sm:hidden">Disabled</Badge>
+                        )}
+                        {op.status === "active" && op.must_change_password && (
+                          <Badge tone="warn" className="mt-1">Must set a new password</Badge>
                         )}
                       </TD>
                       <TD>
@@ -281,14 +294,20 @@ export default function OperatorsPage() {
                       {writable && (
                       <TD className="text-end">
                         <div className="flex flex-wrap justify-end gap-1">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            aria-label={`Change the password for ${op.email}`}
-                            onClick={() => { setFormErr(null); setNewPw(""); setConfirmPw(""); setPwFor(op); }}
-                          >
-                            Change password
-                          </Button>
+                          {isMe ? (
+                            <Link href="/account/password" className="inline-flex h-8 items-center rounded-md px-3 text-sm font-medium hover:bg-surface">
+                              Change my password
+                            </Link>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              aria-label={`Reset the password for ${op.email}`}
+                              onClick={() => { setFormErr(null); setNewPw(""); setConfirmPw(""); setRequireChangeReset(true); setPwFor(op); }}
+                            >
+                              Reset password
+                            </Button>
+                          )}
                         {writable && op.status === "active" && !isMe && (
                           <Button size="sm" variant="ghost" aria-label={`Disable ${op.email}`} onClick={() => { setFormErr(null); setDisabling(op); }}>
                             Disable
@@ -305,6 +324,9 @@ export default function OperatorsPage() {
           )}
         </CardBody>
       </Card>
+
+      {/* ------------------------------------------------------------------ sign-in protection (0119) */}
+      <OperatorSigninProtection writable={writable} />
 
       {/* ------------------------------------------------------------------ new operator */}
       <DialogForm
@@ -329,7 +351,7 @@ export default function OperatorsPage() {
         <Field
           label="Password"
           required
-          hint={`At least ${MIN_PASSWORD} characters. Tell them to change it after their first sign-in.`}
+          hint={`At least ${MIN_PASSWORD} characters.`}
           error={password !== "" && password.length < MIN_PASSWORD ? `${MIN_PASSWORD - password.length} more characters needed.` : undefined}
         >
           <Input
@@ -346,6 +368,7 @@ export default function OperatorsPage() {
             {SITE_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
           </Select>
         </Field>
+        <RequireChangeBox checked={requireChangeNew} onChange={setRequireChangeNew} />
       </DialogForm>
 
       {/* ------------------------------------------------------------------ change password */}
@@ -353,9 +376,9 @@ export default function OperatorsPage() {
         open={pwFor !== null}
         onOpenChange={(v) => !v && setPwFor(null)}
         size="sm"
-        title={pwFor ? `Change the password for ${pwFor.display_name || pwFor.email}` : "Change password"}
-        description="Their current sessions are not ended; they will need the new password the next time they sign in."
-        submitLabel="Change password"
+        title={pwFor ? `Reset the password for ${pwFor.display_name || pwFor.email}` : "Reset password"}
+        description="They are signed out everywhere at once, and any sign-in lockout on their account ends."
+        submitLabel="Reset password"
         busy={busy}
         error={formErr}
         disabled={newPw.length < MIN_PASSWORD || newPw !== confirmPw}
@@ -384,6 +407,7 @@ export default function OperatorsPage() {
             required
           />
         </Field>
+        <RequireChangeBox checked={requireChangeReset} onChange={setRequireChangeReset} />
       </DialogForm>
 
       {/* ------------------------------------------------------------------ disable */}
@@ -436,5 +460,22 @@ export default function OperatorsPage() {
         onConfirm={onRemoveRole}
       />
     </PageShell>
+  );
+}
+
+/** "Must set a new password at the next sign-in" -- on by default whenever an administrator chooses one. */
+function RequireChangeBox({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="flex items-start gap-2 rounded-md border border-border bg-surface/50 px-3.5 py-2.5 text-sm">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)}
+        className="mt-0.5 size-3.5 accent-[hsl(var(--primary))]" />
+      <span>
+        Must choose their own password at the next sign-in
+        <span className="block text-xs text-muted-foreground">
+          You know the password you type here. With this on, the first thing they can do after signing in is
+          replace it with one only they know.
+        </span>
+      </span>
+    </label>
   );
 }

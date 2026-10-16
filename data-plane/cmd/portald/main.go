@@ -88,6 +88,9 @@ type handler struct {
 	// portalTLS is portald's copy of scd's portal HTTPS state (portal_https.go), refreshed every 15 seconds. Nil
 	// (the tests' literal handlers) means the HTTP fallback: the portal exactly as it was before HTTPS existed.
 	portalTLS *tlsStateHolder
+
+	// signIns bounds how fast one device may post to the sign-in routes (throttle.go). Nil disables it.
+	signIns *signInDamper
 }
 
 func newHandler(c cfg) (*handler, error) {
@@ -121,6 +124,7 @@ func newHandler(c cfg) (*handler, error) {
 		commerceCfg: commCfg,
 		designs:     &designCache{},
 		portalTLS:   &tlsStateHolder{},
+		signIns:     newSignInDamper(),
 	}
 	// THE STORE EXISTS ONLY WHERE THERE IS SOMEWHERE FOR IT TO LEAD.
 	//
@@ -227,10 +231,21 @@ func (h *handler) index(w http.ResponseWriter, r *http.Request) {
 	// (10 minutes from sign-in) a reload of the landing page -- a refused card payment, a tab reopened, the
 	// captive browser popped again -- continues at package selection instead of asking for another code.
 	// Captive-portal probes carry no cookie and are unaffected.
+	//
+	// Two journeys are NOT continued at package selection: one whose card payment is in progress goes back to the
+	// page that asks where that payment stands (audit P-25: it used to be offered the package list -- and a second
+	// purchase -- for ten minutes after paying), and an email account held until its address is verified is not
+	// sent round again to a package it cannot use (audit P-13; the hold page offers Sign out).
 	if r.Method == http.MethodGet {
 		if sess, ok := h.resolveCommerceSession(r); ok && !sess.acquired {
-			http.Redirect(w, r, "/packages", http.StatusSeeOther)
-			return
+			switch {
+			case sess.purchaseID != "":
+				http.Redirect(w, r, "/pay/return?p="+sess.purchaseID, http.StatusSeeOther)
+				return
+			case !sess.held:
+				http.Redirect(w, r, "/packages", http.StatusSeeOther)
+				return
+			}
 		}
 	}
 	h.landing(w, r, "")
@@ -278,22 +293,25 @@ func (h *handler) authVoucher(w http.ResponseWriter, r *http.Request) {
 	defer resp.Body.Close()
 	payload, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
-		msg := "Invalid voucher."
+		msg := msgVoucherInvalid
 		var e struct {
 			Error string `json:"error"`
 		}
-		if json.Unmarshal(payload, &e) == nil && e.Error != "" {
-			switch {
-			case e.Error == "MAX_DEVICES_REACHED":
-				msg = "This voucher has reached its device limit. Disconnect another device and try again."
-			case e.Error == "LICENSE_CAPACITY_REACHED":
-				msg = guestCapacityMessage
-			case e.Error == "METHOD_DISABLED" || isLicenceRefusal(e.Error):
-				msg = guestLicenseRefusedMessage
-			default:
-				msg = "Voucher " + e.Error + "."
-			}
+		_ = json.Unmarshal(payload, &e)
+		switch {
+		case e.Error == "TOO_MANY_ATTEMPTS" || resp.StatusCode == http.StatusTooManyRequests:
+			// The durable sign-in throttle refused the attempt (audit P-5): the client waits, the code may be fine.
+			msg = msgTooManyAttempts
+		case e.Error == "MAX_DEVICES_REACHED":
+			msg = msgVoucherDevices
+		case e.Error == "LICENSE_CAPACITY_REACHED":
+			msg = guestCapacityMessage
+		case e.Error == "METHOD_DISABLED" || isLicenceRefusal(e.Error):
+			msg = guestLicenseRefusedMessage
+		case resp.StatusCode >= 500:
+			msg = "Service unavailable. Please try again."
 		}
+		// Any other refusal is the invalid-voucher sentence. scd's code is never shown or echoed (audit P-31).
 		h.landing(w, r, msg)
 		return
 	}
@@ -369,7 +387,7 @@ func (h *handler) credentialsSignIn(w http.ResponseWriter, r *http.Request, user
 		case e.Error == "LICENSE_CAPACITY_REACHED":
 			msg = guestCapacityMessage
 		case e.Error == "MAX_DEVICES_REACHED":
-			msg = "This account has reached its device limit. Disconnect another device and try again."
+			msg = msgAccountDevices
 		case e.Error == "TOO_MANY_ATTEMPTS":
 			msg = "Too many attempts. Please wait a minute and try again."
 		case e.Error == "METHOD_DISABLED" || isLicenceRefusal(e.Error):
@@ -404,25 +422,44 @@ func (h *handler) credentialsSignIn(w http.ResponseWriter, r *http.Request, user
 }
 
 func (h *handler) success(w http.ResponseWriter, r *http.Request) {
+	// WHAT THIS PAGE SAYS IS LOOKED UP, NOT READ FROM ITS ADDRESS (audit P-6, P-32). It used to print the duration
+	// in ?t= and the session in ?s=, which every IAM-v2 sign-in left without t -- so it always said "No time
+	// limit" -- and which anyone could edit. The device is the connection's; scd says whether it is online, which
+	// session it holds and when that access ends.
+	st, known := h.deviceStatus(r.Context(), clientIP(r))
+	if known && !st.Active {
+		// Not online: the sign-in page is where this device belongs.
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
 	nonce := setPortalCSP(w)
-	dur, _ := time.ParseDuration(r.URL.Query().Get("t") + "s")
-	// Branded and in the guest's language like the sign-in page. The session id stays in the data (it is the
-	// page's own address) but is no longer printed: it meant nothing to a guest.
+	// Branded and in the guest's language like the sign-in page.
 	p := h.newGuestPage(r, nonce, "tl.", "dev.", "unit.")
 	v := successView{
-		guestPage:       p,
-		SessionID:       r.URL.Query().Get("s"),
-		DurationSeconds: int(dur.Seconds()),
-		HumanRemaining:  humanSpan(p.T, dur),
-		// Phase 2 DARK: the guest commerce panel renders only when the portal surface is ON.
-		CommerceEnabled: h.commerceCfg.PortalOn(),
+		guestPage: p,
 		// An email account not verified yet (and not suspended): a small reminder with its deadline and Resend.
 		Reminder: h.onlineReminderFor(r, p.T),
 	}
-	if v.CommerceEnabled {
-		v.CX = commerceWords(p.Lang)
-		v.CXJS = jsData(v.CX)
+	if known {
+		v.SessionID = st.SessionID
+		if d := st.remaining(time.Now()); d != nil {
+			v.DurationSeconds = int(d.Seconds())
+			v.HumanRemaining = humanSpan(p.T, *d)
+			if v.HumanRemaining == "" {
+				v.HumanRemaining = p.T["tl.none"]
+			}
+		} else {
+			v.Unlimited = true
+		}
+	}
+	// THE PACKAGE PANEL IS GONE FROM THIS PAGE (audit P-16). Every device that reaches it is online, its sign-in
+	// already spent: the panel offered purchases to a client who had just bought, labelled every quote "Free" and
+	// confirmed without a method, so a priced package answered "offer expired". Buying more is a decision for a
+	// later delivery, not something this page should pretend to do.
+	if sess, ok := h.resolveCommerceSession(r); ok {
+		v.ReturnCode = sess.returnCode
 	}
 	_ = h.tmplSucc.Execute(w, v)
 }
@@ -439,10 +476,23 @@ func (h *handler) logout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad ip", 400)
 		return
 	}
-	body, _ := json.Marshal(map[string]string{"ip": ip.String(), "reason": "admin"})
+	// THIS DEVICE'S OWN PAGE ASKED (leave.go, audit P-8). Without the token nothing is ended: the client is asked.
+	_ = r.ParseForm()
+	if !validLeaveToken(ip, r.PostFormValue("leave")) {
+		if wantsHTML(r) || r.Header.Get("Accept") == "" {
+			h.renderLeaveConfirm(w, r)
+			return
+		}
+		jsonErr(w, http.StatusForbidden, "sign-out must come from this device's portal page")
+		return
+	}
+	// "logout", not "admin" (audit P-30): the guest signed themselves out.
+	body, _ := json.Marshal(map[string]string{"ip": ip.String(), "reason": "logout"})
 	req, _ := http.NewRequestWithContext(r.Context(), "POST", "http://unix/v1/sessions/revoke", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	_, _ = h.scd.Do(req)
+	if resp, err := h.scd.Do(req); err == nil {
+		resp.Body.Close()
+	}
 	// Signing out also forgets the device (contract §2.3): the next visit asks for a code again.
 	if token := h.resumeToken(r); token != "" {
 		rb, _ := json.Marshal(map[string]string{"resume_token": token})
@@ -451,7 +501,7 @@ func (h *handler) logout(w http.ResponseWriter, r *http.Request) {
 		if resp, err := h.scd.Do(rq); err == nil {
 			resp.Body.Close()
 		}
-		clearClientResumeCookie(w)
+		clearClientResumeCookie(w, r)
 	}
 	h.endPortalSignIn(w, r)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -469,10 +519,11 @@ func (h *handler) endPortalSignIn(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(commerceCookie); err == nil && c.Value != "" && h.commerceSessions != nil {
 		h.commerceSessions.delete(c.Value)
 	}
-	for _, name := range []string{commerceCookie, accountCookie} {
+	// og_resume too (audit P-12, contract §2.3): an open-selection client who signs out is forgotten on this
+	// device like every other client; the recovery code still brings them back.
+	for _, name := range []string{commerceCookie, accountCookie, resumeCookie} {
 		if _, err := r.Cookie(name); err == nil {
-			http.SetCookie(w, &http.Cookie{Name: name, Value: "", Path: "/", MaxAge: -1, HttpOnly: true,
-				SameSite: http.SameSiteLaxMode})
+			clearPortalCookie(w, r, name)
 		}
 	}
 }
@@ -533,10 +584,20 @@ func (h *handler) appleProbe(w http.ResponseWriter, r *http.Request) {
 	h.landing(w, r, "")
 }
 func (h *handler) googleProbe(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, "http://"+h.cfg.PortalFQDN+"/", http.StatusFound)
+	http.Redirect(w, r, h.probeTarget(r), http.StatusFound)
 }
 func (h *handler) windowsProbe(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, "http://"+h.cfg.PortalFQDN+"/", http.StatusFound)
+	http.Redirect(w, r, h.probeTarget(r), http.StatusFound)
+}
+
+// probeTarget is where an Android or Windows captive probe is sent on the HTTP fallback (audit P-21): an address
+// the device can certainly reach (fallbackOrigin). PORTALD_FQDN is used only when no address is known; its
+// default .local name is resolved by multicast DNS on Apple devices, so it is the last choice, not the first.
+func (h *handler) probeTarget(r *http.Request) string {
+	if o := h.fallbackOrigin(r); o != "" {
+		return o + "/"
+	}
+	return "http://" + h.cfg.PortalFQDN + "/"
 }
 
 func (h *handler) routes() http.Handler {
@@ -565,18 +626,21 @@ func (h *handler) routes() http.Handler {
 	r.Use(redactLoggedQuery)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(15 * time.Second))
+	// The whole of a package acquisition fits (quote 5 s + confirm 5 s + activation 12 s), and a request that
+	// still runs out is answered with a page in words, not a blank 504 (timeout.go, audit P-20).
+	r.Use(h.portalTimeout(portalRequestTimeout))
 	// Text responses are gzipped for a client that accepts it (portal_gzip.go); images pass through untouched.
 	r.Use(gzipResponses)
 
 	r.Get("/", h.index)
-	r.Post("/auth/voucher", h.authVoucher)
-	r.Post("/auth/credentials", h.authCredentials)
+	// Every route that checks a credential or sends a message passes the flood damper first (throttle.go).
+	r.Post("/auth/voucher", h.damped(h.authVoucher))
+	r.Post("/auth/credentials", h.damped(h.authCredentials))
 	// Email accounts (account_handlers.go): create, sign in, forgot password; the verification page, Resend and
 	// the extra hour; and the two email links, whose GET only shows a button.
-	r.Post("/auth/account/register", h.accountRegister)
-	r.Post("/auth/account/signin", h.accountSignIn)
-	r.Post("/auth/account/forgot", h.accountForgot)
+	r.Post("/auth/account/register", h.damped(h.accountRegister))
+	r.Post("/auth/account/signin", h.damped(h.accountSignIn))
+	r.Post("/auth/account/forgot", h.damped(h.accountForgot))
 	r.Post("/auth/account/resend", h.accountResend)
 	r.Post("/auth/account/grace", h.accountGrace)
 	r.Get("/account/verification", h.accountVerificationPage)
@@ -585,20 +649,21 @@ func (h *handler) routes() http.Handler {
 	r.Get("/account/reset", h.accountResetPage)
 	r.Post("/account/reset", h.accountReset)
 	// The remembered device: Connect, and Not-you (client_resume.go).
-	r.Post("/auth/resume", h.authResume)
+	r.Post("/auth/resume", h.damped(h.authResume))
 	r.Post("/auth/resume/forget", h.authResumeForget)
-	r.Post("/auth/otp/request", h.authOTPRequest)
+	r.Post("/auth/otp/request", h.damped(h.authOTPRequest))
 	// The pending code survives the captive browser (otp_pending.go): resend, forget, and the message's link.
-	r.Post("/auth/otp/resend", h.authOTPResend)
+	r.Post("/auth/otp/resend", h.damped(h.authOTPResend))
 	r.Post("/auth/otp/forget", h.authOTPForget)
 	r.Get("/connect", h.connectPage)
-	r.Post("/auth/otp/link", h.authOTPLink)
-	r.Post("/auth/otp/verify", h.authOTPVerify)
+	r.Post("/auth/otp/link", h.damped(h.authOTPLink))
+	r.Post("/auth/otp/verify", h.damped(h.authOTPVerify))
 	r.Get("/auth/social/start", h.socialStart)
 	r.Get("/auth/social/callback", h.socialCallback)
 	r.Post("/auth/social/callback", h.socialCallback) // Sign in with Apple: response_mode=form_post
-	r.Get("/api/oauth/stub/authorize", h.stubAuthorize)
-	r.Post("/api/oauth/stub/authorize-confirm", h.stubAuthorizeConfirm)
+	// The development OAuth stub exists only in a `-tags devlicense` build (stub_oauth_dev.go); a production
+	// binary has no such route (HTTPS contract section 11, audit P-2).
+	mountStubOAuth(r, h)
 	// The legacy /auth/pms/verify hop is REMOVED; /auth/pms/phase3 below is the current PMS guest flow.
 	// Phase 3 (DARK): the Stay-resolution guest flow. It is mounted unconditionally because it is a pure
 	// proxy — scd does not mount its Phase-3 endpoints while dark, so this path answers with the same uniform
@@ -650,7 +715,7 @@ func (h *handler) routes() http.Handler {
 	r.Get("/packages", h.packagesPage)
 	r.Post("/packages/acquire", h.acquirePackage)
 	// Open package selection and the card payment return (acquisition.go).
-	r.Post("/auth/open", h.authOpen)
+	r.Post("/auth/open", h.damped(h.authOpen))
 	r.Get("/pay/return", h.payReturn)
 	r.Get("/api/pay/status", h.payStatusAPI)
 	r.Get("/success", h.success)

@@ -18,11 +18,25 @@
 // about them after the snapshot. A guest who checked in ten minutes ago is absent from a roster taken
 // fifteen minutes ago, and closing them would disconnect somebody who just arrived. That is shown as a
 // protection, permanently, not hidden because it is usually small.
+//
+// OPENING THE PAGE RUNS NOTHING (audit H-13). It used to compute a dry run on every open, which wrote a run
+// row -- a READ permission writing, and the ledger growing every time anybody looked. The figures are now the
+// LAST RECORDED run; "Run dry run" is an explicit action for the roles that own the integration.
+//
+// A CLOSED STAY IS CHECKED OUT LIKE ANY OTHER (audit H-2). A stay the roster no longer lists is handed to the
+// same checkout a PMS departure goes through: its internet access ends or moves to the departure grace
+// package, and its devices and sessions are closed.
 
 import { useCallback, useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { DialogForm } from "@/components/ui/dialog";
+import { Field, Input, Select } from "@/components/ui/input";
+import { useOperatorRoles } from "@/lib/whoami-context";
+import { canWrite } from "@/lib/roles";
+import { useToast } from "@/components/ui/toast";
 import Link from "next/link";
 import { ShieldCheck, Building2, AlertTriangle, BookMarked, ListChecks, History } from "lucide-react";
-import { api, RosterReconciliationState, ReconcileRunRecord } from "@/lib/api";
+import { api, RosterReconciliationState, ReconcileRunRecord, ReconcileRun } from "@/lib/api";
 import { cn, formatDate } from "@/lib/utils";
 import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
 import { HelpList, HelpSection, HelpTip } from "@/components/help";
@@ -53,7 +67,7 @@ const REFUSAL_MEANING: Record<string, string> = {
 
 // The run outcome in words: "completed" or the refusal, without the REFUSED_ prefix the table already implies.
 const outcomeWords = (o: string) =>
-  o === "COMPLETED" ? "will complete" : `will refuse: ${o.replace(/^REFUSED_/, "").replace(/_/g, " ").toLowerCase()}`;
+  o === "COMPLETED" ? "completed" : `refused: ${o.replace(/^REFUSED_/, "").replace(/_/g, " ").toLowerCase()}`;
 
 export default function RosterReconciliationPage() {
   const [state, setState] = useState<RosterReconciliationState | null>(null);
@@ -61,13 +75,20 @@ export default function RosterReconciliationPage() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const [iface, setIface] = useState("");
+  const [dry, setDry] = useState<ReconcileRun | null>(null);
+  const [dryBusy, setDryBusy] = useState(false);
+  const [dryErr, setDryErr] = useState<unknown>(null);
+  const roles = useOperatorRoles();
+  const writable = roles ? canWrite("pms-roster-reconciliation", roles) : false;
 
   const load = useCallback(async () => {
     setErr(null);
     setBusy(true);
     try {
+      const q = iface ? "?pms_interface_id=" + encodeURIComponent(iface) : "";
       const [s, r] = await Promise.all([
-        api.get<RosterReconciliationState>("/pms-roster-reconciliation"),
+        api.get<RosterReconciliationState>("/pms-roster-reconciliation" + q),
         api.get<{ runs: ReconcileRunRecord[] }>("/pms-roster-reconciliation/runs"),
       ]);
       setState(s);
@@ -78,15 +99,32 @@ export default function RosterReconciliationPage() {
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [iface]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // "Run dry run": what a run would do now, recorded as a DRY_RUN in the ledger. Changes no stay.
+  async function runDry() {
+    setDryBusy(true);
+    setDryErr(null);
+    try {
+      const out = await api.post<ReconcileRun>("/pms-roster-reconciliation/preview", {
+        pms_interface_id: state?.pms_interface_id, reason: "dry run requested from the console",
+      });
+      setDry(out);
+      await load();
+    } catch (e) {
+      setDryErr(e);
+    } finally {
+      setDryBusy(false);
+    }
+  }
 
   // A blocker either clears itself or it does not, and the screen must not imply the wrong one.
   const operational = (state?.blockers ?? []).filter((b) => b.blocker !== "DEPARTURE_FOR_UNKNOWN_STAY");
   const historical = (state?.blockers ?? []).filter((b) => b.blocker === "DEPARTURE_FOR_UNKNOWN_STAY");
 
-  const p = state?.preview;
+  const p = dry ?? state?.last_run ?? state?.preview ?? null;
   const complete = p ? p.rooms_expected > 0 && p.rooms_enumerated >= p.rooms_expected - (state!.settings.inventory_tolerance) : false;
   const refused = p && p.outcome !== "COMPLETED";
 
@@ -108,9 +146,14 @@ export default function RosterReconciliationPage() {
             </HelpSection>
             <HelpSection title="This happens on its own">
               <p>
-                There is nothing on this page to press, no queue to work through and no routine task. Everything
-                here is so you can see what it did and why. The connection&rsquo;s recovery numbers are changed on
-                PMS connection, under Advanced configuration.
+                There is no queue to work through and no routine task. Everything here is so you can see what it
+                did and why. Opening the page changes nothing; <strong>Run dry run</strong> records what a run would
+                do now, without closing any stay. The connection&rsquo;s recovery numbers are changed on PMS
+                connection, under Advanced configuration.
+              </p>
+              <p>
+                A stay the PMS no longer lists is checked out exactly like a departure the PMS sends: its internet
+                access ends (or moves to the departure grace package) and its devices are disconnected.
               </p>
               <p>
                 Guests are never affected while it waits: if the PMS list is incomplete or the link is down, the
@@ -247,12 +290,40 @@ export default function RosterReconciliationPage() {
           complete published generation, and a manual trigger for the same audited action would be a repair
           control for work that is not outstanding. This card exists so an operator can SEE the decision
           before it is taken, and see why it was refused when it is. */}
+      {(state?.interfaces?.length ?? 0) > 1 && (
+        <Card>
+          <CardBody>
+            <Field label="PMS connection" hint="Each connection has its own guest list and its own runs.">
+              <Select value={iface || state?.pms_interface_id || ""} onChange={(e) => { setDry(null); setIface(e.target.value); }}>
+                {state!.interfaces!.map((i) => (
+                  <option key={i.id} value={i.id}>
+                    {(i.label || i.connector_kind) + (i.lifecycle_state !== "ACTIVE" ? ` (${i.lifecycle_state.toLowerCase()})` : "")}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </CardBody>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
-          <CardTitle>What the next automatic run will do</CardTitle>
+          <CardTitle>{dry ? "What a run would do now (dry run)" : "What the last run decided"}</CardTitle>
           {p && <Badge tone={refused ? "warn" : "ok"} dot>{outcomeWords(p.outcome)}</Badge>}
         </CardHeader>
         <CardBody className="space-y-4">
+          <ErrorBanner err={dryErr} />
+          {!p && (
+            <p className="text-sm text-muted-foreground">
+              No run has been recorded for this connection yet. One is recorded each time the PMS publishes a
+              complete guest list.
+            </p>
+          )}
+          {!dry && state?.last_run_at && (
+            <p className="text-xs text-muted-foreground">
+              {state.last_run_mode === "APPLY" ? "Automatic run" : "Dry run"} recorded {formatDate(state.last_run_at)}.
+            </p>
+          )}
 
           {refused && p && (
             <p className="text-sm text-muted-foreground">
@@ -262,19 +333,29 @@ export default function RosterReconciliationPage() {
 
           {!refused && p && (
             <p className="text-sm">
-              <strong>{p.absent_from_roster}</strong> stay{p.absent_from_roster === 1 ? "" : "s"} would be
-              closed — every one of them absent from a roster that named {p.rooms_enumerated} of{" "}
-              {p.rooms_expected} rooms. {p.protected_by_newer_events} further stay
+              <strong>{p.absent_from_roster}</strong> stay{p.absent_from_roster === 1 ? "" : "s"} absent from a
+              roster that named {p.rooms_enumerated} of {p.rooms_expected} rooms
+              {dry ? " would be checked out" : state?.last_run_mode === "APPLY" ? ` — ${p.stays_closed} sent to check-out` : " would be checked out"}
+              . {p.protected_by_newer_events} further stay
               {p.protected_by_newer_events === 1 ? " is" : "s are"} absent but held back, because the PMS has
               said something about {p.protected_by_newer_events === 1 ? "it" : "them"} since the snapshot.
             </p>
           )}
 
-          <p className="text-xs text-muted-foreground">
-            This happens on its own when the PMS publishes a complete roster. Nothing here needs pressing.
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground">
+              This happens on its own when the PMS publishes a complete roster. Nothing here needs pressing.
+            </p>
+            {writable && (
+              <Button size="sm" variant="secondary" disabled={dryBusy || !state} onClick={() => void runDry()}>
+                {dryBusy ? "Running…" : "Run dry run"}
+              </Button>
+            )}
+          </div>
         </CardBody>
       </Card>
+
+      {state && <RosterSettingsCard settings={state.settings} writable={writable} onSaved={() => void load()} />}
 
       {/* THE HISTORICAL SNAPSHOT ARTIFACTS. Answered once, in bulk, from the fact that a resync mentions
           every room and an empty one has no booking to name. There is no button because there is nothing
@@ -332,7 +413,7 @@ export default function RosterReconciliationPage() {
                 <TH>Outcome</TH>
                 <TH className="hidden md:table-cell">Rooms</TH>
                 <TH className="hidden md:table-cell text-end">Absent</TH>
-                <TH className="text-end">Closed</TH>
+                <TH className="text-end">Checked out</TH>
                 <TH className="hidden lg:table-cell text-end">Held back</TH>
                 <TH className="hidden lg:table-cell">By</TH>
                 <TH className="hidden xl:table-cell">Reason</TH>
@@ -342,7 +423,7 @@ export default function RosterReconciliationPage() {
               {runs.map((r, i) => (
                 <TR key={i}>
                   <TD className="whitespace-nowrap text-sm">{formatDate(r.run_at)}</TD>
-                  <TD className="hidden text-sm sm:table-cell">{r.mode === "APPLY" ? "Applied" : "Preview"}</TD>
+                  <TD className="hidden text-sm sm:table-cell">{r.mode === "APPLY" ? "Applied" : "Dry run"}</TD>
                   <TD>
                     <Badge tone={r.outcome === "COMPLETED" ? "ok" : "warn"} dot>
                       {r.outcome.replace(/^REFUSED_/, "").replace(/_/g, " ").toLowerCase()}
@@ -362,5 +443,111 @@ export default function RosterReconciliationPage() {
       </Card>
       </div>
     </PageShell>
+  );
+}
+
+// THE ROSTER-TRUST SETTINGS (audit H-5), shown to everyone who can open the page and changed only by the roles
+// that own the integration: the password, the version that was on screen and a reason are required, the
+// database re-checks the bounds and keeps the change history, and the change is in the activity log.
+function RosterSettingsCard({
+  settings, writable, onSaved,
+}: {
+  settings: RosterReconciliationState["settings"];
+  writable: boolean;
+  onSaved: () => void;
+}) {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [vals, setVals] = useState({ floor: "", cap: "", tol: "", look: "" });
+  const [reason, setReason] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<unknown>(null);
+
+  const bounds = { floor: [1, 100000], cap: [1, 100000], tol: [0, 10000], look: [1, 1000] } as const;
+  const ok = (k: keyof typeof bounds) => {
+    const n = Number(vals[k]);
+    return Number.isInteger(n) && n >= bounds[k][0] && n <= bounds[k][1];
+  };
+  const allOk = ok("floor") && ok("cap") && ok("tol") && ok("look");
+
+  function edit() {
+    setVals({
+      floor: String(settings.roster_trust_min), cap: String(settings.max_close_per_run),
+      tol: String(settings.inventory_tolerance), look: String(settings.inventory_lookback),
+    });
+    setReason(""); setPassword(""); setErr(null); setOpen(true);
+  }
+
+  async function save() {
+    setBusy(true); setErr(null);
+    try {
+      await api.put("/pms-roster-reconciliation/settings", {
+        expected_config_version: settings.config_version,
+        roster_trust_min: Number(vals.floor), max_close_per_run: Number(vals.cap),
+        inventory_tolerance: Number(vals.tol), inventory_lookback: Number(vals.look),
+        reason: reason.trim(), password,
+      });
+      toast.success("Reconciliation settings saved");
+      setOpen(false);
+      onSaved();
+    } catch (e) {
+      setErr(e);
+    } finally {
+      setBusy(false); setPassword("");
+    }
+  }
+
+  const row = (label: string, value: number, hint: string) => (
+    <div className="flex items-baseline justify-between gap-3 text-sm">
+      <span>{label} <span className="text-xs text-muted-foreground">— {hint}</span></span>
+      <span className="tabular font-medium">{value}</span>
+    </div>
+  );
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>When a roster is trusted</CardTitle>
+        {writable && <Button size="sm" variant="secondary" onClick={edit}>Change</Button>}
+      </CardHeader>
+      <CardBody className="space-y-1.5">
+        {row("Smallest roster acted on", settings.roster_trust_min, "occupied rooms; a smaller list is treated as broken")}
+        {row("Most stays one run may check out", settings.max_close_per_run, "more stops for a person")}
+        {row("Rooms a sweep may miss", settings.inventory_tolerance, "and still count as complete")}
+        {row("Sweeps remembered for the building", settings.inventory_lookback, "")}
+        <p className="pt-1 text-xs text-muted-foreground">
+          {settings.is_default ? "These are the defaults." : `Version ${settings.config_version}.`}
+        </p>
+      </CardBody>
+      <DialogForm
+        open={open}
+        onOpenChange={(v) => { if (!busy) setOpen(v); }}
+        title="When a roster is trusted"
+        description="These decide when the appliance checks out stays the PMS no longer lists."
+        busy={busy}
+        error={err}
+        disabled={!allOk || reason.trim().length < 3 || password === ""}
+        onSubmit={save}
+      >
+        <Field label="Smallest roster acted on (rooms)" hint="1 – 100000. Default 50." required error={ok("floor") ? undefined : "1 – 100000"}>
+          <Input type="number" value={vals.floor} onChange={(e) => setVals({ ...vals, floor: e.target.value })} />
+        </Field>
+        <Field label="Most stays one run may check out" hint="1 – 100000. Default 500." required error={ok("cap") ? undefined : "1 – 100000"}>
+          <Input type="number" value={vals.cap} onChange={(e) => setVals({ ...vals, cap: e.target.value })} />
+        </Field>
+        <Field label="Rooms a sweep may miss" hint="0 – 10000. Default 2." required error={ok("tol") ? undefined : "0 – 10000"}>
+          <Input type="number" value={vals.tol} onChange={(e) => setVals({ ...vals, tol: e.target.value })} />
+        </Field>
+        <Field label="Sweeps remembered" hint="1 – 1000. Default 10." required error={ok("look") ? undefined : "1 – 1000"}>
+          <Input type="number" value={vals.look} onChange={(e) => setVals({ ...vals, look: e.target.value })} />
+        </Field>
+        <Field label="Reason" hint="Recorded in the activity log." required>
+          <Input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} />
+        </Field>
+        <Field label="Confirm your password" required>
+          <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        </Field>
+      </DialogForm>
+    </Card>
   );
 }

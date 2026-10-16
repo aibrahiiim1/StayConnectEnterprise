@@ -197,7 +197,6 @@ export const TERM_FIELDS: { key: keyof GraceTerms; label: string; fmt: (v: any) 
     fmt: (v: number) => (v <= 0 ? "No extra devices" : String(v)),
   },
   { key: "grace_device_limit_policy", label: "Device handling", fmt: devicePolicyTitle },
-  { key: "eligibility_window_seconds", label: "Stay rules after checkout", fmt: fmtDuration },
 ];
 
 export type TermChange = { key: keyof GraceTerms; label: string; from: string; to: string; changed: boolean };

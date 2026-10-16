@@ -10,8 +10,9 @@ package iamv2
 //
 //  1. The device that acquired a live anonymous entitlement rejoins it (purchase -> auth context -> device):
 //     no credential needed, and no new subject is minted, so quota and package limits continue.
-//  2. A resume token (HttpOnly portal cookie) or a recovery code (shown to the client, for when a captive
-//     mini-browser drops cookies or the client uses another device) resolves to its subject.
+//  2. A resume token (HttpOnly portal cookie, bound to the device it was issued to -- resumeSecret) or a
+//     recovery code (shown to the client, for when a captive mini-browser drops cookies or the client uses
+//     another device) resolves to its subject.
 //  3. Otherwise a new subject is minted with a fresh resume token and recovery code, returned ONCE.
 //
 // Only keyed HMACs of the token and code are stored. Free-package limits for anonymous subjects are evaluated
@@ -106,6 +107,18 @@ func NormalizeRecoveryCode(s string) string {
 	return s[:5] + "-" + s[5:]
 }
 
+// resumeSecret is what a resume token is keyed by: the token AND the device it was issued to (audit P-12).
+//
+// THE COOKIE IS NOT A BEARER CREDENTIAL. The resume token lives in the og_resume portal cookie, which on the HTTP
+// fallback travels in clear text; keyed by the token alone, anyone who copied it could resume the client's
+// anonymous subject from another device. Keyed with the device's MAC -- which portald takes from the kernel
+// neighbour table, never from the browser -- the same token presented from any other device resolves to nothing.
+// A client on another device uses the recovery code, which is exactly what it is for. No schema change: the
+// stored value is still one keyed HMAC.
+func resumeSecret(token, mac string) string {
+	return token + "\x00device:" + strings.ToLower(strings.TrimSpace(mac))
+}
+
 func newResumeToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -183,7 +196,7 @@ func (o *OpenAccess) Begin(ctx context.Context, req OpenRequest) (OpenResult, er
 		return subj, err
 	}
 	if res.SubjectID == "" && req.ResumeToken != "" {
-		s, err := resolve("RESUME", req.ResumeToken)
+		s, err := resolve("RESUME", resumeSecret(req.ResumeToken, req.MAC))
 		if err != nil {
 			return res, err
 		}
@@ -230,7 +243,7 @@ func (o *OpenAccess) Begin(ctx context.Context, req OpenRequest) (OpenResult, er
 		if err != nil {
 			return res, err
 		}
-		for _, c := range []struct{ kind, secret string }{{"RESUME", tok}, {"RECOVERY", code}} {
+		for _, c := range []struct{ kind, secret string }{{"RESUME", resumeSecret(tok, req.MAC)}, {"RECOVERY", code}} {
 			if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.anonymous_subject_credentials
 				(tenant_id, site_id, subject_id, kind, secret_hmac, key_id, expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
 				req.TenantID, req.SiteID, res.SubjectID, c.kind, o.mac(c.kind, c.secret), o.KeyID, now.Add(life)); err != nil {

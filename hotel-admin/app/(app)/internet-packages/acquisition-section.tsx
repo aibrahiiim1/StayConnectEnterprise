@@ -23,6 +23,7 @@ import {
   type AcquisitionForm, type AcquisitionMethod, type ModulesReport, type RoomChargeInterface,
   type RoomChargeMappingForm,
 } from "@/lib/commerce-form";
+import { RoomChargeLiveNotice } from "@/components/room-charge-live-notice";
 
 const emptyMapping = (pms_interface_id = ""): RoomChargeMappingForm =>
   ({ pms_interface_id, posting_code: "", tax_code: "", tax_rate_pct: "" });
@@ -150,6 +151,7 @@ export function AcquisitionSection({
           charge, and posts in the package's currency (there is no currency conversion). */}
       {roomOn && (
         <div className="mt-3" role="group" aria-labelledby={mappingsHeadingID} data-testid="room-charge-mappings">
+          <RoomChargeLiveNotice className="mb-2" />
           <div className="flex items-center justify-between mb-1">
             <span id={mappingsHeadingID} className="text-sm">Room charge posting codes</span>
             <Button type="button" variant="ghost" disabled={!canAddRow} data-testid="add-room-charge-mapping"

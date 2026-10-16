@@ -88,11 +88,13 @@ export function useCapabilities(): Capabilities | null {
  *  ONEGATE_MODULES_AND_ACQUISITION.md). edged stops reporting one whose module is not manageable here. This
  *  list mirrors `surfaceModules` in data-plane/cmd/edged/modules.go, which a test checks. */
 export const MODULE_SURFACES: readonly string[] = [
-  "pms-stays", "pms-events", "pms-resolutions", "guest-signin-attempts", "guest-signin-credentials",
+  "pms-stays", "pms-events", "pms-event-decisions", "pms-resolutions", "guest-signin-attempts", "guest-signin-credentials",
   "guest-signin-protection", "guest-signin-restrictions", "checkout-grace", "operational-alerts",
   "pms-interfaces", "pms-routing", "pms-source-conflicts", "pms-reconciliation", "pms-roster-reconciliation",
   "post-stay-profiles", "stay-transfers", "pms-financial-onboarding", "payment-providers",
   "financial-review", "financial-ops",
+  // The provider screens behind the optional sign-in methods (audit C-15): served only where the method's module is.
+  "social-providers", "notification-providers",
 ];
 
 /** Whether a nav resource is served here.

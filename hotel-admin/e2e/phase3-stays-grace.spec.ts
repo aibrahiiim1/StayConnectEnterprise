@@ -344,11 +344,11 @@ test("phase-3 pages are accessible: named controls, one heading, labelled filter
     "Upload speed (Mbps)",
     "Data allowance (MB)",
     "Device limit",
-    "Stay rules after checkout",
-    "Stay rules after checkout unit",
   ]) {
     await expect(page.getByLabel(label, { exact: true })).toBeVisible();
   }
+  // No eligibility field (audit H-19): the converter never read it, so the form no longer offers it.
+  await expect(page.getByLabel("Stay rules after checkout", { exact: true })).toHaveCount(0);
   await page.getByLabel("Grace time", { exact: true }).fill("45");
   await page.getByLabel("Grace time unit", { exact: true }).selectOption("min");
   await page.getByRole("button", { name: /Review changes/ }).click();
