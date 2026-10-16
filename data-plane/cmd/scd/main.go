@@ -1174,7 +1174,7 @@ func main() {
 	// Signed hello against ctrlapi — on boot AND periodically. Besides smoke-
 	// testing signed-auth, this provides ORPHAN RECOVERY: if Central no longer
 	// knows this appliance (its row was deleted from the control panel), our
-	// identity is orphaned. We confirm with a second call, then self-reset so the
+	// identity is orphaned. We require the reply to be SUSTAINED (orphanTracker), then self-reset so the
 	// box re-registers as a fresh Pending and STOPS serving on its now-stale
 	// cached license — no manual factory reset needed.
 	//
@@ -1184,14 +1184,19 @@ func main() {
 	// manual restart. Offline-safety is preserved — a transient Central outage
 	// yields connection errors / 5xx / timeouts, never a definitive 401
 	// "not enrolled", so a reset can only ever be triggered by a real deletion
-	// (and only after a second confirming call).
+	// (and only after several consecutive replies over at least orphanConfirmWindow).
 	if ident != nil && talksToCentral {
 		orphan := func(code int, b []byte) bool {
 			l := strings.ToLower(string(b))
 			return code == 401 && (strings.Contains(l, "not enrolled") || strings.Contains(l, "unknown appliance") || strings.Contains(l, "not found"))
 		}
+		// A deletion is acted on only when it is SUSTAINED (orphanTracker, removed_from_central.go): several
+		// consecutive "not found" replies over a minimum window, reset by any other reply.
+		tracker := &orphanTracker{}
 		helloProbe := func() {
 			code, body, err := s.helloRaw(rootCtx)
+			notFound := err != nil && orphan(code, body)
+			confirmed := tracker.observe(time.Now(), code != 0, notFound)
 			if err == nil {
 				return
 			}
@@ -1200,15 +1205,15 @@ func main() {
 				return
 			}
 			slog.Warn("hello: unexpected status", "status", code, "body", string(body))
-			if c.AutoRegister && orphan(code, body) {
-				time.Sleep(3 * time.Second)
-				if code2, b2, _ := s.helloRaw(context.Background()); orphan(code2, b2) {
-					// Whether it may register again depends on whether it ever held a customer.
-					s.handleConfirmedOrphan(rootCtx, orphanPaths{
-						IdentityDir: c.IdentityDir, AssignmentDir: envOr("SCD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment"),
-						LicenseDir: c.LicenseDir, CertDir: c.CertDir, Marker: removedMarkerPath(),
-					})
-				}
+			if c.AutoRegister && confirmed {
+				// Whether it may register again depends on whether it ever held a customer.
+				s.handleConfirmedOrphan(rootCtx, orphanPaths{
+					IdentityDir: c.IdentityDir, AssignmentDir: envOr("SCD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment"),
+					LicenseDir: c.LicenseDir, CertDir: c.CertDir, Marker: removedMarkerPath(),
+				})
+			} else if notFound {
+				slog.Warn("hello: Central does not know this appliance; waiting for the reply to be sustained before acting",
+					"replies_needed", orphanConfirmReplies, "window", orphanConfirmWindow.String())
 			}
 		}
 		go func() {

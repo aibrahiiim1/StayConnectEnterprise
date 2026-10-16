@@ -126,7 +126,10 @@ power on ──► appliance registers itself (signed, hardware-bound, no token)
 * **Delete** removes a `waiting` or `retired` appliance's record (typed serial). Audit history is kept; its open
   security alerts are closed. A retired appliance's identity key is remembered: that key can never register or be
   imported again (`403`/`409 identity_retired`) — the box must be factory-reset first.
-* **What the appliance does when its record is deleted.** Its next `hello` tells it Central no longer knows it.
+* **What the appliance does when its record is deleted.** Its `hello` tells it Central no longer knows it. It acts only when
+  that answer is sustained: at least three consecutive "not found" replies, the first and the last at least ten minutes
+  apart; any other reply from Central resets the count, so a Central briefly answering from an older database cannot
+  remove a licence.
   An appliance that **never held a customer** (a deleted `waiting` record) clears its identity and registers again
   as `waiting`. An appliance that **has held a customer** (any granting or terminal assignment on disk, or tenant
   data in its database — for example a retired appliance whose record was then deleted) removes its licence and

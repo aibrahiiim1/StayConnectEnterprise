@@ -36,6 +36,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
@@ -116,7 +117,7 @@ func (s *server) heldCustomer(ctx context.Context, assignmentDir string) (bool, 
 	return any, nil
 }
 
-// handleConfirmedOrphan acts on a deletion Central has confirmed twice. It returns what it did, for the log
+// handleConfirmedOrphan acts on a deletion Central has confirmed in a sustained way (orphanTracker). It returns what it did, for the log
 // and the tests: "reset" (identity cleared, the restarted scd registers again), "removed" (identity kept,
 // marker written, no re-registration), or "" when it could not decide and did nothing.
 func (s *server) handleConfirmedOrphan(ctx context.Context, p orphanPaths) string {
@@ -153,6 +154,58 @@ func (s *server) handleConfirmedOrphan(ctx context.Context, p orphanPaths) strin
 	s.removed.Store(&rec)
 	s.restartSelf()
 	return "removed"
+}
+
+// SUSTAINED "NOT FOUND" BEFORE ACTING (audit B-21).
+//
+// Removal used to follow two "not found" replies three seconds apart. Two replies that close together are one
+// observation of one moment: a Central restored from an older backup, a database failover, a mis-routed
+// request or a few seconds of a broken deploy all answer that way and then recover -- and on an appliance that
+// has held a customer the reaction is permanent (licence removed, marker written, factory-clean required).
+//
+// So the deletion must be SUSTAINED: at least orphanConfirmReplies consecutive "not found" replies, the first
+// and the last at least orphanConfirmWindow apart. Any successful hello, and any other definite reply from
+// Central, resets the count -- Central answering anything but "not found" is evidence the record exists. A
+// transport failure (no reply at all) is no evidence either way and leaves the count as it is.
+//
+// These are licensing-protocol constants, not hotel operational values: an administrator has no reason to
+// tune how much evidence the appliance needs before it believes Central deleted it, and making it shorter is
+// only a way to lose a licence by accident. With the default five-minute hello cadence, a real deletion is
+// acted on after about ten minutes.
+const (
+	orphanConfirmReplies = 3
+	orphanConfirmWindow  = 10 * time.Minute
+)
+
+// orphanTracker accumulates the evidence. It is used from the single hello goroutine; the mutex keeps it safe
+// should that ever change.
+type orphanTracker struct {
+	mu    sync.Mutex
+	count int
+	first time.Time
+}
+
+// observe records one hello outcome and reports whether the deletion is now confirmed. notFound is a definite
+// "this appliance is unknown" reply; replied is false when no reply arrived at all (transport error).
+func (o *orphanTracker) observe(now time.Time, replied, notFound bool) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if !replied {
+		return false
+	}
+	if !notFound {
+		o.count, o.first = 0, time.Time{}
+		return false
+	}
+	if o.count == 0 {
+		o.first = now
+	}
+	o.count++
+	if o.count >= orphanConfirmReplies && now.Sub(o.first) >= orphanConfirmWindow {
+		o.count, o.first = 0, time.Time{}
+		return true
+	}
+	return false
 }
 
 // restartSelf restarts scd so every subsystem re-evaluates. Tests replace s.restartFn.
