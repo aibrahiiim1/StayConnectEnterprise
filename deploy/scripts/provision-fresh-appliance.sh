@@ -98,8 +98,11 @@ id stayconnect >/dev/null 2>&1 || useradd --system --home "$SC" --shell /usr/sbi
 for svcuser in stayconnect-portald stayconnect-pmsd; do
   id "$svcuser" >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin "$svcuser"
 done
-# NO usermod HERE, DELIBERATELY. portald needs the stayconnect group to open scd's socket, and its unit
-# says so with SupplementaryGroups=stayconnect -- which systemd applies to the process at start time. It
+# scd's socket group (audit N-26): opens /run/stayconnect/scd.sock and nothing else. edged and portald receive it
+# through SupplementaryGroups= in their units; nobody is a persistent member.
+getent group stayconnect-scd >/dev/null 2>&1 || groupadd --system stayconnect-scd
+# NO usermod HERE, DELIBERATELY. portald needs the stayconnect-scd group to open scd's socket, and its unit
+# says so with SupplementaryGroups=stayconnect-scd -- which systemd applies to the process at start time. It
 # does not need, and does not get, a persistent membership in /etc/group: a permanent grant would also
 # apply to anything else ever run as that account, while the unit's grant applies to that service only.
 # Verified on the appliance: `id stayconnect-portald` shows its own group alone, and portald reaches the

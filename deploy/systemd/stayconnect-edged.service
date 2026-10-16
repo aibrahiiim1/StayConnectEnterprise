@@ -24,6 +24,10 @@ ExecStart=/opt/stayconnect/bin/edged serve
 EnvironmentFile=-/etc/stayconnect/edged.env
 User=stayconnect
 Group=stayconnect
+# scd's socket is root:stayconnect-scd 0660 (audit N-26): a group that opens that socket and nothing else, held by
+# the two services that call scd -- this one and portald. The provisioning creates it; until it exists scd falls
+# back to the legacy stayconnect group (cmd/scd/socket_group.go). The group must exist before this unit starts.
+SupplementaryGroups=stayconnect-scd
 # Always recover, with a bounded 2s backoff. Combined with the in-process DB
 # retry and StartLimitIntervalSec=0 above, edged self-heals from any crash,
 # dependency delay or socket outage with zero manual intervention.

@@ -1130,12 +1130,15 @@ func main() {
 		os.Exit(1)
 	}
 	_ = os.Chmod(c.SocketPath, 0o660)
-	if g, err := user.LookupGroup("stayconnect"); err == nil {
+	if g, err := lookupSocketGroup(os.Getenv("SCD_SOCKET_GROUP"), user.LookupGroup); err == nil {
 		if gid, err := strconv.Atoi(g.Gid); err == nil {
 			if err := os.Chown(c.SocketPath, 0, gid); err != nil {
 				slog.Warn("chown socket", "err", err)
 			}
+			slog.Info("scd socket group", "group", g.Name)
 		}
+	} else {
+		slog.Warn("scd socket: no socket group resolves; the socket is root-only", "err", err)
 	}
 
 	// ConnContext reads the peer credentials ONCE, at accept time, so the code-recovery routes can

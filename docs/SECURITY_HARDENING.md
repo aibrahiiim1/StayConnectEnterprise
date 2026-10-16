@@ -65,6 +65,16 @@ The Edge Caddyfile serves the admin API on `unix//run/caddy/admin.sock`, inside 
 `caddy`), instead of `127.0.0.1:2019`: no other local account can rewrite routing. `systemctl reload`
 still works (`caddy reload` runs as `caddy`). edged's Caddy health check probes TLS on 443 instead.
 
+### The portal holds no group that opens credentials (appliance, audit N-26)
+
+scd's socket is `root:stayconnect-scd 0660`, a group that opens that socket and nothing else. edged and
+portald receive it through `SupplementaryGroups=` in their units; nobody is a persistent member. portald
+used to hold `stayconnect` instead -- edged's primary group -- which also opened edged's, netd's and acctd's
+env files (database credentials), the 0640 database dumps and netd's socket, so a compromised portal could
+have read the credentials of more privileged services. portald's unit also makes `/opt/stayconnect/backups`
+and `/var/backups/stayconnect` inaccessible. Provisioning creates the group; an appliance upgraded before it
+exists keeps the legacy group on the socket, logged, until it is created (`groupadd --system stayconnect-scd`).
+
 ## 4. IPv6 client bypass — OPEN (must drop v6 on client LAN)
 
 The nftables table is `inet` family, so the **filter** chains do cover IPv6 —
