@@ -1785,7 +1785,7 @@
     "branch": "delivery/audit-remediation",
     "pr": null,
     "pr_state": "NOT YET OPENED -- READY FOR PRODUCT OWNER TESTING; po-merge-approved NOT applied",
-    "note": "T0237. PRE-LIVE runs netd dc32a52c; scd dc32a52c; edged dc32a52c; pmsd dc32a52c; portald dc32a52c; acctd dc32a52c; keybootstrap e9b72aab; Admin Console release 20261016-163909 (dc32a52c); migrations through 0126; Central ctrlapi and console 832f58b1 (Central migrations through 0051). The audit remediation is live on PRE-LIVE for Product Owner testing; PR #216 stays OPEN and is not merged; Go-Live not authorised."
+    "note": "T0237. PRE-LIVE runs netd dc32a52c; scd dc32a52c; edged dc32a52c; pmsd dc32a52c; portald dc32a52c; acctd dc32a52c; keybootstrap e9b72aab; Admin Console release 20261016-163909 (dc32a52c); migrations through 0126; Central ctrlapi and console 832f58b1 (Central migrations through 0051). The audit remediation is live on PRE-LIVE for Product Owner testing; PR #216 remains under its own Product Owner testing; Go-Live not authorised."
   },
   "onboarding_reconciliation": {
     "decision": "D37",
