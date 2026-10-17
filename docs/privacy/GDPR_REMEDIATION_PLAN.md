@@ -69,9 +69,53 @@ Priority:
 | C11 | P2 | **Encryption at rest:** disk encryption (LUKS) for new installs; TLS or Unix sockets for database connections. | appliance deployment, security | **D-C11:** Accept for new installs only (existing appliances need a reinstall)? How is the key unlocked at boot (TPM vs passphrase)? |
 | C12 | P0 (ops) | **Rotate exposed credentials:** the Gmail app password that `SECURITY_HARDENING.md` reports was once committed and never rotated; the default Postgres password fallback. | security | **D-C12:** None for the rotation itself, which the account owner must do. Confirm removing the personal Gmail address from the repository. |
 
-## 4. Proposed order
+## 4. Product Owner decisions taken (2026-10-17)
 
-1. **Decisions first:** D-C1, D-C3, D-C5, D-C6. These block the P0 controlled work and shape C4 and C7.
+### D-C1, retention defaults: **Balanced**
+
+Each value ships as a hotel setting with this default, following `OPERATIONAL_SETTINGS_POLICY` §0C:
+
+| Data | Default |
+|---|---|
+| PMS stay, stay-guest and stay-event data | 30 days after checkout |
+| Sessions, devices (MAC/IP), usage detail | 12 months |
+| Guest identities (email, phone, social subject) with no stay or account activity | 12 months |
+| OTP, OAuth-state, email-token, auth-context and verification-grant rows | 7 days after expiry |
+| Audit log | 24 months |
+| Financial records (purchases, payments, postings, settlements) | 10 years, never purged automatically |
+
+### D-C3, erasure semantics: **Anonymise only**
+
+"Erase this guest" deletes no rows. Instead it replaces every identifier of that guest, everywhere, with a token. Conditions for the result to count as *anonymous* rather than *pseudonymous*:
+
+- The token is **random per erasure** (not an HMAC of the identifier), and nothing keeps a mapping back to the person.
+- Every identifier is replaced: username/email, phone, social subject, display name, names and date of birth in stay guests, MAC and IP in sessions, devices, sign-in attempts and grants, and room number where it is tied to the guest.
+- Free-text fields are **blanked**, not tokenised: notes, sign-in attempt names, `stay_events` payload guest fields, and audit-log payload values naming the guest.
+- Erasure fixes "Remove" too: the renamed username no longer contains the original.
+- Erasure is refused while the PMS still shows the guest in-house; staff are told the PMS would copy the guest back.
+- The erasure itself is written to the audit log by token, not by name.
+
+### D-C5, backup encryption: **Public key + escrow**
+
+- Backups are encrypted with age to a public key, so the appliance can write backups but cannot read them back.
+- The hotel IT holds the private key, and our support holds an escrow copy so restores still work if the hotel loses its key.
+- The seal keys in `/etc/stayconnect/secrets` travel only inside the encrypted archive.
+
+### D-C6, lawful basis: **Notice, no checkbox**
+
+- Guests get Wi-Fi under the stay contract / legitimate interest. No checkbox blocks access.
+- The portal shows the privacy notice (F1), and C6 records which notice version was shown to whom and when.
+- Consent is introduced only if a marketing feature is ever added.
+
+### Still open (they follow from the above)
+
+- **D-C1a:** When retention expires, do the C1 purge jobs **delete** rows or **anonymise** them, as erasure does? Anonymising keeps reporting totals; deleting is simpler and leaves less behind. Financial rows are anonymised either way.
+- **D-C5a:** Who in our support organisation holds the escrow keys, and how are they stored (offline media, like the Root CA backup)? When may the escrow be used?
+- **D-C2, D-C4, D-C7 to D-C11, D-F1 to D-F8:** still to decide.
+
+## 5. Proposed order
+
+1. **Decisions first:** D-C1, D-C3, D-C5, D-C6 are taken (§4). D-C1a and D-C5a are needed before C1 and C5 start.
 2. **Start now in parallel (FAST, no decision needed):** F4, F6, F9. F1, F2 and F3 can be drafted now and finalised once D-F1, D-F2 and D-F3 are made.
 3. **Then:** C1 + C2 (retention) → C3 + C4 (erasure and export, sharing one guest-lookup) → C5 (backups).
 4. **Then:** C6–C11 as their decisions arrive.
