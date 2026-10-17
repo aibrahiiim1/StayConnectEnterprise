@@ -430,6 +430,12 @@ func main() {
 				r.Use(s.resourcePermission("backups"))
 				r.Mount("/", s.accountingRetentionRoutes())
 			})
+			// GUEST-DATA RETENTION (data_retention_admin.go, migration 0127): shortening a period anonymises
+			// history on the next run, so the same "backups" key.
+			r.Route("/data-retention", func(r chi.Router) {
+				r.Use(s.resourcePermission("backups"))
+				r.Mount("/", s.dataRetentionRoutes())
+			})
 			// USAGE EXPLORER. Read-only investigation over durable accounting and session data; see
 			// resources_usage.go. Under the "sessions" role because it is the same live-access state that
 			// resource already governs, rather than a new row in the role matrix.

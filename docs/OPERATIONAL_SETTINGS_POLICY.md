@@ -93,5 +93,9 @@ implementation of every row in the table above:
 * Portal branding, walled garden, notification and social providers.
 * Admin Console sign-in protection (`public.operator_signin_protection`, migration 0119) — wrong passwords per
   account and per address, their windows and the lockout; System → Operators → Sign-in protection.
+* Guest-data retention (`iam_v2.site_data_retention`, migration 0127) — six periods after which guest
+  personal data is anonymised (PMS stay data, devices and sessions, inactive identities, expired one-time
+  records, audit-log details) or, for sign-in attempts, deleted; defaults 30 / 365 / 365 / 7 / 730 / 30 days;
+  reason + password, change log and run record; Backups → Guest data kept for.
 
 When you add the next one, add it to this list.

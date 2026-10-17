@@ -14,7 +14,8 @@ package signinattempt
 // be written.
 //
 // THE PURGE IS PART OF THE FEATURE, NOT AN AFTERTHOUGHT. These rows hold guest credential material, so they
-// are retained for thirty days and then deleted. The mechanism is the one this appliance already uses for the
+// are retained for the site's sign-in-attempt retention (default thirty days; Hotel Admin -> Backups -> Data
+// retention, migration 0127) and then deleted. The mechanism is the one this appliance already uses for the
 // durable throttle: a bounded DELETE on a ticker in the owning service. It touches nothing but its own table.
 
 import (
@@ -25,12 +26,15 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Retention is how long an attempt record lives. The Product Owner set thirty days: long enough to
-// investigate a complaint that reaches the desk a fortnight later, short enough that the appliance is not a
-// standing archive of what guests typed.
+// Retention is how long an attempt record lives when the site has not chosen otherwise. The Product Owner set
+// thirty days: long enough to investigate a complaint that reaches the desk a fortnight later, short enough that
+// the appliance is not a standing archive of what guests typed. The site's own value is
+// iam_v2.data_retention_get(...).sign_in_attempt_days; this constant is used only by a database that predates
+// migration 0127, and must stay equal to that function's default.
 const Retention = 30 * 24 * time.Hour
 
 // Attempt is one recorded submission. Everything here except Sensitive is operational diagnostics.
@@ -207,7 +211,7 @@ func (s *Store) Complete(ctx context.Context, tenantID, siteID, requestID string
 		tenantID, siteID, requestID, string(result), entitlementID, sessionID).Scan(&rows)
 }
 
-// Purge deletes attempts older than Retention and returns how many went.
+// Purge deletes attempts older than their site's sign-in-attempt retention and returns how many went.
 //
 // It is deliberately narrow. It names ONE table, filters on ONE column, and touches nothing that describes a
 // stay, a guest, an entitlement, a session, a financial record or the general audit log — those have their
@@ -217,8 +221,16 @@ func (s *Store) Purge(ctx context.Context, now time.Time) (int64, error) {
 	if s == nil || s.pool == nil {
 		return 0, nil
 	}
-	ct, err := s.pool.Exec(ctx,
-		`DELETE FROM iam_v2.sign_in_attempts WHERE occurred_at < $1`, now.Add(-Retention))
+	ct, err := s.pool.Exec(ctx, `
+		DELETE FROM iam_v2.sign_in_attempts a
+		 USING (SELECT DISTINCT tenant_id, site_id FROM iam_v2.sign_in_attempts) s
+		 CROSS JOIN LATERAL iam_v2.data_retention_get(s.tenant_id, s.site_id) r
+		 WHERE a.tenant_id = s.tenant_id AND a.site_id = s.site_id
+		   AND a.occurred_at < $1::timestamptz - make_interval(days => r.sign_in_attempt_days)`, now)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "42883" {
+		ct, err = s.pool.Exec(ctx, `DELETE FROM iam_v2.sign_in_attempts WHERE occurred_at < $1`, now.Add(-Retention))
+	}
 	if err != nil {
 		return 0, err
 	}
@@ -242,7 +254,7 @@ func (s *Store) RunPurge(ctx context.Context, every time.Duration) {
 				slog.Warn("sign-in attempt purge failed", "err", err)
 			}
 		} else if n > 0 {
-			slog.Info("sign-in attempts purged", "rows", n, "retention_days", int(Retention.Hours()/24))
+			slog.Info("sign-in attempts purged", "rows", n)
 		}
 		select {
 		case <-ctx.Done():

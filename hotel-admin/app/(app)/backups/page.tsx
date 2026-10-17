@@ -36,6 +36,7 @@ import { canWrite } from "@/lib/roles";
 import { cn, errMsg, formatDate } from "@/lib/utils";
 import { formatBytes } from "@/lib/bytes";
 import { AccountingRetentionCard } from "./accounting-retention-card";
+import { DataRetentionCard } from "./data-retention-card";
 import { submitDownload } from "@/lib/backup-download";
 import {
   Archive, ShieldCheck, Download, RotateCcw, AlertTriangle, CheckCircle2, Loader2, HardDrive, ChevronRight,
@@ -341,6 +342,7 @@ export default function BackupsPage() {
       {/* ---- 3. THE SETTINGS THAT GOVERN THEM: present, and not in the way ------------------------- */}
       <StorageAndRetention writable={writable} />
       <AccountingRetentionCard writable={writable} />
+      <DataRetentionCard writable={writable} />
 
       {/* ---- Back up now: password confirmation ------------------------------------------------------ */}
       <ConfirmDialog

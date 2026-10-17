@@ -1,0 +1,26 @@
+-- Guest-data retention (migration 0127; GDPR remediation plan C1 and F6, Product-Owner decisions D-C1, D-C1a and
+-- D-C3). Idempotent; included by gatep-grants.sql after its revoke, so a Gate-P reconcile reproduces exactly what
+-- the migration granted.
+--
+--   svc_scd    runs the hourly retention: EXECUTE on the two run functions (iam_v2 tables and public tables),
+--              and reads the setting to size the sign-in-attempt DELETE it already performs. No table privilege
+--              is added: every anonymising write happens inside the runs' own definers, and the anonymise_*
+--              primitives are granted to nobody.
+--   svc_edged  reads and changes the setting through its definer functions (operator and reason required,
+--              every change logged), and reads the change log and the run record.
+--
+-- GUARDED on the migration being present, like every file granting on 0116+ objects (audit B-20).
+DO $g$
+BEGIN
+  IF to_regprocedure('iam_v2.run_data_retention(uuid,uuid,integer)') IS NULL THEN
+    RAISE NOTICE 'migration 0127 is not applied; data-retention grants skipped';
+    RETURN;
+  END IF;
+  GRANT EXECUTE ON FUNCTION iam_v2.data_retention_get(uuid,uuid) TO svc_scd;
+  GRANT EXECUTE ON FUNCTION iam_v2.run_data_retention(uuid,uuid,integer) TO svc_scd;
+  GRANT EXECUTE ON FUNCTION public.run_data_retention_public(uuid,uuid,integer) TO svc_scd;
+
+  GRANT EXECUTE ON FUNCTION iam_v2.data_retention_get(uuid,uuid) TO svc_edged;
+  GRANT EXECUTE ON FUNCTION iam_v2.data_retention_set(uuid,uuid,integer,integer,integer,integer,integer,integer,text,text) TO svc_edged;
+  GRANT SELECT ON iam_v2.data_retention_changes, iam_v2.data_retention_runs TO svc_edged;
+END $g$;

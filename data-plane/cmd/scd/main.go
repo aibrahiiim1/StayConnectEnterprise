@@ -1211,6 +1211,10 @@ func main() {
 		go s.p3auth.attempts.RunPurge(rootCtx, time.Hour)
 	}
 
+	// GUEST-DATA RETENTION (data_retention.go, migration 0127): hourly anonymisation of what has outlived the
+	// site's retention settings.
+	go s.dataRetentionLoop(rootCtx)
+
 	// Signed hello against ctrlapi — on boot AND periodically. Besides smoke-
 	// testing signed-auth, this provides ORPHAN RECOVERY: if Central no longer
 	// knows this appliance (its row was deleted from the control panel), our

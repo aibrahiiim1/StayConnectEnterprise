@@ -330,6 +330,8 @@ GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_acctd;
 \ir svc-client-accounts-grants.sql
 -- Plan controls (idle / maximum session / DISCONNECT_OLDEST / time allowance) and accounting retention (0122).
 \ir svc-plan-controls-grants.sql
+-- Guest-data retention: the hourly anonymisation run and its setting (0127).
+\ir svc-data-retention-grants.sql
 
 -- EXECUTE on the CANONICAL audited, versioned publication boundary. This is the only function the product
 -- calls to change checkout grace policy: it requires an active operator as actor, a bounded machine reason
