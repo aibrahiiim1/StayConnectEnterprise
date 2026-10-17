@@ -170,7 +170,7 @@ Each value ships as a hotel setting with this default, following `OPERATIONAL_SE
 - **Sessions end** after 30 minutes idle (`operator_idle_minutes`, 5-240) and 12 hours at most (`operator_session_max_hours`; the old default 24 moved to 12 where nobody had changed it). Both are under System > Team > Sign-in limits. The console's whoami poll does not count as activity.
 - **Lost phone:** a recovery code; an administrator's "Reset two-step" on the Team or a customer's Users (reason, audited, sessions ended, never one's own); or `ctrlapi reset-mfa --email E --reason R` for the last administrator.
 - **The Two-step sign-in page** in the sidebar shows the state and makes new recovery codes (after step-up).
-- **Scripts that sign in with a password alone** (`cmd/acceptance`, `cmd/pkitest` and the phase test scripts under `scripts/`) no longer get a session; they need an operator with a known TOTP secret before they can run again.
+- **The test tools sign in with both steps.** `cmd/acceptance`, `cmd/pkitest` and the two regression scripts (`scripts/lifecycle-regression.sh`, `scripts/replacement-factoryreset-regression.sh`, through `cmd/regtest -signin`) use `internal/opsignin`: the first sign-in sets the operator's authenticator up and keeps its secret in a 0600 keyring on the machine running the tool (`OPERATOR_TOTP_KEYRING`, default in the user's config directory); later sign-ins compute the code. An operator whose authenticator was set up elsewhere is refused with the `ctrlapi reset-mfa` command that hands it back. The older phase scripts (`scripts/phase*-test.sh`) still sign in with a password alone and are not current coverage.
 
 ### How C2 was built (migration 0131, on `delivery/gdpr`)
 

@@ -3,7 +3,8 @@
 // fetch certificate → hello over mTLS (accepted) → operator reissue-certificate with no waiting CSR, which
 // revokes the certificate → hello over mTLS (rejected). It reuses the production request signer.
 //
-// Fixtures: serial ACPT-PKI-<n> in a customer/site it creates. Needs a platform_admin login.
+// Fixtures: serial ACPT-PKI-<n> in a customer/site it creates. Needs a platform_admin login; its authenticator
+// secret is kept in the internal/opsignin keyring (OPERATOR_TOTP_KEYRING).
 package main
 
 import (
@@ -24,6 +25,7 @@ import (
 	"time"
 
 	"github.com/stayconnect/enterprise/control-plane/internal/applianceauth"
+	"github.com/stayconnect/enterprise/control-plane/internal/opsignin"
 )
 
 var (
@@ -47,7 +49,13 @@ func ok(msg string, args ...any)   { fmt.Printf("  PASS: "+msg+"\n", args...); p
 func main() {
 	jar, _ := cookiejar.New(nil)
 	cl := &http.Client{Jar: jar, Timeout: 15 * time.Second}
-	must(cl, "POST", base+"/v1/auth/login", jbody(map[string]string{"email": email, "password": pass}), 200)
+	kr, err := opsignin.Open(opsignin.DefaultKeyringPath())
+	if err != nil {
+		fail("%v", err)
+	}
+	if err := kr.SignIn(cl, base, email, pass); err != nil {
+		fail("sign-in: %v", err)
+	}
 	must(cl, "POST", base+"/v1/auth/reauth", jbody(map[string]string{"password": pass}), 200)
 
 	// 1. Token-less, self-signed registration → WAITING.

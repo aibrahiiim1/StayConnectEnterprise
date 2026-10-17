@@ -18,8 +18,9 @@ code() { curl -s --max-time 15 -b $CJ -c $CJ -o /tmp/lr.json -w "%{http_code}" -
 PASS=0; FAIL=0
 ok()  { echo "  PASS  $1"; PASS=$((PASS+1)); }
 bad() { echo "  FAIL  $1"; FAIL=$((FAIL+1)); }
-curl -s --max-time 8 -c $CJ -o /dev/null -X POST $API/v1/auth/login -H 'Content-Type: application/json' \
-  -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASS\"}"
+[ -x "$REG" ] || { echo "regtest helper missing: go build -o $REG ./control-plane/cmd/regtest"; exit 2; }
+# Both sign-in steps (password, then authenticator code); the helper keeps the operator's authenticator secret.
+ADMIN_PASS="$ADMIN_PASS" $REG -signin -base $API -email "$ADMIN_EMAIL" -jar $CJ || exit 2
 reauth() { curl -s --max-time 8 -b $CJ -c $CJ -o /dev/null -X POST $API/v1/auth/reauth -H 'Content-Type: application/json' -d "{\"password\":\"$ADMIN_PASS\"}"; }
 CAVER=$(PSQL "SELECT version FROM appliance_ca_versions ORDER BY version DESC LIMIT 1;")
 
@@ -53,7 +54,6 @@ global_orphans() { PSQL "SELECT count(*) FROM licenses l WHERE status IN ('activ
                          AND NOT EXISTS(SELECT 1 FROM appliances a WHERE a.id=ANY(l.appliance_ids) AND a.lifecycle_state='assigned');"; }
 
 echo "=== pre-clean ==="; clean
-[ -x "$REG" ] || { echo "regtest helper missing: go build -o $REG ./control-plane/cmd/regtest"; exit 2; }
 
 echo ""; echo "### 1. DELETE a waiting appliance ###"
 register "ZZZ-W1-1"

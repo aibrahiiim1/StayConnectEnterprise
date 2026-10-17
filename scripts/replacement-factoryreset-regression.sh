@@ -10,8 +10,9 @@ PSQL() { docker exec ${PGC:-sc-central-pg} psql -U stayconnect -d stayconnect -t
 jqget() { python3 -c "import sys,json;d=json.load(sys.stdin);print(eval('d'+sys.argv[1]))" "$1" 2>/dev/null; }
 code() { curl -s --max-time 15 -b $CJ -c $CJ -o /tmp/rb.json -w "%{http_code}" -H 'Content-Type: application/json' "$@"; }
 PASS=0; FAIL=0; ok(){ echo "  PASS  $1"; PASS=$((PASS+1)); }; bad(){ echo "  FAIL  $1"; FAIL=$((FAIL+1)); }
-curl -s --max-time 8 -c $CJ -o /dev/null -X POST $API/v1/auth/login -H 'Content-Type: application/json' \
-  -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASS\"}"
+[ -x "$REG" ] || { echo "regtest helper missing: go build -o $REG ./control-plane/cmd/regtest"; exit 2; }
+# Both sign-in steps (password, then authenticator code); the helper keeps the operator's authenticator secret.
+ADMIN_PASS="$ADMIN_PASS" $REG -signin -base $API -email "$ADMIN_EMAIL" -jar $CJ || exit 2
 reauth(){ curl -s --max-time 8 -b $CJ -c $CJ -o /dev/null -X POST $API/v1/auth/reauth -H 'Content-Type: application/json' -d "{\"password\":\"$ADMIN_PASS\"}"; }
 CAVER=$(PSQL "SELECT version FROM appliance_ca_versions ORDER BY version DESC LIMIT 1;")
 appid(){ PSQL "SELECT id::text FROM appliances WHERE serial='$1' ORDER BY updated_at DESC LIMIT 1;"; }
@@ -30,7 +31,6 @@ clean(){ PSQL "BEGIN;
 licstat(){ PSQL "SELECT status FROM licenses WHERE '$1'=ANY(appliance_ids) ORDER BY license_version DESC LIMIT 1;"; }
 
 echo "=== setup ==="; clean
-[ -x "$REG" ] || { echo "regtest helper missing: go build -o $REG ./control-plane/cmd/regtest"; exit 2; }
 code -X POST $API/cloud/v1/customers -d '{"slug":"zzz-rfr","name":"ZZZ RFR"}' >/dev/null; TID=$(jqget "['id']" </tmp/rb.json)
 code -X POST $API/cloud/v1/customers/$TID/sites -d '{"code":"rfr","name":"RFR Site","timezone":"UTC"}' >/dev/null; SID=$(jqget "['id']" </tmp/rb.json)
 echo "TID=$TID SID=$SID"
