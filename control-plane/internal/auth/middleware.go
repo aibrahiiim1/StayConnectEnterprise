@@ -31,6 +31,8 @@ func ContextWithSession(ctx context.Context, s *Session) context.Context { retur
 type SessionBackend interface {
 	Get(ctx context.Context, token string) (*Session, error)
 	Destroy(ctx context.Context, token string) error
+	// Touch records activity (LastSeenAt) on a session that passed the policy (0052).
+	Touch(ctx context.Context, s *Session) error
 }
 
 // RequireAuth extracts the sc_session cookie and attaches the Session to the request context.
@@ -70,6 +72,11 @@ func RequireAuth(store SessionBackend, checker SessionChecker) func(http.Handler
 					return
 				}
 				sess = fresh
+			}
+			// The console's background whoami poll is not activity: counting it would keep every open tab
+			// signed in for ever, and the idle limit would never fire.
+			if r.URL.Path != "/v1/auth/whoami" {
+				_ = store.Touch(r.Context(), sess)
 			}
 			next.ServeHTTP(w, r.WithContext(withSession(r.Context(), sess)))
 		})

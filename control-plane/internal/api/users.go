@@ -31,13 +31,16 @@ type UserRow struct {
 	CreatedAt   time.Time `json:"created_at"`
 	// LastLoginAt is the last successful console sign-in; null when the user never signed in.
 	LastLoginAt *time.Time `json:"last_login_at"`
+	// TwoStepEnrolled: an authenticator app is set up (0052). Without one, the next sign-in sets one up.
+	TwoStepEnrolled bool `json:"two_step_enrolled"`
 }
 
 // queryUsers lists users. customerID "" = the Team (operators holding a platform role).
 func (b *Base) queryUsers(ctx context.Context, customerID, userID string) ([]UserRow, error) {
 	rows, err := b.DB.Query(ctx, `
         SELECT o.id::text, o.email, COALESCE(o.display_name,''), o.status, o.tenant_id::text, o.created_at, o.last_login_at,
-               COALESCE(array_agg(r.role ORDER BY r.role) FILTER (WHERE r.role IS NOT NULL), '{}')
+               COALESCE(array_agg(r.role ORDER BY r.role) FILTER (WHERE r.role IS NOT NULL), '{}'),
+               EXISTS (SELECT 1 FROM operator_mfa m WHERE m.operator_id = o.id AND m.confirmed_at IS NOT NULL)
           FROM operators o
           LEFT JOIN operator_roles r ON r.operator_id = o.id
          WHERE ($2 = '' OR o.id::text = $2)
@@ -56,7 +59,8 @@ func (b *Base) queryUsers(ctx context.Context, customerID, userID string) ([]Use
 	out := []UserRow{}
 	for rows.Next() {
 		var u UserRow
-		if err := rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Status, &u.CustomerID, &u.CreatedAt, &u.LastLoginAt, &u.Roles); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Status, &u.CustomerID, &u.CreatedAt, &u.LastLoginAt, &u.Roles,
+			&u.TwoStepEnrolled); err != nil {
 			return nil, err
 		}
 		for _, role := range u.Roles {
@@ -419,6 +423,69 @@ func (b *Base) teamPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	audit.Op(r.Context(), b.DB, r, "user.password_reset", "operator", id, map[string]any{"sessions_ended": true})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// teamMFAReset: POST /cloud/v1/team/{id}/mfa-reset {reason}
+func (b *Base) teamMFAReset(w http.ResponseWriter, r *http.Request) {
+	b.resetUserMFA(w, r, "", chi.URLParam(r, "id"))
+}
+
+// customerUserMFAReset: POST /cloud/v1/customers/{id}/users/{uid}/mfa-reset {reason}
+func (b *Base) customerUserMFAReset(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if !requireCustomerManage(w, r, id, auth.PermUsersManage, auth.PermCustomerUsersManage) {
+		return
+	}
+	b.resetUserMFA(w, r, id, chi.URLParam(r, "uid"))
+}
+
+// resetUserMFA removes a colleague's authenticator and recovery codes (0052, GDPR plan C10): their sessions end
+// and they set up a new authenticator at their next sign-in. Never one's own -- a stolen session plus the
+// password must not be enough to remove the second factor -- and with a reason, audited.
+func (b *Base) resetUserMFA(w http.ResponseWriter, r *http.Request, customerID, id string) {
+	var in struct {
+		Reason string `json:"reason"`
+	}
+	if err := DecodeJSON(r, &in); err != nil || len(strings.TrimSpace(in.Reason)) < 4 {
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "a reason of at least 4 characters is required")
+		return
+	}
+	s := auth.FromContext(r.Context())
+	if s != nil && s.OperatorID == id {
+		Fail(w, r, http.StatusConflict, "not_yourself", "Another administrator must reset your two-step sign-in.")
+		return
+	}
+	ctx, cancel := DBCtx(r)
+	defer cancel()
+	cur, err := b.queryUsers(ctx, customerID, id)
+	if err != nil || len(cur) == 0 {
+		Fail(w, r, http.StatusNotFound, CodeNotFound, "user not found")
+		return
+	}
+	if !mayGrant(s, cur[0].Role) {
+		Fail(w, r, http.StatusForbidden, CodeForbidden, "you may not change a "+cur[0].Role)
+		return
+	}
+	tx, err := b.DB.Begin(ctx)
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "reset failed")
+		return
+	}
+	defer tx.Rollback(ctx)
+	had, err := auth.ResetMFA(ctx, tx, id)
+	if err == nil {
+		err = auth.EndOperatorSessions(ctx, tx, id)
+	}
+	if err == nil {
+		err = tx.Commit(ctx)
+	}
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "reset failed")
+		return
+	}
+	audit.Op(r.Context(), b.DB, r, "user.mfa_reset", "operator", id, map[string]any{
+		"reason": strings.TrimSpace(in.Reason), "had_authenticator": had, "sessions_ended": true})
+	WriteJSON(w, http.StatusOK, map[string]any{"removed": had})
 }
 
 // ---- Customer users: /cloud/v1/customers/{id}/users ----

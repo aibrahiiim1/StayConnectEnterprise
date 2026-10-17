@@ -66,8 +66,9 @@ func (s *SessionStore) Create(ctx context.Context, base Session) (*Session, erro
 	return &sess, nil
 }
 
-// Get fetches a session by token. Returns (nil, nil) when not found.
-// Also slides the TTL forward if the session is more than 1 min old.
+// Get fetches a session by token. Returns (nil, nil) when not found. It changes nothing: activity is recorded by
+// Touch, after the request has passed the session policy (0052), so the idle limit is judged on the last real
+// activity rather than on this request.
 func (s *SessionStore) Get(ctx context.Context, token string) (*Session, error) {
 	raw, err := s.R.Get(ctx, key(token)).Bytes()
 	if err != nil {
@@ -81,14 +82,23 @@ func (s *SessionStore) Get(ctx context.Context, token string) (*Session, error) 
 		return nil, err
 	}
 	sess.Token = token
-	if time.Since(sess.LastSeenAt) > time.Minute {
-		sess.LastSeenAt = time.Now()
-		sess.ExpiresAt = sess.LastSeenAt.Add(SessionTTL)
-		if buf, err := json.Marshal(sess); err == nil {
-			_ = s.R.Set(ctx, key(token), buf, SessionTTL).Err()
-		}
-	}
 	return &sess, nil
+}
+
+// Touch records activity on a session: LastSeenAt moves to now (at most once a minute, to keep Redis writes
+// bounded) and the Redis TTL slides. The idle and absolute limits are enforced by Validate.
+func (s *SessionStore) Touch(ctx context.Context, sess *Session) error {
+	if time.Since(sess.LastSeenAt) <= time.Minute {
+		return nil
+	}
+	stored := *sess
+	stored.LastSeenAt = time.Now()
+	stored.ExpiresAt = stored.LastSeenAt.Add(SessionTTL)
+	buf, err := json.Marshal(stored)
+	if err != nil {
+		return err
+	}
+	return s.R.Set(ctx, key(sess.Token), buf, SessionTTL).Err()
 }
 
 // Destroy removes a session.

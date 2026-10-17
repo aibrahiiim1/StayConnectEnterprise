@@ -21,14 +21,19 @@ import (
 //	                                                      password reset, removal)
 //	the session is older than the absolute cap          -> session ended, however active it was
 //	                                                      (central_security_settings.operator_session_max_hours)
+//	no activity for longer than the idle limit          -> session ended (operator_idle_minutes, 0052); the
+//	                                                      console's background whoami poll is not activity
 //
 // and the roles the request is authorised with are the CURRENT roles, never the snapshot.
 
-// Session limits for the absolute lifetime setting.
+// Session limits: the absolute lifetime and the idle limit (GDPR plan C10, decision D-C10: 12 hours, 30 minutes).
 const (
-	DefaultSessionMaxHours = 24
+	DefaultSessionMaxHours = 12
 	MinSessionMaxHours     = 1
 	MaxSessionMaxHours     = 168
+	DefaultIdleMinutes     = 30
+	MinIdleMinutes         = 5
+	MaxIdleMinutes         = 240
 )
 
 // ErrSessionEnded means the session must not be used again; the middleware destroys it.
@@ -44,6 +49,7 @@ type OperatorState struct {
 	Roles             []string
 	DefaultTenant     string
 	MaxHours          int
+	IdleMinutes       int
 }
 
 // Validate applies the policy above. It returns the session refreshed with the operator's current identity
@@ -63,6 +69,13 @@ func Validate(s *Session, st OperatorState, now time.Time) (*Session, string, er
 	}
 	if now.Sub(s.CreatedAt) > time.Duration(maxHours)*time.Hour {
 		return nil, "session lifetime reached", ErrSessionEnded
+	}
+	idle := st.IdleMinutes
+	if idle < MinIdleMinutes || idle > MaxIdleMinutes {
+		idle = DefaultIdleMinutes
+	}
+	if now.Sub(s.LastSeenAt) > time.Duration(idle)*time.Minute {
+		return nil, "signed out after inactivity", ErrSessionEnded
 	}
 	out := *s
 	out.Email, out.DisplayName = st.Email, st.DisplayName
@@ -96,12 +109,13 @@ func (c DBSessionChecker) OperatorState(ctx context.Context, operatorID string) 
         SELECT o.status, o.email, COALESCE(o.display_name,''), o.sessions_not_before,
                COALESCE(array_agg(r.role ORDER BY r.role) FILTER (WHERE r.role IS NOT NULL), '{}'),
                COALESCE(array_agg(COALESCE(r.tenant_id::text,'') ORDER BY r.role) FILTER (WHERE r.role IS NOT NULL), '{}'),
-               COALESCE((SELECT operator_session_max_hours FROM central_security_settings WHERE id), $2)
+               COALESCE((SELECT operator_session_max_hours FROM central_security_settings WHERE id), $2),
+               COALESCE((SELECT operator_idle_minutes FROM central_security_settings WHERE id), $3)
           FROM operators o
           LEFT JOIN operator_roles r ON r.operator_id = o.id
          WHERE o.id::text = $1
-         GROUP BY o.id`, operatorID, DefaultSessionMaxHours).
-		Scan(&st.Status, &st.Email, &st.DisplayName, &st.SessionsNotBefore, &roles, &tenants, &st.MaxHours)
+         GROUP BY o.id`, operatorID, DefaultSessionMaxHours, DefaultIdleMinutes).
+		Scan(&st.Status, &st.Email, &st.DisplayName, &st.SessionsNotBefore, &roles, &tenants, &st.MaxHours, &st.IdleMinutes)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return OperatorState{}, nil
 	}

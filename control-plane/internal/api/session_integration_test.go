@@ -24,9 +24,19 @@ func (s *memSessions) Get(_ context.Context, tok string) (*auth.Session, error) 
 	defer s.mu.Unlock()
 	if v, ok := s.m[tok]; ok {
 		c := *v
+		c.Token = tok // as SessionStore.Get does
 		return &c, nil
 	}
 	return nil, nil
+}
+
+func (s *memSessions) Touch(_ context.Context, sess *auth.Session) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if v, ok := s.m[sess.Token]; ok {
+		v.LastSeenAt = time.Now()
+	}
+	return nil
 }
 
 func (s *memSessions) Destroy(_ context.Context, tok string) error {
@@ -39,9 +49,13 @@ func (s *memSessions) Destroy(_ context.Context, tok string) error {
 
 // guarded runs one request through RequireAuth + a permission check and reports the status.
 func guarded(store *memSessions, f *fixture, tok, perm string) int {
+	return guardedAt(store, f, tok, perm, "/cloud/v1/appliances")
+}
+
+func guardedAt(store *memSessions, f *fixture, tok, perm, path string) int {
 	h := auth.RequireAuth(store, auth.DBSessionChecker{DB: f.pool})(auth.RequirePermission(perm)(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })))
-	req := httptest.NewRequest(http.MethodGet, "/cloud/v1/appliances", nil)
+	req := httptest.NewRequest(http.MethodGet, path, nil)
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: tok})
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -121,7 +135,7 @@ func TestOperatorSessionsEndWhenAccessChanges(t *testing.T) {
 	old.CreatedAt = time.Now().Add(-3 * time.Hour)
 	store.m["t-old"] = old
 	if c := guarded(store, f, "t-old", auth.PermFleetView); c != http.StatusNoContent {
-		t.Fatalf("under the default 24 h cap the session continues, got %d", c)
+		t.Fatalf("under the default 12 h cap the session continues, got %d", c)
 	}
 	rec := f.operatorCall(f.base.patchSecuritySettings, http.MethodPatch, "", map[string]any{"operator_session_max_hours": 2, "reason": "shared desk"})
 	if rec.Code != http.StatusOK || decode(t, rec)["operator_session_max_hours"].(float64) != 2 {
@@ -138,5 +152,21 @@ func TestOperatorSessionsEndWhenAccessChanges(t *testing.T) {
 	if n := f.count(`SELECT count(*) FROM audit_log WHERE action='settings.security_updated'
                       AND payload->'operator_session_max_hours'->>'to' = '2'`); n != 1 {
 		t.Fatal("the setting change must be audited with from/to")
+	}
+
+	// THE IDLE LIMIT (0052, GDPR plan C10): 30 minutes by default; the background whoami poll is not activity.
+	_, idle := mk("idle@central.test", "platform_admin")
+	idle.LastSeenAt = time.Now().Add(-10 * time.Minute)
+	store.m["t-idle"] = idle
+	seen := idle.LastSeenAt
+	if c := guardedAt(store, f, "t-idle", auth.PermFleetView, "/v1/auth/whoami"); c != http.StatusNoContent || !store.m["t-idle"].LastSeenAt.Equal(seen) {
+		t.Fatalf("the whoami poll must pass without counting as activity, got %d", c)
+	}
+	if c := guarded(store, f, "t-idle", auth.PermFleetView); c != http.StatusNoContent || !store.m["t-idle"].LastSeenAt.After(seen) {
+		t.Fatalf("a real request must count as activity, got %d", c)
+	}
+	store.m["t-idle"].LastSeenAt = time.Now().Add(-31 * time.Minute)
+	if c := guarded(store, f, "t-idle", auth.PermFleetView); c != http.StatusUnauthorized {
+		t.Fatalf("a session idle past 30 minutes must end, got %d", c)
 	}
 }

@@ -40,6 +40,7 @@ type Deps struct {
 	AllowOrigins  []string           // CORS allowlist for the console in development
 	CookieSecure  bool               // set true behind HTTPS
 	PortalTLS     *portaltls.Service // portal hostnames and certificates; nil leaves /cloud/v1/portal-tls unavailable
+	MFA           *auth.MFA          // console two-step sign-in (0052); nil refuses every sign-in
 
 	rateCounter api.RateCounter // tests only; production counts in Redis
 }
@@ -61,7 +62,7 @@ func NewRouter(d Deps) http.Handler {
 	store := &auth.SessionStore{R: d.Redis}
 	repo := &auth.Repo{DB: d.DB}
 	adeps := authDeps{Repo: repo, Store: store, Secure: d.CookieSecure, DB: d.DB,
-		Failures: ratebudget.New(5, 300, time.Minute)}
+		Failures: ratebudget.New(5, 300, time.Minute), MFA: d.MFA}
 	// Every authenticated request re-reads the operator (session_policy.go). Only a router built without a
 	// database (unit tests of the unauthenticated limits) runs without it.
 	var checker auth.SessionChecker
@@ -109,6 +110,11 @@ func NewRouter(d Deps) http.Handler {
 		// Operator authentication. Password re-entry is limited BEFORE the session check, so the limit also
 		// holds for guesses made without a valid session.
 		r.With(limit("login", loginPerMinute)).Post("/auth/login", adeps.login)
+		// The second step (0052): set up the authenticator, or enter its code. Same limit as the password.
+		r.With(limit("login", loginPerMinute)).Post("/auth/login/enrol", adeps.loginEnrol)
+		r.With(limit("login", loginPerMinute)).Post("/auth/login/code", adeps.loginCode)
+		r.With(auth.RequireAuth(store, checker)).Get("/auth/mfa", adeps.mfaStatus)
+		r.With(auth.RequireAuth(store, checker), api.RequireReauth(d.Redis)).Post("/auth/mfa/recovery-codes", adeps.mfaRecoveryCodes)
 		r.Post("/auth/logout", adeps.logout)
 		r.With(limit("reauth", reauthPerMinute), auth.RequireAuth(store, checker)).Post("/auth/reauth", adeps.reauth)
 		r.With(auth.RequireAuth(store, checker)).Get("/auth/whoami", adeps.whoami)

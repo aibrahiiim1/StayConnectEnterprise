@@ -11,6 +11,9 @@ import { formatDateTime } from "@/lib/status";
 
 export type SecuritySettings = {
   operator_session_max_hours: number;
+  /** Signed out after this many minutes without activity (0052). */
+  operator_idle_minutes: number;
+  idle_bounds: { default: number; min: number; max: number; unit: string };
   default: number;
   min: number;
   max: number;
@@ -27,13 +30,14 @@ export function SessionLifetimeSetting({ canManage }: { canManage: boolean }) {
   const toast = useToast();
   const [s, setS] = useState<SecuritySettings | null>(null);
   const [hours, setHours] = useState("");
+  const [idle, setIdle] = useState("");
   const [reason, setReason] = useState("");
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api.get<SecuritySettings>("/cloud/v1/settings/security")
-      .then((v) => { setS(v); setHours(String(v.operator_session_max_hours)); })
+      .then((v) => { setS(v); setHours(String(v.operator_session_max_hours)); setIdle(String(v.operator_idle_minutes)); })
       .catch(setErr);
   }, []);
 
@@ -44,6 +48,11 @@ export function SessionLifetimeSetting({ canManage }: { canManage: boolean }) {
       setErr(`Enter a whole number of hours from ${s.min} to ${s.max}.`);
       return;
     }
+    const m = Number(idle);
+    if (!/^\d+$/.test(idle.trim()) || m < s.idle_bounds.min || m > s.idle_bounds.max) {
+      setErr(`Enter a whole number of minutes from ${s.idle_bounds.min} to ${s.idle_bounds.max}.`);
+      return;
+    }
     if (!reason.trim()) {
       setErr("Enter a reason; it is recorded in the audit log.");
       return;
@@ -52,12 +61,13 @@ export function SessionLifetimeSetting({ canManage }: { canManage: boolean }) {
     setErr(null);
     try {
       const v = await withStepUp(() =>
-        api.patch<SecuritySettings>("/cloud/v1/settings/security", { operator_session_max_hours: n, reason: reason.trim() }),
+        api.patch<SecuritySettings>("/cloud/v1/settings/security", { operator_session_max_hours: n, operator_idle_minutes: m, reason: reason.trim() }),
       );
       setS(v);
       setHours(String(v.operator_session_max_hours));
+      setIdle(String(v.operator_idle_minutes));
       setReason("");
-      toast.success("Sign-in lifetime saved", `${v.operator_session_max_hours} hours`);
+      toast.success("Sign-in limits saved", `${v.operator_idle_minutes} minutes idle, ${v.operator_session_max_hours} hours at most`);
     } catch (e) {
       setErr(e);
     } finally {
@@ -69,10 +79,11 @@ export function SessionLifetimeSetting({ canManage }: { canManage: boolean }) {
     <Card>
       <CardHeader>
         <div className="space-y-0.5">
-          <CardTitle>Sign-in lifetime</CardTitle>
+          <CardTitle>Sign-in limits</CardTitle>
           <CardDescription>
-            A console sign-in ends this many hours after it began, however active the person is. Disabling a person,
-            changing their role or resetting their password ends their sign-ins at once.
+            A console sign-in ends after this many minutes without activity, and this many hours after it began however
+            active the person is. A tab that is only open counts as inactive. Disabling a person, changing their role
+            or resetting their password or two-step sign-in ends their sign-ins at once.
           </CardDescription>
         </div>
       </CardHeader>
@@ -87,6 +98,14 @@ export function SessionLifetimeSetting({ canManage }: { canManage: boolean }) {
             >
               <Input inputMode="numeric" aria-label="Sign-in lifetime in hours" value={hours} disabled={!canManage}
                 onChange={(e) => setHours(e.target.value)} />
+            </Field>
+            <Field
+              label="Minutes without activity"
+              required
+              hint={`From ${s.idle_bounds.min} to ${s.idle_bounds.max} minutes. Default ${s.idle_bounds.default}.`}
+            >
+              <Input inputMode="numeric" aria-label="Sign out after this many minutes without activity" value={idle}
+                disabled={!canManage} onChange={(e) => setIdle(e.target.value)} />
             </Field>
             {canManage && (
               <Field label="Reason" required hint="Recorded in the audit log.">
@@ -103,7 +122,7 @@ export function SessionLifetimeSetting({ canManage }: { canManage: boolean }) {
       </CardBody>
       {canManage && s && (
         <CardFooter>
-          <Button size="sm" disabled={busy || hours === String(s.operator_session_max_hours)} onClick={save}>
+          <Button size="sm" disabled={busy || (hours === String(s.operator_session_max_hours) && idle === String(s.operator_idle_minutes))} onClick={save}>
             {busy ? "Saving…" : "Save"}
           </Button>
         </CardFooter>

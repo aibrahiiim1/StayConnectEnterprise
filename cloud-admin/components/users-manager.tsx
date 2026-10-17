@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { KeyRound, Plus, UserCheck, UserMinus, UserPen, Users } from "lucide-react";
+import { KeyRound, Plus, Smartphone, UserCheck, UserMinus, UserPen, Users } from "lucide-react";
 import { api, itemsOf, withStepUp, type CentralUser, type Items } from "@/lib/api";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -65,6 +65,7 @@ export function UsersManager({
     | { kind: "new" }
     | { kind: "role"; u: CentralUser }
     | { kind: "password"; u: CentralUser }
+    | { kind: "mfa"; u: CentralUser }
     | { kind: "disable"; u: CentralUser }
     | { kind: "remove"; u: CentralUser }
     | null
@@ -72,9 +73,11 @@ export function UsersManager({
   const [busy, setBusy] = useState(false);
   const [dErr, setDErr] = useState<unknown>(null);
   const [form, setForm] = useState({ email: "", name: "", password: "", role: roles[roles.length - 1] as string });
+  const [mfaReason, setMfaReason] = useState("");
 
   function open(d: NonNullable<typeof dialog>) {
     setDErr(null);
+    setMfaReason("");
     setForm({
       email: "",
       name: "",
@@ -139,6 +142,9 @@ export function UsersManager({
                       {self && <Badge tone="accent">You</Badge>}
                     </div>
                     {u.display_name && <div className="text-caption text-muted-foreground">{u.display_name}</div>}
+                    {u.status === "active" && u.two_step_enrolled === false && (
+                      <Badge tone="neutral" className="mt-1">Sets up two-step at next sign-in</Badge>
+                    )}
                   </TD>
                   <TD>
                     <div className="flex flex-wrap gap-1">
@@ -158,6 +164,12 @@ export function UsersManager({
                           <Button size="sm" variant="ghost" onClick={() => open({ kind: "password", u })}>
                             <KeyRound /> <span className="hidden sm:inline">Password</span>
                             <span className="sr-only"> of {u.email}</span>
+                          </Button>
+                        )}
+                        {u.two_step_enrolled && (
+                          <Button size="sm" variant="ghost" onClick={() => open({ kind: "mfa", u })}>
+                            <Smartphone /> <span className="hidden sm:inline">Reset two-step</span>
+                            <span className="sr-only"> for {u.email}</span>
                           </Button>
                         )}
                         {u.status === "disabled" ? (
@@ -263,6 +275,30 @@ export function UsersManager({
       >
         <Field label="New password" required hint={`At least ${MIN_PASSWORD} characters. ${form.password.length}/${MIN_PASSWORD}`}>
           <Input type="password" autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+        </Field>
+      </DialogForm>
+
+      <DialogForm
+        open={dialog?.kind === "mfa"}
+        onOpenChange={(v) => { if (!v) setDialog(null); }}
+        title="Reset two-step sign-in"
+        description={dialog?.kind === "mfa"
+          ? `${dialog.u.email}: their authenticator app and recovery codes stop working, they are signed out, and they set up a new app at their next sign-in.`
+          : undefined}
+        size="sm"
+        submitLabel="Reset two-step sign-in"
+        busyLabel="Resetting…"
+        busy={busy}
+        error={dErr}
+        disabled={mfaReason.trim().length < 4}
+        onSubmit={() => {
+          if (dialog?.kind !== "mfa") return;
+          const u = dialog.u;
+          return run(() => api.post(`${base}/${u.id}/mfa-reset`, { reason: mfaReason.trim() }), "Two-step sign-in reset", u.email);
+        }}
+      >
+        <Field label="Reason" required hint="Recorded in the audit log, for example: lost their phone.">
+          <Input value={mfaReason} maxLength={500} onChange={(e) => setMfaReason(e.target.value)} />
         </Field>
       </DialogForm>
 

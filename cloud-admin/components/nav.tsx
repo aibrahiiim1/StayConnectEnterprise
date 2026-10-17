@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
-  BadgeCheck, Building2, GlobeLock, HardDrive, KeyRound, LayoutDashboard, LogOut, PanelLeftClose, PanelLeftOpen,
+  BadgeCheck, Building2, GlobeLock, HardDrive, KeyRound, LayoutDashboard, LogOut, Smartphone, PanelLeftClose, PanelLeftOpen,
   ScrollText, Server, Settings2, ShieldAlert, Users,
 } from "lucide-react";
 import { BySemantics, OneGateLockup } from "@/components/brand";
@@ -196,6 +196,26 @@ export function Nav({
           </div>
         )}
 
+        {(() => {
+          // The operator's own two-step sign-in (0052).
+          const twoStep = (
+            <Link
+              href="/account/security"
+              onClick={onNavigate}
+              aria-label={collapsed ? "Two-step sign-in" : undefined}
+              className={cn(
+                "mt-1 flex w-full items-center rounded-md text-sm text-sidebar-foreground/85",
+                "transition-colors hover:bg-sidebar-accent/60 hover:text-white",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
+                collapsed ? "h-10 justify-center px-0" : "gap-2.5 px-2.5 py-1.5",
+              )}
+            >
+              <Smartphone className="size-4 shrink-0 text-sidebar-muted" />
+              <span className={cn(collapsed ? "sr-only" : undefined)}>Two-step sign-in</span>
+            </Link>
+          );
+          return collapsed ? <Tooltip content="Two-step sign-in" side="right">{twoStep}</Tooltip> : twoStep;
+        })()}
         {(() => {
           const signOut = (
             <button

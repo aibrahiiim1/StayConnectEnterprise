@@ -13,6 +13,7 @@ beforeEach(() => nav.reset("/system/team"));
 
 const settings = {
   operator_session_max_hours: 24, default: 24, min: 1, max: 168, unit: "hours",
+  operator_idle_minutes: 30, idle_bounds: { default: 30, min: 5, max: 240, unit: "minutes" },
   updated_at: "2026-10-01T08:00:00Z", updated_by: "owner@example.test",
 };
 const team = { match: "/api/cloud/v1/team", method: "GET", body: { items: [] } };
@@ -50,7 +51,29 @@ describe("System > Team: the sign-in lifetime setting", () => {
     await user.type(within(dialog).getByLabelText(/^Password/), "hunter22");
     await user.click(within(dialog).getByRole("button", { name: "Confirm" }));
     await waitFor(() => expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(2));
-    expect(calls.filter((c) => c.method === "PATCH")[1].body).toEqual({ operator_session_max_hours: 8, reason: "front desk PC" });
+    expect(calls.filter((c) => c.method === "PATCH")[1].body).toEqual({ operator_session_max_hours: 8, operator_idle_minutes: 30, reason: "front desk PC" });
+  });
+
+  it("the idle limit is saved with its bounds (GDPR plan C10)", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetch([
+      team,
+      { match: "/api/cloud/v1/settings/security", method: "GET", body: settings },
+      { match: "/api/cloud/v1/settings/security", method: "PATCH", body: { ...settings, operator_idle_minutes: 15 } },
+    ]);
+    renderAs(PLATFORM_ME, <TeamPage />);
+    const idle = await screen.findByLabelText("Sign out after this many minutes without activity");
+    expect(idle).toHaveValue("30");
+    await user.clear(idle);
+    await user.type(idle, "2");
+    await user.type(screen.getByPlaceholderText("e.g. shared workstation"), "night shift");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText(/from 5 to 240/)).toBeInTheDocument();
+    await user.clear(idle);
+    await user.type(idle, "15");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(1));
+    expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ operator_session_max_hours: 24, operator_idle_minutes: 15, reason: "night shift" });
   });
 
   it("support staff see the value but cannot change it", async () => {

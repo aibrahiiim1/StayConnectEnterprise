@@ -369,4 +369,6 @@ export type CentralUser = {
   roles: string[];
   created_at?: string;
   last_login_at?: string | null;
+  /** An authenticator app is set up (0052); without one, the next sign-in sets one up. */
+  two_step_enrolled?: boolean;
 };

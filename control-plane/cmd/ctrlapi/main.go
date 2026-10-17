@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"flag"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/api"
 	"github.com/stayconnect/enterprise/control-plane/internal/applianceauth"
 	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
+	"github.com/stayconnect/enterprise/control-plane/internal/audit"
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 	"github.com/stayconnect/enterprise/control-plane/internal/config"
 	"github.com/stayconnect/enterprise/control-plane/internal/db"
@@ -52,11 +54,15 @@ func main() {
 			err = runGenRegistryKey(os.Args[2:])
 		case "assignment-key":
 			err = runAssignmentKey(os.Args[2:])
+		case "gen-mfa-key":
+			err = runGenMFAKey(os.Args[2:])
+		case "reset-mfa":
+			err = runResetMFA(os.Args[2:])
 		case "serve", "":
 			goto serve
 		default:
 			fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", os.Args[1])
-			fmt.Fprintf(os.Stderr, "usage: ctrlapi [serve | seed-admin | gen-vendor-key | gen-assignment-key | gen-registry-key | assignment-key verify-only|revoke]\n")
+			fmt.Fprintf(os.Stderr, "usage: ctrlapi [serve | seed-admin | gen-vendor-key | gen-assignment-key | gen-registry-key | assignment-key verify-only|revoke | gen-mfa-key | reset-mfa]\n")
 			os.Exit(2)
 		}
 		if err != nil {
@@ -254,6 +260,19 @@ func serve() {
 		slog.Warn("appliance CA unavailable — PKI/mTLS disabled", "path", intKeyPath, "err", err)
 	}
 
+	// CONSOLE TWO-STEP SIGN-IN (0052, GDPR plan C10). Without the key no operator can sign in: the console
+	// refuses rather than letting a password alone through. central-install.sh creates it; the export bundle
+	// carries it, so moving Central keeps everyone's authenticator.
+	mfaKeyPath := envOrDefault("CTRLAPI_OPERATOR_MFA_KEY", defaultMFAKeyPath)
+	var mfaSvc *auth.MFA
+	if raw, err := auth.LoadMFAKeyFile(mfaKeyPath); err != nil {
+		slog.Error("console two-step sign-in key missing -- every console sign-in will be refused",
+			"path", mfaKeyPath, "err", err, "hint", "run: ctrlapi gen-mfa-key --out "+mfaKeyPath)
+	} else if mfaSvc, err = auth.NewMFA(pool, raw); err != nil {
+		slog.Error("console two-step sign-in key unusable -- every console sign-in will be refused", "path", mfaKeyPath, "err", err)
+		mfaSvc = nil
+	}
+
 	handler := apihttp.NewRouter(apihttp.Deps{
 		DB:            pool,
 		Redis:         rdb,
@@ -269,6 +288,7 @@ func serve() {
 		AllowOrigins:  cfg.AllowOrigins,
 		CookieSecure:  cfg.CookieSecure,
 		PortalTLS:     ptls,
+		MFA:           mfaSvc,
 	})
 
 	srv := &http.Server{
@@ -495,5 +515,83 @@ func runSeedAdmin(args []string) error {
 	}
 
 	slog.Info("seeded platform admin", "email", *email, "id", id)
+	return nil
+}
+
+// defaultMFAKeyPath is where central-install.sh puts the console two-step sign-in key.
+const defaultMFAKeyPath = "/etc/stayconnect/operator-mfa.key"
+
+// runGenMFAKey writes a new 32-byte console two-step sign-in key (0052). It refuses to overwrite one: replacing
+// the key makes every operator's authenticator unreadable, and every operator would need a reset.
+func runGenMFAKey(args []string) error {
+	fs := flag.NewFlagSet("gen-mfa-key", flag.ExitOnError)
+	out := fs.String("out", defaultMFAKeyPath, "where to write the key (0600)")
+	_ = fs.Parse(args)
+	if _, err := os.Stat(*out); err == nil {
+		return fmt.Errorf("%s already exists; refusing to replace it (every operator would have to set up their authenticator again)", *out)
+	}
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(*out, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(key); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	slog.Info("console two-step sign-in key written", "path", *out)
+	return nil
+}
+
+// runResetMFA removes one operator's authenticator from Central's own command line (0052): the break-glass for
+// the last platform administrator, when nobody is left to reset them in the console. The operator's sessions
+// end, and they set up a new authenticator at their next sign-in. Audited as user.mfa_reset.
+func runResetMFA(args []string) error {
+	fs := flag.NewFlagSet("reset-mfa", flag.ExitOnError)
+	email := fs.String("email", "", "the operator's email")
+	reason := fs.String("reason", "", "why (recorded in the audit log)")
+	_ = fs.Parse(args)
+	if strings.TrimSpace(*email) == "" || len(strings.TrimSpace(*reason)) < 4 {
+		return fmt.Errorf("--email and --reason (at least 4 characters) are required")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	pool, err := db.Open(ctx, cfg.DBURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	var id string
+	if err := pool.QueryRow(ctx, `SELECT id::text FROM operators WHERE lower(email) = lower($1)`, strings.TrimSpace(*email)).Scan(&id); err != nil {
+		return fmt.Errorf("no operator %q: %w", *email, err)
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	had, err := auth.ResetMFA(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	if err := auth.EndOperatorSessions(ctx, tx, id); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	audit.System(ctx, pool, "user.mfa_reset", "operator", id, map[string]any{
+		"reason": strings.TrimSpace(*reason), "had_authenticator": had, "via": "command line"})
+	slog.Info("two-step sign-in reset; a new authenticator is set up at the next sign-in", "email", *email, "had_authenticator", had)
 	return nil
 }

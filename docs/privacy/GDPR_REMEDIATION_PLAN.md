@@ -65,7 +65,7 @@ Priority:
 | C7 | P1 | **Store less from the PMS.** Stop mirroring date of birth, VIP, travel agent and rate plan unless a feature needs them. Clear the existing values. | PMS protocol, schema, historical data | **D-C7:** Does any feature need date of birth (e.g. as a sign-in factor)? If none, drop it. |
 | C8 | P1 | **Encrypt the Protel FIAS link** (`UseTLS` is read but never used). | PMS configuration and traffic | **D-C8:** Does the hotel's Protel interface support TLS? Is turning it on at this hotel authorised? |
 | C9 | P1 | **Request fewer profile fields from social providers:** drop `profile`, `public_profile`, `name` and the Facebook `picture` field. Limit the free-text scope field in Hotel Admin to an allow-list. | guest authentication | **D-C9:** Reject or warn when a hotel adds extra scopes? |
-| C10 | P1 | **Hotel Admin built on `delivery/gdpr` (migration 0132); Central to follow.** **Harden operator access:** MFA for Hotel Admin and Central, an absolute session limit plus an idle timeout, `EDGED_COOKIE_SECURE` on by default. | security | **D-C10:** Which MFA method (TOTP recommended)? Mandatory for admin roles only, or for everyone? Idle timeout (recommend 30 min) and absolute limit (recommend 12 h)? |
+| C10 | P1 | **Built on `delivery/gdpr`: Hotel Admin (migration 0132) and Central (Central migration 0052).** **Harden operator access:** MFA for Hotel Admin and Central, an absolute session limit plus an idle timeout, `EDGED_COOKIE_SECURE` on by default. | security | **D-C10:** Which MFA method (TOTP recommended)? Mandatory for admin roles only, or for everyone? Idle timeout (recommend 30 min) and absolute limit (recommend 12 h)? |
 | C11 | P2 | **Encryption at rest:** disk encryption (LUKS) for new installs; TLS or Unix sockets for database connections. | appliance deployment, security | **D-C11:** Accept for new installs only (existing appliances need a reinstall)? How is the key unlocked at boot (TPM vs passphrase)? |
 | C12 | P0 (ops) | **Rotate exposed credentials:** the Gmail app password that `SECURITY_HARDENING.md` reports was once committed and never rotated; the default Postgres password fallback. | security | **D-C12:** None for the rotation itself, which the account owner must do. Confirm removing the personal Gmail address from the repository. |
 
@@ -161,6 +161,16 @@ Each value ships as a hotel setting with this default, following `OPERATIONAL_SE
 - **Your account → Two-step sign-in** shows the state and makes a new set of recovery codes.
 - **The session cookie is Secure by default** (`EDGED_COOKIE_SECURE=false` is needed to switch it off).
 - **New dependency:** `qrcode` 1.5.4 (MIT) in Hotel Admin, pinned.
+
+### How C10 was built for Central (Central migration 0052, on `delivery/gdpr`)
+
+- **The same two steps** as Hotel Admin, for every Central account: platform operators and customer users. The pending state between the password and the code is a row in Postgres (a hash of the cookie token, five minutes).
+- **The secret is sealed by ctrlapi** with AES-256-GCM under a new key file, `/etc/stayconnect/operator-mfa.key` (`CTRLAPI_OPERATOR_MFA_KEY`). `central-install.sh` creates it, and the export bundle carries it, so moving Central keeps everyone's authenticator. Without the key, every sign-in is refused.
+- **Wrong codes** lock the authenticator for 15 minutes after five, audited (`auth.mfa_failed`, `auth.mfa_locked`). A code is never accepted twice.
+- **Sessions end** after 30 minutes idle (`operator_idle_minutes`, 5-240) and 12 hours at most (`operator_session_max_hours`; the old default 24 moved to 12 where nobody had changed it). Both are under System > Team > Sign-in limits. The console's whoami poll does not count as activity.
+- **Lost phone:** a recovery code; an administrator's "Reset two-step" on the Team or a customer's Users (reason, audited, sessions ended, never one's own); or `ctrlapi reset-mfa --email E --reason R` for the last administrator.
+- **The Two-step sign-in page** in the sidebar shows the state and makes new recovery codes (after step-up).
+- **Scripts that sign in with a password alone** (`cmd/acceptance`, `cmd/pkitest` and the phase test scripts under `scripts/`) no longer get a session; they need an operator with a known TOTP secret before they can run again.
 
 ### How C2 was built (migration 0131, on `delivery/gdpr`)
 

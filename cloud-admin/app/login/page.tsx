@@ -2,7 +2,7 @@
 
 // THE SIGN-IN SCREEN — outside the app shell, so it carries its own theme control.
 
-import { Suspense, useState } from "react";
+import { Suspense, useCallback, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ShieldCheck } from "lucide-react";
 import { BySemantics, OneGateLockup, OneGateMark } from "@/components/brand";
@@ -11,6 +11,7 @@ import { Input, Field } from "@/components/ui/input";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { api } from "@/lib/api";
+import { SigninSecondStep, type SecondStep } from "@/components/signin-second-step";
 
 export default function LoginPage() {
   // useSearchParams must live inside a Suspense boundary for production build.
@@ -32,21 +33,32 @@ function LoginInner() {
   const [password, setPassword] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // The password is the first of two steps (0052): it answers which second step comes, and opens no session.
+  const [second, setSecond] = useState<SecondStep | null>(null);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
     setLoading(true);
     try {
-      await api.post("/v1/auth/login", { email, password });
-      router.replace(next);
-      router.refresh();
+      const r = await api.post<{ second_step?: SecondStep }>("/v1/auth/login", { email, password });
+      setPassword("");
+      setSecond(r.second_step === "enrol" ? "enrol" : "code");
     } catch (e: any) {
       setErr(e?.message || "Login failed");
     } finally {
       setLoading(false);
     }
   }
+
+  const finish = useCallback(() => {
+    router.replace(next);
+    router.refresh();
+  }, [router, next]);
+  const restart = useCallback((why: string) => {
+    setSecond(null);
+    setErr(why || null);
+  }, []);
 
   return (
     <div className="grid min-h-screen bg-background lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
@@ -81,6 +93,9 @@ function LoginInner() {
               <p className="text-sm text-muted-foreground">Admin sign-in. Use your Central operator account.</p>
             </div>
 
+            {second ? (
+              <SigninSecondStep step={second} onDone={finish} onRestart={restart} />
+            ) : (
             <form onSubmit={onSubmit} className="space-y-4">
               <div aria-live="assertive">
                 <ErrorBanner err={err} className="mb-0" />
@@ -108,6 +123,7 @@ function LoginInner() {
                 {loading ? "Signing in…" : "Sign in"}
               </Button>
             </form>
+            )}
 
             <div className="mt-6 flex gap-2.5 rounded-lg border border-border bg-card px-3.5 py-3 text-caption leading-relaxed text-muted-foreground">
               <ShieldCheck className="mt-0.5 size-4 shrink-0" aria-hidden />

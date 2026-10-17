@@ -23,6 +23,10 @@ type authDeps struct {
 	Secure bool // set true in prod to add Secure on cookies
 	// Failures bounds how many failed sign-ins / step-ups are written to the audit log (ratebudget).
 	Failures *ratebudget.Budget
+	// MFA is the authenticator service (auth/mfa.go, 0052). nil refuses every sign-in: fail closed.
+	MFA *auth.MFA
+	// NewSession creates the console session; nil means Store.Create (Redis). Tests supply their own.
+	NewSession func(context.Context, auth.Session) (*auth.Session, error)
 }
 
 // auditFailure records a failed sign-in or step-up, within the failure budget: at most 5 per client address
@@ -124,35 +128,9 @@ func (d authDeps) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, err := d.Store.Create(r.Context(), auth.Session{
-		OperatorID:      op.ID,
-		Email:           op.Email,
-		DisplayName:     op.DisplayName,
-		IsSuperAdmin:    op.IsSuperAdmin,
-		DefaultTenantID: op.DefaultTenant,
-		Roles:           op.Roles,
-	})
-	if err != nil {
-		api.Fail(w, r, http.StatusInternalServerError, api.CodeInternal, "session create failed")
-		return
-	}
-	if d.DB != nil {
-		_, _ = d.DB.Exec(r.Context(), `UPDATE operators SET last_login_at=now() WHERE id=$1`, op.ID)
-		audit.Emit(r.Context(), d.DB, audit.Entry{ActorType: "operator", ActorID: op.ID, TenantID: op.DefaultTenant,
-			Action: "auth.login_succeeded", TargetType: "operator", TargetID: op.ID,
-			IP: clientip.From(r), UserAgent: r.UserAgent()})
-	}
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     auth.SessionCookieName,
-		Value:    sess.Token,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   d.Secure,
-		SameSite: http.SameSiteLaxMode,
-		Expires:  sess.ExpiresAt,
-	})
-	writeJSON(w, http.StatusOK, d.describe(r.Context(), sess))
+	// THE PASSWORD IS ONE OF TWO STEPS (0052): no session yet. The authenticator code opens it
+	// (auth_mfa_handlers.go).
+	d.beginSecondStep(w, r, op)
 }
 
 // reauth re-verifies the CURRENT session operator's password. Licence and activation writes (and every

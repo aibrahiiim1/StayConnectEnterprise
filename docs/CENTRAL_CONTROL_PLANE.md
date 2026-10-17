@@ -191,7 +191,9 @@ code, `message` an operator sentence the console shows verbatim. Login, re-authe
 rate-limited per client address, which ctrlapi derives itself (the TCP peer, or the loopback proxy's `X-Real-IP`).
 
 ### Authentication
-`POST /v1/auth/login` · `POST /v1/auth/logout` · `GET /v1/auth/whoami` → `{operator_id,email,display_name,roles[],is_super_admin,customer_id|null,customer_name|null,permissions[]}` · `POST /v1/auth/reauth`
+`POST /v1/auth/login` → `{second_step: "code"|"enrol"}` and a five-minute `sc_signin` cookie, no session · `POST /v1/auth/login/enrol` → `{secret, otpauth_uri}` (first sign-in) · `POST /v1/auth/login/code {code}` → the session and the whoami shape (first sign-in adds `recovery_codes`) · `POST /v1/auth/logout` · `GET /v1/auth/whoami` → `{operator_id,email,display_name,roles[],is_super_admin,customer_id|null,customer_name|null,permissions[]}` · `POST /v1/auth/reauth` · `GET /v1/auth/mfa` · `POST /v1/auth/mfa/recovery-codes` (SU)
+
+Two-step sign-in (migration 0052, GDPR plan C10): every account signs in with its password and the 6-digit code of an authenticator app (TOTP), or a single-use recovery code. The secret is sealed under `CTRLAPI_OPERATOR_MFA_KEY` (default `/etc/stayconnect/operator-mfa.key`, created by `central-install.sh`, carried by the export bundle); without the key every sign-in is refused. Sessions end after `operator_idle_minutes` without activity (default 30; the whoami poll is not activity) and `operator_session_max_hours` after sign-in (default 12). An administrator resets a colleague's second step with `POST /cloud/v1/team/{id}/mfa-reset` or `POST /cloud/v1/customers/{id}/users/{uid}/mfa-reset` (SU, reason, never one's own); the last one is reset with `ctrlapi reset-mfa --email E --reason R`.
 
 ### Overview
 `GET /cloud/v1/overview` →

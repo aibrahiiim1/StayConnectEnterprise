@@ -246,6 +246,10 @@ DBQ_OK=0; [ "$DRY_RUN" = 0 ] && DBQ_OK=1
 KEY_VENDOR="$SC_ETC/vendor-license.key"
 KEY_ASSIGN="$SC_ETC/assignment-signing.key"
 KEY_REG="$SC_ETC/assignment-registry-root.key"
+# Console two-step sign-in (0052, GDPR plan C10): seals each operator's authenticator secret. Carried by a
+# restore when the bundle has it; created otherwise. ctrlapi reads it from CTRLAPI_OPERATOR_MFA_KEY (this path
+# by default) and refuses every console sign-in without it.
+KEY_MFA="$SC_ETC/operator-mfa.key"
 PKI_ROOT_CRT="$SC_ETC/pki/root-ca.crt"
 PKI_INT_CRT="$SC_ETC/pki/intermediate-ca.crt"
 PKI_INT_KEY="$SC_ETC/pki/intermediate-ca.key"
@@ -448,6 +452,14 @@ else
   if [ "$TLS_MODE" = internal ]; then run bash "$T/central-mint-tls.sh" --init-ca; fi
   if [ "$n" = 3 ]; then say "appliance CA exists — kept (root $(cert_fpr "$PKI_ROOT_CRT" | cut -c1-23)…)"
   else say "the appliance Root/Intermediate CA is created by ctrlapi on its first start (step 11)"; fi
+fi
+if [ -s "$KEY_MFA" ]; then say "console two-step sign-in key exists — kept"
+else
+  run "$CTRLAPI_BIN_PATH" gen-mfa-key --out "$KEY_MFA"
+  if [ "$MODE" = restore ]; then
+    warn "the bundle had no console two-step sign-in key: a NEW one was created. Operators who had set up an
+    authenticator cannot sign in until it is reset: ctrlapi reset-mfa --email <them> --reason \"restored without key\""
+  fi
 fi
 case "$TLS_MODE" in internal|acme) ;; *) die "--tls must be internal or acme" ;; esac
 [ "$TLS_MODE" = acme ] || [ "$DRY_RUN" = 1 ] || [ -s "$CENTRAL_TLS_DIR/ca.crt" ] || die "--tls internal but no Central TLS CA at $CENTRAL_TLS_DIR"
