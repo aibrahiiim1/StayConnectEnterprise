@@ -59,7 +59,7 @@ Priority:
 | C1 | P0 | **Built on `delivery/gdpr` (migration 0127), not yet deployed.** **Retention engine for guest data.** One purge job driven by hotel settings, per category: PMS stays, stay guests and stay events after checkout; sessions; devices (MAC/IP); guest identities (email, phone, social subject); `auth_otps`; `audit_log`; expired single-use rows (OAuth states, email tokens, auth contexts, verification grants, sign-in restrictions). Needs migrations, and the append-only trigger on `stay_events` must allow deletion by the retention job only. | schema, destructive data, PMS mirror | **D-C1 (retention defaults):** recommended starting points:<br>• PMS stay, guest and event data: **30 days after checkout**<br>• sessions, devices, usage detail: **12 months** (check the hotel's national rules on keeping connection data)<br>• guest identities with no stay or account activity: **12 months**<br>• OTP, OAuth and token rows: **7 days after expiry**<br>• audit log: **24 months**<br>• financial records: **legal period, set per country (default 10 years)**, kept and not purged.<br>Also: purge for real, or anonymise and keep the totals? |
 | C2 | P0 | **Change the accounting-detail default** from *unlimited* to the D-C1 value for new sites. Decide what happens on existing sites. | destructive / historical data | **D-C2:** Apply the new default to existing sites (purges history on PRE-LIVE), or only to new installs? |
 | C3 | P0 | **Erase one guest.** A single action in Hotel Admin that finds everything held about one guest (account, principal and identities, stays, sessions, devices, sign-in attempts, OTPs, audit mentions) and erases or anonymises it. Fixes "Remove" keeping the email inside the renamed username. | destructive data, guest auth core, product semantics | **D-C3 (erasure semantics):**<br>(a) **Pseudonymise** rows that must survive (financial postings, entitlement totals, and audit rows as events) by replacing identifiers with a one-way token. **Hard-delete** everything else. *Recommended.*<br>(b) Hard-delete everything: breaks the financial and audit chains, not recommended.<br>Also decide: what happens to `stay_events` raw payloads (recommend: blank the guest fields, keep the event); whether to erase guests the PMS still shows as checked in (recommend: refuse, and tell staff the PMS will copy them back). |
-| C4 | P1 | **Export one guest's data (access and portability).** The same lookup as C3, producing a machine-readable JSON/CSV bundle. Requires the operator's password again, is audited, and is limited to one role. | product semantics (guest-data surface) | **D-C4:** Which roles may export (recommend site_admin and hotel_it_manager)? Is the export handed to the guest by staff (recommended), or do guests get self-service? |
+| C4 | P1 | **Export one guest's data (access and portability).** The same lookup as C3, producing a machine-readable JSON/CSV bundle. Requires the operator's password again, is audited, and is limited to one role. | product semantics (guest-data surface) | **D-C4:** decided, see §4 (site_admin and hotel_it_manager; staff hand the export over). |
 | C5 | P0 | **Encrypt backups and keep the keys apart.** Encrypt the nightly dump and the `/etc` archive to a public key, so the appliance can write backups but cannot read them back. Stop the seal keys travelling in the same unencrypted archive. Add an age limit to the on-demand dumps as well as the count limit. | security, keys and trust | **D-C5:** decided, see §4 (hotel-held keys, several holders, restore-test reminder, no escrow). |
 | C6 | P1 | **Record consent / notice acknowledgement.** Store the version of the notice and terms each guest saw, with the time. | schema, guest auth flow | **D-C6:** Lawful basis for Wi-Fi access. We recommend **contract / legitimate interest, not consent**, so we *record that the notice was shown* rather than block access on a checkbox. Consent is needed only if marketing is ever added. |
 | C7 | P1 | **Store less from the PMS.** Stop mirroring date of birth, VIP, travel agent and rate plan unless a feature needs them. Clear the existing values. | PMS protocol, schema, historical data | **D-C7:** Does any feature need date of birth (e.g. as a sign-in factor)? If none, drop it. |
@@ -118,13 +118,19 @@ Each value ships as a hotel setting with this default, following `OPERATIONAL_SE
 - Reports and totals (usage, entitlements, financials) keep working on the anonymised rows.
 - The `stay_events` append-only trigger is relaxed only for that routine blanking the guest fields; deletion stays refused.
 
+### D-C4, guest export and erasure: **Site admin and IT manager; staff hand the export over**
+
+- Only `site_admin` and `hotel_it_manager` may export or erase a guest. Other staff roles get neither action.
+- Each export and each erasure asks for the operator's password again and a reason, and is written to the audit log by internal record id (an export) or erasure token (an erasure), never by name, email, phone or room.
+- The export is a machine-readable JSON file downloaded from Hotel Admin. Staff check the guest's identity and hand the file over. The guest portal gets no self-service download, so a weak portal sign-in cannot leak another guest's data.
+
 ### Still open
 
-- **D-C2, D-C4, D-C7 to D-C11, D-F1 to D-F8:** still to decide.
+- **D-C2, D-C7 to D-C11, D-F1 to D-F8:** still to decide.
 
 ## 5. Proposed order
 
-1. **Decisions first:** D-C1, D-C1a, D-C3, D-C5 and D-C6 are taken (§4). C1, C3 and C5 are no longer blocked by a decision.
+1. **Decisions first:** D-C1, D-C1a, D-C3, D-C4, D-C5 and D-C6 are taken (§4). C1, C3, C4 and C5 are no longer blocked by a decision.
 2. **Start now in parallel (FAST, no decision needed):** F4 and F9 are done on this branch; F6 moved to C1. F1, F2 and F3 can be drafted now and finalised once D-F1, D-F2 and D-F3 are made.
 3. **Then:** C1 (built: migration 0127, includes F6) + C2 (retention) → C3 + C4 (erasure and export, sharing one guest-lookup) → C5 (backups).
 4. **Then:** C6–C11 as their decisions arrive.
