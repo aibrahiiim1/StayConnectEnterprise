@@ -153,6 +153,8 @@ Each value ships as a hotel setting with this default, following `OPERATIONAL_SE
 ### F2, breach runbook: drafted, waiting for D-F2
 
 - `docs/runbooks/PERSONAL_DATA_BREACH.md`. The breach contact and the promised notification hours are marked **TBD** until D-F2 is answered; it is not given to a customer before then, nor before the D-F3 legal review.
+- **Scope, from the Product Owner's answers (2026-10-17), checked in the code.** Guest data stays on the hotel's appliance and we have no standing access: the Central link is licensing only, installation creates no vendor login, tunnel or key, and break-glass needs root the hotel gives us. The messaging, identity-provider and payment accounts are the hotel's own. We are therefore a processor only (A) during a support session the hotel opens and (B) for files it sends us, such as logs; and (C) as the supplier, we warn hotels of a security flaw in our software. The runbook covers those three cases, with one promised notification time.
+- **For F3:** the sub-processor list shrinks accordingly. SendGrid, Twilio, Meta, Google, Microsoft, Apple, Stripe and Paymob are the hotel's own processors, not ours.
 
 ### Still open
 
