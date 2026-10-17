@@ -1,0 +1,79 @@
+# GDPR remediation plan
+
+**Status:** DRAFT for Product Owner decision. Nothing here is implemented yet.
+**Branch:** `delivery/gdpr`; all GDPR work goes here, never on `master`.
+**Baseline:** audit of `master` at `18e34e90` (2026-10-17), read-only.
+
+## 0. Where we stand
+
+**StayConnect is not GDPR compliant today.** On each guest appliance, the hotel is the **controller** and we are the **processor**. Our product therefore has to let a hotel:
+
+- tell guests what is processed;
+- keep data no longer than necessary;
+- answer access and erasure requests;
+- secure the data.
+
+Today it can do none of the first three. Its security is partial.
+
+### Already sound (keep it this way)
+
+- **No guest data reaches Central.** Every appliance-to-Central payload was checked: licensing data only.
+- **Strong password storage:** argon2id for operators, guests and Central.
+- **Provider secrets are sealed** with AES-256-GCM: social login, SMTP, payment, vouchers and sign-in attempts.
+- **Server-side role matrix.** Revealing credentials or codes requires the operator's password again, and the reveal is written to the audit log.
+- **The portal loads no trackers or analytics.** The portal's Content-Security-Policy (CSP) allows only the appliance itself (`default-src 'self'`). Payment providers receive no guest identifiers.
+- **Social login stores only the verified email and the provider's subject id.** Name and picture are thrown away.
+- **Some retention already works:** sign-in attempts are kept 30 days, throttles and OTP bindings are pruned, and the accounting purge exists but is opt-in.
+
+## 1. How the work is classified
+
+The classification follows `CLAUDE.md` §0, by what each item touches:
+
+- **FAST:** no schema change, no deletion of data, no guest-auth, PMS, security or financial core. It can be built on this branch directly.
+- **CONTROLLED:** touches one of the §0 triggers. It needs the listed Product Owner decision first, then the full verification for that action.
+
+Priority:
+
+- **P0:** exposure today.
+- **P1:** needed for a defensible position.
+- **P2:** hygiene.
+
+## 2. FAST work: buildable now on `delivery/gdpr`
+
+| # | P | Item | Gap it closes | PO decision needed |
+|---|---|---|---|---|
+| F1 | P0 | **Privacy notice on the guest portal.** Add a `privacy_url` field and an optional inline privacy text to the portal design (stored in the same design document as `terms_url`, so no schema change). Translate the link text. Show it on every sign-in method, before the guest acts. | Art. 13: guests receive no information today | **D-F1:** Do we ship default notice text that the hotel completes (we recommend a template with controller placeholders)? Or a link only? |
+| F2 | P0 | **Breach-response runbook** `docs/runbooks/PERSONAL_DATA_BREACH.md`: detection sources, who decides, the hotel's 72-hour deadline as controller, our duty to tell the hotel "without undue delay" as processor, evidence handling. | Art. 33/34: nothing exists | **D-F2:** Who in our organisation is the breach contact? Within how many hours do we promise to tell the hotel? |
+| F3 | P0 | **Compliance pack** under `docs/privacy/`: data inventory / Art. 30 record template, sub-processor list (SendGrid, Twilio, Meta, Google, Microsoft, Apple, Stripe, Paymob), notes on data sent outside the EU, DPIA starter, DPA template for hotels. | Art. 28, 30, 35, Chapter V: nothing exists | **D-F3:** Legal review owner. These are engineering drafts and need a lawyer's sign-off before they reach a customer. |
+| F4 | P1 | **Turn off SendGrid click/open tracking** on verification and reset mail (`tracking_settings`). | Tracking that guests are not told about; rewritten links | none |
+| F5 | P1 | **Bound the logs:** a logrotate rule for `/var/log/stayconnect/*` and Caddy/Kea logs, plus a journald size and age limit. Stop the non-production OTP stubs from writing full recipients and codes. | Art. 5(1)(e): logs grow forever | **D-F5:** Log retention period (recommend 14 days) |
+| F6 | P1 | **Make the 30-day sign-in-attempt retention a hotel setting**, if the existing settings store holds it without a migration (otherwise it moves to C1). | Breaks `OPERATIONAL_SETTINGS_POLICY` §0C | none (keep the 30-day default) |
+| F7 | P2 | **Explain the remembered-device cookie on the portal** (one sentence, translated). Hotel Admin warns when a logo, background or font comes from an outside host. | Art. 13; outside hosts the guest is not told about | none |
+| F8 | P2 | **Audit routine reads of guest data:** staff viewing guest-account details, a stay's identity, usage by MAC. | Accountability: who looked at a guest | **D-F8:** Audit every view, or only opening one guest's detail (recommended; avoids flooding the log)? |
+| F9 | P2 | **Correct stale documents:** `DATA_OWNERSHIP.md` (the dropped `guests` table; the claim that "retention is enforced locally"; the portal-TLS endpoints) and `CONTROL_PLANE_MIGRATION.md` ("historical guest rows"). | Accurate records | none |
+
+## 3. CONTROLLED work: needs a decision first
+
+| # | P | Item | Trigger(s) | PO decision needed |
+|---|---|---|---|---|
+| C1 | P0 | **Retention engine for guest data.** One purge job driven by hotel settings, per category: PMS stays, stay guests and stay events after checkout; sessions; devices (MAC/IP); guest identities (email, phone, social subject); `auth_otps`; `audit_log`; expired single-use rows (OAuth states, email tokens, auth contexts, verification grants, sign-in restrictions). Needs migrations, and the append-only trigger on `stay_events` must allow deletion by the retention job only. | schema, destructive data, PMS mirror | **D-C1 (retention defaults):** recommended starting points:<br>• PMS stay, guest and event data: **30 days after checkout**<br>• sessions, devices, usage detail: **12 months** (check the hotel's national rules on keeping connection data)<br>• guest identities with no stay or account activity: **12 months**<br>• OTP, OAuth and token rows: **7 days after expiry**<br>• audit log: **24 months**<br>• financial records: **legal period, set per country (default 10 years)**, kept and not purged.<br>Also: purge for real, or anonymise and keep the totals? |
+| C2 | P0 | **Change the accounting-detail default** from *unlimited* to the D-C1 value for new sites. Decide what happens on existing sites. | destructive / historical data | **D-C2:** Apply the new default to existing sites (purges history on PRE-LIVE), or only to new installs? |
+| C3 | P0 | **Erase one guest.** A single action in Hotel Admin that finds everything held about one guest (account, principal and identities, stays, sessions, devices, sign-in attempts, OTPs, audit mentions) and erases or anonymises it. Fixes "Remove" keeping the email inside the renamed username. | destructive data, guest auth core, product semantics | **D-C3 (erasure semantics):**<br>(a) **Pseudonymise** rows that must survive (financial postings, entitlement totals, and audit rows as events) by replacing identifiers with a one-way token. **Hard-delete** everything else. *Recommended.*<br>(b) Hard-delete everything: breaks the financial and audit chains, not recommended.<br>Also decide: what happens to `stay_events` raw payloads (recommend: blank the guest fields, keep the event); whether to erase guests the PMS still shows as checked in (recommend: refuse, and tell staff the PMS will copy them back). |
+| C4 | P1 | **Export one guest's data (access and portability).** The same lookup as C3, producing a machine-readable JSON/CSV bundle. Requires the operator's password again, is audited, and is limited to one role. | product semantics (guest-data surface) | **D-C4:** Which roles may export (recommend site_admin and hotel_it_manager)? Is the export handed to the guest by staff (recommended), or do guests get self-service? |
+| C5 | P0 | **Encrypt backups and keep the keys apart.** Encrypt the nightly dump and the `/etc` archive to a public key, so the appliance can write backups but cannot read them back. Stop the seal keys travelling in the same unencrypted archive. Add an age limit to the on-demand dumps as well as the count limit. | security, keys and trust | **D-C5 (backup encryption):**<br>(a) **age/GPG to a hotel-held public key.** The private key stays with the hotel IT / our support escrow. Restore needs the key. *Recommended.*<br>(b) Symmetric key on the appliance: protects only copies taken off the appliance.<br>Also: who holds the escrow copy? Is an unencrypted download from Hotel Admin still allowed? |
+| C6 | P1 | **Record consent / notice acknowledgement.** Store the version of the notice and terms each guest saw, with the time. | schema, guest auth flow | **D-C6:** Lawful basis for Wi-Fi access. We recommend **contract / legitimate interest, not consent**, so we *record that the notice was shown* rather than block access on a checkbox. Consent is needed only if marketing is ever added. |
+| C7 | P1 | **Store less from the PMS.** Stop mirroring date of birth, VIP, travel agent and rate plan unless a feature needs them. Clear the existing values. | PMS protocol, schema, historical data | **D-C7:** Does any feature need date of birth (e.g. as a sign-in factor)? If none, drop it. |
+| C8 | P1 | **Encrypt the Protel FIAS link** (`UseTLS` is read but never used). | PMS configuration and traffic | **D-C8:** Does the hotel's Protel interface support TLS? Is turning it on at this hotel authorised? |
+| C9 | P1 | **Request fewer profile fields from social providers:** drop `profile`, `public_profile`, `name` and the Facebook `picture` field. Limit the free-text scope field in Hotel Admin to an allow-list. | guest authentication | **D-C9:** Reject or warn when a hotel adds extra scopes? |
+| C10 | P1 | **Harden operator access:** MFA for Hotel Admin and Central, an absolute session limit plus an idle timeout, `EDGED_COOKIE_SECURE` on by default. | security | **D-C10:** Which MFA method (TOTP recommended)? Mandatory for admin roles only, or for everyone? Idle timeout (recommend 30 min) and absolute limit (recommend 12 h)? |
+| C11 | P2 | **Encryption at rest:** disk encryption (LUKS) for new installs; TLS or Unix sockets for database connections. | appliance deployment, security | **D-C11:** Accept for new installs only (existing appliances need a reinstall)? How is the key unlocked at boot (TPM vs passphrase)? |
+| C12 | P0 (ops) | **Rotate exposed credentials:** the Gmail app password that `SECURITY_HARDENING.md` reports was once committed and never rotated; the default Postgres password fallback. | security | **D-C12:** None for the rotation itself, which the account owner must do. Confirm removing the personal Gmail address from the repository. |
+
+## 4. Proposed order
+
+1. **Decisions first:** D-C1, D-C3, D-C5, D-C6. These block the P0 controlled work and shape C4 and C7.
+2. **Start now in parallel (FAST, no decision needed):** F4, F6, F9. F1, F2 and F3 can be drafted now and finalised once D-F1, D-F2 and D-F3 are made.
+3. **Then:** C1 + C2 (retention) → C3 + C4 (erasure and export, sharing one guest-lookup) → C5 (backups).
+4. **Then:** C6–C11 as their decisions arrive.
+
+Every step is deployed to PRE-LIVE for testing under the standing authorisation, except where its CONTROLLED trigger needs more. Nothing merges to `master` without Product Owner acceptance.
