@@ -7,7 +7,7 @@
 This Data Processing Agreement ("**DPA**") is made between:
 
 1. **[[Hotel legal name]]**, [[address]], [[registration number]] (the "**Controller**"); and
-2. **[[StayConnect legal entity]]**, [[address]], [[registration number]] (the "**Processor**"),
+2. **Semantics Technology Ltd**, [[registered address]], [[company registration number]] (the "**Processor**"),
 
 each a "**Party**". It forms part of the [[name of the licence / support agreement]] dated [[date]] (the
 "**Main Agreement**") and applies from the date the last Party signs it.
@@ -19,7 +19,7 @@ supplementing it that applies to the processing under this DPA. Terms such as *p
 *controller*, *processor*, *data subject*, *personal data breach* and *supervisory authority* have the meanings
 given in Art. 4 GDPR.
 
-1.2 "**Software**" means the StayConnect appliance software (the guest portal, the Admin Console and the services
+1.2 "**Software**" means the OneGate appliance software (the guest portal, the Admin Console and the services
 behind them) installed on equipment at the Controller's premises (the "**Appliance**").
 
 1.3 "**Central**" means the Processor's OneGate Central service, which the Appliance contacts for identity,

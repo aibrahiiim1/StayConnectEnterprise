@@ -34,7 +34,7 @@ for those are a separate F3 item. The guest privacy-notice template already ship
 
 | # | Decision | Where it appears |
 |---|---|---|
-| 1 | Our legal entity: name, address, registration number, contact | DPA parties, record |
+| 1 | Our company is **Semantics Technology Ltd** (Product Owner, 2026-10-18). Still needed: the registered address, the company number, the country of registration, and a privacy contact email | DPA parties, record |
 | 2 | **Where we and our support personnel are established.** Remote access from outside the EEA is a transfer under Chapter V (EDPB Guidelines 05/2021). If outside, the DPA needs the SCCs, Module Two, a transfer impact assessment, and possibly an Art. 27 representative | DPA clause 8, record Part 1(c) |
 | 3 | The services our support uses (helpdesk, email, file transfer, remote screen sharing): each becomes a sub-processor | Annex III, Part A |
 | 4 | Confirm our internal practices: confidentiality clauses, training, encrypted support laptops, MFA on support systems | Annex II, Part A, rows marked [[confirm]] |

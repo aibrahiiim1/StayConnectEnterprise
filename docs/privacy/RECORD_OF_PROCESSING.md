@@ -15,7 +15,7 @@ for organisations under 250 employees is not relied on: Central's processing is 
 
 | | |
 |---|---|
-| Name and contact details | [[StayConnect legal entity]], [[address]], [[email]] |
+| Name and contact details | Semantics Technology Ltd, [[registered address]], [[company registration number]], [[privacy contact email]] |
 | Representative in the Union (Art. 27), if we are established outside the EU | [[name and contact, or "not applicable"]] |
 | Data protection officer (Art. 37), if one is designated | [[name and contact, or "none designated": record the reason]] |
 | Breach contact | [[D-F2]] |
