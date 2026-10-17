@@ -4,14 +4,14 @@ package main
 
 import "testing"
 
-// D-H: accounting-detail retention is an audited §0C setting. Unlimited by default; bounded; a reason and the
+// D-H: accounting-detail retention is an audited §0C setting. 365 days by default (0131, GDPR C2); bounded; a reason and the
 // password to change it; logged; site administrators write, the roles that can see backups can read.
 func TestIntegration_AccountingRetention_TheSetting(t *testing.T) {
 	f := newAPI(t)
 	st, body := f.do(t, "GET", "/accounting-retention/", nil)
 	set, _ := body["settings"].(map[string]any)
-	if st != 200 || set == nil || set["detail_retention_days"] != nil || body["config_version"] != float64(0) {
-		t.Fatalf("default = %d %v; it must be unlimited (null) and never changed", st, body)
+	if st != 200 || set == nil || set["detail_retention_days"] != float64(365) || body["config_version"] != float64(0) {
+		t.Fatalf("default = %d %v; it must be 365 days and never changed", st, body)
 	}
 	for _, bad := range []map[string]any{
 		{"detail_retention_days": 7, "reason": "too short", "password": f.password},

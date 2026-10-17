@@ -1,11 +1,11 @@
 "use client";
 
-// HOW LONG USAGE DETAIL IS KEPT (migration 0122, Product-Owner decision D-H).
+// HOW LONG USAGE DETAIL IS KEPT (migration 0122, Product-Owner decision D-H; default 365 days since 0131, GDPR C2).
 //
 // The appliance records every client session's traffic as a series of small samples. Totals per package and per
 // session are kept for good; this setting only decides how long the per-sample DETAIL is kept. The default is
-// Unlimited, and Unlimited means nothing is ever removed. A number of days lets the appliance remove, once an
-// hour, detail older than that -- only of sessions that have ended and packages that have finished. Shortening
+// 365 days; the administrator may choose another number of days, or Unlimited, which means nothing is ever
+// removed. A number of days lets the appliance remove, once an hour, detail older than that -- only of sessions that have ended and packages that have finished. Shortening
 // it removes history for good, so it asks for a reason and the password, and every change and every removal is
 // recorded and listed here.
 
@@ -86,9 +86,9 @@ export function AccountingRetentionCard({ writable }: { writable: boolean }) {
             <div className="text-emphasis">Usage detail kept for</div>
             <p className="text-caption text-muted-foreground">
               How long the appliance keeps the detailed traffic samples behind each client session. Totals per
-              package and per session are always kept. Default Unlimited: nothing is removed. With a number of days
-              ({RETENTION_MIN_DAYS} to {RETENTION_MAX_DAYS}), detail older than that is removed once an hour, only
-              for sessions that have ended and packages that have finished. Removed detail cannot be brought back.
+              package and per session are always kept. Default 365 days. With a number of days ({RETENTION_MIN_DAYS} to{" "}
+              {RETENTION_MAX_DAYS}), detail older than that is removed once an hour, only for sessions that have ended
+              and packages that have finished; Unlimited removes nothing. Removed detail cannot be brought back.
             </p>
             {lastRun && (
               <p className="text-caption text-muted-foreground">

@@ -5,9 +5,9 @@ package main
 //	GET /edge/v1/accounting-retention/   the setting, its bounds, its change log and the recent purge runs
 //	PUT /edge/v1/accounting-retention/   change it: password step-up, a reason, audited
 //
-// How long the per-sample accounting detail (iam_v2.accounting_records) is kept. The default is UNLIMITED and
-// unlimited means nothing is ever purged. A retention of 30-3650 days lets acctd's hourly purge remove detail
-// older than it -- only of sessions that have ended, and only once every entitlement they served has ended.
+// How long the per-sample accounting detail (iam_v2.accounting_records) is kept. The default is 365 days (0131,
+// GDPR plan C2); the site administrator may choose 30-3650 days or unlimited, and unlimited means nothing is
+// ever purged. A retention lets acctd's hourly purge remove detail older than it -- only of sessions that have ended, and only once every entitlement they served has ended.
 // Totals on the entitlement and the session are never touched, and every purge that removed anything is
 // recorded. Shortening it removes history, so it sits under the "backups" key (data retention: site
 // administrators write, the roles that can see backups can see it) and asks for the password.
@@ -23,6 +23,8 @@ import (
 const (
 	accountingRetentionMinDays = 30
 	accountingRetentionMaxDays = 3650
+	// accountingRetentionDefaultDays mirrors iam_v2.accounting_retention_default() (0131), which decides.
+	accountingRetentionDefaultDays = 365
 )
 
 func (s *server) accountingRetentionRoutes() http.Handler {
@@ -94,7 +96,7 @@ func (s *server) getAccountingRetention(w http.ResponseWriter, r *http.Request) 
 		"settings": map[string]any{"detail_retention_days": days}, "config_version": version,
 		"updated_at": updatedAt, "updated_by": updatedBy,
 		"bounds": map[string]any{"detail_retention_days": map[string]any{
-			"min": accountingRetentionMinDays, "max": accountingRetentionMaxDays, "default": nil,
+			"min": accountingRetentionMinDays, "max": accountingRetentionMaxDays, "default": accountingRetentionDefaultDays,
 			"unit": "days; empty = unlimited (nothing is purged)"}},
 		"changes": changes, "purge_runs": runs,
 	})
