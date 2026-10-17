@@ -9,6 +9,10 @@ package mail
 // Successful sends respond with 202 Accepted and an empty body. Errors
 // arrive as 4xx/5xx with a {errors:[{message,field}]} JSON body — we
 // surface the first message verbatim so operators don't need to parse.
+//
+// Tracking is switched off on every message (GDPR plan F4): otherwise the SendGrid account's defaults decide,
+// and click tracking rewrites the verification and reset links while open tracking reports when a guest read
+// the mail.
 
 import (
 	"bytes"
@@ -53,6 +57,7 @@ func (s *SendGrid) Send(ctx context.Context, m Message) error {
 		Personalizations: []sgPerson{{To: []sgEmail{{Email: m.To}}}},
 		From:             sgEmail{Email: s.FromAddress, Name: s.FromName},
 		Subject:          m.Subject,
+		TrackingSettings: noTracking,
 	}
 	body.Content = append(body.Content, sgContent{Type: "text/plain", Value: m.Text})
 	if m.HTML != "" {
@@ -96,7 +101,27 @@ type sgRequest struct {
 	From             sgEmail     `json:"from"`
 	Subject          string      `json:"subject"`
 	Content          []sgContent `json:"content"`
+	TrackingSettings sgTracking  `json:"tracking_settings"`
 }
+
+// sgTracking is the v3 tracking_settings block. The flags carry no omitempty: an explicit false is what
+// overrides an account that has tracking switched on.
+type sgTracking struct {
+	ClickTracking        sgClickTracking `json:"click_tracking"`
+	OpenTracking         sgEnable        `json:"open_tracking"`
+	SubscriptionTracking sgEnable        `json:"subscription_tracking"`
+	Ganalytics           sgEnable        `json:"ganalytics"`
+}
+type sgClickTracking struct {
+	Enable     bool `json:"enable"`
+	EnableText bool `json:"enable_text"`
+}
+type sgEnable struct {
+	Enable bool `json:"enable"`
+}
+
+var noTracking = sgTracking{}
+
 type sgPerson struct {
 	To []sgEmail `json:"to"`
 }
