@@ -160,9 +160,27 @@ Each value ships as a hotel setting with this default, following `OPERATIONAL_SE
 - **Scope, from the Product Owner's answers (2026-10-17), checked in the code.** Guest data stays on the hotel's appliance and we have no standing access: the Central link is licensing only, installation creates no vendor login, tunnel or key, break-glass needs root the hotel gives us, and our installers keep no root or SSH login after an installation (Product Owner's statement; not enforced by code). The messaging, identity-provider and payment accounts are the hotel's own. We are therefore a processor only (A) during a support session the hotel opens and (B) for files it sends us, such as logs; and (C) as the supplier, we warn hotels of a security flaw in our software. The runbook covers those three cases, with one promised notification time.
 - **For F3:** the sub-processor list shrinks accordingly. SendGrid, Twilio, Meta, Google, Microsoft, Apple, Stripe and Paymob are the hotel's own processors, not ours.
 
+### Product Owner answers on C2, C7 to C12 and F8 (2026-10-17)
+
+The product is still in development: there is no paying customer and no live hotel. Work stays on `delivery/gdpr`; nothing is merged to `master` or deployed to PRE-LIVE as part of this plan.
+
+- **D-C2: the new default applies everywhere.** With no live customer, there is no history to protect, so the 12-month default for accounting detail replaces "unlimited" on every site, not only new installs.
+- **D-C7: nothing to remove but the empty date-of-birth column.** Checked in the code: `stay_guests.date_of_birth` is never written or read outside retention and erasure, so it is always empty. VIP, travel agent and rate plan are used by the package offers, so they stay. C7 shrinks to: drop the unused column when a migration next touches the stay domain, and confirm that the PMS event payloads carry no date of birth. Not confirmed yet.
+- **D-C8: build it, switched off.** Nobody knows yet whether a hotel's Protel interface supports TLS. C8 makes the existing `UseTLS` switch work, defaulting to off; turning it on for a hotel is a separate decision, because it changes PMS traffic.
+- **D-C9: warn, do not refuse.** When a hotel asks a sign-in provider for more than name and email, Hotel Admin warns; the hotel, as controller, decides.
+- **D-C10: follow the industry standard (NIST SP 800-63B, OWASP ASVS), kept simple:**
+  - an authenticator app (TOTP) as the second step, for every Hotel Admin and Central account; staff still sign in with their email and password;
+  - setting up the app at the next sign-in, by scanning a QR code;
+  - 10 single-use recovery codes;
+  - a site admin can reset a colleague's second step, with the reset audited;
+  - idle logout after 30 minutes and a session limit of 12 hours, both hotel settings (§0C).
+- **D-F8: record views at the level the standards ask for, without slowing pages down.** Opening one guest's details and every guest search are recorded; list pages are not. Entries are written in the background, so a page never waits for the log.
+- **C12:** the account owner rotates the Gmail app password later.
+
 ### Still open
 
-- **D-C2, D-C7 to D-C11, D-F2, D-F3, D-F5, D-F8:** still to decide.
+- **D-C11** (disk encryption): needs more information first.
+- **D-F2** (breach contact), **D-F3** (legal reviewer), **D-F5** (how long to keep logs).
 
 ## 5. Proposed order
 
@@ -171,4 +189,4 @@ Each value ships as a hotel setting with this default, following `OPERATIONAL_SE
 3. **Then:** C1 (built: migration 0127, includes F6) + C2 (retention) → C3 + C4 (built: migration 0128, erasure and export sharing one guest lookup) → C5 (built: migration 0129, backups encrypted to hotel-held keys).
 4. **Then:** C6–C11 as their decisions arrive.
 
-Every step is deployed to PRE-LIVE for testing under the standing authorisation, except where its CONTROLLED trigger needs more. Nothing merges to `master` without Product Owner acceptance.
+Every step stays on `delivery/gdpr` as local commits. By the Product Owner's direction (2026-10-17), nothing in this plan is deployed to PRE-LIVE or merged to `master`.
