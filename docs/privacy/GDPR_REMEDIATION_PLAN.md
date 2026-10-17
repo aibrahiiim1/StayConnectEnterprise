@@ -107,15 +107,20 @@ Each value ships as a hotel setting with this default, following `OPERATIONAL_SE
 - The portal shows the privacy notice (F1), and C6 records which notice version was shown to whom and when.
 - Consent is introduced only if a marketing feature is ever added.
 
+### D-C1a, what happens when retention expires: **Anonymise, the same way erasure does**
+
+- The C1 retention jobs and the C3 erasure action share one anonymisation routine. When a category's retention period ends, its rows are anonymised under the D-C3 rules (a random token per guest, free text blanked); no rows are deleted.
+- Reports and totals (usage, entitlements, financials) keep working on the anonymised rows.
+- The `stay_events` append-only trigger is relaxed only for that routine blanking the guest fields; deletion stays refused.
+
 ### Still open (they follow from the above)
 
-- **D-C1a:** When retention expires, do the C1 purge jobs **delete** rows or **anonymise** them, as erasure does? Anonymising keeps reporting totals; deleting is simpler and leaves less behind. Financial rows are anonymised either way.
 - **D-C5a:** Who in our support organisation holds the escrow keys, and how are they stored (offline media, like the Root CA backup)? When may the escrow be used?
 - **D-C2, D-C4, D-C7 to D-C11, D-F1 to D-F8:** still to decide.
 
 ## 5. Proposed order
 
-1. **Decisions first:** D-C1, D-C3, D-C5, D-C6 are taken (§4). D-C1a and D-C5a are needed before C1 and C5 start.
+1. **Decisions first:** D-C1, D-C3, D-C5, D-C6 are taken (§4). D-C1a is taken; D-C5a is needed before C5 starts.
 2. **Start now in parallel (FAST, no decision needed):** F4, F6, F9. F1, F2 and F3 can be drafted now and finalised once D-F1, D-F2 and D-F3 are made.
 3. **Then:** C1 + C2 (retention) → C3 + C4 (erasure and export, sharing one guest-lookup) → C5 (backups).
 4. **Then:** C6–C11 as their decisions arrive.
