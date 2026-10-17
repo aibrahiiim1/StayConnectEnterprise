@@ -82,4 +82,5 @@ export const LIMITS = {
   hotelName: 120,
   welcomeText: 280,
   helpText: 600,
+  privacyText: 8000,
 } as const;

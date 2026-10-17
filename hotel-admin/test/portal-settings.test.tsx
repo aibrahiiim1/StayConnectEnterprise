@@ -610,3 +610,43 @@ describe("the wording follows the site's modules", () => {
     expect(await screen.findByText(/This page collects clients' room numbers and voucher codes/)).toBeTruthy();
   });
 });
+
+// GDPR plan F1 and F7: the privacy notice starts from the shipped template, and the designer says what the
+// server warns about (an unfinished notice, an outside image host) without blocking the save.
+describe("the privacy notice", () => {
+  it("is missing until the hotel writes one, and starts from the template", async () => {
+    mock({ hotel_name: "Semantics Demo" });
+    await renderPage();
+    open(/Content/);
+    expect(await screen.findByText("Clients are not told how their data is used")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Start from the template" }));
+    const text = (screen.getByLabelText(/Notice text/) as HTMLTextAreaElement).value;
+    expect(text).toMatch(/^Privacy notice: guest Wi-Fi/);
+    expect(text).toContain("[[privacy contact email]]");
+    expect(screen.queryByText("Clients are not told how their data is used")).toBeNull();
+    await waitFor(() => expect((screen.getByRole("button", { name: /Save changes/i }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
+    await waitFor(() => expect(saves()).toHaveLength(1));
+    expect(saves()[0][1].design.privacy_text).toBe(text);
+  });
+
+  it("shows the server's warnings and still saves", async () => {
+    mock({ hotel_name: "Semantics Demo", privacy_text: "Kept for [[period]]." });
+    mockPost((d) => ({
+      ok: true,
+      issues: [
+        { field: "privacy_text", severity: "warning", message: "still has 1 part(s) in [[double brackets]] to complete" },
+        { field: "logo_url", severity: "warning", message: "loads from cdn.example.com, outside this appliance" },
+      ],
+      sanitized: { custom_css: d.custom_css ?? "", custom_html: d.custom_html ?? "" },
+    }));
+    await renderPage();
+    const callout = await screen.findByText("Worth knowing before you save");
+    const box = callout.closest("[class*=border]") as HTMLElement;
+    expect(within(box).getByText(/Logo: loads from cdn.example.com/)).toBeTruthy();
+    expect(within(box).getByText(/Privacy notice: still has 1 part/)).toBeTruthy();
+    open(/Content/);
+    fireEvent.change(screen.getByLabelText(/Site name/i), { target: { value: "Semantics Demo Hotel" } });
+    await waitFor(() => expect((screen.getByRole("button", { name: /Save changes/i }) as HTMLButtonElement).disabled).toBe(false));
+  });
+});

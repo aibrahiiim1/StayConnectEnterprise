@@ -11,6 +11,10 @@ export type Design = {
   welcome_text?: string;
   help_text?: string;
   terms_url?: string;
+  /** The hotel's privacy notice (GDPR Art. 13), plain text shown in place on the sign-in page. */
+  privacy_text?: string;
+  /** A link to the hotel's full privacy notice. */
+  privacy_url?: string;
   logo_url?: string;
   background_url?: string;
   brand_color?: string;
@@ -305,6 +309,9 @@ export const PORTAL_STRINGS: PortalString[] = [
   { group: "Help and tips", key: "help.whatsapp", english: "Enter your WhatsApp phone number with the country code and tap Send code, then type the 6-digit code from the WhatsApp message.", module: "whatsapp_otp" },
   { group: "Help and tips", key: "help.fail", english: "Something not working? Please contact the site team for assistance." },
   { group: "Sign-in page", key: "brand.by", english: "Wi-Fi by" },
+  { group: "Privacy", key: "privacy.link", english: "How we use your data" },
+  { group: "Privacy", key: "privacy.url", english: "Privacy notice" },
+  { group: "Privacy", key: "privacy.remember", english: "If you sign in with a code or an online account, this device is remembered with a cookie so you can reconnect with one tap. Signing out, or “Not you?”, forgets it.", module: ["email_otp", "sms_otp", "whatsapp_otp", "social_login"] },
   { group: "Email account: links in the emails", key: "acct.forgot.title", english: "Reset your password", module: "email_otp" },
   { group: "Email account: links in the emails", key: "acct.forgot.sent", english: "If an account exists for that email address, we've sent it a link to choose a new password. Open the link while connected to this Wi-Fi.", module: "email_otp" },
   { group: "Email account: links in the emails", key: "acct.verify.title", english: "Verify your email address", module: "email_otp" },

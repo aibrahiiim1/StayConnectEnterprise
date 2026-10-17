@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode/utf8"
 )
@@ -23,6 +24,7 @@ const (
 	MaxHotelName        = 120        // characters
 	MaxWelcomeText      = 280        // one or two sentences under the name
 	MaxHelpText         = 600        // a short paragraph at the foot of the page
+	MaxPrivacyText      = 8000       // the hotel's privacy notice (GDPR Art. 13), plain text
 	MaxURLLength        = 2048       // https / appliance paths
 	MaxInlineImageBytes = 256 * 1024 // a data:image/… URI, from before uploads existed
 	MaxLanguages        = 16
@@ -88,6 +90,14 @@ var (
 	reStringKey  = regexp.MustCompile(`^[a-z][a-zA-Z0-9._-]{0,63}$`)
 	colourFields = []string{"brand_color", "brand_color_dark", "text_color"}
 	imageFields  = []string{"logo_url", "background_url", "hero_image_url"}
+	// linkFields are links a guest can follow from the sign-in page.
+	linkFields = []string{"terms_url", "privacy_url"}
+	// rePlaceholder is a part of the shipped privacy-notice template the hotel has not completed yet.
+	rePlaceholder = regexp.MustCompile(`\[\[[^\]\n]*\]\]`)
+	// reCSSLoad and reHTMLLoad find what a guest's browser would FETCH from an outside host: url(...) in a
+	// stylesheet (backgrounds, @font-face sources) and src= in markup. A followed link is not a load.
+	reCSSLoad  = regexp.MustCompile(`(?i)url\(\s*["']?https://([^/"'()\s\\]+)`)
+	reHTMLLoad = regexp.MustCompile(`(?i)\ssrc\s*=\s*["']?https://([^/"'\s>\\]+)`)
 )
 
 // ImageFields are the design keys that name an image, so the asset store can tell what is in use.
@@ -138,6 +148,13 @@ func Validate(d map[string]any) []Issue {
 	text("hotel_name", MaxHotelName)
 	text("welcome_text", MaxWelcomeText)
 	text("help_text", MaxHelpText)
+	text("privacy_text", MaxPrivacyText)
+	if s, ok := d["privacy_text"].(string); ok {
+		if n := len(rePlaceholder.FindAllString(s, -1)); n > 0 {
+			out = append(out, Issue{Field: "privacy_text", Severity: SeverityWarning, Message: fmt.Sprintf(
+				"still has %d part(s) in [[double brackets]] to complete; clients see them exactly as written", n)})
+		}
+	}
 
 	for _, k := range colourFields {
 		if v, ok := str(k); ok && !reColor.MatchString(v) {
@@ -159,13 +176,16 @@ func Validate(d map[string]any) []Issue {
 			}
 		}
 	}
-	if v, ok := str("terms_url"); ok {
-		if len(v) > MaxURLLength {
-			add("terms_url", "is longer than %d characters", MaxURLLength)
-		} else if _, err := CheckLinkURL(v); err != nil {
-			add("terms_url", "%s", err)
+	for _, k := range linkFields {
+		if v, ok := str(k); ok {
+			if len(v) > MaxURLLength {
+				add(k, "is longer than %d characters", MaxURLLength)
+			} else if _, err := CheckLinkURL(v); err != nil {
+				add(k, "%s", err)
+			}
 		}
 	}
+	out = append(out, outsideHostWarnings(d)...)
 	if v, present := d["template_id"]; present && v != nil {
 		s, ok := v.(string)
 		switch {
@@ -206,6 +226,52 @@ func Validate(d map[string]any) []Issue {
 			out = append(out, issues...)
 		}
 	}
+	return out
+}
+
+// outsideHostWarnings names every host outside this appliance that the sign-in page would make a guest's
+// device contact (GDPR plan F7). It is allowed -- the hotel may choose it -- but the hotel should know: that
+// host learns each guest's address, and on a captive portal it is unreachable until the guest is online.
+func outsideHostWarnings(d map[string]any) []Issue {
+	var out []Issue
+	warn := func(field string, hosts []string) {
+		if len(hosts) == 0 {
+			return
+		}
+		out = append(out, Issue{Field: field, Severity: SeverityWarning, Message: fmt.Sprintf(
+			"loads from %s, outside this appliance: each client's device contacts that host, which sees its "+
+				"address, and nothing loads from it before the client is online; upload the file here instead",
+			strings.Join(hosts, ", "))})
+	}
+	for _, k := range imageFields {
+		if s, ok := d[k].(string); ok {
+			if v, err := normaliseURL(s); err == nil && httpsURL(v) {
+				warn(k, hostsIn(reCSSLoad, "url("+v+")"))
+			}
+		}
+	}
+	if s, ok := d["custom_css"].(string); ok {
+		warn("custom_css", hostsIn(reCSSLoad, s))
+	}
+	if s, ok := d["custom_html"].(string); ok {
+		warn("custom_html", hostsIn(reHTMLLoad, s, reCSSLoad))
+	}
+	return out
+}
+
+// hostsIn returns the distinct hosts the patterns capture, lower-cased and sorted.
+func hostsIn(re *regexp.Regexp, s string, more ...*regexp.Regexp) []string {
+	seen := map[string]bool{}
+	for _, r := range append([]*regexp.Regexp{re}, more...) {
+		for _, m := range r.FindAllStringSubmatch(s, -1) {
+			seen[strings.ToLower(m[1])] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for h := range seen {
+		out = append(out, h)
+	}
+	sort.Strings(out)
 	return out
 }
 
@@ -368,6 +434,7 @@ func ForGuests(d map[string]any) map[string]any {
 	keepText("hotel_name", MaxHotelName)
 	keepText("welcome_text", MaxWelcomeText)
 	keepText("help_text", MaxHelpText)
+	keepText("privacy_text", MaxPrivacyText)
 	for _, k := range colourFields {
 		if s, ok := d[k].(string); ok && reColor.MatchString(s) {
 			out[k] = s
@@ -385,9 +452,11 @@ func ForGuests(d map[string]any) map[string]any {
 			out[k] = v
 		}
 	}
-	if s, ok := d["terms_url"].(string); ok && s != "" && len(s) <= MaxURLLength {
-		if v, err := CheckLinkURL(s); err == nil {
-			out["terms_url"] = v
+	for _, k := range linkFields {
+		if s, ok := d[k].(string); ok && s != "" && len(s) <= MaxURLLength {
+			if v, err := CheckLinkURL(s); err == nil {
+				out[k] = v
+			}
 		}
 	}
 	out["template_id"] = TemplateID(d)

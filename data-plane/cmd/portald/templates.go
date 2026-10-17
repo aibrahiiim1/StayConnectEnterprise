@@ -489,6 +489,21 @@ const landingHTML = `<!doctype html>
 
       <div class="alt" id="alt-methods" style="display:none"></div>
     </div>
+
+    <!-- THE PRIVACY NOTICE (GDPR Art. 13), on the card under every way in -- the welcome-back button included --
+         so a guest can read it before signing in. The hotel's own text opens in place: an outside page does not
+         load before the guest is online. The remembered-device sentence is shown where the device can be
+         remembered (a verified code or an identity provider), and on the welcome-back screen itself. -->
+    <div class="privacy" id="privacy">
+      <details class="privacy-notice" id="privacy-notice"{{if not .PrivacyText}} hidden{{end}}>
+        <summary data-i18n="privacy.link" data-i18n-en="How we use your data">{{index .T "privacy.link"}}</summary>
+        <div class="privacy-text" id="privacy-text" dir="auto">{{.PrivacyText}}</div>
+      </details>
+      <a class="privacy-url" id="privacy-url"{{with .PrivacyURL}} href="{{.}}"{{end}} target="_blank" rel="noopener noreferrer"{{if not .PrivacyURL}} hidden{{end}}
+         data-i18n="privacy.url" data-i18n-en="Privacy notice">{{index .T "privacy.url"}}</a>
+      <p class="privacy-remember" id="privacy-remember"{{if not .Welcome}} hidden{{end}}
+         data-i18n="privacy.remember" data-i18n-en="If you sign in with a code or an online account, this device is remembered with a cookie so you can reconnect with one tap. Signing out, or “Not you?”, forgets it.">{{index .T "privacy.remember"}}</p>
+    </div>
     </div>
 
     <!-- The hotel's own footer: a help line and the Advanced fragment. The fragment is inserted as MARKUP. It
@@ -946,6 +961,11 @@ const landingHTML = `<!doctype html>
       const terms = document.getElementById('brand-terms');
       if (d.terms_url) { terms.href = d.terms_url; } else { terms.removeAttribute('href'); }
       document.getElementById('brand-terms-wrap').hidden = !d.terms_url;
+      document.getElementById('privacy-text').textContent = d.privacy_text || '';
+      document.getElementById('privacy-notice').hidden = !d.privacy_text;
+      const privacyURL = document.getElementById('privacy-url');
+      if (d.privacy_url) { privacyURL.href = d.privacy_url; } else { privacyURL.removeAttribute('href'); }
+      privacyURL.hidden = !d.privacy_url;
       const oldSheet = document.getElementById('sc-hotel');
       if (oldSheet) oldSheet.parentNode.removeChild(oldSheet);
       if (d.custom_css) {
@@ -1170,6 +1190,9 @@ const landingHTML = `<!doctype html>
       document.querySelectorAll('[data-help-method]').forEach(function (el) {
         el.hidden = enabled.indexOf(el.dataset.helpMethod) < 0;
       });
+      // THE REMEMBERED-DEVICE COOKIE is explained wherever a sign-in can set it (client_resume.go).
+      document.getElementById('privacy-remember').hidden =
+        !(hasSocial || ['email', 'sms', 'whatsapp'].some(function (m) { return enabled.indexOf(m) >= 0; }));
       if (enabled.length === 0 && (openOn || hasSocial)) {
         // Open selection and/or the identity providers are the only ways in: no tabs, no empty sign-in panel.
         tabsEl.style.display = 'none';

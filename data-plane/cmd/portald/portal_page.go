@@ -476,6 +476,9 @@ type landingView struct {
 	Help                                    string
 	HasExtras                               bool
 	Terms                                   template.URL // checked by ForGuests (CheckLinkURL)
+	// The hotel's privacy notice (GDPR Art. 13): its own text, shown in place, and/or a link to a full notice.
+	PrivacyText string
+	PrivacyURL  template.URL // checked by ForGuests (CheckLinkURL)
 	// The shipped wording for the script, from languages.go -- the words the sign-in page can show, in every
 	// language, so a guest switching language needs no round trip. The after-sign-in pages' words are
 	// rendered by those pages and are not repeated here.
@@ -579,6 +582,10 @@ func newLandingView(r *http.Request, d map[string]any, nonce, errMsg, ip, mac st
 	v.HasExtras = v.Help != "" || html != ""
 	if s, _ := d["terms_url"].(string); s != "" {
 		v.Terms = template.URL(s)
+	}
+	v.PrivacyText, _ = d["privacy_text"].(string)
+	if s, _ := d["privacy_url"].(string); s != "" {
+		v.PrivacyURL = template.URL(s)
 	}
 	if tr, ok := d["translations"].(map[string]any); ok && len(tr) > 0 {
 		v.HotelWords = jsData(tr)

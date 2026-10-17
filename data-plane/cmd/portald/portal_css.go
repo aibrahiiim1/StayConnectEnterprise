@@ -360,6 +360,20 @@ const portalBaseCSS = `
     display: flex; flex-wrap: wrap; align-items: center;
     margin-top: 24px; padding-top: 6px; border-top: 1px solid var(--sc-line);
   }
+  /* The privacy notice: one quiet line under the sign-in, opening in place. */
+  .privacy { margin-top: 18px; color: var(--sc-muted); font-size: 0.875rem; line-height: 1.5; }
+  .privacy-notice summary {
+    display: inline-flex; align-items: center; min-height: 44px;
+    color: var(--sc-link); font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 3px;
+  }
+  .privacy-text {
+    max-height: 50vh; overflow-y: auto; margin: 4px 0 8px; padding: 12px 14px;
+    border: 1px solid var(--sc-line); border-radius: var(--sc-r-ctl); background: var(--sc-card); color: var(--sc-ink);
+    white-space: pre-line; overflow-wrap: anywhere;
+  }
+  .privacy-url { display: inline-flex; align-items: center; min-height: 44px; font-weight: 600; text-underline-offset: 3px; }
+  .privacy-remember { margin: 4px 0 0; }
+  [dir="rtl"] .privacy-text { text-align: right; }
   .terms { font-size: 0.875rem; }
   .terms a { display: inline-flex; align-items: center; min-height: 44px; font-weight: 600; text-underline-offset: 3px; }
   .info-btn {

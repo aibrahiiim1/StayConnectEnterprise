@@ -42,13 +42,13 @@ Priority:
 
 | # | P | Item | Gap it closes | PO decision needed |
 |---|---|---|---|---|
-| F1 | P0 | **Privacy notice on the guest portal.** Add a `privacy_url` field and an optional inline privacy text to the portal design (stored in the same design document as `terms_url`, so no schema change). Translate the link text. Show it on every sign-in method, before the guest acts. | Art. 13: guests receive no information today | **D-F1:** Do we ship default notice text that the hotel completes (we recommend a template with controller placeholders)? Or a link only? |
-| F2 | P0 | **Breach-response runbook** `docs/runbooks/PERSONAL_DATA_BREACH.md`: detection sources, who decides, the hotel's 72-hour deadline as controller, our duty to tell the hotel "without undue delay" as processor, evidence handling. | Art. 33/34: nothing exists | **D-F2:** Who in our organisation is the breach contact? Within how many hours do we promise to tell the hotel? |
+| F1 | P0 | **Built on `delivery/gdpr`, not yet deployed.** **Privacy notice on the guest portal.** Add a `privacy_url` field and an optional inline privacy text to the portal design (stored in the same design document as `terms_url`, so no schema change). Translate the link text. Show it on every sign-in method, before the guest acts. | Art. 13: guests receive no information today | **D-F1:** Do we ship default notice text that the hotel completes (we recommend a template with controller placeholders)? Or a link only? |
+| F2 | P0 | **Drafted; contact and hours TBD (D-F2).** **Breach-response runbook** `docs/runbooks/PERSONAL_DATA_BREACH.md`: detection sources, who decides, the hotel's 72-hour deadline as controller, our duty to tell the hotel "without undue delay" as processor, evidence handling. | Art. 33/34: nothing exists | **D-F2:** Who in our organisation is the breach contact? Within how many hours do we promise to tell the hotel? |
 | F3 | P0 | **Compliance pack** under `docs/privacy/`: data inventory / Art. 30 record template, sub-processor list (SendGrid, Twilio, Meta, Google, Microsoft, Apple, Stripe, Paymob), notes on data sent outside the EU, DPIA starter, DPA template for hotels. | Art. 28, 30, 35, Chapter V: nothing exists | **D-F3:** Legal review owner. These are engineering drafts and need a lawyer's sign-off before they reach a customer. |
 | F4 | P1 | **Turn off SendGrid click/open tracking** on verification and reset mail (`tracking_settings`). | Tracking that guests are not told about; rewritten links | none |
 | F5 | P1 | **Bound the logs:** a logrotate rule for `/var/log/stayconnect/*` and Caddy/Kea logs, plus a journald size and age limit. Stop the non-production OTP stubs from writing full recipients and codes. | Art. 5(1)(e): logs grow forever | **D-F5:** Log retention period (recommend 14 days) |
 | F6 | P1 | **Moved to C1.** Making the 30-day sign-in-attempt retention a hotel setting needs a migration: the settings policy requires a site-keyed table, a database CHECK and a change log written by a definer function. It ships with the C1 retention settings. | Breaks `OPERATIONAL_SETTINGS_POLICY` §0C | none (keep the 30-day default) |
-| F7 | P2 | **Explain the remembered-device cookie on the portal** (one sentence, translated). Hotel Admin warns when a logo, background or font comes from an outside host. | Art. 13; outside hosts the guest is not told about | none |
+| F7 | P2 | **Built on `delivery/gdpr`, not yet deployed.** **Explain the remembered-device cookie on the portal** (one sentence, translated). Hotel Admin warns when a logo, background or font comes from an outside host. | Art. 13; outside hosts the guest is not told about | none |
 | F8 | P2 | **Audit routine reads of guest data:** staff viewing guest-account details, a stay's identity, usage by MAC. | Accountability: who looked at a guest | **D-F8:** Audit every view, or only opening one guest's detail (recommended; avoids flooding the log)? |
 | F9 | P2 | **Correct stale documents:** `DATA_OWNERSHIP.md` (the dropped `guests` table; the claim that "retention is enforced locally"; the portal-TLS endpoints) and `CONTROL_PLANE_MIGRATION.md` ("historical guest rows"). | Accurate records | none |
 
@@ -139,9 +139,24 @@ Each value ships as a hotel setting with this default, following `OPERATIONAL_SE
 - **Restore-test reminder**: backup setting `RESTORE_TEST_MONTHS`, default 6; overdue shows a warning. On-demand dumps also get an age limit, `DB_BACKUP_DAYS` (default 30), beside the count limit.
 - **New dependency**: `filippo.io/age` v1.2.1, the reference Go implementation of age (the format D-C5 named).
 
+### D-F1, privacy notice: **A template the hotel completes**
+
+- We ship a starting notice; the hotel, as controller, completes and publishes it. Every hotel-specific fact (who the controller is, retention periods, which outside services are on) is a `[[placeholder]]`.
+
+### How F1 and F7 were built (no migration, on `delivery/gdpr`)
+
+- **Design fields** `privacy_text` (plain text, up to 8,000 characters, never markup) and `privacy_url` (same rule as `terms_url`), in the same design document; `internal/portaldesign` checks and serves both.
+- **Hotel Admin → Portal settings → Content → Privacy notice.** "Start from the template" fills in the shipped notice (`portal-branding/privacy-template.ts`). It says only what this system records. While any `[[placeholder]]` is left, the checks warn, but the notice can still be saved.
+- **On the portal**, "How we use your data" sits on the sign-in card under every sign-in method, including the welcome-back screen, and opens the text in place: an outside page would not load before the guest is online. The optional link is shown beside it. The three new phrases are translated into all six shipped languages.
+- **F7.** One sentence explains the remembered-device cookie wherever a sign-in can set it (code or identity provider) and on the welcome-back screen. The design checks now **warn** (they do not refuse) for every outside host the page would load from: a logo, background or hero image on https, `url()` in custom CSS (including `@font-face`), and `src` in custom HTML. Hotel Admin lists these under "Worth knowing before you save".
+
+### F2, breach runbook: drafted, waiting for D-F2
+
+- `docs/runbooks/PERSONAL_DATA_BREACH.md`. The breach contact and the promised notification hours are marked **TBD** until D-F2 is answered; it is not given to a customer before then, nor before the D-F3 legal review.
+
 ### Still open
 
-- **D-C2, D-C7 to D-C11, D-F1 to D-F8:** still to decide.
+- **D-C2, D-C7 to D-C11, D-F2, D-F3, D-F5, D-F8:** still to decide.
 
 ## 5. Proposed order
 
