@@ -256,6 +256,11 @@ var rolePerms = map[string]map[string]perm{
 		// DOWNLOADING the full database dump (decision D-B): the IT manager and site_admin only, behind the
 		// password step-up at the route. Every other role that reads backups sees the list and downloads nothing.
 		"backup-download": permWrite,
+		// GUEST DATA RIGHTS (Product-Owner decision D-C4): looking a guest up, exporting their data and erasing
+		// them. The IT manager and site_admin only, each export and erasure behind the password step-up and a
+		// reason. No other role holds this key at all: a desk role can see guests, but handing over or erasing
+		// everything held about one is a data-protection act, not a desk one.
+		"guest-data-rights": permWrite,
 		// Phase 6 (DARK): the per-appliance Guest Device Self-Service setting. WRITE belongs here for the
 		// same reason auth-methods does -- it decides which capabilities the property offers its guests,
 		// which is a configuration decision rather than a daily desk action. No new ROLE is introduced: the

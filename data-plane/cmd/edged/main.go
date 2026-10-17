@@ -436,6 +436,8 @@ func main() {
 				r.Use(s.resourcePermission("backups"))
 				r.Mount("/", s.dataRetentionRoutes())
 			})
+			// GUEST DATA RIGHTS (guest_data_rights.go, migration 0128): look up, export and erase one guest.
+			mountResource(r, s, "guest-data-rights", s.guestDataRightsRoutes)
 			// USAGE EXPLORER. Read-only investigation over durable accounting and session data; see
 			// resources_usage.go. Under the "sessions" role because it is the same live-access state that
 			// resource already governs, rather than a new row in the role matrix.

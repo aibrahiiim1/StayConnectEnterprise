@@ -13,7 +13,7 @@ import {
   PanelLeftClose, PanelLeftOpen, ClipboardCheck, Ticket,
   DoorOpen, DoorClosed, BedDouble, Plug, Route, Inbox, ShieldCheck, UserX, Layers, ArrowLeftRight, HeartPulse, Receipt,
   LifeBuoy, Globe, AtSign, MessageSquare, Stethoscope, Bell, Hourglass, CalendarClock, ChartColumn,
-  CreditCard, BedSingle, Blocks, UsersRound,
+  CreditCard, BedSingle, Blocks, UsersRound, UserSearch,
 } from "lucide-react";
 import { BySemantics, OneGateLockup } from "@/components/brand";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -203,6 +203,7 @@ const SECTIONS: Section[] = [
       { href: "/appliance",          label: "Appliance & licence", icon: ServerCog, resource: "license", keywords: "enrol claim serial activate setup cloud connection central licence capacity expiry plan offline renewal first-time" },
       { href: "/modules",            label: "Modules",     icon: Blocks,     resource: "modules", keywords: "licence licensed features hospitality paid access card payment room charge switch on off site type" },
       { href: "/backups",            label: "Backups",     icon: Archive,    resource: "backups", keywords: "restore snapshot database retention schedule" },
+      { href: "/guest-data",         label: "Guest data requests", icon: UserSearch, resource: "guest-data-rights", keywords: "gdpr privacy personal data erase delete forget export copy access request subject" },
       // Who may.
       { href: "/operators",          label: "Operators",   icon: Users,      resource: "operators", keywords: "staff users roles password" },
     ],
