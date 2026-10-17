@@ -47,7 +47,7 @@ Priority:
 | F3 | P0 | **Compliance pack** under `docs/privacy/`: data inventory / Art. 30 record template, sub-processor list (SendGrid, Twilio, Meta, Google, Microsoft, Apple, Stripe, Paymob), notes on data sent outside the EU, DPIA starter, DPA template for hotels. | Art. 28, 30, 35, Chapter V: nothing exists | **D-F3:** Legal review owner. These are engineering drafts and need a lawyer's sign-off before they reach a customer. |
 | F4 | P1 | **Turn off SendGrid click/open tracking** on verification and reset mail (`tracking_settings`). | Tracking that guests are not told about; rewritten links | none |
 | F5 | P1 | **Bound the logs:** a logrotate rule for `/var/log/stayconnect/*` and Caddy/Kea logs, plus a journald size and age limit. Stop the non-production OTP stubs from writing full recipients and codes. | Art. 5(1)(e): logs grow forever | **D-F5:** Log retention period (recommend 14 days) |
-| F6 | P1 | **Make the 30-day sign-in-attempt retention a hotel setting**, if the existing settings store holds it without a migration (otherwise it moves to C1). | Breaks `OPERATIONAL_SETTINGS_POLICY` §0C | none (keep the 30-day default) |
+| F6 | P1 | **Moved to C1.** Making the 30-day sign-in-attempt retention a hotel setting needs a migration: the settings policy requires a site-keyed table, a database CHECK and a change log written by a definer function. It ships with the C1 retention settings. | Breaks `OPERATIONAL_SETTINGS_POLICY` §0C | none (keep the 30-day default) |
 | F7 | P2 | **Explain the remembered-device cookie on the portal** (one sentence, translated). Hotel Admin warns when a logo, background or font comes from an outside host. | Art. 13; outside hosts the guest is not told about | none |
 | F8 | P2 | **Audit routine reads of guest data:** staff viewing guest-account details, a stay's identity, usage by MAC. | Accountability: who looked at a guest | **D-F8:** Audit every view, or only opening one guest's detail (recommended; avoids flooding the log)? |
 | F9 | P2 | **Correct stale documents:** `DATA_OWNERSHIP.md` (the dropped `guests` table; the claim that "retention is enforced locally"; the portal-TLS endpoints) and `CONTROL_PLANE_MIGRATION.md` ("historical guest rows"). | Accurate records | none |
@@ -125,7 +125,7 @@ Each value ships as a hotel setting with this default, following `OPERATIONAL_SE
 ## 5. Proposed order
 
 1. **Decisions first:** D-C1, D-C1a, D-C3, D-C5 and D-C6 are taken (§4). C1, C3 and C5 are no longer blocked by a decision.
-2. **Start now in parallel (FAST, no decision needed):** F4, F6, F9. F1, F2 and F3 can be drafted now and finalised once D-F1, D-F2 and D-F3 are made.
+2. **Start now in parallel (FAST, no decision needed):** F4 and F9 are done on this branch; F6 moved to C1. F1, F2 and F3 can be drafted now and finalised once D-F1, D-F2 and D-F3 are made.
 3. **Then:** C1 + C2 (retention) → C3 + C4 (erasure and export, sharing one guest-lookup) → C5 (backups).
 4. **Then:** C6–C11 as their decisions arrive.
 

@@ -36,16 +36,20 @@ commercial remnant columns were dropped by migration 0047.
 | `operators`, `operator_roles` | staff emails | the seven site roles; site staff accounts live here, not in the cloud |
 | `ticket_templates` (**GuestAccessPlan**) | — | |
 | `voucher_batches`, `vouchers` | codes | voucher codes are treated as secrets (PII-adjacent) |
-| `guests` | **YES** | MAC, name, email, phone, consent |
-| `sessions` | **YES** | IP, MAC, per-client timing |
-| `accounting_records` | **YES** | per-session byte counters |
+| `iam_v2.guest_access_accounts` | **YES** | username (the email address for self-registered accounts), display name, notes, creating device's MAC |
+| `iam_v2.guest_principals`, `iam_v2.guest_principal_identities` | **YES** | display name; email, phone and social-provider subject |
+| `iam_v2.stays`, `iam_v2.stay_guests`, `iam_v2.stay_events` | **YES** | PMS mirror: reservation, room, names, date of birth, VIP, travel agent; raw PMS event payloads |
+| `iam_v2.sessions`, `iam_v2.devices` | **YES** | IP, MAC, per-client timing and byte totals |
+| `iam_v2.accounting_records` | **YES** | per-sample usage detail |
+| `iam_v2.sign_in_attempts` | **YES** | submitted room, device IP/MAC; names sealed |
+| `accounting_records` | **YES** | legacy per-session byte counters (no current writer) |
 | `auth_otps` | **YES** | hashed codes, destinations (email/phone) |
 | `social_oauth_states` | **YES** | IP+MAC-bound OAuth state |
 | `pms_providers` | credentials | PMS hosts/keys — site infrastructure secrets |
 | `pms_attempts` | **YES** | room numbers, attempt IPs |
 | `walled_garden_rules` | — | |
 | `notification_providers`, `social_oauth_providers`, `stripe_accounts` | credentials | provider secrets stay on-site |
-| `payments`, `stripe_events` | **YES** | client IP/MAC, Stripe references |
+| `iam_v2.payment_transactions`, `stripe_events` | **YES** | payment references tied to a guest's purchase |
 | `audit_log` | staff + client refs | local compliance record |
 | `tenant_effective_limits` (plain TABLE) | — | derived from the signed license; local bridge |
 | `edge_offline_packages` | — | single-use ledger of imported offline activation packages |
@@ -62,6 +66,7 @@ commercial remnant columns were dropped by migration 0047.
 | Signed hello (detects a deleted record) | `GET /v1/appliance/hello` |
 | Assignment acknowledgement (adopted version; a terminal ack is retried until confirmed) | `POST /v1/appliance/assignment/ack` |
 | Offline-activation reconciliation (the consumed package id; retried until confirmed) | `POST /v1/appliance/offline-reconcile` |
+| Client Portal hostname and certificate (portal address, hotel domain; CSR) | `POST /v1/appliance/portal-tls/sync`, `POST /v1/appliance/portal-tls/orders` |
 
 **No telemetry.** The appliance has no telemetry outbox, producer or message-bus
 client (CLAUDE.md §0E); the subsystem and its tables (`sync_outbox`,
@@ -99,8 +104,14 @@ client (CLAUDE.md §0E); the subsystem and its tables (`sync_outbox`,
 Consequences:
 
 - A cloud compromise cannot expose a site's clients — the data simply is not there.
-- GDPR/data-locality: client data residency equals the site's own premises;
-  retention is enforced locally on the appliance.
+- GDPR/data-locality: client data stays on the site's own premises as far as
+  Central is concerned. Optional providers the hotel enables (email, SMS,
+  WhatsApp, social sign-in, payments) do receive the data they need to work;
+  see [privacy/GDPR_REMEDIATION_PLAN.md](privacy/GDPR_REMEDIATION_PLAN.md).
+- Retention: only sign-in attempts (30 days), throttle and OTP rows, and
+  accounting detail (opt-in, unlimited by default) are purged automatically
+  today. Retention for the rest of the client data is planned work (GDPR plan
+  C1).
 - Cloud support staff see only activation, connection and licence state; to
   diagnose a site they ask site staff to act in Admin Console.
 
