@@ -28,6 +28,7 @@ require (
 )
 
 require (
+	filippo.io/age v1.2.1
 	github.com/stayconnect/enterprise/license v0.0.0
 	golang.org/x/crypto v0.49.0
 	golang.org/x/net v0.51.0

@@ -235,6 +235,9 @@ func (s *server) lastRestore(w http.ResponseWriter, r *http.Request) {
 
 type restoreReq struct {
 	Name string `json:"name"`
+	// Identity is a backup key holder's private key, needed for an encrypted backup. It lives in memory for
+	// the length of the restore and is never stored or logged.
+	Identity string `json:"identity"`
 }
 
 type restoreStep struct {
@@ -274,6 +277,20 @@ func (s *server) backupRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// AN ENCRYPTED BACKUP NEEDS A KEY THAT OPENS IT, and that is checked now, before the safety dump and
+	// maintenance: a wrong key must cost the hotel nothing, not a closed appliance.
+	src, closer, err := openBackup(filepath.Join(scdBackupDir, in.Name), in.Identity)
+	if err != nil {
+		if msg, isKey := keyProblem(err); isKey {
+			httpErr(w, http.StatusBadRequest, msg)
+			return
+		}
+		httpErr(w, http.StatusInternalServerError, "the backup could not be opened: "+err.Error())
+		return
+	}
+	_, _ = io.ReadFull(src, make([]byte, 16))
+	closer.Close()
+
 	if !restoreInFlight.CompareAndSwap(false, true) {
 		httpErr(w, http.StatusConflict, "a restore is already running on this appliance")
 		return
@@ -304,13 +321,13 @@ func (s *server) backupRestore(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer cancel()
 		defer restoreInFlight.Store(false)
-		s.runRestore(ctx, in.Name, rec, started)
+		s.runRestore(ctx, in.Name, in.Identity, rec, started)
 	}()
 }
 
 // runRestore performs the restore. It reports only durably: by the time it finishes, the HTTP request that
 // asked for it is long gone and edged has been restarted.
-func (s *server) runRestore(ctx context.Context, name string, rec *verifiedRecord, started time.Time) {
+func (s *server) runRestore(ctx context.Context, name, identity string, rec *verifiedRecord, started time.Time) {
 	in := restoreReq{Name: name}
 	steps := []restoreStep{}
 	stamp := started.Format("20060102T150405Z")
@@ -393,13 +410,16 @@ func (s *server) runRestore(ctx context.Context, name string, rec *verifiedRecor
 			"-tAc", "DROP DATABASE IF EXISTS "+staging+" WITH (FORCE)").CombinedOutput()
 	}
 
-	load := exec.CommandContext(ctx, "/bin/sh", "-c",
-		"gzip -dc "+shq(filepath.Join(scdBackupDir, in.Name))+" | docker exec -i "+pgContainer+
-			" psql -U "+pgUser+" -d "+staging+" -v ON_ERROR_STOP=1 -q")
-	if out, err := load.CombinedOutput(); err != nil {
+	if out, err := loadBackupInto(ctx, filepath.Join(scdBackupDir, in.Name), identity, staging); err != nil {
 		dropStaging()
 		// NOTHING WAS LOST. The live database was never opened.
-		fail("load", "the backup did not load, so nothing was replaced: "+firstProblem(string(out)))
+		detail := firstProblem(string(out))
+		if msg, isKey := keyProblem(err); isKey {
+			detail = msg
+		} else if len(out) == 0 {
+			detail = err.Error()
+		}
+		fail("load", "the backup did not load, so nothing was replaced: "+detail)
 		return
 	}
 	ok("load", fmt.Sprintf("the backup loaded into a staging database (%d tables when verified)", rec.Tables))

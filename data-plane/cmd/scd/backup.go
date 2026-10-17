@@ -31,6 +31,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/backupcrypt"
 )
 
 // scdBackupDir is a var rather than a const so tests can point it at a temporary directory. Nothing in the
@@ -52,69 +54,41 @@ const (
 // screen had just listed.
 //
 // Still strict, and for the reason it was written: this bounds a string that gets joined onto a path, so it
-// admits no separator, no dot-dot and no arbitrary text -- only the two shapes this appliance produces.
-var safeBackupName = regexp.MustCompile(`^db-(safety-)?[0-9TZ]{1,24}\.sql\.gz$`)
+// admits no separator, no dot-dot and no arbitrary text -- only the shapes this appliance produces, each
+// either in the clear or encrypted to the hotel's keys (.age, migration 0129).
+var safeBackupName = regexp.MustCompile(`^db-(safety-)?[0-9TZ]{1,24}\.sql\.gz(\.age)?$`)
 
-// backupRun takes a compressed logical dump of the site database.
+// backupRun takes a compressed logical dump of the site database, encrypted to the hotel's backup keys once
+// they are set up (backup_crypt.go).
 func (s *server) backupRun(w http.ResponseWriter, r *http.Request) {
-	if err := os.MkdirAll(scdBackupDir, 0o750); err != nil {
-		httpErr(w, http.StatusInternalServerError, "the backup directory could not be created")
-		return
-	}
 	started := time.Now().UTC()
-	name := "db-" + started.Format("20060102T150405Z") + ".sql.gz"
-	dest := filepath.Join(scdBackupDir, name)
-	partial := dest + ".partial"
-
 	// NOT r.Context(). A backup writes a file; if the caller's connection times out mid-dump the command is
 	// killed and a half-written archive is left to be cleaned up. It also cannot be retried usefully, because
 	// the caller has already given up. Its own deadline, independent of whoever asked.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Minute)
 	defer cancel()
-
-	// Written to .partial and renamed only on success, so an interrupted dump is never left behind looking
-	// like a backup somebody could restore from.
-	out, err := exec.CommandContext(ctx, "/bin/sh", "-c",
-		"docker exec "+pgContainer+" pg_dump -U "+pgUser+" -d "+pgDatabase+
-			" --no-owner --no-privileges | gzip -c > "+shq(partial)).CombinedOutput()
+	name, err := s.dumpTo(ctx, "db-"+started.Format("20060102T150405Z")+".sql.gz")
 	if err != nil {
-		_ = os.Remove(partial)
-		slog.Error("database backup failed", "err", err, "detail", tailLine(string(out)))
-		httpErr(w, http.StatusInternalServerError, "the database backup did not complete: "+tailLine(string(out)))
+		slog.Error("database backup failed", "err", err)
+		httpErr(w, http.StatusInternalServerError, "the database backup did not complete: "+err.Error())
 		return
 	}
-	if err := os.Rename(partial, dest); err != nil {
-		_ = os.Remove(partial)
-		httpErr(w, http.StatusInternalServerError, "the completed dump could not be moved into place")
-		return
-	}
-	fi, err := os.Stat(dest)
+	fi, err := os.Stat(filepath.Join(scdBackupDir, name))
 	if err != nil {
 		httpErr(w, http.StatusInternalServerError, "the completed dump could not be measured")
 		return
 	}
-	// gzip of nothing still exits 0, so an empty dump is a failure wearing a success's clothes.
-	if fi.Size() < 1024 {
-		_ = os.Remove(dest)
-		httpErr(w, http.StatusInternalServerError, "the dump was empty and has been discarded")
-		return
-	}
-	// READABLE BY THE OPERATOR SURFACE. scd writes as root; edged serves the download as the unprivileged
-	// service user. Mode 0640 alone left the file root:root, so the download answered 500 -- the group has to
-	// be the service group as well as the mode being group-readable.
-	_ = os.Chmod(dest, 0o640)
-	if gid, ok := serviceGroupID(); ok {
-		if err := os.Chown(dest, 0, gid); err != nil {
-			slog.Warn("backup written but not group-readable by the operator surface", "err", err)
-		}
-	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name": name, "size_bytes": fi.Size(), "started_at": started,
+		"encrypted": strings.HasSuffix(name, backupcrypt.Suffix),
 	})
 }
 
 type verifyReq struct {
 	Name string `json:"name"`
+	// Identity is a backup key holder's private key, needed for an encrypted backup. Used for this request
+	// only; never stored or logged.
+	Identity string `json:"identity"`
 }
 
 // backupVerify answers "would this restore?" WITHOUT restoring anything anyone depends on.
@@ -164,10 +138,12 @@ func (s *server) backupVerify(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	load := exec.CommandContext(ctx, "/bin/sh", "-c",
-		"gzip -dc "+shq(path)+" | docker exec -i "+pgContainer+" psql -U "+pgUser+" -d "+scratch+
-			" -v ON_ERROR_STOP=1 -q")
-	if out, err := load.CombinedOutput(); err != nil {
+	out, err := loadBackupInto(ctx, path, in.Identity, scratch)
+	if msg, isKey := keyProblem(err); isKey {
+		httpErr(w, http.StatusBadRequest, msg)
+		return
+	}
+	if err != nil {
 		// NAME THE FAILURE, NOT THE LAST LINE. tailLine returns the final non-empty line, and psql keeps
 		// printing normal output after an error -- so a genuine load failure was reported as "(1 row)", which
 		// tells an operator nothing and sent me looking in the wrong place. The first ERROR/FATAL line is the
@@ -250,24 +226,32 @@ func tailLine(s string) string {
 	return last
 }
 
-// dumpTo writes a compressed logical dump under the given name and returns it.
+// dumpTo writes a compressed logical dump under the given name and returns the name it was written under:
+// "<name>.age" when the hotel's backup keys are set up, because the dump is then encrypted to them as it is
+// written (backup_crypt.go).
 //
-// FACTORED OUT OF backupRun so that the safety copy a restore takes is produced by exactly the same code as
-// an operator's backup -- same flags, same .partial discipline, same empty-dump check, same ownership. A
+// THE ONE WAY TO TAKE A BACKUP. An operator's backup and the safety copy a restore takes are both produced
+// here -- same flags, same .partial discipline, same empty-dump check, same ownership, same encryption. A
 // second implementation of "take a backup" is the one that turns out to differ on the day it matters.
 func (s *server) dumpTo(ctx context.Context, name string) (string, error) {
 	if err := os.MkdirAll(scdBackupDir, 0o750); err != nil {
 		return "", fmt.Errorf("the backup directory could not be created: %w", err)
 	}
+	recipients, err := s.backupRecipients(ctx)
+	if err != nil {
+		return "", err
+	}
+	if len(recipients) > 0 {
+		name += backupcrypt.Suffix
+	}
 	dest := filepath.Join(scdBackupDir, name)
 	partial := dest + ".partial"
 
-	out, err := exec.CommandContext(ctx, "/bin/sh", "-c",
-		"docker exec "+pgContainer+" pg_dump -U "+pgUser+" -d "+pgDatabase+
-			" --no-owner --no-privileges | gzip -c > "+shq(partial)).CombinedOutput()
-	if err != nil {
+	// Written to .partial and renamed only on success, so an interrupted dump is never left behind looking
+	// like a backup somebody could restore from.
+	if err := writeDump(ctx, partial, recipients); err != nil {
 		_ = os.Remove(partial)
-		return "", fmt.Errorf("%s", tailLine(string(out)))
+		return "", err
 	}
 	if err := os.Rename(partial, dest); err != nil {
 		_ = os.Remove(partial)
@@ -282,6 +266,9 @@ func (s *server) dumpTo(ctx context.Context, name string) (string, error) {
 		_ = os.Remove(dest)
 		return "", fmt.Errorf("the dump was empty and has been discarded")
 	}
+	// READABLE BY THE OPERATOR SURFACE. scd writes as root; edged serves the download as the unprivileged
+	// service user. Mode 0640 alone left the file root:root, so the download answered 500 -- the group has to
+	// be the service group as well as the mode being group-readable.
 	_ = os.Chmod(dest, 0o640)
 	if gid, ok := serviceGroupID(); ok {
 		if err := os.Chown(dest, 0, gid); err != nil {

@@ -19,6 +19,7 @@ CONF="${SC_CLEANUP_CONF:-/etc/stayconnect/backup-retention.conf}"   # overridabl
 : "${KEEP_BINARIES:=5}"      # per binary name (ctrlapi / scd / edged / acctd)
 : "${KEEP_RELEASES:=5}"      # per UI app (cloud-admin / hotel-admin), on top of current+previous
 : "${KEEP_DB:=7}"            # DB dumps, newest always kept regardless
+: "${DB_BACKUP_DAYS:=30}"     # appliance DB dumps older than this are removed too (the newest is still kept)
 : "${KEEP_CONFIG:=3}"        # config *.bak* files
 : "${DISK_WARN:=80}"         # % used -> warn
 : "${DISK_CRIT:=90}"         # % used -> critical
@@ -32,6 +33,8 @@ case "$SITE_BACKUP_DAYS" in (""|*[!0-9]*) SITE_BACKUP_DAYS=30;; esac
 case "$SITE_BACKUP_KEEP" in (""|*[!0-9]*) SITE_BACKUP_KEEP=7;; esac
 [ "$SITE_BACKUP_DAYS" -ge 1 ] || SITE_BACKUP_DAYS=30
 [ "$SITE_BACKUP_KEEP" -ge 7 ] || SITE_BACKUP_KEEP=7
+case "$DB_BACKUP_DAYS" in (""|*[!0-9]*) DB_BACKUP_DAYS=30;; esac
+[ "$DB_BACKUP_DAYS" -ge 1 ] || DB_BACKUP_DAYS=30
 
 ROOT="${SC_CLEANUP_ROOT:-/opt/stayconnect}"
 PINS="${SC_CLEANUP_PINS:-/etc/stayconnect/backup-retention.pins}"
@@ -115,6 +118,34 @@ retain_db() {
   done <<< "$sorted"
 }
 
+# retain_db_aged: retain_db, plus an AGE limit (GDPR plan C5). A count alone keeps a quiet site's last KEEP_DB
+# dumps for ever, and with them guest data the live database has long since anonymised. So a dump is also
+# removed once it is older than DB_BACKUP_DAYS -- except the newest, which is never removed, and pinned ones.
+# Age comes from the UTC stamp in the name (db-[safety-]YYYYMMDDTHHMMSSZ...), never from mtime; a name with no
+# readable stamp is kept rather than guessed at.
+retain_db_aged() {
+  local label="$1" keep="$2" days="$3"; shift 3
+  local -a cand=("$@")
+  [ "${#cand[@]}" -eq 0 ] && return 0
+  local sorted kept=0 first=1 line stamp ts now_s
+  now_s="$(date +%s)"
+  sorted="$(ls -1dt "${cand[@]}" 2>/dev/null)"
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    if [ "$first" = 1 ]; then R_KEEP+=("$label|$line|newest full backup (never delete)"); first=0; kept=$((kept+1)); continue; fi
+    if is_pinned "$line"; then R_PIN+=("$label|$line|operator-pinned"); continue; fi
+    if [ "$kept" -ge "$keep" ]; then R_DEL+=("$label|$line|older than newest $keep"); continue; fi
+    stamp="$(basename "$line" | sed -nE 's/^db-(safety-)?([0-9]{8})T([0-9]{6})Z.*/\2 \3/p')"
+    if [ -n "$stamp" ]; then
+      ts="$(date -u -d "${stamp:0:8} ${stamp:9:2}:${stamp:11:2}:${stamp:13:2}" +%s 2>/dev/null || echo "$now_s")"
+      if [ $((now_s - ts)) -gt $((days * 86400)) ]; then
+        R_DEL+=("$label|$line|older than $days days"); continue
+      fi
+    fi
+    R_KEEP+=("$label|$line|within newest $keep"); kept=$((kept+1))
+  done <<< "$sorted"
+}
+
 # THE NIGHTLY SITE BACKUPS (audit N-9 / decision D-H).
 #
 # stayconnect-site-backup.sh writes one SET per night into $SITE_BACKUP_DIR -- site-<stamp>.dump, its
@@ -127,6 +158,9 @@ retain_db() {
 #
 # Every artefact is also made 0600 root -- the backup script now writes them that way, and this repairs the
 # ones it wrote before.
+#
+# A set encrypted to the hotel's backup keys (GDPR plan C5) is the same set with .age on the dump and the
+# /etc archive; it is retained by exactly the same rule.
 retain_site_backups() {
   local dir="$SITE_BACKUP_DIR" now_s age_limit dump stamp kept=0 mtime f
   [ -d "$dir" ] || return 0
@@ -135,7 +169,7 @@ retain_site_backups() {
   # newest-first by the stamp in the name (UTC, sortable), never by mtime: a touched file must not look new.
   while IFS= read -r dump; do
     [ -z "$dump" ] && continue
-    stamp="$(basename "$dump" .dump)"; stamp="${stamp#site-}"
+    stamp="$(basename "$dump" .age)"; stamp="${stamp%.dump}"; stamp="${stamp#site-}"
     if is_pinned "$dump"; then R_PIN+=("site-backup|$dump|operator-pinned"); continue; fi
     if [ "$kept" -lt "$SITE_BACKUP_KEEP" ]; then
       R_KEEP+=("site-backup|$dump|within newest $SITE_BACKUP_KEEP"); kept=$((kept+1)); continue
@@ -146,10 +180,11 @@ retain_site_backups() {
     if [ $((now_s - mtime)) -le "$age_limit" ]; then
       R_KEEP+=("site-backup|$dump|younger than $SITE_BACKUP_DAYS days"); continue
     fi
-    for f in "$dir/site-$stamp.dump" "$dir/site-$stamp.dump.meta.json" "$dir/site-$stamp-etc.tgz" "$dir/site-$stamp.manifest.json"; do
+    for f in "$dir/site-$stamp.dump" "$dir/site-$stamp.dump.age" "$dir/site-$stamp.dump.meta.json" \
+             "$dir/site-$stamp-etc.tgz" "$dir/site-$stamp-etc.tgz.age" "$dir/site-$stamp.manifest.json"; do
       [ -f "$f" ] && R_DEL+=("site-backup|$f|older than $SITE_BACKUP_DAYS days and beyond the newest $SITE_BACKUP_KEEP")
     done
-  done < <(find "$dir" -maxdepth 1 -type f -regextype posix-extended -regex '.*/site-[0-9]{8}-[0-9]{6}\.dump' -printf '%f\n' 2>/dev/null | sort -r | sed "s#^#$dir/#")
+  done < <(find "$dir" -maxdepth 1 -type f -regextype posix-extended -regex '.*/site-[0-9]{8}-[0-9]{6}\.dump(\.age)?' -printf '%f\n' 2>/dev/null | sort -r | sed "s#^#$dir/#")
 }
 
 # site_backup_permissions makes every site-backup artefact 0600 and the directory 0700, root-owned.
@@ -158,7 +193,7 @@ site_backup_permissions() {
   [ -d "$dir" ] || return 0
   chown root:root "$dir" 2>/dev/null; chmod 0700 "$dir" 2>/dev/null
   find "$dir" -maxdepth 1 -type f -regextype posix-extended \
-    -regex '.*/site-[0-9]{8}-[0-9]{6}(\.dump|\.dump\.meta\.json|-etc\.tgz|\.manifest\.json)' \
+    -regex '.*/site-[0-9]{8}-[0-9]{6}(\.dump|\.dump\.age|\.dump\.meta\.json|-etc\.tgz|-etc\.tgz\.age|\.manifest\.json)' \
     -exec chown root:root {} + -exec chmod 0600 {} + 2>/dev/null
   return 0
 }
@@ -226,9 +261,10 @@ plan_appliance() {
   # full safety copy of the site here before it touches anything, so the directory now grows by ~27MB per
   # attempt while the same page shows a disk gauge with nothing on it to explain the climb.
   #
-  # Same rule as everywhere else: the newest is never deleted, pinned artefacts are never deleted, and
-  # KEEP_DB of them are retained.
-  retain_db "db-dump" "$KEEP_DB" $(ls -1d "$ROOT"/backups/db/*.sql.gz 2>/dev/null)
+  # Same rule as everywhere else: the newest is never deleted, pinned artefacts are never deleted, and at most
+  # KEEP_DB of them are retained -- and none older than DB_BACKUP_DAYS (GDPR plan C5). Encrypted dumps (.age)
+  # are the same backups and follow the same rule.
+  retain_db_aged "db-dump" "$KEEP_DB" "$DB_BACKUP_DAYS" $(ls -1d "$ROOT"/backups/db/*.sql.gz "$ROOT"/backups/db/*.sql.gz.age 2>/dev/null)
 
   # The nightly site backups (stayconnect-site-backup.timer), under the hotel's retention setting.
   retain_site_backups
@@ -328,7 +364,7 @@ json_arr() { local first=1; printf '['; for e in "$@"; do [ -z "$e" ] && continu
   [ -n "$NEWEST_DB" ] && NEWEST_DB_AT="$(date -u -r "$NEWEST_DB" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
   printf '  "newest_db_backup": "%s", "newest_db_backup_at": "%s",\n' "$NEWEST_DB" "$NEWEST_DB_AT"
   printf '  "keep_binaries": %s, "keep_releases": %s, "keep_db": %s, "keep_config": %s,\n' "$KEEP_BINARIES" "$KEEP_RELEASES" "$KEEP_DB" "$KEEP_CONFIG"
-  printf '  "site_backup_days": %s, "site_backup_keep": %s,\n' "$SITE_BACKUP_DAYS" "$SITE_BACKUP_KEEP"
+  printf '  "site_backup_days": %s, "site_backup_keep": %s, "db_backup_days": %s,\n' "$SITE_BACKUP_DAYS" "$SITE_BACKUP_KEEP" "$DB_BACKUP_DAYS"
   printf '  "protected_items": %s,\n' "$(json_arr "${R_PROT[@]:-}")"
   printf '  "pinned_items": %s,\n' "$(json_arr "${R_PIN[@]:-}")"
   printf '  "retained_items": %s,\n' "$(json_arr "${R_KEEP[@]:-}")"

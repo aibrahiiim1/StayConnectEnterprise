@@ -55,6 +55,11 @@ var retentionSchema = []retentionSetting{
 		Explains: "Previous Hotel Admin bundles, on top of the current and previous ones, which are never removed."},
 	{Key: "KEEP_DB", Label: "Database backups", Unit: "backups", Default: 7, Min: 1, Max: 365,
 		Explains: "How many database backups to retain. The newest is always kept regardless of this number."},
+	// AN AGE LIMIT AS WELL AS A COUNT (GDPR plan C5). A count alone keeps a quiet site's last seven backups
+	// for ever -- and with them guest data the retention settings have long since anonymised in the live
+	// database. The newest is still always kept.
+	{Key: "DB_BACKUP_DAYS", Label: "Database backups: keep for", Unit: "days", Default: 30, Min: 1, Max: 3650,
+		Explains: "Database backups older than this are removed by the nightly sweep, even within the number above. The newest is always kept."},
 	{Key: "KEEP_CONFIG", Label: "Configuration backups", Unit: "copies", Default: 3, Min: 1, Max: 30,
 		Explains: "Saved copies of configuration files taken before a change."},
 	// THE NIGHTLY SITE BACKUPS (/var/backups/stayconnect, decision D-H). They were never removed: every night
@@ -64,6 +69,11 @@ var retentionSchema = []retentionSetting{
 		Explains: "Nightly site backups older than this are removed by the nightly sweep, except the newest ones kept below."},
 	{Key: "SITE_BACKUP_KEEP", Label: "Nightly site backups: always keep the newest", Unit: "backups", Default: 7, Min: 7, Max: 365,
 		Explains: "This many of the most recent nightly site backups are never removed, however old they are."},
+	// THE RESTORE-TEST REMINDER (decision D-C5). Backups are encrypted to the hotel's own keys, and the
+	// appliance cannot tell whether those keys still exist. So Hotel Admin asks, this often, for a key holder to
+	// prove it by opening the newest backup; an overdue or failed test is a warning on the Backups screen.
+	{Key: "RESTORE_TEST_MONTHS", Label: "Backup key restore test every", Unit: "months", Default: 6, Min: 1, Max: 24,
+		Explains: "How often a backup key holder must prove their key still opens the backups. Overdue tests show a warning."},
 	{Key: "DISK_WARN", Label: "Disk warning threshold", Unit: "% used", Default: 80, Min: 50, Max: 95,
 		Explains: "Disk usage at which the nightly sweep reports a warning."},
 	{Key: "DISK_CRIT", Label: "Disk critical threshold", Unit: "% used", Default: 90, Min: 60, Max: 99,

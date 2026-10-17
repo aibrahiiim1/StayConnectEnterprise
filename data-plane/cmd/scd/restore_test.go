@@ -132,7 +132,7 @@ func TestTheDestructiveStepIsARenameAndComesLast(t *testing.T) {
 	order := []struct{ what, needle string }{
 		{"the safety dump", "s.dumpTo(ctx,"},
 		{"maintenance on", "maintenanceOn("},
-		{"the staging load", "-d \"+staging+\""},
+		{"the staging load", "identity, staging)"},
 		{"the rename aside", "RENAME TO \" + aside"},
 		{"the rename in", "RENAME TO \" + pgDatabase"},
 		{"the integrity check", "s.restoreIntegrity(ctx)"},

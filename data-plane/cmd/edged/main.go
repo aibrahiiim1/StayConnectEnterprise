@@ -436,6 +436,12 @@ func main() {
 				r.Use(s.resourcePermission("backups"))
 				r.Mount("/", s.dataRetentionRoutes())
 			})
+			// BACKUP KEY HOLDERS (backup_keys.go, migration 0129): backups are encrypted to the hotel's own keys.
+			// Under "backups": readers see the state, site administrators manage the holders and run the test.
+			r.Route("/backup-keys", func(r chi.Router) {
+				r.Use(s.resourcePermission("backups"))
+				r.Mount("/", s.backupKeysRoutes())
+			})
 			// GUEST DATA RIGHTS (guest_data_rights.go, migration 0128): look up, export and erase one guest.
 			mountResource(r, s, "guest-data-rights", s.guestDataRightsRoutes)
 			// USAGE EXPLORER. Read-only investigation over durable accounting and session data; see

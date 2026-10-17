@@ -25,7 +25,7 @@ import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { ConfirmDialog } from "@/components/ui/dialog";
+import { ConfirmDialog, DialogForm } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { Skeleton, SkeletonRows } from "@/components/ui/misc";
@@ -37,6 +37,7 @@ import { cn, errMsg, formatDate } from "@/lib/utils";
 import { formatBytes } from "@/lib/bytes";
 import { AccountingRetentionCard } from "./accounting-retention-card";
 import { DataRetentionCard } from "./data-retention-card";
+import { BackupKeyInput, BackupKeysCard } from "./backup-keys-card";
 import { submitDownload } from "@/lib/backup-download";
 import {
   Archive, ShieldCheck, Download, RotateCcw, AlertTriangle, CheckCircle2, Loader2, HardDrive, ChevronRight,
@@ -123,11 +124,18 @@ export default function BackupsPage() {
     } catch (e) { setBackupErr(errMsg(e)); } finally { setBackupBusy(false); }
   }
 
-  async function verify(name: string) {
+  // AN ENCRYPTED BACKUP (.age) is opened with a key holder's key, asked for here and sent with this one request.
+  const [keyFor, setKeyFor] = useState<string | null>(null);
+  const [verifyKey, setVerifyKey] = useState("");
+  const startVerify = (name: string) => {
+    if (isEncrypted(name)) { setVerifyKey(""); setKeyFor(name); } else void verify(name);
+  };
+
+  async function verify(name: string, identity?: string) {
     setVerifying(name); setErr(null); setVerifyOutcome(null);
     try {
       const r = await api.post<{ ok: boolean; tables: number; duration: string; detail?: string }>(
-        `/backups/artifacts/${encodeURIComponent(name)}/verify`);
+        `/backups/artifacts/${encodeURIComponent(name)}/verify`, identity ? { identity } : undefined);
       if (r.ok) {
         toast.success("Backup verified", `It loads and contains ${r.tables} tables (${r.duration}).`);
         setVerifyOutcome({ name, ok: true, text: `Verified: the backup loads and contains ${r.tables} tables (${r.duration}).` });
@@ -156,6 +164,7 @@ export default function BackupsPage() {
                   <><strong>Verify</strong> proves a backup can actually be loaded back. Only a verified backup can be restored.</>,
                   <><strong>Download</strong> keeps a copy off the appliance. Only a site admin or the IT manager can download, and it asks for your password every time. Every download is recorded.</>,
                   <><strong>Restore</strong> replaces the current data with the backup. It asks for the backup&rsquo;s name typed out and your password.</>,
+                  <><strong>Encryption</strong>: once a key holder is set up, every backup is encrypted to the hotel&rsquo;s own keys. Verifying or restoring one asks for a key holder&rsquo;s key; downloads stay encrypted.</>,
                 ]}
               />
             </HelpSection>
@@ -249,7 +258,7 @@ export default function BackupsPage() {
                 </div>
               </div>
               {writable && newest && !verifiedNewest && (
-                <Button variant="secondary" onClick={() => verify(newest.name)} disabled={verifying === newest.name}>
+                <Button variant="secondary" onClick={() => startVerify(newest.name)} disabled={verifying === newest.name}>
                   <ShieldCheck /> {verifying === newest.name ? "Checking…" : "Verify it"}
                 </Button>
               )}
@@ -260,6 +269,9 @@ export default function BackupsPage() {
           )}
         </CardBody>
       </Card>
+
+      {/* ---- encryption to the hotel's own keys (GDPR plan C5) --------------------------------------- */}
+      <BackupKeysCard writable={writable} />
 
       {/* ---- the outcome of the last restore, if there was one --------------------------------------- */}
       {lastRestore && <LastRestoreCard result={lastRestore} />}
@@ -299,9 +311,12 @@ export default function BackupsPage() {
                     <div className="break-all font-mono text-2xs text-muted-foreground">{a.name}</div>
                   </TD>
                   <TD>
-                    {a.verified_at
-                      ? <Badge tone="ok" dot>Verified</Badge>
-                      : <Badge tone="default">Not checked</Badge>}
+                    <div className="flex flex-wrap gap-1">
+                      {a.verified_at
+                        ? <Badge tone="ok" dot>Verified</Badge>
+                        : <Badge tone="default">Not checked</Badge>}
+                      {isEncrypted(a.name) && <Badge tone="info">Encrypted</Badge>}
+                    </div>
                   </TD>
                   <TD className="hidden tabular sm:table-cell">{formatBytes(a.size_bytes)}</TD>
                   <TD className="hidden text-sm text-muted-foreground md:table-cell">
@@ -314,7 +329,7 @@ export default function BackupsPage() {
                       {writable && (
                         <Button size="sm" variant="secondary" disabled={verifying === a.name}
                           aria-label={`${a.verified_at ? "Re-verify" : "Verify"} ${a.name}`}
-                          onClick={() => verify(a.name)}>
+                          onClick={() => startVerify(a.name)}>
                           <ShieldCheck />
                           {verifying === a.name ? "Checking…" : a.verified_at ? "Re-verify" : "Verify"}
                         </Button>
@@ -369,6 +384,14 @@ export default function BackupsPage() {
         requirePassword
         onConfirm={download}
       />
+
+      <DialogForm open={keyFor !== null} onOpenChange={(v) => { if (!v) { setKeyFor(null); setVerifyKey(""); } }}
+        title="Verify an encrypted backup"
+        description="This backup is encrypted to the hotel’s keys. A key holder’s key opens it for this check only; the appliance does not keep it."
+        submitLabel="Verify" disabled={verifyKey.trim() === ""}
+        onSubmit={() => { const n = keyFor!, k = verifyKey; setKeyFor(null); setVerifyKey(""); void verify(n, k); }}>
+        <BackupKeyInput value={verifyKey} onChange={setVerifyKey} />
+      </DialogForm>
 
       {restoring && (
         <RestoreDialog
@@ -436,6 +459,9 @@ function LastRestoreCard({ result }: { result: RestoreResult }) {
   );
 }
 
+/** A backup encrypted to the hotel's backup keys (migration 0129). */
+function isEncrypted(name: string) { return name.endsWith(".age"); }
+
 /** THE CONFIRMATION. Two independent proofs, and a plain account of what is about to happen. */
 function RestoreDialog({ backup, onClose, onDone }: {
   backup: Artifact;
@@ -445,6 +471,8 @@ function RestoreDialog({ backup, onClose, onDone }: {
   const [busy, setBusy] = useState(false);
   const [started, setStarted] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [identity, setIdentity] = useState("");
+  const encrypted = isEncrypted(backup.name);
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
 
@@ -457,9 +485,11 @@ function RestoreDialog({ backup, onClose, onDone }: {
   // Nothing here retries anything. It asks what happened until the appliance says. The dialog cannot be
   // closed while it is busy.
   async function go({ password, confirm }: { password: string; confirm: string }) {
+    if (encrypted && identity.trim() === "") { setErr("This backup is encrypted: paste a key holder’s backup key."); return; }
     setBusy(true); setErr(null);
     try {
-      await api.post(`/backups/artifacts/${encodeURIComponent(backup.name)}/restore`, { password, confirm });
+      await api.post(`/backups/artifacts/${encodeURIComponent(backup.name)}/restore`,
+        encrypted ? { password, confirm, identity } : { password, confirm });
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : errMsg(e));
       setBusy(false);
@@ -507,6 +537,8 @@ function RestoreDialog({ backup, onClose, onDone }: {
           {backup.verified_at ? ` · verified ${formatDate(backup.verified_at)}` : ""}
         </div>
       </div>
+
+      {encrypted && !started && <BackupKeyInput value={identity} onChange={setIdentity} />}
 
       {/* SAYING WHAT WILL HAPPEN IS PART OF THE CONSENT. An operator agreeing to a destructive step
           should know the appliance protects them, and how, rather than hoping it does. */}

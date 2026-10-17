@@ -447,8 +447,23 @@ func (s *server) verifyBackupArtifact(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "not_found", "no such database backup")
 		return
 	}
+	// AN ENCRYPTED BACKUP (.age, migration 0129) is opened with a backup key holder's key, sent with this
+	// request and passed to scd for it alone. The body is optional: a backup in the clear needs none.
+	var in struct {
+		Identity string `json:"identity"`
+	}
+	if raw, _ := io.ReadAll(io.LimitReader(r.Body, 64<<10)); len(strings.TrimSpace(string(raw))) > 0 {
+		if err := json.Unmarshal(raw, &in); err != nil {
+			jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")
+			return
+		}
+	}
 	code, body, err := s.scd.call(r.Context(), http.MethodPost, "/v1/backup/verify",
-		map[string]any{"name": name})
+		map[string]any{"name": name, "identity": in.Identity})
+	if err == nil && code == http.StatusBadRequest {
+		jsonErr(w, http.StatusBadRequest, "backup_key", scdDetail(body, nil))
+		return
+	}
 	if err != nil || code != http.StatusOK {
 		jsonErr(w, http.StatusInternalServerError, "verify_failed", scdDetail(body, err))
 		return
@@ -529,6 +544,8 @@ func (s *server) restoreDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Password string `json:"password"`
 		Confirm  string `json:"confirm"`
+		// A backup key holder's key, for an encrypted backup. Passed to scd for this restore only.
+		Identity string `json:"identity"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")
@@ -566,7 +583,13 @@ func (s *server) restoreDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 	// describes an outcome this process never saw. The durable record in scd is the outcome; restore_started,
 	// written above and captured by the safety backup, is what the audit trail can truthfully hold.
 	code, body, err := s.scd.call(r.Context(), http.MethodPost, "/v1/backup/restore",
-		map[string]any{"name": name})
+		map[string]any{"name": name, "identity": in.Identity})
+	if err == nil && code == http.StatusBadRequest {
+		// The key did not open the backup (or none was given): checked by scd before anything was touched.
+		s.audit(r, "backup.restore_refused", "backup", name, map[string]any{"detail": scdDetail(body, nil)})
+		jsonErr(w, http.StatusBadRequest, "backup_key", scdDetail(body, nil))
+		return
+	}
 	if err != nil || (code != http.StatusOK && code != http.StatusAccepted) {
 		detail := scdDetail(body, err)
 		s.audit(r, "backup.restore_failed", "backup", name, map[string]any{"detail": detail})

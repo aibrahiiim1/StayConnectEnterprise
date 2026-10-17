@@ -334,6 +334,8 @@ GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_acctd;
 \ir svc-data-retention-grants.sql
 -- Guest data rights: look up, export and erase one guest (0128).
 \ir svc-guest-data-rights-grants.sql
+-- Backup key holders: backups encrypted to the hotel's own keys (0129).
+\ir svc-backup-keys-grants.sql
 
 -- EXECUTE on the CANONICAL audited, versioned publication boundary. This is the only function the product
 -- calls to change checkout grace policy: it requires an active operator as actor, a bounded machine reason

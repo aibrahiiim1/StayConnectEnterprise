@@ -27,6 +27,46 @@ DB (netd re-renders on apply), so they need no separate backup — but the `tar`
 `/etc/stayconnect` above captures them anyway, which speeds recovery by keeping
 the last active revision's bundle on hand ([EDGE_NETWORKING.md](EDGE_NETWORKING.md)).
 
+### Encryption to the hotel's own keys (GDPR plan C5, decision D-C5)
+
+Once the hotel has confirmed a **backup key holder** (Hotel Admin → System → Backups → Backup encryption),
+every backup the appliance writes is encrypted with [age](https://age-encryption.org) to every active holder's
+public key **as it is written**: the nightly dump (`site-<stamp>.dump.age`), the nightly `/etc/stayconnect`
+archive with the seal keys (`site-<stamp>-etc.tgz.age`), and the on-demand and restore-safety dumps on the
+Backups screen (`db-…sql.gz.age`). No plaintext copy touches the disk.
+
+- **The appliance holds public keys only.** It can write backups and never read them back. Adding a holder
+  generates the key pair on the appliance and hands the private key over **once**, as a key file and a printable
+  recovery sheet; the appliance keeps no copy. The holder counts only after the **check code** printed in both
+  is typed back. There is no escrow: the supplier holds no key either.
+- **Several holders.** Any one holder's key opens a backup alone. Removing a holder stops new backups being
+  encrypted to it; backups taken earlier still open with it. The last active holder cannot be removed.
+- **Opening a backup on the appliance** (Verify, Restore, and the restore test) asks for a holder's key, which
+  is used in memory for that one action and never stored or logged. A wrong key is refused before a restore
+  touches anything.
+- **Restore test.** Hotel Admin asks every `RESTORE_TEST_MONTHS` (a backup setting, default 6) for a holder to
+  prove their key opens the newest encrypted backup. Overdue shows a warning on the Backups screen.
+- **Downloads stay encrypted.** The file downloaded is the encrypted file.
+- **Before the first holder is confirmed**, backups are written in the clear as before, and the Backups screen
+  says so. If holders are registered but cannot be read, the backup **fails** rather than falling back to
+  plaintext. If the holders of more than one site are active (an appliance moved to another hotel), the nightly
+  backup fails rather than encrypt to the previous hotel's keys.
+- **If every key is lost**, the encrypted backups cannot be read by anyone. Live data is unaffected; add a new
+  holder and new backups work at once.
+
+To open an encrypted nightly backup by hand (for the restore below), a holder supplies their key file:
+
+```sh
+/opt/stayconnect/bin/scd backup-crypt decrypt -i <key-file> /var/backups/stayconnect/site-<stamp>.dump.age /root/site-<stamp>.dump
+/opt/stayconnect/bin/scd backup-crypt decrypt -i <key-file> /var/backups/stayconnect/site-<stamp>-etc.tgz.age - | tar tzf -
+```
+
+The key file is the standard age format, so `age -d -i <key-file>` works off the appliance too. Delete the
+decrypted copy once the restore is done.
+
+On-demand database backups are also kept no longer than `DB_BACKUP_DAYS` (default 30), on top of the count
+limit `KEEP_DB`; the newest is always kept.
+
 ### How
 
 `deploy/scripts/stayconnect-site-backup.sh` is the supported backup script. It runs nightly from

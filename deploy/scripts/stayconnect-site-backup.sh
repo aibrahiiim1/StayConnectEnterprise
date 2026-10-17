@@ -96,6 +96,36 @@ STAMP="$(date -u +%Y%m%d-%H%M%S)"
 DUMP="$OUT_DIR/site-$STAMP.dump"
 ETC_TAR="$OUT_DIR/site-$STAMP-etc.tgz"
 
+# ENCRYPTED TO THE HOTEL'S OWN KEYS (migration 0129; GDPR plan C5; Product-Owner decision D-C5).
+#
+# Once the hotel has confirmed a backup key holder in Hotel Admin, both artefacts are encrypted with age to every
+# holder's public key AS THEY ARE WRITTEN -- no plaintext copy touches the disk -- and the /etc archive, which
+# carries the seal keys, travels only inside its encrypted file. The appliance holds public keys only, so it
+# cannot read these backups back; any one holder's key can (see the closing note).
+#
+# Before the first holder is confirmed, or on a database without migration 0129, the backup is written in the
+# clear as it always was, and the Backups screen says so. If holders ARE registered but cannot be read, the
+# backup FAILS rather than falling back to plaintext: a hotel that switched encryption on must never find an
+# unencrypted copy of its guests.
+SCD_BIN="${STAYCONNECT_SCD_BIN:-/opt/stayconnect/bin/scd}"
+RCPT=""
+HAS_KEYS="$(sitedb_psql -qAt -c "SELECT to_regprocedure('public.backup_key_recipients(uuid,uuid)') IS NOT NULL")" \
+  || { echo "backup: FAILED — could not ask the database whether backup keys are set up" >&2; exit 1; }
+if [ "$HAS_KEYS" = "t" ]; then
+  RCPT_LIST="$(sitedb_psql -qAt -c "SELECT k FROM public.backup_key_recipients() k")" \
+    || { echo "backup: FAILED — the hotel's backup keys could not be read, and a backup is never written in the clear instead" >&2; exit 1; }
+  if [ -n "$RCPT_LIST" ]; then
+    [ -x "$SCD_BIN" ] || { echo "backup: FAILED — $SCD_BIN is missing, so the backup cannot be encrypted" >&2; exit 1; }
+    RCPT="$(mktemp)"
+    printf '%s\n' "$RCPT_LIST" > "$RCPT"
+    DUMP="$DUMP.age"
+    ETC_TAR="$ETC_TAR.age"
+    echo "backup: encrypting to $(grep -c . "$RCPT") backup key holder(s)"
+  else
+    echo "backup: WARNING — no backup key holder is set up, so this backup is NOT encrypted (Hotel Admin -> Backups)" >&2
+  fi
+fi
+
 # EVERY ARTEFACT IS 0600 ROOT, AND THE DIRECTORY 0700 (audit N-9). The /etc archive is a complete copy of
 # /etc/stayconnect -- service DSNs, the voucher and OTP keys, identity material -- and the dump is every guest
 # record the site holds. They used to be written 0644 into a 0755 directory: readable by every account on the
@@ -118,6 +148,7 @@ chmod 0700 "$OUT_DIR" 2>/dev/null || true
 # `set -e` takes the script down mid-command.
 BACKUP_OK=0
 cleanup_partial() {
+  [ -n "${RCPT:-}" ] && rm -f "$RCPT"
   [ "$BACKUP_OK" = 1 ] && return 0
   for f in "${DUMP:-}" "${ETC_TAR:-}"; do
     [ -n "$f" ] || continue
@@ -146,21 +177,31 @@ if [ -n "${UNREADABLE:-}" ] && [ "$UNREADABLE" != "0" ]; then
   exit 1
 fi
 
-sitedb_pg_dump "$DUMP"
+if [ -n "$RCPT" ]; then
+  sitedb_pg_dump /dev/stdout | "$SCD_BIN" backup-crypt encrypt -R "$RCPT" - "$DUMP"
+else
+  sitedb_pg_dump "$DUMP"
+fi
 [ -s "$DUMP" ] || { echo "backup: FAILED — the dump is empty" >&2; rm -f "$DUMP"; exit 1; }
 
-echo "backup: tar $ETC_DIR -> $ETC_TAR (EXCLUDING $MARKER_NAME)"
-tar czf "$ETC_TAR" --exclude="$MARKER_NAME" -C "$(dirname "$ETC_DIR")" "$(basename "$ETC_DIR")"
-
 # Prove the exclusion rather than trusting the flag. A tar that quietly included the marker would be a
-# backup that disarms the rollback detector, and that is not something to discover during a restore.
-if tar tzf "$ETC_TAR" | grep -q "$MARKER_NAME"; then
-  echo "backup: FAILED — the financial restore marker is inside the /etc archive." >&2
+# backup that disarms the rollback detector, and that is not something to discover during a restore. The
+# listing is taken from the same tar invocation BEFORE the archive is written, because an encrypted archive
+# cannot be listed by the appliance afterwards -- that is the point of it.
+etc_tar() { tar czf - --exclude="$MARKER_NAME" -C "$(dirname "$ETC_DIR")" "$(basename "$ETC_DIR")"; }
+if etc_tar | tar tzf - | grep -q "$MARKER_NAME"; then
+  echo "backup: FAILED — the financial restore marker would be inside the /etc archive." >&2
   echo "backup: restoring that archive would roll the marker back and silence rollback detection." >&2
-  rm -f "$ETC_TAR"
   exit 1
 fi
 echo "backup: verified — the financial restore marker is not in the archive"
+
+echo "backup: tar $ETC_DIR -> $ETC_TAR (EXCLUDING $MARKER_NAME)"
+if [ -n "$RCPT" ]; then
+  etc_tar | "$SCD_BIN" backup-crypt encrypt -R "$RCPT" - "$ETC_TAR"
+else
+  etc_tar > "$ETC_TAR"
+fi
 
 # From here the artefacts are complete, so the trap must not delete them.
 BACKUP_OK=1
@@ -173,6 +214,7 @@ cat > "$DUMP.meta.json" <<JSON
   "database": "$PGDB_SITE",
   "etc_archive": "$(basename "$ETC_TAR")",
   "marker_excluded": true,
+  "encrypted": $([ -n "$RCPT" ] && echo true || echo false),
   "note": "This metadata is NOT a restore manifest. A supported restore needs a manifest SIGNED by the appliance's pinned registry root; see stayconnect-financial-restore.sh."
 }
 JSON
@@ -182,6 +224,11 @@ echo "backup:   dump      $DUMP  ($DUMP_SHA)"
 echo "backup:   /etc      $ETC_TAR"
 echo "backup:   metadata  $DUMP.meta.json"
 echo
+if [ -n "$RCPT" ]; then
+  echo "These files are encrypted to the hotel's backup keys. To open one, a key holder supplies their key file:"
+  echo "  $SCD_BIN backup-crypt decrypt -i <key-file> $DUMP <decrypted.dump>"
+  echo
+fi
 echo "To restore this artefact, a signed restore manifest is required. The manifest is signed off-appliance"
 echo "with the registry root key and verified against the appliance's own pinned anchor; the restore tool"
 echo "will not accept a key supplied on its command line."

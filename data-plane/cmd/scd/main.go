@@ -605,6 +605,11 @@ func main() {
 		fmt.Println(buildprofile.Name)
 		return
 	}
+	// `scd backup-crypt ...` encrypts the nightly backup to the hotel's keys, and decrypts one for an engineer
+	// restoring it (backup_crypt.go). One implementation for every backup the appliance writes.
+	if len(os.Args) > 1 && os.Args[1] == "backup-crypt" {
+		os.Exit(backupCryptMain(os.Args[2:]))
+	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
@@ -1000,6 +1005,7 @@ func main() {
 	r.Get("/v1/tenant/branding", s.tenantBranding)
 	r.Post("/v1/backup/run", s.backupRun)
 	r.Post("/v1/backup/verify", s.backupVerify)
+	r.Post("/v1/backup/key-test", s.backupKeyTest)
 	// THE DESTRUCTIVE ONE. edged performs the password step-up, the permission check and the audit record
 	// before it reaches here; this socket is not reachable from the network. See restore.go.
 	r.Post("/v1/backup/restore", s.backupRestore)

@@ -19,7 +19,7 @@ func TestRetentionDefaultsMatchTheSweepsOwn(t *testing.T) {
 	want := map[string]int{
 		"KEEP_BINARIES": 5, "KEEP_RELEASES": 5, "KEEP_DB": 7,
 		"KEEP_CONFIG": 3, "DISK_WARN": 80, "DISK_CRIT": 90,
-		"SITE_BACKUP_DAYS": 30, "SITE_BACKUP_KEEP": 7,
+		"SITE_BACKUP_DAYS": 30, "SITE_BACKUP_KEEP": 7, "DB_BACKUP_DAYS": 30, "RESTORE_TEST_MONTHS": 6,
 	}
 	for _, s := range retentionSchema {
 		if want[s.Key] != s.Default {

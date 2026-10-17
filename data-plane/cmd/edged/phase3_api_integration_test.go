@@ -272,6 +272,10 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 				r.Mount("/", s.dataRetentionRoutes())
 			})
 			mountResource(r, s, "guest-data-rights", s.guestDataRightsRoutes)
+			r.Route("/backup-keys", func(r chi.Router) {
+				r.Use(s.resourcePermission("backups"))
+				r.Mount("/", s.backupKeysRoutes())
+			})
 		})
 	})
 	f.srv = httptest.NewServer(r)
