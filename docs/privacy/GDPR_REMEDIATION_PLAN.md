@@ -60,7 +60,7 @@ Priority:
 | C2 | P0 | **Change the accounting-detail default** from *unlimited* to the D-C1 value for new sites. Decide what happens on existing sites. | destructive / historical data | **D-C2:** Apply the new default to existing sites (purges history on PRE-LIVE), or only to new installs? |
 | C3 | P0 | **Erase one guest.** A single action in Hotel Admin that finds everything held about one guest (account, principal and identities, stays, sessions, devices, sign-in attempts, OTPs, audit mentions) and erases or anonymises it. Fixes "Remove" keeping the email inside the renamed username. | destructive data, guest auth core, product semantics | **D-C3 (erasure semantics):**<br>(a) **Pseudonymise** rows that must survive (financial postings, entitlement totals, and audit rows as events) by replacing identifiers with a one-way token. **Hard-delete** everything else. *Recommended.*<br>(b) Hard-delete everything: breaks the financial and audit chains, not recommended.<br>Also decide: what happens to `stay_events` raw payloads (recommend: blank the guest fields, keep the event); whether to erase guests the PMS still shows as checked in (recommend: refuse, and tell staff the PMS will copy them back). |
 | C4 | P1 | **Export one guest's data (access and portability).** The same lookup as C3, producing a machine-readable JSON/CSV bundle. Requires the operator's password again, is audited, and is limited to one role. | product semantics (guest-data surface) | **D-C4:** Which roles may export (recommend site_admin and hotel_it_manager)? Is the export handed to the guest by staff (recommended), or do guests get self-service? |
-| C5 | P0 | **Encrypt backups and keep the keys apart.** Encrypt the nightly dump and the `/etc` archive to a public key, so the appliance can write backups but cannot read them back. Stop the seal keys travelling in the same unencrypted archive. Add an age limit to the on-demand dumps as well as the count limit. | security, keys and trust | **D-C5 (backup encryption):**<br>(a) **age/GPG to a hotel-held public key.** The private key stays with the hotel IT / our support escrow. Restore needs the key. *Recommended.*<br>(b) Symmetric key on the appliance: protects only copies taken off the appliance.<br>Also: who holds the escrow copy? Is an unencrypted download from Hotel Admin still allowed? |
+| C5 | P0 | **Encrypt backups and keep the keys apart.** Encrypt the nightly dump and the `/etc` archive to a public key, so the appliance can write backups but cannot read them back. Stop the seal keys travelling in the same unencrypted archive. Add an age limit to the on-demand dumps as well as the count limit. | security, keys and trust | **D-C5:** decided, see §4 (hotel-held keys, several holders, restore-test reminder, no escrow). |
 | C6 | P1 | **Record consent / notice acknowledgement.** Store the version of the notice and terms each guest saw, with the time. | schema, guest auth flow | **D-C6:** Lawful basis for Wi-Fi access. We recommend **contract / legitimate interest, not consent**, so we *record that the notice was shown* rather than block access on a checkbox. Consent is needed only if marketing is ever added. |
 | C7 | P1 | **Store less from the PMS.** Stop mirroring date of birth, VIP, travel agent and rate plan unless a feature needs them. Clear the existing values. | PMS protocol, schema, historical data | **D-C7:** Does any feature need date of birth (e.g. as a sign-in factor)? If none, drop it. |
 | C8 | P1 | **Encrypt the Protel FIAS link** (`UseTLS` is read but never used). | PMS configuration and traffic | **D-C8:** Does the hotel's Protel interface support TLS? Is turning it on at this hotel authorised? |
@@ -95,11 +95,16 @@ Each value ships as a hotel setting with this default, following `OPERATIONAL_SE
 - Erasure is refused while the PMS still shows the guest in-house; staff are told the PMS would copy the guest back.
 - The erasure itself is written to the audit log by token, not by name.
 
-### D-C5, backup encryption: **Public key + escrow**
+### D-C5, backup encryption: **Hotel-held keys, several holders, no escrow** (revised the same day; replaces "public key + escrow")
 
-- Backups are encrypted with age to a public key, so the appliance can write backups but cannot read them back.
-- The hotel IT holds the private key, and our support holds an escrow copy so restores still work if the hotel loses its key.
-- The seal keys in `/etc/stayconnect/secrets` travel only inside the encrypted archive.
+**Why no escrow.** GDPR does not require the vendor to hold a backup key. Art. 32(1)(c) requires that the **hotel**, as controller, can restore guest data in good time. An escrow key would let us read every escrowed hotel's guest data, which adds processor liability and conflicts with Central handling licensing only (§0E). We therefore hold no key, and protection against key loss is provided inside the hotel.
+
+- **Encryption.** Backups (the database dump and the `/etc/stayconnect` archive, including the seal keys) are encrypted with age to the hotel's public keys. The appliance can write backups but can never read them back. The seal keys travel only inside the encrypted archive.
+- **Keys are per appliance and generated at setup.** In Hotel Admin the appliance generates the key pair and hands the private key to the hotel once, as a file and as a printable recovery sheet. The appliance keeps no copy. Encrypted backups switch on only after the hotel types back a short check code, proving it saved the key.
+- **Several key holders.** Each backup is encrypted to every registered key holder (for example the IT manager, the General Manager, or a printed copy in the hotel safe). Any one holder can restore alone. The hotel can add, replace or remove holders at any time. New backups use the current holders; older backups still open with the keys they were made with.
+- **Restore-test reminder.** Hotel Admin asks the hotel to prove periodically that it still holds a working key, by decrypting a small test file. A failed or overdue test shows a warning in Hotel Admin. The interval is a hotel setting (§0C): **default 6 months**, with the usual unit, explanation, permission check, validation and change audit.
+- **Downloads stay encrypted.** A backup downloaded from Hotel Admin is the encrypted file; the hotel decrypts it with its own key.
+- **If every key is lost.** Live data is unaffected and new backups work as soon as a new key is set; older backups cannot be recovered. The setup screen says this plainly, and the hotel acknowledges it.
 
 ### D-C6, lawful basis: **Notice, no checkbox**
 
@@ -113,14 +118,13 @@ Each value ships as a hotel setting with this default, following `OPERATIONAL_SE
 - Reports and totals (usage, entitlements, financials) keep working on the anonymised rows.
 - The `stay_events` append-only trigger is relaxed only for that routine blanking the guest fields; deletion stays refused.
 
-### Still open (they follow from the above)
+### Still open
 
-- **D-C5a:** Who in our support organisation holds the escrow keys, and how are they stored (offline media, like the Root CA backup)? When may the escrow be used?
 - **D-C2, D-C4, D-C7 to D-C11, D-F1 to D-F8:** still to decide.
 
 ## 5. Proposed order
 
-1. **Decisions first:** D-C1, D-C3, D-C5, D-C6 are taken (§4). D-C1a is taken; D-C5a is needed before C5 starts.
+1. **Decisions first:** D-C1, D-C1a, D-C3, D-C5 and D-C6 are taken (§4). C1, C3 and C5 are no longer blocked by a decision.
 2. **Start now in parallel (FAST, no decision needed):** F4, F6, F9. F1, F2 and F3 can be drafted now and finalised once D-F1, D-F2 and D-F3 are made.
 3. **Then:** C1 + C2 (retention) → C3 + C4 (erasure and export, sharing one guest-lookup) → C5 (backups).
 4. **Then:** C6–C11 as their decisions arrive.
