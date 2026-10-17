@@ -3,8 +3,8 @@
 GDPR remediation plan item **F2** (Art. 28(3)(f), 33 and 34). An engineering draft: the legal reviewer named
 under plan decision D-F3 signs it off before a customer relies on it.
 
-> **Still to complete (plan decision D-F2):** the values marked **TBD** — our breach contact and the number of
-> hours within which we tell a hotel. Until they are filled in, this runbook is not given to a customer.
+> **Still to complete (plan decision D-F2):** our breach contact, marked **TBD**. Until it is filled in, this
+> runbook is not given to a customer. The notification time is decided: **24 hours** (Product Owner, 2026-10-17).
 
 ## 1. Where the guest data is, and when we are involved
 
@@ -25,9 +25,18 @@ three cases only:
 
 | Case | Our role | What we owe the hotel |
 |---|---|---|
-| **A. A support session the hotel opened** (it gave us SSH, root or a Hotel Admin login) | processor, for that session | Tell the hotel **within TBD hours** of becoming aware of a breach caused during or through the session (Art. 33(2)) |
+| **A. A support session the hotel opened** (it gave us SSH, root or a Hotel Admin login) | processor, for that session | Tell the hotel without undue delay, and **within 24 hours** of becoming aware of a breach caused during or through the session (Art. 33(2)) |
 | **B. Files the hotel sent us** (logs, screenshots, exports, backups) | processor, for those files | The same, if those files are lost, exposed or reach the wrong person |
-| **C. A security flaw in our software** that exposes, or could expose, guest data | supplier | Tell **every affected hotel within TBD hours** of confirming the flaw, with what is at risk and what to do |
+| **C. A security flaw in our software** that exposes, or could expose, guest data | supplier | Tell **every affected hotel within 24 hours** of confirming the flaw, with what is at risk and what to do |
+
+**24 hours is for the first notice, not the full report.** Send it as soon as we know something happened, even
+if little is known yet; the details follow in stages (Art. 33(4)).
+
+**Case C may also need a report to the authorities.** If the appliance is sold on the EU market, the Cyber
+Resilience Act (reporting duties in force since 11 September 2026) asks the manufacturer to report an actively
+exploited vulnerability, or a severe incident affecting the product's security, to the national CSIRT and ENISA
+with an early warning within 24 hours, a notification within 72 hours and a final report later. That duty is
+ours whatever we promise the hotels; the legal reviewer (plan D-F3) confirms whether and how it applies.
 
 In every other case (a hotel employee misusing their access, a stolen appliance, a breach of the hotel's own
 accounts) the hotel decides and reports. We help when it asks.
