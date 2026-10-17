@@ -272,6 +272,9 @@ type server struct {
 	// otpEscrowKey seals the staff-readable copy of a live code (temp_access_admin.go); same local key file,
 	// its own domain.
 	otpEscrowKey sealbox.Key
+	// operatorMFA seals the Admin Console operators' authenticator secrets and MACs their recovery codes
+	// (operator_mfa.go, 0132).
+	operatorMFA operatorMFAKeys
 
 	// PMS registry is live-reloadable (phase 5.3). All readers must go
 	// through currentPMSReg(); the reload path atomically swaps it under
@@ -884,6 +887,7 @@ func main() {
 	s.initOpenAccess(c.SecretsDir)
 	s.initClientResume(c.SecretsDir)
 	s.initNotifyKey(c.SecretsDir)
+	s.initOperatorMFAKey(c.SecretsDir)
 	s.portalTLS = s.initPortalTLS(c, ident != nil && talksToCentral)
 	s.socialPortal = s.portalTLS
 	// Social sign-in: load the sealing key, seal any plaintext secret still in the provider table, build the
@@ -988,6 +992,8 @@ func main() {
 	r.Post("/v1/auth/account/forgot", s.accountForgot)
 	r.Post("/v1/auth/account/reset", s.accountReset)
 	r.Post("/v1/admin/accounts/{id}/resend-verification", s.adminAccountResendVerification)
+	// The Admin Console operator's authenticator (operator_mfa.go, 0132): edged only, under /v1/admin/.
+	s.operatorMFARoutes(r)
 	r.Post("/v1/auth/social/start", s.socialStart)
 	r.Post("/v1/sessions/authorize-social", s.authorizeSocial)
 	// The remembered device (client_resume.go): peek for the Welcome-back line, Connect, and sign-out.

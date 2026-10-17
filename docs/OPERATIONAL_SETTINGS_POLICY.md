@@ -97,5 +97,8 @@ implementation of every row in the table above:
   personal data is anonymised (PMS stay data, devices and sessions, inactive identities, expired one-time
   records, audit-log details) or, for sign-in attempts, deleted; defaults 30 / 365 / 365 / 7 / 730 / 30 days;
   reason + password, change log and run record; Backups → Guest data kept for.
+* Admin Console session limits (`public.operator_session_policy`, migration 0132) — sign out after inactivity
+  (5-240 minutes, default 30) and the longest session (1-24 hours, default 12); reason + password, change log;
+  System → Operators → Session limits.
 
 When you add the next one, add it to this list.

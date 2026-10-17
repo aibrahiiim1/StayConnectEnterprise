@@ -65,7 +65,7 @@ Priority:
 | C7 | P1 | **Store less from the PMS.** Stop mirroring date of birth, VIP, travel agent and rate plan unless a feature needs them. Clear the existing values. | PMS protocol, schema, historical data | **D-C7:** Does any feature need date of birth (e.g. as a sign-in factor)? If none, drop it. |
 | C8 | P1 | **Encrypt the Protel FIAS link** (`UseTLS` is read but never used). | PMS configuration and traffic | **D-C8:** Does the hotel's Protel interface support TLS? Is turning it on at this hotel authorised? |
 | C9 | P1 | **Request fewer profile fields from social providers:** drop `profile`, `public_profile`, `name` and the Facebook `picture` field. Limit the free-text scope field in Hotel Admin to an allow-list. | guest authentication | **D-C9:** Reject or warn when a hotel adds extra scopes? |
-| C10 | P1 | **Harden operator access:** MFA for Hotel Admin and Central, an absolute session limit plus an idle timeout, `EDGED_COOKIE_SECURE` on by default. | security | **D-C10:** Which MFA method (TOTP recommended)? Mandatory for admin roles only, or for everyone? Idle timeout (recommend 30 min) and absolute limit (recommend 12 h)? |
+| C10 | P1 | **Hotel Admin built on `delivery/gdpr` (migration 0132); Central to follow.** **Harden operator access:** MFA for Hotel Admin and Central, an absolute session limit plus an idle timeout, `EDGED_COOKIE_SECURE` on by default. | security | **D-C10:** Which MFA method (TOTP recommended)? Mandatory for admin roles only, or for everyone? Idle timeout (recommend 30 min) and absolute limit (recommend 12 h)? |
 | C11 | P2 | **Encryption at rest:** disk encryption (LUKS) for new installs; TLS or Unix sockets for database connections. | appliance deployment, security | **D-C11:** Accept for new installs only (existing appliances need a reinstall)? How is the key unlocked at boot (TPM vs passphrase)? |
 | C12 | P0 (ops) | **Rotate exposed credentials:** the Gmail app password that `SECURITY_HARDENING.md` reports was once committed and never rotated; the default Postgres password fallback. | security | **D-C12:** None for the rotation itself, which the account owner must do. Confirm removing the personal Gmail address from the repository. |
 
@@ -149,6 +149,18 @@ Each value ships as a hotel setting with this default, following `OPERATIONAL_SE
 - **Hotel Admin → Portal settings → Content → Privacy notice.** "Start from the template" fills in the shipped notice (`portal-branding/privacy-template.ts`). It says only what this system records. While any `[[placeholder]]` is left, the checks warn, but the notice can still be saved.
 - **On the portal**, "How we use your data" sits on the sign-in card under every sign-in method, including the welcome-back screen, and opens the text in place: an outside page would not load before the guest is online. The optional link is shown beside it. The three new phrases are translated into all six shipped languages.
 - **F7.** One sentence explains the remembered-device cookie wherever a sign-in can set it (code or identity provider) and on the welcome-back screen. The design checks now **warn** (they do not refuse) for every outside host the page would load from: a logo, background or hero image on https, `url()` in custom CSS (including `@font-face`), and `src` in custom HTML. Hotel Admin lists these under "Worth knowing before you save".
+
+### How C10 was built for Hotel Admin (migration 0132, on `delivery/gdpr`)
+
+- **Signing in is two steps.** The password no longer opens a session: it opens a five-minute "password accepted" state, and the 6-digit code from an authenticator app (TOTP, RFC 6238) opens the session. The first time, the app is set up there: a QR code drawn in the browser (no outside service), the key to type, a first code, then ten single-use recovery codes shown once.
+- **The secret is sealed by scd** with a new appliance key, `operator_totp_dek.key` (keybootstrap creates it), bound to the operator. edged, which serves the console, cannot open it. The routes are edged-only on scd's socket. A code is never accepted twice; recovery codes are stored as an HMAC under the same key.
+- **Wrong codes** are throttled per operator with the sign-in protection's account limits, and per address, and audited (`operator.mfa_failed`, `operator.mfa_locked`).
+- **Password confirmations stay a password.** NIST SP 800-63B allows one factor to re-confirm inside a session opened with two, so no existing screen changed.
+- **Sessions end** after 30 minutes idle and 12 hours at most, a setting under System → Operators → Session limits. The console's background check every 30 seconds does not count as activity, so an open tab does sign out.
+- **Lost phone:** a recovery code; or a site administrator resets a colleague (password, reason, audited, their sessions end; never one's own); or, for the last administrator, `edged reset-mfa --email E --reason R` on the appliance.
+- **Your account → Two-step sign-in** shows the state and makes a new set of recovery codes.
+- **The session cookie is Secure by default** (`EDGED_COOKIE_SECURE=false` is needed to switch it off).
+- **New dependency:** `qrcode` 1.5.4 (MIT) in Hotel Admin, pinned.
 
 ### How C2 was built (migration 0131, on `delivery/gdpr`)
 

@@ -73,6 +73,10 @@ type session struct {
 	DisplayName string
 	Roles       []string
 	Expires     time.Time
+	// CreatedAt and LastSeen are what the session limits are measured from (0132): LastSeen moves with each
+	// request that counts as activity, CreatedAt never does.
+	CreatedAt time.Time
+	LastSeen  time.Time
 	// MustChangePassword confines the session to changing the password (0119): requireAuth refuses every
 	// other route until the operator has set a password that meets the policy.
 	MustChangePassword bool
@@ -101,11 +105,22 @@ func newSessionStore(ttl time.Duration) *sessionStore {
 	return s
 }
 
+// sessionStoreCap is the store's own outer bound, the longest session the setting allows (24 hours, 0132).
+// The setting's idle and absolute limits are enforced by active(); this only bounds memory.
+const sessionStoreCap = 24 * time.Hour
+
 func (s *sessionStore) create(sess *session) string {
 	b := make([]byte, 32)
 	_, _ = rand.Read(b)
 	tok := base64.RawURLEncoding.EncodeToString(b)
-	sess.Expires = time.Now().Add(s.ttl)
+	now := time.Now()
+	sess.Expires = now.Add(s.ttl)
+	// A replacement session (after changing one's own password) keeps the original sign-in time, so changing
+	// the password does not extend the absolute limit.
+	if sess.CreatedAt.IsZero() {
+		sess.CreatedAt = now
+	}
+	sess.LastSeen = now
 	s.mu.Lock()
 	s.m[tok] = sess
 	s.mu.Unlock()
@@ -121,6 +136,23 @@ func (s *sessionStore) get(tok string) *session {
 		return nil
 	}
 	sess.Expires = time.Now().Add(s.ttl) // sliding
+	return sess
+}
+
+// active is the session the request carries if it is within the limits: not idle for longer than idle, not
+// older than maxAge. touch says whether this request counts as activity. A session past either limit is ended.
+func (s *sessionStore) active(tok string, idle, maxAge time.Duration, touch bool) *session {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.m[tok]
+	now := time.Now()
+	if !ok || now.After(sess.Expires) || now.Sub(sess.LastSeen) > idle || now.Sub(sess.CreatedAt) > maxAge {
+		delete(s.m, tok)
+		return nil
+	}
+	if touch {
+		sess.LastSeen = now
+	}
 	return sess
 }
 
@@ -480,6 +512,9 @@ type ctxKey int
 
 const sessKey ctxKey = 1
 
+// sessPolicyKey carries the session limits requireAuth applied, for whoami to report the real end.
+var sessPolicyKey = struct{ name string }{"session-policy"}
+
 func (s *server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ck, err := r.Cookie(sessionCookie)
@@ -487,7 +522,11 @@ func (s *server) requireAuth(next http.Handler) http.Handler {
 			jsonErr(w, http.StatusUnauthorized, "unauthenticated", "login required")
 			return
 		}
-		sess := s.sessions.get(ck.Value)
+		// THE SESSION LIMITS (0132). The console's background whoami check is not activity: counting it would
+		// keep every open tab signed in for ever.
+		pol := s.sessionPolicyFor(r.Context())
+		touch := strings.TrimSuffix(r.URL.Path, "/") != "/edge/v1/auth/whoami"
+		sess := s.sessions.active(ck.Value, pol.idle(), pol.max(), touch)
 		if sess == nil {
 			jsonErr(w, http.StatusUnauthorized, "unauthenticated", "session expired")
 			return
@@ -500,6 +539,7 @@ func (s *server) requireAuth(next http.Handler) http.Handler {
 			return
 		}
 		ctx := context.WithValue(r.Context(), sessKey, sess)
+		ctx = context.WithValue(ctx, sessPolicyKey, pol)
 		ctx = context.WithValue(ctx, reauthNoteKey, &reauthNote{})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -571,13 +611,23 @@ func (s *server) loadRoles(ctx context.Context, operatorID string) ([]string, er
 
 func (s *server) whoami(w http.ResponseWriter, r *http.Request) {
 	sess := sessFrom(r.Context())
+	pol, ok := r.Context().Value(sessPolicyKey).(sessionPolicy)
+	if !ok {
+		pol = defaultSessionPolicy
+	}
+	// When the session ends if nothing else happens: the idle limit or the absolute one, whichever is first.
+	ends := sess.LastSeen.Add(pol.idle())
+	if abs := sess.CreatedAt.Add(pol.max()); abs.Before(ends) {
+		ends = abs
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"operator_id":  sess.OperatorID,
 		"email":        sess.Email,
 		"display_name": sess.DisplayName,
 		"roles":        sess.Roles,
 		"site_id":      s.siteID,
-		"expires_at":   sess.Expires.UTC(),
+		"expires_at":   ends.UTC(),
+		"idle_timeout_minutes": pol.IdleTimeoutMinutes,
 		// The console shows only the change-password form while this is true (0119).
 		"must_change_password": sess.MustChangePassword,
 	})

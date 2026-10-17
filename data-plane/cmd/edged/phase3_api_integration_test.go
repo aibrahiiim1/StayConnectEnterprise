@@ -114,6 +114,8 @@ type apiFixture struct {
 	operator string
 	password string
 	sessTok  string
+	// mfa stands in for scd's authenticator service (operator_mfa_fake_test.go).
+	mfa *fakeMFA
 }
 
 // newAPI builds the REAL Phase-3 routes with the real auth middleware, backed by a disposable database and a
@@ -193,6 +195,8 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 	}
 
 	s := &server{db: p, sessions: newSessionStore(2 * time.Hour), tenantID: f.tenant, siteID: f.site}
+	f.mfa = newFakeMFA(p)
+	s.mfa = f.mfa
 	// The commerce repository, wired exactly as main.go wires it. Publishing a checkout-grace policy derives
 	// the service plan and package revisions that express it, so this is not optional plumbing: without it the
 	// route these tests exercise would answer 503 and every assertion below would be about a fixture gap

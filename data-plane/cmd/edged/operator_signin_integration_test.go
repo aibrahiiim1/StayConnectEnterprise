@@ -49,11 +49,15 @@ func newSigninAPI(t *testing.T, roles ...string) *signinFixture {
 	r.Route("/edge/v1", func(r chi.Router) {
 		r.Use(sameOrigin)
 		r.Post("/auth/login", s.login)
+		r.Post("/auth/login/enrol", s.loginEnrol)
+		r.Post("/auth/login/code", s.loginCode)
 		r.Post("/auth/logout", s.logout)
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
 			r.Get("/auth/whoami", s.whoami)
 			r.Post("/auth/password", s.changeOwnPassword)
+			r.Get("/auth/mfa", s.getOwnMFA)
+			r.Post("/auth/mfa/recovery-codes", s.newOwnRecoveryCodes)
 			mountResource(r, s, "operators", s.operatorsRoutes)
 			mountResource(r, s, "backup-download", s.backupDownloadRoutes)
 		})
@@ -81,6 +85,8 @@ type resp struct {
 	raw    string
 	header http.Header
 	cookie string
+	// pending is the "password accepted" cookie of a first sign-in step (0132).
+	pending string
 }
 
 func (sf *signinFixture) call(t *testing.T, method, path, ip, cookie string, body any, extra map[string]string) resp {
@@ -104,6 +110,10 @@ func (sf *signinFixture) call(t *testing.T, method, path, ip, cookie string, bod
 	if cookie != "" {
 		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: cookie})
 	}
+	if p := extra["pending"]; p != "" {
+		req.AddCookie(&http.Cookie{Name: pendingSigninCookie, Value: p})
+		delete(extra, "pending")
+	}
 	for k, v := range extra {
 		req.Header.Set(k, v)
 	}
@@ -119,14 +129,48 @@ func (sf *signinFixture) call(t *testing.T, method, path, ip, cookie string, bod
 		if c.Name == sessionCookie && c.MaxAge >= 0 && c.Value != "" {
 			out.cookie = c.Value
 		}
+		if c.Name == pendingSigninCookie && c.MaxAge >= 0 && c.Value != "" {
+			out.pending = c.Value
+		}
 	}
 	return out
 }
 
-func (sf *signinFixture) login(t *testing.T, email, pw, ip string) resp {
+// passwordStep is the first sign-in step alone: on success it answers which second step comes, and opens no session.
+func (sf *signinFixture) passwordStep(t *testing.T, email, pw, ip string) resp {
 	sf.track(scopeAccount, email)
 	sf.track(scopeIP, ip)
 	return sf.call(t, "POST", "/auth/login", ip, "", map[string]any{"email": email, "password": pw}, nil)
+}
+
+// codeStep sends a code with the "password accepted" cookie.
+func (sf *signinFixture) codeStep(t *testing.T, pending, code, ip string) resp {
+	return sf.call(t, "POST", "/auth/login/code", ip, "", map[string]any{"code": code}, map[string]string{"pending": pending})
+}
+
+// login signs in the way a person does: the password, then -- setting up the authenticator the first time --
+// the code the phone shows. It answers the final response, or the password step's when that one refused.
+func (sf *signinFixture) login(t *testing.T, email, pw, ip string) resp {
+	t.Helper()
+	first := sf.passwordStep(t, email, pw, ip)
+	if first.code != 200 {
+		return first
+	}
+	var id string
+	if err := sf.pool.QueryRow(context.Background(), `SELECT id::text FROM operators WHERE lower(email)=lower($1)`, email).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	sf.track(scopeMFA, id)
+	switch first.body["second_step"] {
+	case "enrol":
+		if e := sf.call(t, "POST", "/auth/login/enrol", ip, "", nil, map[string]string{"pending": first.pending}); e.code != 200 {
+			t.Fatalf("set-up step = %d %s", e.code, e.raw)
+		}
+	case "code":
+	default:
+		t.Fatalf("password step answered %s", first.raw)
+	}
+	return sf.codeStep(t, first.pending, sf.mfa.codeFor(id), ip)
 }
 
 // age moves a counter's clock back by d: the test's way of letting time pass.

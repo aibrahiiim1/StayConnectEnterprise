@@ -245,7 +245,7 @@ func (s *server) recordFailure(r *http.Request, action, lockAction, operatorID, 
 	defer cancel()
 	ip := clientIP(r)
 	payload := map[string]any{"reason": reason, "source_ip": ip}
-	for _, scope := range []string{scopeAccount, scopeReauth, scopeIP} {
+	for _, scope := range []string{scopeAccount, scopeReauth, scopeMFA, scopeIP} {
 		value, ok := scopes[scope]
 		if !ok {
 			continue
@@ -368,18 +368,17 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		mustChange = true
 		s.audit(r, "operator.password_change_required", "operator", id, map[string]any{"reason": "weak_password"})
 	}
-	tok := s.sessions.create(&session{OperatorID: id, Email: in.Email, DisplayName: display, Roles: roles,
+	// THE PASSWORD IS ONE OF TWO STEPS (0132): no session yet. The authenticator code opens it (operator_mfa.go).
+	s.beginSecondStep(w, r, ctx, &pendingSignin{OperatorID: id, Email: in.Email, DisplayName: display, Roles: roles,
 		MustChangePassword: mustChange})
-	s.setSessionCookie(w, tok)
-	s.audit(r, "operator.login", "operator", id, map[string]any{"source_ip": ip, "must_change_password": mustChange})
-	writeJSON(w, http.StatusOK, map[string]any{"operator_id": id, "roles": roles, "must_change_password": mustChange})
 }
 
 func (s *server) setSessionCookie(w http.ResponseWriter, tok string) {
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookie, Value: tok, Path: "/", HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, Secure: s.secure,
-		Expires: time.Now().Add(12 * time.Hour),
+		// The browser's bound only; the session limits are enforced by requireAuth.
+		Expires: time.Now().Add(sessionStoreCap),
 	})
 }
 
@@ -567,7 +566,8 @@ func (s *server) changeOwnPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	wasForced := sess.MustChangePassword
 	s.sessions.destroyOperator(sess.OperatorID)
-	fresh := &session{OperatorID: sess.OperatorID, Email: sess.Email, DisplayName: sess.DisplayName, Roles: sess.Roles}
+	fresh := &session{OperatorID: sess.OperatorID, Email: sess.Email, DisplayName: sess.DisplayName, Roles: sess.Roles,
+		CreatedAt: sess.CreatedAt}
 	s.setSessionCookie(w, s.sessions.create(fresh))
 	s.audit(r, "operator.password_changed", "operator", sess.OperatorID, map[string]any{
 		"self": true, "was_required": wasForced, "source_ip": clientIP(r),

@@ -22,6 +22,8 @@ type edgeOperator struct {
 	CreatedAt   time.Time `json:"created_at"`
 	// MustChangePassword: the operator's next sign-in can only set a new password (0119).
 	MustChangePassword bool `json:"must_change_password"`
+	// TwoStepEnrolled: an authenticator is set up (0132). Without one, the next sign-in sets one up.
+	TwoStepEnrolled bool `json:"two_step_enrolled"`
 }
 
 // isValidEdgeRole accepts site_admin plus every role in the rolePerms matrix
@@ -42,9 +44,14 @@ func (s *server) operatorsRoutes() http.Handler {
 	r.Get("/signin-protection", s.getSigninProtection)
 	r.Put("/signin-protection", s.setSigninProtection)
 	r.Get("/signin-protection/changes", s.listSigninProtectionChanges)
+	// Admin Console session limits (0132): idle and absolute, the same rules as sign-in protection.
+	r.Get("/session-policy", s.getSessionPolicy)
+	r.Put("/session-policy", s.setSessionPolicy)
+	r.Get("/session-policy/changes", s.listSessionPolicyChanges)
 	r.Post("/", s.createEdgeOperator)
 	r.Delete("/{id}", s.disableEdgeOperator)
 	r.Post("/{id}/set-password", s.setEdgeOperatorPassword)
+	r.Post("/{id}/reset-mfa", s.resetEdgeOperatorMFA)
 	r.Post("/{id}/roles", s.addEdgeOperatorRole)
 	r.Delete("/{id}/roles/{role}", s.removeEdgeOperatorRole)
 	return r
@@ -73,7 +80,7 @@ func (s *server) listEdgeOperators(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.db.Query(ctx, `
         SELECT o.id, o.email, COALESCE(o.display_name,''), o.status, o.created_at,
                COALESCE(array_agg(r.role ORDER BY r.role) FILTER (WHERE r.role IS NOT NULL), '{}'::text[]),
-               o.must_change_password
+               o.must_change_password, (SELECT m.enrolled FROM public.operator_mfa_status(o.id) m)
           FROM operators o
           LEFT JOIN operator_roles r ON r.operator_id = o.id
          GROUP BY o.id
@@ -87,7 +94,8 @@ func (s *server) listEdgeOperators(w http.ResponseWriter, r *http.Request) {
 	var out []edgeOperator
 	for rows.Next() {
 		var op edgeOperator
-		if err := rows.Scan(&op.ID, &op.Email, &op.DisplayName, &op.Status, &op.CreatedAt, &op.Roles, &op.MustChangePassword); err != nil {
+		if err := rows.Scan(&op.ID, &op.Email, &op.DisplayName, &op.Status, &op.CreatedAt, &op.Roles, &op.MustChangePassword,
+			&op.TwoStepEnrolled); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
 			return
 		}

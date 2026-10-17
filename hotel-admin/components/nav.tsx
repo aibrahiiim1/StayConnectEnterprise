@@ -584,6 +584,27 @@ export function Nav({
           return collapsed ? <Tooltip content="Change my password" side="right">{change}</Tooltip> : change;
         })()}
 
+        {/* The operator's own two-step sign-in (0132): its state and new recovery codes. */}
+        {(() => {
+          const twoStep = (
+            <Link
+              href="/account/security"
+              onClick={onNavigate}
+              aria-label={collapsed ? "Two-step sign-in" : undefined}
+              className={cn(
+                "mt-1 flex w-full items-center rounded-md text-sm text-sidebar-foreground/85",
+                "transition-colors hover:bg-sidebar-accent/60 hover:text-white",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
+                collapsed ? "h-10 justify-center px-0" : "gap-2.5 px-2.5 py-1.5",
+              )}
+            >
+              <Smartphone className="size-4 shrink-0 text-sidebar-muted" />
+              <span className={cn(collapsed ? "sr-only" : undefined)}>Two-step sign-in</span>
+            </Link>
+          );
+          return collapsed ? <Tooltip content="Two-step sign-in" side="right">{twoStep}</Tooltip> : twoStep;
+        })()}
+
         {(() => {
           const signOut = (
             <button

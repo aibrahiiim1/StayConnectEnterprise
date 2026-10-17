@@ -336,6 +336,8 @@ GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_acctd;
 \ir svc-guest-data-rights-grants.sql
 -- Backup key holders: backups encrypted to the hotel's own keys (0129).
 \ir svc-backup-keys-grants.sql
+-- Admin Console authenticator codes and session limits (0132).
+\ir svc-operator-mfa-grants.sql
 
 -- EXECUTE on the CANONICAL audited, versioned publication boundary. This is the only function the product
 -- calls to change checkout grace policy: it requires an active operator as actor, a bounded machine reason

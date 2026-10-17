@@ -113,6 +113,16 @@ func main() {
 	}
 	log.Printf("keybootstrap: social sign-in sealing key ready at %s", socialPath)
 
+	// 2g) Admin Console authenticator key (0132, GDPR plan C10): seals each operator's TOTP secret and MACs their
+	// recovery codes (public.operator_mfa*). Without it scd checks no code and edged refuses Admin Console
+	// sign-in. Load-only at runtime, for the same reason as every key above; replacing it means every operator
+	// sets up their authenticator again.
+	mfaPath := filepath.Join(secretsDir, "operator_totp_dek.key")
+	if _, err := localkeys.CreateKeyIfAbsent(mfaPath); err != nil {
+		log.Fatalf("keybootstrap: admin console authenticator key: %v", err)
+	}
+	log.Printf("keybootstrap: admin console authenticator sealing key ready at %s", mfaPath)
+
 	// 3) OTP generation-1 key + DB lifecycle metadata, validated together.
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {

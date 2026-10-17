@@ -682,6 +682,21 @@ export type EdgeOperator = {
   created_at: string;
   /** Their next sign-in can only set a new password (edged 0119). */
   must_change_password?: boolean;
+  /** An authenticator app is set up (edged 0132); without one, the next sign-in sets one up. */
+  two_step_enrolled?: boolean;
+};
+
+/** Admin Console session limits (edged /operators/session-policy, migration 0132). */
+export type SessionPolicy = {
+  idle_timeout_minutes: number;
+  max_session_hours: number;
+  config_version: number;
+  updated_at?: string | null;
+  updated_by?: string | null;
+};
+export type SessionPolicyBound = {
+  key: keyof Pick<SessionPolicy, "idle_timeout_minutes" | "max_session_hours">;
+  label: string; unit: string; min: number; max: number; default: number; explains: string;
 };
 
 /** Admin Console sign-in protection (edged /operators/signin-protection, migration 0119). */

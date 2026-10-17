@@ -16,6 +16,8 @@
 //	edged serve                             — run the API (default)
 //	edged seed-admin --email E --password P — create/update the first
 //	                                          site_admin (bootstrap)
+//	edged reset-mfa --email E               — remove an operator's
+//	                                          authenticator (break-glass)
 package main
 
 import (
@@ -61,7 +63,9 @@ func loadCfg() cfg {
 		DBURL:        envOr("EDGED_DB_URL", "postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect_site?sslmode=disable"),
 		SCDSocket:    envOr("EDGED_SCD_SOCKET", "/run/stayconnect/scd.sock"),
 		IdentityDir:  envOr("EDGED_IDENTITY_DIR", "/etc/stayconnect/identity"),
-		CookieSecure: os.Getenv("EDGED_COOKIE_SECURE") == "true",
+		// Secure unless explicitly switched off (GDPR plan C10): the console is served over HTTPS, and a browser
+		// treats http://localhost as secure, so only a deliberate plain-HTTP setup needs EDGED_COOKIE_SECURE=false.
+		CookieSecure: os.Getenv("EDGED_COOKIE_SECURE") != "false",
 	}
 }
 
@@ -77,6 +81,10 @@ type server struct {
 	scd      *scdClient
 	netd     *netdClient
 	sessions *sessionStore
+	// pending holds the "password accepted, code not yet entered" sign-ins; mfa is the authenticator service
+	// (operator_mfa.go, 0132).
+	pending  pendingSignins
+	mfa      mfaService
 	tenantID string
 	siteID   string
 	secure   bool
@@ -129,6 +137,12 @@ func main() {
 		case "seed-admin":
 			if err := runSeedAdmin(os.Args[2:]); err != nil {
 				slog.Error("seed-admin failed", "err", err)
+				os.Exit(1)
+			}
+			return
+		case "reset-mfa":
+			if err := runResetMFA(os.Args[2:]); err != nil {
+				slog.Error("reset-mfa failed", "err", err)
 				os.Exit(1)
 			}
 			return
@@ -202,13 +216,14 @@ func main() {
 		db:       pool,
 		scd:      newSCDClient(c.SCDSocket),
 		netd:     newNetdClient(envOr("EDGED_NETD_SOCKET", "/run/stayconnect/netd.sock")),
-		sessions: newSessionStore(12 * time.Hour),
+		sessions: newSessionStore(sessionStoreCap),
 		tenantID: c.TenantID,
 		siteID:   c.SiteID,
 		secure:   c.CookieSecure,
 		surfaces: newMountedSurfaces(),
 		modCache: &moduleCache{},
 	}
+	s.mfa = scdMFA{scd: s.scd, db: pool}
 
 	// Phase 2 DARK Hotel-Admin commerce. Config from env (all flags default OFF); nil repository while the
 	// master flag is OFF (zero Phase-2 SQL). Fail closed if the master flag is set without a wired repo
@@ -354,6 +369,9 @@ func main() {
 		r.Use(sameOrigin)
 		r.Get("/health", s.health)
 		r.Post("/auth/login", s.login)
+		// The second step: set up the authenticator, or enter its code (operator_mfa.go, 0132).
+		r.Post("/auth/login/enrol", s.loginEnrol)
+		r.Post("/auth/login/code", s.loginCode)
 		// logout needs the caller's session and ends only that one (operator_signin.go).
 		r.Post("/auth/logout", s.logout)
 
@@ -362,6 +380,9 @@ func main() {
 			r.Get("/auth/whoami", s.whoami)
 			// The operator's own password: the current one is a step-up; every session is ended (N-8).
 			r.Post("/auth/password", s.changeOwnPassword)
+			// The operator's own two-step sign-in: its state, and a new set of recovery codes (step-up).
+			r.Get("/auth/mfa", s.getOwnMFA)
+			r.Post("/auth/mfa/recovery-codes", s.newOwnRecoveryCodes)
 
 			// ALWAYS-PRESENT SURFACES THAT DO NOT GO THROUGH mountResource.
 			//

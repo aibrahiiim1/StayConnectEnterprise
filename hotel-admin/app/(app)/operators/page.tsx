@@ -32,6 +32,7 @@ import { canWrite, SITE_ROLES, ROLE_LABELS, SiteRole } from "@/lib/roles";
 import { formatRelative } from "@/lib/utils";
 import { HelpList, HelpSection } from "@/components/help";
 import { OperatorSigninProtection } from "@/components/operator-signin-protection";
+import { OperatorSessionLimits } from "@/components/operator-session-limits";
 
 const MIN_PASSWORD = 10;
 
@@ -58,6 +59,10 @@ export default function OperatorsPage() {
   const [requireChangeReset, setRequireChangeReset] = useState(true);
 
   const [disabling, setDisabling] = useState<EdgeOperator | null>(null);
+  // Resetting a colleague's two-step sign-in (0132): they set up a new app at their next sign-in.
+  const [mfaFor, setMfaFor] = useState<EdgeOperator | null>(null);
+  const [mfaReason, setMfaReason] = useState("");
+  const [mfaPassword, setMfaPassword] = useState("");
   const [removingRole, setRemovingRole] = useState<{ op: EdgeOperator; role: string } | null>(null);
 
   const writable = canWrite("operators", me?.roles ?? []);
@@ -115,6 +120,18 @@ export default function OperatorsPage() {
       await load();
       setPwFor(null);
       setNewPw(""); setConfirmPw("");
+    } catch (e) { setFormErr(e); }
+    finally { setBusy(false); }
+  }
+
+  async function onResetMFA() {
+    if (!mfaFor) return;
+    setBusy(true); setFormErr(null);
+    try {
+      await api.post(`/operators/${mfaFor.id}/reset-mfa`, { reason: mfaReason.trim(), password: mfaPassword });
+      toast.success("Two-step sign-in reset", `${mfaFor.email} has been signed out and sets up a new app at the next sign-in.`);
+      setMfaFor(null); setMfaReason(""); setMfaPassword("");
+      await load();
     } catch (e) { setFormErr(e); }
     finally { setBusy(false); }
   }
@@ -195,6 +212,16 @@ export default function OperatorsPage() {
                 ]}
               />
             </HelpSection>
+            <HelpSection title="Two-step sign-in">
+              <HelpList
+                items={[
+                  "Signing in asks for the password and the 6-digit code from an authenticator app on the operator's phone.",
+                  "The app is set up at the first sign-in, which also gives ten single-use recovery codes.",
+                  "Someone who lost their phone signs in with a recovery code, or you reset their two-step sign-in: they are signed out and set up a new app at their next sign-in.",
+                  "You cannot reset your own; another site administrator must.",
+                ]}
+              />
+            </HelpSection>
           </>
         }
 
@@ -238,6 +265,9 @@ export default function OperatorsPage() {
                         )}
                         {op.status === "active" && op.must_change_password && (
                           <Badge tone="warn" className="mt-1">Must set a new password</Badge>
+                        )}
+                        {op.status === "active" && op.two_step_enrolled === false && (
+                          <Badge tone="neutral" className="mt-1">Sets up two-step at next sign-in</Badge>
                         )}
                       </TD>
                       <TD>
@@ -308,6 +338,12 @@ export default function OperatorsPage() {
                               Reset password
                             </Button>
                           )}
+                        {writable && op.status === "active" && !isMe && op.two_step_enrolled && (
+                          <Button size="sm" variant="ghost" aria-label={`Reset two-step sign-in for ${op.email}`}
+                            onClick={() => { setFormErr(null); setMfaReason(""); setMfaPassword(""); setMfaFor(op); }}>
+                            Reset two-step
+                          </Button>
+                        )}
                         {writable && op.status === "active" && !isMe && (
                           <Button size="sm" variant="ghost" aria-label={`Disable ${op.email}`} onClick={() => { setFormErr(null); setDisabling(op); }}>
                             Disable
@@ -327,6 +363,30 @@ export default function OperatorsPage() {
 
       {/* ------------------------------------------------------------------ sign-in protection (0119) */}
       <OperatorSigninProtection writable={writable} />
+
+      {/* ------------------------------------------------------------------ session limits (0132) */}
+      <OperatorSessionLimits writable={writable} />
+
+      {/* ------------------------------------------------------------------ reset two-step sign-in (0132) */}
+      <DialogForm
+        open={mfaFor !== null}
+        onOpenChange={(v) => !v && setMfaFor(null)}
+        size="sm"
+        title={mfaFor ? `Reset two-step sign-in for ${mfaFor.display_name || mfaFor.email}` : "Reset two-step sign-in"}
+        description="Their authenticator app and recovery codes stop working, they are signed out everywhere, and they set up a new app at their next sign-in."
+        submitLabel="Reset two-step sign-in"
+        busy={busy}
+        error={formErr}
+        disabled={mfaReason.trim().length < 4 || mfaPassword === ""}
+        onSubmit={onResetMFA}
+      >
+        <Field label="Reason" required hint="Recorded with the reset, for example: lost their phone.">
+          <Input value={mfaReason} maxLength={500} onChange={(e) => setMfaReason(e.target.value)} />
+        </Field>
+        <Field label="Your password" required hint="Confirms the reset.">
+          <Input type="password" autoComplete="current-password" value={mfaPassword} onChange={(e) => setMfaPassword(e.target.value)} />
+        </Field>
+      </DialogForm>
 
       {/* ------------------------------------------------------------------ new operator */}
       <DialogForm

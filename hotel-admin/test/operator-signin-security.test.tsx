@@ -64,11 +64,14 @@ describe("safeNextPath (N-18)", () => {
 
   it("the login page sends a hostile ?next to the dashboard instead", async () => {
     search = new URLSearchParams("next=https://evil.example/phish");
-    post.mockResolvedValue({ operator_id: "op", roles: ["site_admin"] });
+    post.mockImplementation((path: string) => Promise.resolve(path === "/auth/login"
+      ? { second_step: "code" } : { operator_id: "op", roles: ["site_admin"] }));
     const Page = (await import("@/app/login/page")).default;
     render(<Page />);
     await userEvent.type(screen.getByLabelText(/Email or username/), "ops@hotel");
     await userEvent.type(screen.getByLabelText(/^Password/), "a-good-password");
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await userEvent.type(await screen.findByLabelText(/^Code/), "123456");
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
     await waitFor(() => expect(replace).toHaveBeenCalledWith("/dashboard"));
   });

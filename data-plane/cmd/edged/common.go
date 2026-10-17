@@ -352,3 +352,47 @@ func writeAwaitingAssignment(w http.ResponseWriter, what string) {
 			" to show. Complete enrollment, claim and signed assignment first.",
 	})
 }
+
+// ----- reset-mfa ----------------------------------------------------------------------------------------------
+
+// runResetMFA removes one operator's authenticator from the appliance's own command line (0132, GDPR plan C10):
+// the break-glass for the last site administrator, when nobody is left to reset them in the console. Whoever can
+// run it is root on the appliance already. The operator sets up a new authenticator at their next sign-in; a
+// running edged ends their sessions at its next restart, or an administrator ends them by any password reset.
+func runResetMFA(args []string) error {
+	fs := flag.NewFlagSet("reset-mfa", flag.ExitOnError)
+	email := fs.String("email", "", "the operator's email / username")
+	reason := fs.String("reason", "", "why (4-500 characters; recorded in the audit log)")
+	_ = fs.Parse(args)
+	if strings.TrimSpace(*email) == "" || !validReason(strings.TrimSpace(*reason)) {
+		return fmt.Errorf("--email and --reason (4-500 characters) are required")
+	}
+	c := loadCfg()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	pool, err := pgxpool.New(ctx, c.DBURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	var id string
+	if err := pool.QueryRow(ctx, `SELECT id::text FROM operators WHERE lower(email) = lower($1)`, strings.TrimSpace(*email)).Scan(&id); err != nil {
+		return fmt.Errorf("no operator %q: %w", *email, err)
+	}
+	var removed bool
+	if err := pool.QueryRow(ctx, `SELECT public.operator_mfa_remove($1)`, id).Scan(&removed); err != nil {
+		return err
+	}
+	if _, err := pool.Exec(ctx, `SELECT public.operator_signin_throttle_clear('mfa', $1)`, throttleKey(scopeMFA, id)); err != nil {
+		slog.Warn("could not clear the code counter", "err", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO audit_log (tenant_id, actor_type, actor_id, action, target_type, target_id, payload)
+		VALUES (NULLIF($1,'')::uuid, 'system', 'edged reset-mfa', 'operator.mfa_reset', 'operator', $2,
+		        jsonb_build_object('reason', $3::text, 'had_authenticator', $4::boolean, 'via', 'command line'))`,
+		c.TenantID, id, strings.TrimSpace(*reason), removed); err != nil {
+		slog.Warn("reset-mfa: the audit entry could not be written", "err", err)
+	}
+	slog.Info("two-step sign-in reset; a new authenticator is set up at the next sign-in", "email", *email, "had_authenticator", removed)
+	return nil
+}
+
