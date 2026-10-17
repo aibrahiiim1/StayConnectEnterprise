@@ -15,6 +15,9 @@ All guest data stays on the hotel's own appliance. **We have no standing access 
   only; there is no remote command, shell or data channel (CLAUDE.md §0E);
 - installation creates no vendor login: no SSH key, support account, tunnel or VPN; the break-glass procedures
   (docs/VENDOR_BREAKGLASS_RUNBOOK.md) all require root on the appliance, which the hotel has to give us;
+- our installers do not keep the root or SSH login after an installation (Product Owner, 2026-10-17). The
+  appliance accepts SSH on its WAN side, so this is a rule for our people, not something the code enforces: an
+  installer who kept a login would make every later breach through it a case A;
 - the email, SMS, WhatsApp, identity-provider and payment accounts are the hotel's own.
 
 So the hotel is the **controller** and normally handles a breach on its appliance itself. We are involved in
