@@ -49,7 +49,7 @@ Priority:
 | F5 | P1 | **Bound the logs:** a logrotate rule for `/var/log/stayconnect/*` and Caddy/Kea logs, plus a journald size and age limit. Stop the non-production OTP stubs from writing full recipients and codes. | Art. 5(1)(e): logs grow forever | **D-F5:** Log retention period (recommend 14 days) |
 | F6 | P1 | **Moved to C1.** Making the 30-day sign-in-attempt retention a hotel setting needs a migration: the settings policy requires a site-keyed table, a database CHECK and a change log written by a definer function. It ships with the C1 retention settings. | Breaks `OPERATIONAL_SETTINGS_POLICY` §0C | none (keep the 30-day default) |
 | F7 | P2 | **Built on `delivery/gdpr`, not yet deployed.** **Explain the remembered-device cookie on the portal** (one sentence, translated). Hotel Admin warns when a logo, background or font comes from an outside host. | Art. 13; outside hosts the guest is not told about | none |
-| F8 | P2 | **Audit routine reads of guest data:** staff viewing guest-account details, a stay's identity, usage by MAC. | Accountability: who looked at a guest | **D-F8:** Audit every view, or only opening one guest's detail (recommended; avoids flooding the log)? |
+| F8 | P2 | **Built on `delivery/gdpr` (no migration).** **Audit routine reads of guest data:** staff viewing guest-account details, a stay's identity, usage by MAC. | Accountability: who looked at a guest | **D-F8:** Audit every view, or only opening one guest's detail (recommended; avoids flooding the log)? |
 | F9 | P2 | **Correct stale documents:** `DATA_OWNERSHIP.md` (the dropped `guests` table; the claim that "retention is enforced locally"; the portal-TLS endpoints) and `CONTROL_PLANE_MIGRATION.md` ("historical guest rows"). | Accurate records | none |
 
 ## 3. CONTROLLED work: needs a decision first
@@ -171,6 +171,18 @@ Each value ships as a hotel setting with this default, following `OPERATIONAL_SE
 - **Lost phone:** a recovery code; an administrator's "Reset two-step" on the Team or a customer's Users (reason, audited, sessions ended, never one's own); or `ctrlapi reset-mfa --email E --reason R` for the last administrator.
 - **The Two-step sign-in page** in the sidebar shows the state and makes new recovery codes (after step-up).
 - **The test tools sign in with both steps.** `cmd/acceptance`, `cmd/pkitest` and the two regression scripts (`scripts/lifecycle-regression.sh`, `scripts/replacement-factoryreset-regression.sh`, through `cmd/regtest -signin`) use `internal/opsignin`: the first sign-in sets the operator's authenticator up and keeps its secret in a 0600 keyring on the machine running the tool (`OPERATOR_TOTP_KEYRING`, default in the user's config directory); later sign-ins compute the code. An operator whose authenticator was set up elsewhere is refused with the `ctrlapi reset-mfa` command that hands it back. The older phase scripts (`scripts/phase*-test.sh`) still sign in with a password alone and are not current coverage.
+
+### How F8 was built (no migration, on `delivery/gdpr`)
+
+- **What is recorded**, in the existing activity log (`audit_log`), by edged (`cmd/edged/guest_data_reads.go`):
+  - `guest_data.viewed`: opening one client account, device, session, stay, sign-in attempt, post-stay profile, or one stay's, device's or session's usage. The target is the record's id.
+  - `guest_data.searched`: every search of a guest list (client accounts, devices, sessions, stays, PMS activity, sign-in attempts, usage, guest data requests, DHCP leases), with the text searched for.
+  - Each entry has the staff member, the time of the read, the address and the browser. Only successful reads count. A list browsed without a search is not recorded. Revealing what a guest typed at sign-in was already audited and is unchanged.
+- **Pages never wait.** The request puts the entry on an in-memory queue (4,096 places); one background writer saves it. A full queue drops the entry with a warning. Entries still waiting when edged stops are written first.
+- **The log stays readable.** A search typed letter by letter is one entry: it waits 3 seconds, and a longer or shorter search by the same person in the same list replaces it. The same read by the same person is recorded once per 10 minutes, so self-refreshing lists add nothing.
+- **Erasure and retention cover the entries:** erasing a guest anonymises the entries that name the guest's records, address or username; retention anonymises all entries after the audit-log period (730 days by default). A search by name only is not linked to the guest at erasure, and is anonymised by retention.
+- **Hotel Admin → Activity** lists them under a new **Client data** filter, beside export and erasure.
+- **A route list** (`guestDataReads`) says which pages count. A test fails if a listed route no longer exists.
 
 ### How C2 was built (migration 0131, on `delivery/gdpr`)
 

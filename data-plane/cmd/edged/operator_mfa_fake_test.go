@@ -31,7 +31,9 @@ type fakeAuthenticator struct {
 	recovery  map[string]bool // code -> used
 }
 
-func newFakeMFA(db *pgxpool.Pool) *fakeMFA { return &fakeMFA{ops: map[string]*fakeAuthenticator{}, db: db} }
+func newFakeMFA(db *pgxpool.Pool) *fakeMFA {
+	return &fakeMFA{ops: map[string]*fakeAuthenticator{}, db: db}
+}
 
 // codeFor is what the operator's phone shows now.
 func (f *fakeMFA) codeFor(operatorID string) string {

@@ -621,12 +621,12 @@ func (s *server) whoami(w http.ResponseWriter, r *http.Request) {
 		ends = abs
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"operator_id":  sess.OperatorID,
-		"email":        sess.Email,
-		"display_name": sess.DisplayName,
-		"roles":        sess.Roles,
-		"site_id":      s.siteID,
-		"expires_at":   ends.UTC(),
+		"operator_id":          sess.OperatorID,
+		"email":                sess.Email,
+		"display_name":         sess.DisplayName,
+		"roles":                sess.Roles,
+		"site_id":              s.siteID,
+		"expires_at":           ends.UTC(),
 		"idle_timeout_minutes": pol.IdleTimeoutMinutes,
 		// The console shows only the change-password form while this is true (0119).
 		"must_change_password": sess.MustChangePassword,

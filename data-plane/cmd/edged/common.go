@@ -395,4 +395,3 @@ func runResetMFA(args []string) error {
 	slog.Info("two-step sign-in reset; a new authenticator is set up at the next sign-in", "email", *email, "had_authenticator", removed)
 	return nil
 }
-

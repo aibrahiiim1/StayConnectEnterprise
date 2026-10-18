@@ -210,6 +210,8 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 	r.Route("/edge/v1", func(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
+			// As main.go: a no-op until a test gives the server a read recorder (guest_data_reads_integration_test.go).
+			r.Use(s.recordGuestDataReads)
 			mountResource(r, s, "checkout-grace", s.checkoutGraceConfigRoutes)
 			mountResource(r, s, "operational-alerts", s.operationalAlertsRoutes)
 			mountResource(r, s, "pms-stays", s.pmsStaysRoutes)

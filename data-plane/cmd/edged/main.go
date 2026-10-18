@@ -59,10 +59,10 @@ type cfg struct {
 
 func loadCfg() cfg {
 	return cfg{
-		Addr:         envOr("EDGED_ADDR", "127.0.0.1:8090"),
-		DBURL:        envOr("EDGED_DB_URL", "postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect_site?sslmode=disable"),
-		SCDSocket:    envOr("EDGED_SCD_SOCKET", "/run/stayconnect/scd.sock"),
-		IdentityDir:  envOr("EDGED_IDENTITY_DIR", "/etc/stayconnect/identity"),
+		Addr:        envOr("EDGED_ADDR", "127.0.0.1:8090"),
+		DBURL:       envOr("EDGED_DB_URL", "postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect_site?sslmode=disable"),
+		SCDSocket:   envOr("EDGED_SCD_SOCKET", "/run/stayconnect/scd.sock"),
+		IdentityDir: envOr("EDGED_IDENTITY_DIR", "/etc/stayconnect/identity"),
 		// Secure unless explicitly switched off (GDPR plan C10): the console is served over HTTPS, and a browser
 		// treats http://localhost as secure, so only a deliberate plain-HTTP setup needs EDGED_COOKIE_SECURE=false.
 		CookieSecure: os.Getenv("EDGED_COOKIE_SECURE") != "false",
@@ -88,6 +88,8 @@ type server struct {
 	tenantID string
 	siteID   string
 	secure   bool
+	// reads records who opened or searched guest data (guest_data_reads.go, plan F8), off the request path.
+	reads *readRecorder
 
 	// surfaces records every resource mountResource actually mounted on THIS appliance, so the admin can ask
 	// rather than infer it from build-time flags. See capabilities.go.
@@ -356,6 +358,9 @@ func main() {
 	// startup backoff own recovery), so it cannot fight the service manager.
 	go s.healthMonitorLoop(rootCtx)
 
+	s.reads = newReadRecorder(s.writeReadEntry)
+	go s.reads.run(rootCtx, time.Second)
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -377,6 +382,7 @@ func main() {
 
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
+			r.Use(s.recordGuestDataReads)
 			r.Get("/auth/whoami", s.whoami)
 			// The operator's own password: the current one is a step-up; every session is ended (N-8).
 			r.Post("/auth/password", s.changeOwnPassword)
@@ -631,6 +637,11 @@ func main() {
 	shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutCtx)
+	// The reads still waiting (a search's last keystroke) are written before edged exits.
+	select {
+	case <-s.reads.done:
+	case <-shutCtx.Done():
+	}
 }
 
 // mountResource wires a resource router under its permission key: reads

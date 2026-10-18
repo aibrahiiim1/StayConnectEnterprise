@@ -103,7 +103,8 @@ The annex has three parts:
 
 - An audit log records staff sign-ins, failed sign-ins and lockouts, authenticator events, configuration changes,
   credential reveals, backup downloads, and guest exports and erasures, with time, staff member, IP address and
-  user agent. Service accounts can add entries but cannot change or delete them.
+  user agent. It also records every time staff open one guest's record or search guest data, written in the
+  background so pages do not slow down. Service accounts can add entries but cannot change or delete them.
 
 ### System configuration and defaults
 
