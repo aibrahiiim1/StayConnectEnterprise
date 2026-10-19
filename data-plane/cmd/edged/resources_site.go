@@ -563,6 +563,40 @@ func (s *server) walledGardenRoutes() http.Handler {
 
 // ----- local audit log ----------------------------------------------------------------
 
+// guestAuditResources: the trail entries that name a guest, by action prefix, and the screen whose read
+// permission shows them (GDPR audit B6; final check D3). What was searched for is client data too, so the
+// guest_data entries follow guest-data-rights.
+var guestAuditResources = []struct{ prefix, resource string }{
+	{"guest_data.", "guest-data-rights"},
+	{"guest_account.", "guest-accounts"},
+	{"guest_signin_", "guest-signin-attempts"},
+	{"network.dhcp.reservation.", "network"},
+	{"client_device.", "sessions"},
+	{"session.", "sessions"},
+	{"poststay.", "pms-stay-identity"},
+	{"stay.", "pms-stay-identity"},
+}
+
+// hiddenGuestAuditPrefixes lists the prefixes whose guest details these roles may not see.
+func hiddenGuestAuditPrefixes(roles []string) []string {
+	out := []string{}
+	for _, g := range guestAuditResources {
+		if !permFor(roles, g.resource, permRead) {
+			out = append(out, g.prefix)
+		}
+	}
+	return out
+}
+
+func guestAuditHidden(action string, hidden []string) bool {
+	for _, p := range hidden {
+		if strings.HasPrefix(action, p) {
+			return true
+		}
+	}
+	return false
+}
+
 type auditRow struct {
 	TS         time.Time       `json:"ts"`
 	ActorType  string          `json:"actor_type"`
@@ -658,6 +692,19 @@ func (s *server) auditRoutes() http.Handler {
 		if p := qv.Get("action_prefix"); p != "" {
 			where += fmt.Sprintf(` AND action LIKE $%d`, bind(likeEscape(p)+"%"))
 		}
+		// GUEST DETAILS IN THE TRAIL FOLLOW THE SCREEN THEY CAME FROM (GDPR audit B6; final check D3). An entry
+		// about a guest -- an account, a device, a stay, a sign-in -- names them in its target or its details. A
+		// role that cannot read that screen sees that the action happened, when, and who did it; not whom it was
+		// about, and a search does not match on it either.
+		var roles []string
+		if sess := sessFrom(req.Context()); sess != nil {
+			roles = sess.Roles
+		}
+		hidden := hiddenGuestAuditPrefixes(roles)
+		hiddenLike := make([]string, len(hidden))
+		for i, h := range hidden {
+			hiddenLike[i] = likeEscape(h) + "%"
+		}
 		if search != "" {
 			titled := []string{}
 			for _, c := range strings.Split(req.Header.Get(auditSearchActionsHeader), ",") {
@@ -665,17 +712,10 @@ func (s *server) auditRoutes() http.Handler {
 					titled = append(titled, c)
 				}
 			}
-			n, m := bind(likePattern(search)), bind(titled)
-			where += fmt.Sprintf(` AND (action ILIKE $%[1]d OR actor_id ILIKE $%[1]d OR target_id ILIKE $%[1]d
-			    OR target_type ILIKE $%[1]d OR host(ip) ILIKE $%[1]d OR action = ANY($%[2]d))`, n, m)
-		}
-
-		// WHAT WAS SEARCHED FOR IS CLIENT DATA (GDPR audit B6). Every role that reads the trail sees that a search,
-		// a view, an export or an erasure happened, and who did it; only holders of guest-data-rights see the
-		// details: the search text, and the reason given for an export or erasure.
-		seeGuestDetail := false
-		if sess := sessFrom(req.Context()); sess != nil {
-			seeGuestDetail = permFor(sess.Roles, "guest-data-rights", permRead)
+			n, m, h := bind(likePattern(search)), bind(titled), bind(hiddenLike)
+			where += fmt.Sprintf(` AND (action ILIKE $%[1]d OR actor_id ILIKE $%[1]d
+			    OR (target_id ILIKE $%[1]d AND NOT action LIKE ANY($%[3]d))
+			    OR target_type ILIKE $%[1]d OR host(ip) ILIKE $%[1]d OR action = ANY($%[2]d))`, n, m, h)
 		}
 
 		ctx, cancel := dbCtx(req)
@@ -701,8 +741,11 @@ func (s *server) auditRoutes() http.Handler {
 				jsonErr(w, http.StatusInternalServerError, "internal", "the audit trail could not be read")
 				return
 			}
-			if !seeGuestDetail && strings.HasPrefix(a.Action, "guest_data.") && len(a.Payload) > 0 {
-				a.Payload = json.RawMessage(`{"details_hidden":true}`)
+			if guestAuditHidden(a.Action, hidden) {
+				a.TargetID = nil
+				if len(a.Payload) > 0 {
+					a.Payload = json.RawMessage(`{"details_hidden":true}`)
+				}
 			}
 			out = append(out, a)
 		}
