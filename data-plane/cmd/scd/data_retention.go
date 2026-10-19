@@ -45,7 +45,7 @@ func (s *server) runDataRetention(ctx context.Context) {
 	failed := map[string]bool{}
 	for pass := 0; pass < dataRetentionMaxPasses; pass++ {
 		changed := 0
-		for _, fn := range []string{"iam_v2.run_data_retention", "public.run_data_retention_public"} {
+		for _, fn := range []string{"iam_v2.run_data_retention", "public.run_data_retention_public", "iam_v2.run_staff_note_retention"} {
 			if failed[fn] {
 				continue
 			}
@@ -56,7 +56,7 @@ func (s *server) runDataRetention(ctx context.Context) {
 				}
 				var pgErr *pgconn.PgError
 				if errors.As(err, &pgErr) && pgErr.Code == "42883" {
-					slog.Warn("data retention unavailable: this database predates migration 0127", "fn", fn)
+					slog.Warn("data retention unavailable: this database predates the migration that adds it", "fn", fn)
 				} else {
 					slog.Warn("data retention run failed", "fn", fn, "err", err)
 				}

@@ -19,10 +19,11 @@ const bounds = {
   audit_log_days: { min: 90, max: 3650, default: 730, unit: "days" },
   sign_in_attempt_days: { min: 7, max: 365, default: 30, unit: "days" },
   log_days: { min: 1, max: 730, default: 14, unit: "days" },
+  staff_note_days: { min: 30, max: 3650, default: 730, unit: "days" },
 };
 let settings: Record<string, number>;
 beforeEach(() => {
-  settings = { pms_stay_days: 30, client_activity_days: 365, inactive_identity_days: 365, expired_record_days: 7, audit_log_days: 730, sign_in_attempt_days: 30, log_days: 14 };
+  settings = { pms_stay_days: 30, client_activity_days: 365, inactive_identity_days: 365, expired_record_days: 7, audit_log_days: 730, sign_in_attempt_days: 30, log_days: 14, staff_note_days: 730 };
   get.mockReset(); put.mockReset();
   get.mockImplementation((path: string) => path === "/data-retention/"
     ? Promise.resolve({ settings: { ...settings }, bounds, runs: [] })
@@ -40,9 +41,10 @@ async function renderCard(writable: boolean) {
 }
 
 describe("Guest data retention", () => {
-  it("shows the six periods and offers no change to a read-only role", async () => {
+  it("shows every period and offers no change to a read-only role", async () => {
     await renderCard(false);
-    expect(screen.getByText("730 days")).toBeTruthy();
+    expect(screen.getAllByText("730 days")).toHaveLength(2); // the audit log details and the staff notes
+    expect(screen.getByText("Staff notes")).toBeTruthy();
     expect(screen.getByText(/cannot be brought back/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /change/i })).toBeNull();
   });
@@ -59,7 +61,7 @@ describe("Guest data retention", () => {
     expect(save.disabled).toBe(false);
     fireEvent.click(save);
     await waitFor(() => expect(put).toHaveBeenCalledWith("/data-retention/", {
-      settings: { pms_stay_days: 60, client_activity_days: 365, inactive_identity_days: 365, expired_record_days: 7, audit_log_days: 730, sign_in_attempt_days: 30, log_days: 14 },
+      settings: { pms_stay_days: 60, client_activity_days: 365, inactive_identity_days: 365, expired_record_days: 7, audit_log_days: 730, sign_in_attempt_days: 30, log_days: 14, staff_note_days: 730 },
       reason: "hotel policy", password: "pw",
     }));
     await screen.findByText("60 days");

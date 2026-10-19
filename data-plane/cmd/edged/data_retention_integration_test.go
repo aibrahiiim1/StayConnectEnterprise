@@ -25,7 +25,7 @@ func TestIntegration_DataRetention_TheSetting(t *testing.T) {
 		t.Fatalf("default = %d %v", st, body)
 	}
 	want := map[string]float64{"pms_stay_days": 30, "client_activity_days": 365, "inactive_identity_days": 365,
-		"expired_record_days": 7, "audit_log_days": 730, "sign_in_attempt_days": 30, "log_days": 14}
+		"expired_record_days": 7, "audit_log_days": 730, "sign_in_attempt_days": 30, "log_days": 14, "staff_note_days": 730}
 	for k, v := range want {
 		if set[k] != v {
 			t.Fatalf("default %s = %v, want %v (Product-Owner decision D-C1)", k, set[k], v)
@@ -33,7 +33,7 @@ func TestIntegration_DataRetention_TheSetting(t *testing.T) {
 	}
 	good := func() map[string]any {
 		return map[string]any{"pms_stay_days": 60, "client_activity_days": 180, "inactive_identity_days": 400,
-			"expired_record_days": 3, "audit_log_days": 365, "sign_in_attempt_days": 14, "log_days": 365}
+			"expired_record_days": 3, "audit_log_days": 365, "sign_in_attempt_days": 14, "log_days": 365, "staff_note_days": 90}
 	}
 	for name, mutate := range map[string]func(map[string]any){
 		"pms too short":      func(m map[string]any) { m["pms_stay_days"] = 6 },
@@ -41,6 +41,8 @@ func TestIntegration_DataRetention_TheSetting(t *testing.T) {
 		"attempts too long":  func(m map[string]any) { m["sign_in_attempt_days"] = 366 },
 		"logs too long":      func(m map[string]any) { m["log_days"] = 731 },
 		"logs zero":          func(m map[string]any) { m["log_days"] = 0 },
+		"notes too short":    func(m map[string]any) { m["staff_note_days"] = 29 },
+		"notes too long":     func(m map[string]any) { m["staff_note_days"] = 3651 },
 		"one missing":        func(m map[string]any) { delete(m, "client_activity_days") },
 		"an unknown setting": func(m map[string]any) { m["forever_days"] = 30 },
 	} {
@@ -63,7 +65,7 @@ func TestIntegration_DataRetention_TheSetting(t *testing.T) {
 	st, body = f.do(t, "GET", "/data-retention/", nil)
 	set, _ = body["settings"].(map[string]any)
 	ch, _ := body["changes"].([]any)
-	if st != 200 || set["pms_stay_days"] != float64(60) || set["sign_in_attempt_days"] != float64(14) || set["log_days"] != float64(365) || len(ch) != 1 {
+	if st != 200 || set["pms_stay_days"] != float64(60) || set["sign_in_attempt_days"] != float64(14) || set["log_days"] != float64(365) || set["staff_note_days"] != float64(90) || len(ch) != 1 {
 		t.Fatalf("after the change = %v", body)
 	}
 	var audited int
@@ -362,7 +364,7 @@ func TestIntegration_DataRetention_AnonymisesOnlyWhatOutlivedTheRetention(t *tes
 func TestIntegration_DataRetention_SignInAttemptsFollowTheSiteSetting(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
-	if _, err := f.pool.Exec(ctx, `SELECT iam_v2.data_retention_set($1,$2,30,365,365,7,730,7,14,'test','short attempts')`, f.tenant, f.site); err != nil {
+	if _, err := f.pool.Exec(ctx, `SELECT iam_v2.data_retention_set($1,$2,30,365,365,7,730,7,14,730,'test','short attempts')`, f.tenant, f.site); err != nil {
 		t.Fatal(err)
 	}
 	other := newAPI(t) // default 30 days
@@ -453,4 +455,113 @@ func seedEndedAccount(t *testing.T, f *apiFixture, username string, ago time.Dur
 		t.Fatalf("seed session: %v", err)
 	}
 	return account, device, session
+}
+
+// GDPR audit C4 (0140): a staff note older than the site's staff-note period is replaced by a fixed text; the
+// record stays, a recent note is kept, and nothing outside the retention run can rewrite the histories.
+func TestIntegration_DataRetention_StaffNotesFollowTheSetting(t *testing.T) {
+	f := newAPI(t)
+	ctx := context.Background()
+	if _, err := f.pool.Exec(ctx, `SELECT iam_v2.data_retention_set($1,$2,30,365,365,7,730,30,14,90,'test','notes for 90 days')`, f.tenant, f.site); err != nil {
+		t.Fatal(err)
+	}
+	// A checked-out stay with a post-stay profile (as cmd/edged/phase5_poststay_api_integration_test.go seeds one).
+	stay := seedGuestDataStay(t, f, "R-NOTES-"+fmt.Sprint(time.Now().UnixNano()), "CHECKED_OUT")
+	var profile string
+	var iface string
+	if err := f.pool.QueryRow(ctx, `SELECT pms_interface_id::text FROM iam_v2.stays WHERE id=$1`, stay).Scan(&iface); err != nil {
+		t.Fatal(err)
+	}
+	note := func(daysAgo int) string {
+		var event string
+		if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `INSERT INTO iam_v2.stay_events(tenant_id,site_id,pms_interface_id,external_event_identity,
+						  event_type,processing_status,received_at,payload)
+						VALUES ($1,$2,$3::uuid,'EV-NOTE-'||gen_random_uuid(),'GUEST_OUT','PENDING',now(),'{}') RETURNING id::text`,
+				f.tenant, f.site, iface).Scan(&event)
+		}); err != nil {
+			t.Fatalf("seed event: %v", err)
+		}
+		var id string
+		if err := f.pool.QueryRow(ctx, `INSERT INTO iam_v2.pms_case_resolutions(tenant_id,site_id,pms_interface_id,stay_event_id,
+			  disposition,evidence_kind,resolved_by,note,resolved_at)
+			VALUES ($1,$2,$3::uuid,$4::uuid,'ACKNOWLEDGED_BY_OPERATOR','OPERATOR_DECISION','op-1','Mrs Lovelace phoned',
+			        now() - make_interval(days => $5::int)) RETURNING id::text`, f.tenant, f.site, iface, event, daysAgo).Scan(&id); err != nil {
+			t.Fatalf("seed case note: %v", err)
+		}
+		return id
+	}
+	slot := func(daysAgo int) string {
+		var id string
+		if err := f.pool.QueryRow(ctx, `INSERT INTO iam_v2.device_slot_actions(tenant_id,site_id,actor,operator_label,action,outcome,reason,acted_at)
+			VALUES ($1,$2,'STAFF','op-1','RELEASE','OK','guest in 412 lost her phone',now() - make_interval(days => $3::int)) RETURNING id::text`,
+			f.tenant, f.site, daysAgo).Scan(&id); err != nil {
+			t.Fatalf("seed slot action: %v", err)
+		}
+		return id
+	}
+	oldNote, newNote, oldSlot, newSlot := note(120), note(10), slot(120), slot(10)
+	tx, err := f.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.p5_begin_controlled_operation('post_stay_identity')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.post_stay_profiles
+		(tenant_id,site_id,origin_stay_id,origin_lifecycle_version,pin_hash,valid_until,issued_via,pin_revealed_at)
+		SELECT $1,$2,st.id,st.lifecycle_version,'$argon2id$v=19$m=65536,t=1,p=4$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNo',
+		       now()+interval '1 day','GUEST_AUTHENTICATED_SESSION',now() FROM iam_v2.stays st WHERE st.id=$3::uuid
+		RETURNING id::text`, f.tenant, f.site, stay).Scan(&profile); err != nil {
+		t.Fatalf("seed profile: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE iam_v2.post_stay_profiles SET status='REVOKED', revoked_at=now() - interval '120 days',
+		revoked_by=NULL, revoke_reason='guest complained about the bill' WHERE id=$1`, profile); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Outside the run, the histories stay append-only even with the retention flag set.
+	rewrite, err := f.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = rewrite.Exec(ctx, `SET LOCAL iam_v2.anonymise = 'retention'`)
+	_, err = rewrite.Exec(ctx, `UPDATE iam_v2.pms_case_resolutions SET note='Removed after the staff-notes period' WHERE id=$1`, newNote)
+	_ = rewrite.Rollback(ctx)
+	if err == nil {
+		t.Fatal("a staff note was rewritten outside the retention run")
+	}
+
+	var category string
+	var n int
+	if err := f.pool.QueryRow(ctx, `SELECT o_category, o_anonymised FROM iam_v2.run_staff_note_retention($1,$2,500)`, f.tenant, f.site).Scan(&category, &n); err != nil || category != "staff_notes" || n != 3 {
+		t.Fatalf("run = %q %d (%v), want staff_notes 3", category, n, err)
+	}
+	str := func(q string, args ...any) string {
+		var v string
+		if err := f.pool.QueryRow(ctx, q, args...).Scan(&v); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+		return v
+	}
+	const removed = "Removed after the staff-notes period"
+	for name, got := range map[string][2]string{
+		"old case note":      {str(`SELECT note FROM iam_v2.pms_case_resolutions WHERE id=$1`, oldNote), removed},
+		"recent case note":   {str(`SELECT note FROM iam_v2.pms_case_resolutions WHERE id=$1`, newNote), "Mrs Lovelace phoned"},
+		"old slot reason":    {str(`SELECT reason FROM iam_v2.device_slot_actions WHERE id=$1`, oldSlot), removed},
+		"recent slot reason": {str(`SELECT reason FROM iam_v2.device_slot_actions WHERE id=$1`, newSlot), "guest in 412 lost her phone"},
+		"revoke reason":      {str(`SELECT revoke_reason FROM iam_v2.post_stay_profiles WHERE id=$1`, profile), removed},
+		"who decided stays":  {str(`SELECT resolved_by FROM iam_v2.pms_case_resolutions WHERE id=$1`, oldNote), "op-1"},
+	} {
+		if got[0] != got[1] {
+			t.Errorf("%s = %q, want %q", name, got[0], got[1])
+		}
+	}
+	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM iam_v2.run_staff_note_retention($1,$2,500)`, f.tenant, f.site).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("a second run changed something (%d, %v): the run must be idempotent", n, err)
+	}
 }
