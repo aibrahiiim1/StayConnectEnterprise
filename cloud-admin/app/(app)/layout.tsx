@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/misc";
 import { ToastProvider } from "@/components/ui/toast";
 import { StepUpProvider } from "@/components/step-up";
 import { SessionExpiryWarning } from "@/components/session-expiry";
-import { api, ApiError, setUnauthorizedHandler, type Whoami } from "@/lib/api";
+import { api, ApiError, BACKGROUND, setUnauthorizedHandler, type RequestOptions, type Whoami } from "@/lib/api";
 import { deadlinesFrom, expiredSignInUrl, sameDeadlines, type Deadlines } from "@/lib/session-expiry";
 import { SessionProvider } from "@/lib/session";
 import { usePoll } from "@/lib/use-poll";
@@ -52,7 +52,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     setDeadlines((prev) => (sameDeadlines(prev, d) ? prev : d));
     return d;
   }, []);
-  const readWhoami = useCallback(() => api.get<Whoami>("/v1/auth/whoami").then(take), [take]);
+  const readWhoami = useCallback((opts?: RequestOptions) => api.get<Whoami>("/v1/auth/whoami", opts).then(take), [take]);
 
   useEffect(() => {
     let cancelled = false;
@@ -69,7 +69,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // Re-read whoami every 30 s while the tab is visible: a role changed mid-session reaches the role-gated screens
   // without a reload, and the sign-in's deadlines stay current. whoami is not activity. An ended sign-in is handled
   // by the 401 handler above; any other failure (a network blip) is left for the next poll.
-  usePoll(() => { readWhoami().catch(() => undefined); }, 30000, !loading);
+  usePoll((opts) => { readWhoami(opts).catch(() => undefined); }, 30000, !loading);
   // The content pane is the scrolling element, so reset it on navigation.
   useEffect(() => { mainRef.current?.scrollTo?.({ top: 0 }); }, [pathname]);
   // The drawer closes on navigation.
@@ -108,7 +108,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <StepUpProvider>
           <SessionExpiryWarning
             deadlines={deadlines}
-            refresh={readWhoami}
+            refresh={() => readWhoami(BACKGROUND)}
             keepAlive={() => api.get("/v1/auth/mfa")}
             onExpired={expire}
             onSignOut={onLogout}

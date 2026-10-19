@@ -257,7 +257,7 @@ func corsMiddleware(origins []string) func(http.Handler) http.Handler {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept, X-Requested-With")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept, X-Requested-With, "+auth.BackgroundHeader)
 				w.Header().Set("Access-Control-Expose-Headers", "X-Trace-Id")
 				w.Header().Set("Vary", strings.TrimSpace("Origin, "+w.Header().Get("Vary")))
 			}

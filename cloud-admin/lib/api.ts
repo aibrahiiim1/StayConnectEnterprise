@@ -48,10 +48,24 @@ export function isEndedSignIn(status: number, path: string): boolean {
   return !NOT_AN_ENDED_SIGNIN.some((p) => bare === p || bare.startsWith(p + "/"));
 }
 
-async function request<T>(method: string, path: string, body?: any): Promise<T> {
+// ------- Background requests -------
+//
+// A request the console makes on its own, from a timer (a list refreshing itself, the sign-in-ending check), is
+// not something the person did, so it must not keep the sign-in alive: Central's idle limit would never fire with
+// a screen left open. Such requests carry X-OneGate-Background: 1 (the same header as the appliance's Admin
+// Console) and ctrlapi does not count them as activity (control-plane internal/auth/middleware.go).
+export const BACKGROUND_HEADER = "X-OneGate-Background";
+export type RequestOptions = { background?: boolean };
+/** Pass to api.get for a request sent from a timer rather than by the person. */
+export const BACKGROUND: RequestOptions = Object.freeze({ background: true });
+
+async function request<T>(method: string, path: string, body?: any, opts?: RequestOptions): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (body) headers["Content-Type"] = "application/json";
+  if (opts?.background) headers[BACKGROUND_HEADER] = "1";
   const res = await fetch(`/api${path}`, {
     method,
-    headers: body ? { "Content-Type": "application/json" } : undefined,
+    headers: Object.keys(headers).length ? headers : undefined,
     body: body ? JSON.stringify(body) : undefined,
     cache: "no-store",
   });
@@ -66,7 +80,7 @@ async function request<T>(method: string, path: string, body?: any): Promise<T> 
 }
 
 export const api = {
-  get:   <T>(path: string)             => request<T>("GET", path),
+  get:   <T>(path: string, opts?: RequestOptions) => request<T>("GET", path, undefined, opts),
   post:  <T>(path: string, body?: any) => request<T>("POST", path, body),
   patch: <T>(path: string, body?: any) => request<T>("PATCH", path, body),
   put:   <T>(path: string, body?: any) => request<T>("PUT", path, body),
