@@ -57,8 +57,8 @@ or to the personal data on it. In particular:
 
 Annex I describes this processing.
 
-2.3 **Processing for the Processor's own purposes.** Central holds the accounts of the Controller's staff who sign
-in to Central, the Appliance's identity and licence, and an audit log of actions taken in Central. The Processor
+2.3 **Processing for the Processor's own purposes.** Central (`central.onegate.getsemantics.com`) holds the
+accounts of the Controller's staff who sign in to Central, the Appliance's identity and licence, and an audit log of actions taken in Central. The Processor
 decides why and how that data is processed, so it does this as a **controller**, not under this DPA. Its privacy
 notice ([[link to the published notice; the draft is CENTRAL_PRIVACY_NOTICE.md]]) explains that processing. No guest data reaches Central.
 

@@ -46,6 +46,9 @@ from another country, or any sub-processor in DPA Annex III, Part A, outside the
 
 ## Part 2: OneGate Central (Art. 30(1))
 
+Central's staff console is at `central.onegate.getsemantics.com`. Appliances reach Central for licensing at
+`sc-central.echofusion.com`.
+
 **(a) Controller.** As in *Common details*.
 
 **(b) Purposes and (c) categories.**

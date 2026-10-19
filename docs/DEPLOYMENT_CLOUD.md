@@ -2,7 +2,8 @@
 
 > The runbook for OneGate Central, the vendor half: licensing, activation and fleet status
 > ([CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md)). Central runs on its own host; appliances reach it
-> by name (`sc-central.echofusion.com`, CLAUDE.md §0D) and only ever for licensing (CLAUDE.md §0E).
+> by name (`sc-central.echofusion.com`, CLAUDE.md §0D) and only ever for licensing (CLAUDE.md §0E). Staff use the
+> console at `central.onegate.getsemantics.com` (§3).
 > Appliance counterpart: [DEPLOYMENT_APPLIANCE.md](DEPLOYMENT_APPLIANCE.md).
 >
 > **Everything here is a script in `deploy/scripts/`.** A Central host is built from a release and nothing
@@ -72,6 +73,11 @@ it cannot drift from what appliances are told to dial. Central initiates **no** 
   **Moving Central is a DNS change** — no appliance knows an IP.
 - The console may have its own name(s) (`--admin-name`), so it can later sit behind MFA/VPN without that
   becoming a dependency of a site's connectivity. Those names become `CTRLAPI_ALLOW_ORIGINS`.
+- **`central.onegate.getsemantics.com`** is the staff address of the console (Product Owner, 2026-10-19). It is
+  given as `--admin-name central.onegate.getsemantics.com`, so it joins the Caddy site addresses, the certificate
+  names and `CTRLAPI_ALLOW_ORIGINS`; appliances keep `sc-central.echofusion.com`. **Not configured yet:** it needs
+  a DNS record pointing at the Central host, a certificate that covers it (`internal` adds it to the SANs; `acme`
+  needs the name publicly reachable), and a Central redeploy, each with the Product Owner's go-ahead.
 - **:443 certificate**, two modes (`--tls`):
   - `internal` (default, what the first Central uses): Central's own TLS CA in `/opt/stayconnect/central/tls`
     issues the certificate (`central-mint-tls.sh`); appliances trust that CA (`install-central-trust.sh`).
@@ -129,7 +135,7 @@ docker-compose-v2, Caddy's apt repo, NodeSource 20).
 tar -xzf onegate-central-<sha>.tar.gz
 export CENTRAL_ADMIN_PASSWORD='…'                 # or be prompted; never on the command line
 sudo -E bash onegate-central-<sha>/deploy/scripts/central-install.sh --mode new \
-     --admin-email ops@example.com [--admin-name admin.example.com] [--extra-names 203.0.113.10] \
+     --admin-email ops@example.com [--admin-name central.onegate.getsemantics.com] [--extra-names 203.0.113.10] \
      [--tls internal|acme --acme-email ops@example.com] [--install-prereqs] [--dry-run]
 ```
 

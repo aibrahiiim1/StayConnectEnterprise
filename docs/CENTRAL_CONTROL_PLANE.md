@@ -7,7 +7,8 @@ this file wins. Product-Owner mission "Central Control Plane refactor & activati
 
 ## 1. What Central is — and is not
 
-Central is the vendor's cloud-hosted **licensing, appliance-activation and fleet-status** system. It answers five
+Central is the vendor's cloud-hosted **licensing, appliance-activation and fleet-status** system (staff console:
+`central.onegate.getsemantics.com`; appliances use `sc-central.echofusion.com`). It answers five
 questions: *who is the customer, which site and appliance, is it activated, what does its licence allow, and is it
 healthy right now.*
 

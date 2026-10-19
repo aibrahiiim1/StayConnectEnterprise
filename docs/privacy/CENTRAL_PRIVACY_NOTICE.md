@@ -5,8 +5,9 @@
 > links to this notice. Once approved, publish it where Central's users can read it before signing in, for
 > example a link on the sign-in page.
 
-This notice is for **anyone who has an account on OneGate Central**: our own staff, and the staff of hotels and
-other customers who use Central to manage their OneGate appliances and licences. It explains what we record
+This notice is for **anyone who has an account on OneGate Central** (`https://central.onegate.getsemantics.com`):
+our own staff, and the staff of hotels and other customers who use Central to manage their OneGate appliances and
+licences. It explains what we record
 about you, why, and for how long.
 
 It does **not** cover hotel guests. Central holds no guest data: a hotel's guest Wi-Fi data stays on the
