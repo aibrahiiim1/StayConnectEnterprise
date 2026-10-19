@@ -246,7 +246,8 @@ func outsideHostWarnings(d map[string]any) []Issue {
 		}
 		out = append(out, Issue{Field: field, Severity: SeverityWarning, Message: fmt.Sprintf(
 			"loads from %s, outside this appliance: each client's device contacts that host, which sees its "+
-				"address, and nothing loads from it before the client is online; upload the file here instead",
+				"address, and nothing loads from it before the client is online; upload the file here instead, or "+
+				"name the host in the privacy notice", // the notice must say who sees guests' addresses (GDPR audit C1)
 			strings.Join(hosts, ", "))})
 	}
 	for _, k := range imageFields {
