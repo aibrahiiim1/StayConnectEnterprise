@@ -248,4 +248,5 @@ Signed for the Processor: [[name, role, date]]
 | Privacy notice record | Which version of the Controller's privacy notice was in force at each sign-in, and when | Follows the sign-in record |
 | Staff accounts | Email, display name, password hash, sealed authenticator secret, role, sign-in history | While the account is active. Anonymised 730 days after it is disabled (30–3,650). The staff member's email stays as the "changed by" label in the change history of settings |
 | Audit log | Staff member, action, time, IP and user agent, and the record acted on | IP, user agent and record anonymised after 730 days (90–3,650) |
+| Staff notes | What staff type as a note or reason: PMS case decisions, released or replaced devices, revoked post-stay access | Removed after 730 days (30–3,650); the record of what was done, when and by whom stays |
 | Logs and backups | Device MAC and IP addresses and sign-in identifiers in system logs; a full copy of the database in backups | Backups: 30 days, with the newest 7 always kept. Logs: see Annex II, Part C |

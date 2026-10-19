@@ -289,17 +289,17 @@ Also consider whether VIP and travel agent are needed at all (minimisation).
 
 ## C. Low, and document wording
 
-1. **Notice line added (with B11);** a preference for uploads is not enforced. ~~Outside images and fonts:~~ the portal allows ones the hotel chooses (`cmd/portald/portal_design.go:59-60`),
+1. **Fixed:** the notice line was added with B11; the design check already said to upload the file instead, and now also asks for the host to be named in the notice. Uploads are not enforced, as the hotel may choose an outside host. ~~Outside images and fonts:~~ the portal allows ones the hotel chooses (`cmd/portald/portal_design.go:59-60`),
    which then see guests' IPs. Hotel Admin only warns. Add a line to the notice template, and prefer uploads.
 2. **Microsoft sign-in still asks for `profile`.** This was a deliberate choice in C9, because some personal
    accounts need it to give their email.
-3. **Over-erasure:** erasing one guest anonymises the whole stay, co-guests included.
-4. **Staff free-text notes are never limited:** `pms_case_resolutions.note`, `device_slot_actions.reason`,
+3. **Fixed** (migration 0141; Product-Owner decision: erase only the guest who asked): a stay with more than one guest is found, exported and erased one guest at a time. Erasing one guest removes their name, PMS guest number and PIN, and their name from the stay's PMS events; the other guests, the stay and its shared access stay. Their export holds only their own details. The last guest erased is the whole stay. ~~Over-erasure:~~ erasing one guest anonymised the whole stay, co-guests included.
+4. **Fixed** (migration 0140; Product-Owner decision: its own setting): a "Staff notes" data-retention period, default 730 days (30 to 3650, audited), replaces the notes with a fixed text; the records stay. ~~Staff free-text notes are never limited:~~ `pms_case_resolutions.note`, `device_slot_actions.reason`,
    `post_stay_profiles.revoke_reason`.
-5. **Logs outside retention, and an old default password:**
+5. **Fixed** (Product-Owner decision: warn, do not change the password automatically): the database logs errors without the statement or DETAIL line and its docker log is 3 × 10 MB; Hotel Admin's Overview warns while the default password is accepted. The PRE-LIVE appliance itself has not been checked yet. ~~Logs outside retention, and an old default password:~~
    - the Postgres container's Docker logs are outside log retention (`deploy/compose/infra.yml`);
    - older appliances may still have the default database password.
-6. **Central server logs:**
+6. **Fixed:** the request log already named routes only (A1); the Caddy access log is rolled daily and kept 14 days; the two commands log the account id. ~~Central server logs:~~
    - the chi request log writes query text;
    - the Caddy log on the Central host has no roll settings;
    - two admin CLI commands log an email.

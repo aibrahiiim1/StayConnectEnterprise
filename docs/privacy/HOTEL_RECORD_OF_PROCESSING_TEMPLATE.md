@@ -100,6 +100,7 @@ instead.
 | Disabled staff accounts: email, name and password removed after | 730 days (2 years) | ✏️ |
 | Backups | 30 days, the newest 7 always kept | ✏️ |
 | System logs (web, address and service logs) | 14 days | ✏️ |
+| Staff notes (PMS case decisions, released devices, revoked post-stay access) removed after | 730 days (2 years) | ✏️ |
 
 ### Step 4: Does a law make you keep connection records?
 
