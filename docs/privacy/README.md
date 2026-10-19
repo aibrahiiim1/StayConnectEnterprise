@@ -7,14 +7,18 @@
 | [DPA_ANNEX_II_SECURITY_MEASURES.md](DPA_ANNEX_II_SECURITY_MEASURES.md) | Annex II: technical and organisational measures (Art. 32) | Draft (F3) |
 | [DPA_ANNEX_III_SUBPROCESSORS.md](DPA_ANNEX_III_SUBPROCESSORS.md) | Annex III: our sub-processors, and the hotel's own providers | Draft (F3) |
 | [RECORD_OF_PROCESSING.md](RECORD_OF_PROCESSING.md) | Our records of processing: as processor (Art. 30(2)) and, for Central, as controller (Art. 30(1)) | Draft (F3) |
+| [HOTEL_RECORD_OF_PROCESSING_TEMPLATE.md](HOTEL_RECORD_OF_PROCESSING_TEMPLATE.md) | For the hotel: its Art. 30 record for guest Wi-Fi, pre-filled. The hotel answers four short steps | Draft (F3) |
+| [HOTEL_DPIA_STARTER.md](HOTEL_DPIA_STARTER.md) | For the hotel: its risk assessment (Art. 35), with the risks and OneGate's measures pre-filled. The hotel ticks and chooses | Draft (F3) |
 | [../runbooks/PERSONAL_DATA_BREACH.md](../runbooks/PERSONAL_DATA_BREACH.md) | Breach response | Draft (F2) |
 
 **None of these goes to a customer before a lawyer has reviewed it (decision D-F3).** They are engineering drafts:
 every fact about the system was checked in the code on `delivery/gdpr` (2026-10-18), but the legal wording is not
 advice.
 
-The hotel's own documents (its Art. 30 record, its DPIA, its privacy notice) are the hotel's to write. Templates
-for those are a separate F3 item. The guest privacy-notice template already ships in Hotel Admin (F1).
+The hotel's own documents (its Art. 30 record, its DPIA, its privacy notice) are the hotel's. We give it
+templates that already say what OneGate does: the two `HOTEL_` documents above, and the guest privacy-notice
+template that ships in Hotel Admin (F1). The hotel's part is written to be filled in by its IT manager, not a
+lawyer: tick boxes, a few blanks, and where in Hotel Admin each answer is found.
 
 ## How the roles were decided
 
