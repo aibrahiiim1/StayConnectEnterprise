@@ -16,6 +16,12 @@ package main
 //     is emptied rather than deleted, because a process may still hold it open.
 //
 // Nothing here touches the database, the backups, or a file outside the listed directories.
+//
+// NEVER BY NAME ALONE. These directories are writable by the services that log there (/var/log/stayconnect is
+// group-writable, /var/log/caddy belongs to caddy) and this job runs as root, so a name is not trusted: each file
+// is opened without following symlinks (O_NOFOLLOW), checked on the open descriptor (a regular file, on the
+// directory's filesystem, with no second name), emptied and copied through that descriptor, and unlinked only
+// after the name is re-checked to still be that same file. A symlink or hard link planted there is left alone.
 
 import (
 	"context"
@@ -106,11 +112,16 @@ func (j *logRetention) run(ctx context.Context, days int) {
 	cutToday := j.lastCut() != today
 	removed, emptied, cut := 0, 0, 0
 	for _, dir := range j.dirs {
-		entries, err := os.ReadDir(dir)
+		dirInfo, err := os.Stat(dir)
 		if err != nil {
 			if !errors.Is(err, fs.ErrNotExist) {
 				slog.Warn("log retention: directory not readable", "dir", dir, "err", err)
 			}
+			continue
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			slog.Warn("log retention: directory not readable", "dir", dir, "err", err)
 			continue
 		}
 		for _, e := range entries {
@@ -118,26 +129,13 @@ func (j *logRetention) run(ctx context.Context, days int) {
 				continue
 			}
 			path := filepath.Join(dir, e.Name())
-			info, err := e.Info()
-			if err != nil {
-				continue
-			}
-			isCut := cutName.MatchString(e.Name())
-			switch {
-			case info.ModTime().Before(cutoff) && isCut:
-				if os.Remove(path) == nil {
-					removed++
-				}
-			case info.ModTime().Before(cutoff):
-				if os.Truncate(path, 0) == nil {
-					emptied++
-				}
-			case !isCut && cutToday && info.Size() > 0:
-				if err := cutLog(path, path+"."+today); err != nil {
-					slog.Warn("log retention: log not cut", "file", path, "err", err)
-				} else {
-					cut++
-				}
+			switch j.handle(dirInfo, path, cutName.MatchString(e.Name()), cutoff, cutToday, today) {
+			case "removed":
+				removed++
+			case "emptied":
+				emptied++
+			case "cut":
+				cut++
 			}
 		}
 	}
@@ -149,18 +147,44 @@ func (j *logRetention) run(ctx context.Context, days int) {
 	}
 }
 
-// cutLog copies src to dst (refusing to overwrite) and empties src in place, so a writer that keeps the file
-// open goes on appending to it.
-func cutLog(src, dst string) error {
-	in, err := os.Open(src)
+// handle opens one file without following links, decides on what the descriptor says (not what the directory
+// listing said), and acts through the descriptor. It answers what it did, or "" for nothing.
+func (j *logRetention) handle(dirInfo fs.FileInfo, path string, isCut bool, cutoff time.Time, cutToday bool, today string) string {
+	f, err := openLogNoFollow(path, os.O_RDWR)
 	if err != nil {
-		return err
+		return "" // a symlink (ELOOP), or gone since the listing
 	}
-	defer in.Close()
-	info, err := in.Stat()
-	if err != nil {
-		return err
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() || !logFileInPlace(dirInfo, info) {
+		slog.Warn("log retention: not a log file of its own; left alone", "file", path)
+		return ""
 	}
+	switch {
+	case info.ModTime().Before(cutoff) && isCut:
+		// Unlink only if the name still refers to the file just checked. Closed first: Windows, where the unit
+		// tests run, cannot remove an open file; the identity check does not need the descriptor.
+		f.Close()
+		if now, err := os.Lstat(path); err == nil && os.SameFile(info, now) && os.Remove(path) == nil {
+			return "removed"
+		}
+	case info.ModTime().Before(cutoff):
+		if f.Truncate(0) == nil {
+			return "emptied"
+		}
+	case !isCut && cutToday && info.Size() > 0:
+		if err := cutLog(f, info, path+"."+today); err != nil {
+			slog.Warn("log retention: log not cut", "file", path, "err", err)
+			return ""
+		}
+		return "cut"
+	}
+	return ""
+}
+
+// cutLog copies the opened log to dst (refusing to overwrite, or to write through a symlink) and empties it in
+// place, so a writer that keeps the file open goes on appending to it.
+func cutLog(in *os.File, info fs.FileInfo, dst string) error {
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
 	if err != nil {
 		return err
@@ -174,7 +198,7 @@ func cutLog(src, dst string) error {
 		os.Remove(dst)
 		return err
 	}
-	return os.Truncate(src, 0)
+	return in.Truncate(0)
 }
 
 func (j *logRetention) lastCut() string {

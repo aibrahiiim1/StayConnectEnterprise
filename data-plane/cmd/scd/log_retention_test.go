@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -65,5 +66,71 @@ func TestLogRetention_CutsDeletesAndEmpties(t *testing.T) {
 	j.run(context.Background(), 14)
 	if b, _ := os.ReadFile(live); string(b) != "more\n" {
 		t.Fatalf("the log was cut twice in one day: %q", b)
+	}
+}
+
+// The log directories are writable by the services that log there and this job runs as root: a symlink -- or a
+// hard link -- planted in one must never lead it to empty, copy or remove a file elsewhere. handle is called
+// directly as well as through run, because the dangerous case is a name swapped for a link AFTER the listing.
+func TestLogRetention_NeverFollowsALink(t *testing.T) {
+	dir, outside := t.TempDir(), t.TempDir()
+	now := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
+	target := func(name string, age time.Duration) string {
+		p := filepath.Join(outside, name)
+		if err := os.WriteFile(p, []byte("not a log\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		at := now.Add(-age)
+		_ = os.Chtimes(p, at, at)
+		return p
+	}
+	recent, old, oldCut := target("recent", time.Hour), target("old", 30*24*time.Hour), target("old-cut", 30*24*time.Hour)
+	links := map[string]string{
+		"evil.log":          recent, // would be cut
+		"quiet.log":         old,    // would be emptied
+		"evil.log.20261001": oldCut, // would be removed
+	}
+	for name, to := range links {
+		if err := os.Symlink(to, filepath.Join(dir, name)); err != nil {
+			t.Skipf("symlinks unavailable here: %v", err)
+		}
+	}
+	j := &logRetention{dirs: []string{dir}, stamp: filepath.Join(t.TempDir(), "last-cut"),
+		journal: func(context.Context, int) error { return nil }, now: func() time.Time { return now }}
+	dirInfo, _ := os.Stat(dir)
+	cutoff := now.Add(-14 * 24 * time.Hour)
+	for name := range links {
+		if got := j.handle(dirInfo, filepath.Join(dir, name), cutName.MatchString(name), cutoff, true, "20261019"); got != "" {
+			t.Fatalf("handle(%s) = %q through a symlink", name, got)
+		}
+	}
+	j.run(context.Background(), 14)
+
+	for _, p := range []string{recent, old, oldCut} {
+		if b, err := os.ReadFile(p); err != nil || string(b) != "not a log\n" {
+			t.Fatalf("%s was touched through a symlink: %q %v", filepath.Base(p), b, err)
+		}
+	}
+	for name := range links {
+		if _, err := os.Lstat(filepath.Join(dir, name)); err != nil {
+			t.Fatalf("the planted link %s was removed: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "evil.log.20261019")); err == nil {
+		t.Fatal("a symlinked file was copied into a cut")
+	}
+
+	// A hard link to a file elsewhere has a second name: left alone too (Linux checks the link count).
+	if runtime.GOOS == "linux" {
+		hard := filepath.Join(dir, "hard.log")
+		if err := os.Link(old, hard); err != nil {
+			t.Fatalf("hard link: %v", err)
+		}
+		if got := j.handle(dirInfo, hard, false, cutoff, true, "20261019"); got != "" {
+			t.Fatalf("handle(hard link) = %q", got)
+		}
+		if b, _ := os.ReadFile(old); string(b) != "not a log\n" {
+			t.Fatal("a hard-linked file was emptied")
+		}
 	}
 }
