@@ -699,6 +699,18 @@ export type SessionPolicyBound = {
   label: string; unit: string; min: number; max: number; default: number; explains: string;
 };
 
+/** How long a disabled staff account is kept before it is anonymised (edged /operators/account-retention, 0138). */
+export type AccountRetention = {
+  disabled_account_days: number;
+  config_version: number;
+  updated_at?: string | null;
+  updated_by?: string | null;
+};
+export type AccountRetentionBound = {
+  key: "disabled_account_days";
+  label: string; unit: string; min: number; max: number; default: number; explains: string;
+};
+
 /** Admin Console sign-in protection (edged /operators/signin-protection, migration 0119). */
 export type SigninProtection = {
   account_max_failures: number;

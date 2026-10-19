@@ -82,6 +82,10 @@ const WORDS: Record<string, AuditWords> = {
     title: "Required a new password at sign-in", category: "Sign-in & access", severity: "security",
     note: "The password used was shorter than the policy, so it must be replaced before the console can be used.",
   },
+  "operator.account_retention_changed": {
+    title: "Changed how long disabled staff accounts are kept", category: "Sign-in & access", severity: "security",
+    note: "After this period a disabled account's email, name, password and authenticator are removed.",
+  },
   "operator.signin_protection_changed": { title: "Changed Admin Console sign-in protection", category: "Sign-in & access", severity: "security" },
   "session.disconnected": {
     title: "Disconnected a client device", category: "Sign-in & access", severity: "change",

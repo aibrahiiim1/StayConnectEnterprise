@@ -48,6 +48,9 @@ func (s *server) operatorsRoutes() http.Handler {
 	r.Get("/session-policy", s.getSessionPolicy)
 	r.Put("/session-policy", s.setSessionPolicy)
 	r.Get("/session-policy/changes", s.listSessionPolicyChanges)
+	// How long a disabled account is kept before it is anonymised (0138, GDPR audit B4).
+	r.Get("/account-retention", s.getAccountRetention)
+	r.Put("/account-retention", s.setAccountRetention)
 	r.Post("/", s.createEdgeOperator)
 	r.Delete("/{id}", s.disableEdgeOperator)
 	r.Post("/{id}/set-password", s.setEdgeOperatorPassword)

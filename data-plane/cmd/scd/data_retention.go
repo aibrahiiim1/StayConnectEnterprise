@@ -40,26 +40,57 @@ func (s *server) runDataRetention(ctx context.Context) {
 	if s.db == nil || s.tenID == "" || s.siteID == "" {
 		return
 	}
+	// ONE FAILING PASS DOES NOT STOP THE OTHERS (GDPR audit C10). A function that fails is left out for the
+	// rest of this tick and logged; the others go on working off their backlog.
+	failed := map[string]bool{}
 	for pass := 0; pass < dataRetentionMaxPasses; pass++ {
 		changed := 0
 		for _, fn := range []string{"iam_v2.run_data_retention", "public.run_data_retention_public"} {
+			if failed[fn] {
+				continue
+			}
 			n, err := s.dataRetentionPass(ctx, fn)
 			if err != nil {
-				if ctx.Err() == nil {
-					var pgErr *pgconn.PgError
-					if errors.As(err, &pgErr) && pgErr.Code == "42883" {
-						slog.Warn("data retention unavailable: this database predates migration 0127")
-					} else {
-						slog.Warn("data retention run failed", "fn", fn, "err", err)
-					}
+				if ctx.Err() != nil {
+					return
 				}
-				return
+				var pgErr *pgconn.PgError
+				if errors.As(err, &pgErr) && pgErr.Code == "42883" {
+					slog.Warn("data retention unavailable: this database predates migration 0127", "fn", fn)
+				} else {
+					slog.Warn("data retention run failed", "fn", fn, "err", err)
+				}
+				failed[fn] = true
+				continue
 			}
 			changed += n
 		}
 		if changed == 0 {
-			return
+			break
 		}
+	}
+	s.runStaffRetention(ctx)
+}
+
+// runStaffRetention anonymises staff accounts disabled for longer than the appliance's setting and clears staff
+// addresses older than the activity-log period (migration 0138, GDPR audit B4). One call: it is bounded itself.
+func (s *server) runStaffRetention(ctx context.Context) {
+	cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	var out map[string]int
+	err := s.db.QueryRow(cctx, `SELECT public.run_staff_retention($1::uuid,$2::uuid)`, s.tenID, s.siteID).Scan(&out)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "42883" {
+			slog.Warn("staff retention unavailable: this database predates migration 0138")
+		} else if ctx.Err() == nil {
+			slog.Warn("staff retention run failed", "err", err)
+		}
+		return
+	}
+	if out["staff_accounts_anonymised"]+out["audit_entries"]+out["staff_addresses_cleared"] > 0 {
+		slog.Info("staff data anonymised by retention", "accounts", out["staff_accounts_anonymised"],
+			"audit_entries", out["audit_entries"], "addresses", out["staff_addresses_cleared"])
 	}
 }
 

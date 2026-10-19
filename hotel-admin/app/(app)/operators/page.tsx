@@ -33,6 +33,7 @@ import { formatRelative } from "@/lib/utils";
 import { HelpList, HelpSection } from "@/components/help";
 import { OperatorSigninProtection } from "@/components/operator-signin-protection";
 import { OperatorSessionLimits } from "@/components/operator-session-limits";
+import { OperatorAccountRetention } from "@/components/operator-account-retention";
 
 const MIN_PASSWORD = 10;
 
@@ -213,6 +214,7 @@ export default function OperatorsPage() {
                   "A password you set for someone must, by default, be replaced by them at their next sign-in.",
                   "Your own password is changed with Change my password, which asks for your current one.",
                   "A disabled operator can no longer sign in, and is signed out at once.",
+                  "A disabled account is anonymised after the period set under Disabled accounts (24 months by default).",
                   "Adding, disabling or resetting an operator, or changing their roles, asks for your own password first.",
                 ]}
               />
@@ -372,6 +374,9 @@ export default function OperatorsPage() {
       {/* ------------------------------------------------------------------ session limits (0132) */}
       <OperatorSessionLimits writable={writable} />
 
+      {/* ------------------------------------------------------------------ disabled accounts (0138) */}
+      <OperatorAccountRetention writable={writable} />
+
       {/* ------------------------------------------------------------------ reset two-step sign-in (0132) */}
       <DialogForm
         open={mfaFor !== null}
@@ -484,7 +489,7 @@ export default function OperatorsPage() {
         title="Stop this operator signing in?"
         description={
           disabling
-            ? `${disabling.display_name || disabling.email} will no longer be able to sign in to this appliance. Their account and everything they have done is kept. There is no way to re-enable a disabled operator from this screen.`
+            ? `${disabling.display_name || disabling.email} will no longer be able to sign in to this appliance. Their account and everything they have done is kept until the disabled-account period ends; then their email and name are removed. There is no way to re-enable a disabled operator from this screen.`
             : undefined
         }
         confirmLabel="Disable account"
