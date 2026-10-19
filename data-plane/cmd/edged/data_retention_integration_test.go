@@ -104,8 +104,8 @@ func TestIntegration_DataRetention_AnonymisesOnlyWhatOutlivedTheRetention(t *tes
 				return err
 			}
 			if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.stay_guests(tenant_id,site_id,pms_interface_id,stay_id,
-				  external_guest_id,first_name_norm,last_name_norm,display_name,is_primary,date_of_birth)
-				VALUES ($1,$2,$3::uuid,$4::uuid,'G-'||$5,'ada','lovelace','Ada Lovelace',true,'1815-12-10')`,
+				  external_guest_id,first_name_norm,last_name_norm,display_name,is_primary)
+				VALUES ($1,$2,$3::uuid,$4::uuid,'G-'||$5,'ada','lovelace','Ada Lovelace',true)`,
 				f.tenant, f.site, iface, stay, res); err != nil {
 				return err
 			}
@@ -251,7 +251,7 @@ func TestIntegration_DataRetention_AnonymisesOnlyWhatOutlivedTheRetention(t *tes
 	expect("old stay travel agent", str(`SELECT travel_agent FROM iam_v2.stays WHERE id=$1`, oldStay), "<null>")
 	expect("old stay status", str(`SELECT status FROM iam_v2.stays WHERE id=$1`, oldStay), "CHECKED_OUT")
 	expect("old stay departure kept", str(`SELECT (departure IS NOT NULL)::text FROM iam_v2.stays WHERE id=$1`, oldStay), "true")
-	expect("old guest names", str(`SELECT concat_ws(',',first_name_norm,last_name_norm,display_name,date_of_birth::text,external_guest_id) FROM iam_v2.stay_guests WHERE stay_id=$1`, oldStay), "")
+	expect("old guest names", str(`SELECT concat_ws(',',first_name_norm,last_name_norm,display_name,external_guest_id) FROM iam_v2.stay_guests WHERE stay_id=$1`, oldStay), "")
 	expect("old event payload", str(`SELECT payload::text FROM iam_v2.stay_events WHERE stay_id=$1`, oldStay), `{"anonymised": true}`)
 	expect("old event status kept", str(`SELECT processing_status FROM iam_v2.stay_events WHERE stay_id=$1`, oldStay), "APPLIED")
 	// The recent stay is untouched.

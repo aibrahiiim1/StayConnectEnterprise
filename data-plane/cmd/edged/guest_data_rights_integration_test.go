@@ -226,7 +226,7 @@ func TestIntegration_GuestDataRights_ErasesAStay(t *testing.T) {
 		t.Fatalf("erase stay = %d %v", st, body)
 	}
 	var reservation, names, payload, status string
-	if err := f.pool.QueryRow(context.Background(), `SELECT s.external_reservation_id, concat_ws(',',g.first_name_norm,g.last_name_norm,g.display_name,g.date_of_birth::text),
+	if err := f.pool.QueryRow(context.Background(), `SELECT s.external_reservation_id, concat_ws(',',g.first_name_norm,g.last_name_norm,g.display_name),
 		e.payload::text, s.status FROM iam_v2.stays s JOIN iam_v2.stay_guests g ON g.stay_id=s.id JOIN iam_v2.stay_events e ON e.stay_id=s.id WHERE s.id=$1`,
 		stay).Scan(&reservation, &names, &payload, &status); err != nil {
 		t.Fatal(err)
@@ -254,8 +254,8 @@ func seedGuestDataStay(t *testing.T, f *apiFixture, res, status string) string {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.stay_guests(tenant_id,site_id,pms_interface_id,stay_id,
-			  external_guest_id,first_name_norm,last_name_norm,display_name,is_primary,date_of_birth)
-			VALUES ($1,$2,$3::uuid,$4::uuid,'G-'||$5,'ada','lovelace','Ada Lovelace',true,'1815-12-10')`,
+			  external_guest_id,first_name_norm,last_name_norm,display_name,is_primary)
+			VALUES ($1,$2,$3::uuid,$4::uuid,'G-'||$5,'ada','lovelace','Ada Lovelace',true)`,
 			f.tenant, f.site, iface, stay, res); err != nil {
 			return err
 		}
