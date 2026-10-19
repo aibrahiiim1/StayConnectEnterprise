@@ -19,10 +19,11 @@ BEGIN
   RAISE EXCEPTION 'iam_v2.device_slot_actions is append-only: % refused', TG_OP USING ERRCODE = 'restrict_violation';
 END $$;
 
-DELETE FROM iam_v2.data_retention_runs WHERE category = 'staff_notes';
+-- The runs already recorded are history and data_retention_runs refuses deletion: the narrower category list is
+-- restored NOT VALID, so it binds new rows and leaves the recorded staff-notes runs where they are.
 ALTER TABLE iam_v2.data_retention_runs DROP CONSTRAINT IF EXISTS drr_category;
 ALTER TABLE iam_v2.data_retention_runs ADD CONSTRAINT drr_category CHECK (category = ANY (ARRAY[
-  'pms_stays', 'client_activity', 'inactive_identities', 'expired_records', 'audit_log']));
+  'pms_stays', 'client_activity', 'inactive_identities', 'expired_records', 'audit_log'])) NOT VALID;
 
 DROP FUNCTION IF EXISTS iam_v2.data_retention_defaults();
 CREATE FUNCTION iam_v2.data_retention_defaults(
