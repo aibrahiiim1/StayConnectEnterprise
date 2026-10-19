@@ -49,8 +49,17 @@ Backups screen (`db-…sql.gz.age`). No plaintext copy touches the disk.
 - **Downloads stay encrypted.** The file downloaded is the encrypted file.
 - **Before the first holder is confirmed**, backups are written in the clear as before, and the Backups screen
   says so. If holders are registered but cannot be read, the backup **fails** rather than falling back to
-  plaintext. If the holders of more than one site are active (an appliance moved to another hotel), the nightly
-  backup fails rather than encrypt to the previous hotel's keys.
+  plaintext.
+- **An appliance moved to another hotel** encrypts only to the holders of the site it now serves (migration
+  0144): the nightly backup names no site, so it takes the active holders whose site is in `public.sites`, and a
+  previous owner's holders are never used. Until the new hotel confirms a holder its backups are in the clear,
+  as for any new site. Only if holders of two sites the appliance serves are both active does the nightly
+  backup refuse.
+- **A restore keeps the current key holders** (restore step "key holders", migration-independent). Before the
+  restored database is swapped in, the live register is copied into it: every holder takes its current status,
+  a holder removed since the backup stays removed, and a holder the live register does not know is removed by
+  the restore. A backup older than backup encryption cannot carry the register; the step says so and backups
+  are unencrypted until a holder is set up again. If the register cannot be carried, nothing is replaced.
 - **If every key is lost**, the encrypted backups cannot be read by anyone. Live data is unaffected; add a new
   holder and new backups work at once.
 
