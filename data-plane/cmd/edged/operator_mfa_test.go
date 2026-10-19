@@ -34,3 +34,40 @@ func TestNewRecoveryCodesRefusesWithoutAnAuthenticatorCode(t *testing.T) {
 		}
 	}
 }
+
+// The pending sign-in is shared between requests: a handler gets a copy, and the one change made after creation
+// (an authenticator found already set up) goes through the lock. Run with -race.
+func TestPendingSigninsHandOutCopies(t *testing.T) {
+	var p pendingSignins
+	tok := p.create(&pendingSignin{OperatorID: "op-1", Enrol: true, Roles: []string{"site_admin"}})
+	a := p.get(tok)
+	a.Enrol = false
+	a.Roles = nil
+	if b := p.get(tok); !b.Enrol || len(b.Roles) != 1 {
+		t.Fatalf("a handler's copy changed the stored sign-in: %+v", b)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			p.setEnrol(tok, i%2 == 0)
+		}
+	}()
+	for i := 0; i < 200; i++ {
+		if ps := p.get(tok); ps != nil {
+			_ = ps.Enrol
+		}
+	}
+	<-done
+	p.setEnrol(tok, false)
+	if p.get(tok).Enrol {
+		t.Fatal("setEnrol did not change the stored sign-in")
+	}
+	p.dropOperator("op-1")
+	if p.get(tok) != nil {
+		t.Fatal("dropOperator left the pending sign-in")
+	}
+	if passwordFingerprint("a") == passwordFingerprint("b") || passwordFingerprint("a") != passwordFingerprint("a") {
+		t.Fatal("passwordFingerprint does not tell hashes apart")
+	}
+}

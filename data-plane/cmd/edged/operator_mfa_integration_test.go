@@ -287,3 +287,65 @@ func TestIntegrationMFA_NewRecoveryCodesNeedACurrentAuthenticatorCode(t *testing
 		t.Fatalf("new codes audited %d times", n)
 	}
 }
+
+// The code step builds the session from the account as it is THEN, not from the password step's snapshot: roles
+// and must-change changed in between are what the session gets, a password changed in between ends the sign-in,
+// and an administrator's change drops the pending sign-in outright.
+func TestIntegrationMFA_TheCodeStepReloadsTheAccount(t *testing.T) {
+	sf := newSigninAPI(t, "site_admin")
+	ip := testIP()
+	ctx := context.Background()
+	first := sf.login(t, sf.email, sf.password, ip)
+	if first.code != 200 {
+		t.Fatalf("set-up sign-in = %d %s", first.code, first.raw)
+	}
+
+	// Roles and must-change changed behind the pending sign-in.
+	p := sf.passwordStep(t, sf.email, sf.password, ip)
+	if _, err := sf.pool.Exec(ctx, `DELETE FROM operator_roles WHERE operator_id=$1`, sf.operator); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sf.pool.Exec(ctx, `INSERT INTO operator_roles (operator_id, role) VALUES ($1,'front_office_operator')`, sf.operator); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sf.pool.Exec(ctx, `UPDATE operators SET must_change_password=true WHERE id=$1`, sf.operator); err != nil {
+		t.Fatal(err)
+	}
+	r := sf.codeStep(t, p.pending, sf.mfa.codeFor(sf.operator), ip)
+	roles, _ := r.body["roles"].([]any)
+	if r.code != 200 || len(roles) != 1 || roles[0] != "front_office_operator" || r.body["must_change_password"] != true {
+		t.Fatalf("the session was built from the stale snapshot: %d %s", r.code, r.raw)
+	}
+	if _, err := sf.pool.Exec(ctx, `UPDATE operators SET must_change_password=false WHERE id=$1`, sf.operator); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sf.pool.Exec(ctx, `INSERT INTO operator_roles (operator_id, role) VALUES ($1,'site_admin')`, sf.operator); err != nil {
+		t.Fatal(err)
+	}
+
+	// A password changed behind the pending sign-in ends it.
+	p = sf.passwordStep(t, sf.email, sf.password, ip)
+	other, _ := hashPassword("another-password-2026")
+	var old string
+	_ = sf.pool.QueryRow(ctx, `SELECT password_hash FROM operators WHERE id=$1`, sf.operator).Scan(&old)
+	if _, err := sf.pool.Exec(ctx, `UPDATE operators SET password_hash=$2 WHERE id=$1`, sf.operator, other); err != nil {
+		t.Fatal(err)
+	}
+	if r := sf.codeStep(t, p.pending, sf.mfa.codeFor(sf.operator), ip); r.code != 401 || r.cookie != "" {
+		t.Fatalf("a pending sign-in outlived a password change: %d %s", r.code, r.raw)
+	}
+	if _, err := sf.pool.Exec(ctx, `UPDATE operators SET password_hash=$2 WHERE id=$1`, sf.operator, old); err != nil {
+		t.Fatal(err)
+	}
+
+	// An administrator's change drops it: here a role added through the Operators screen.
+	admin := sf.login(t, sf.email, sf.password, ip)
+	p = sf.passwordStep(t, sf.email, sf.password, ip)
+	if r := sf.call(t, "POST", "/operators/"+sf.operator+"/roles", ip, admin.cookie,
+		map[string]any{"role": "front_office_operator", "your_password": sf.password}, nil); r.code != 201 {
+		t.Fatalf("add role = %d %s", r.code, r.raw)
+	}
+	if r := sf.codeStep(t, p.pending, sf.mfa.codeFor(sf.operator), ip); r.code != 401 || r.body["error"] != "signin_expired" {
+		t.Fatalf("a pending sign-in outlived a role change: %d %s", r.code, r.raw)
+	}
+}

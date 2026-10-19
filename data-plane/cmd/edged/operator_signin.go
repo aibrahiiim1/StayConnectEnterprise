@@ -372,7 +372,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	// THE PASSWORD IS ONE OF TWO STEPS (0132): no session yet. The authenticator code opens it (operator_mfa.go).
 	s.beginSecondStep(w, r, ctx, &pendingSignin{OperatorID: id, Email: in.Email, DisplayName: display, Roles: roles,
-		MustChangePassword: mustChange})
+		MustChangePassword: mustChange, PasswordFP: passwordFingerprint(hash)})
 }
 
 func (s *server) setSessionCookie(w http.ResponseWriter, tok string) {
@@ -568,6 +568,7 @@ func (s *server) changeOwnPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	wasForced := sess.MustChangePassword
 	s.sessions.destroyOperator(sess.OperatorID)
+	s.pending.dropOperator(sess.OperatorID)
 	fresh := &session{OperatorID: sess.OperatorID, Email: sess.Email, DisplayName: sess.DisplayName, Roles: sess.Roles,
 		CreatedAt: sess.CreatedAt}
 	s.setSessionCookie(w, s.sessions.create(fresh))

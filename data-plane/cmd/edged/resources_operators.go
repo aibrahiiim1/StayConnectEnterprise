@@ -263,6 +263,7 @@ func (s *server) disableEdgeOperator(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.sessions.destroyOperator(id)
+	s.pending.dropOperator(id) // a password step taken before the change must not complete after it
 	s.audit(r, "operator.disabled", "operator", id, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -322,6 +323,7 @@ func (s *server) setEdgeOperatorPassword(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	s.sessions.destroyOperator(id)
+	s.pending.dropOperator(id) // a password step taken before the change must not complete after it
 	_ = s.throttleClear(ctx, scopeAccount, strings.ToLower(strings.TrimSpace(email)))
 	_ = s.throttleClear(ctx, scopeReauth, id)
 	s.audit(r, "operator.password_reset", "operator", id, map[string]any{
@@ -374,6 +376,7 @@ func (s *server) addEdgeOperatorRole(w http.ResponseWriter, r *http.Request) {
 	}
 	// Cached session roles are stale now; force a re-login for that operator.
 	s.sessions.destroyOperator(id)
+	s.pending.dropOperator(id) // a password step taken before the change must not complete after it
 	s.audit(r, "operator.role_added", "operator", id, map[string]any{"role": in.Role})
 	writeJSON(w, http.StatusCreated, map[string]string{"operator_id": id, "role": in.Role})
 }
@@ -416,6 +419,7 @@ func (s *server) removeEdgeOperatorRole(w http.ResponseWriter, r *http.Request) 
 	}
 	// Permissions shrank — kill any cached sessions so the change bites now.
 	s.sessions.destroyOperator(id)
+	s.pending.dropOperator(id) // a password step taken before the change must not complete after it
 	s.audit(r, "operator.role_removed", "operator", id, map[string]any{"role": role})
 	w.WriteHeader(http.StatusNoContent)
 }

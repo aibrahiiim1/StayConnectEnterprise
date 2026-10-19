@@ -30,7 +30,9 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -169,15 +171,26 @@ func (m scdMFA) Reset(ctx context.Context, operatorID string) (bool, error) {
 
 // ----- the "password accepted" state --------------------------------------------------------------------------
 
+// pendingSignin is what the password step proved. Roles, display name and must-change are NOT trusted at the code
+// step: up to five minutes may pass, in which an administrator can change the account, so the code step reloads
+// them (currentOperator). PasswordFP is a fingerprint of the password hash the password was checked against, so
+// a password changed in between ends the pending sign-in even if nothing dropped it.
 type pendingSignin struct {
 	OperatorID         string
 	Email              string
 	DisplayName        string
 	Roles              []string
 	MustChangePassword bool
+	PasswordFP         string
 	// Enrol: no authenticator is confirmed yet; the second step sets one up.
 	Enrol   bool
 	Expires time.Time
+}
+
+// passwordFingerprint identifies a stored password hash without keeping it.
+func passwordFingerprint(hash string) string {
+	sum := sha256.Sum256([]byte(hash))
+	return hex.EncodeToString(sum[:])
 }
 
 type pendingSignins struct {
@@ -205,6 +218,8 @@ func (p *pendingSignins) create(ps *pendingSignin) string {
 	return tok
 }
 
+// get returns a COPY of the pending sign-in: handlers on concurrent requests must not share one struct. Changes
+// go through setEnrol, under the lock.
 func (p *pendingSignins) get(tok string) *pendingSignin {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -213,7 +228,16 @@ func (p *pendingSignins) get(tok string) *pendingSignin {
 		delete(p.m, tok)
 		return nil
 	}
-	return ps
+	cp := *ps
+	return &cp
+}
+
+func (p *pendingSignins) setEnrol(tok string, enrol bool) {
+	p.mu.Lock()
+	if ps, ok := p.m[tok]; ok {
+		ps.Enrol = enrol
+	}
+	p.mu.Unlock()
 }
 
 func (p *pendingSignins) drop(tok string) {
@@ -280,7 +304,7 @@ func (s *server) beginSecondStep(w http.ResponseWriter, r *http.Request, ctx con
 
 // POST /auth/login/enrol: the QR code for an operator who has no authenticator yet.
 func (s *server) loginEnrol(w http.ResponseWriter, r *http.Request) {
-	_, ps, ok := s.pendingFrom(w, r)
+	tok, ps, ok := s.pendingFrom(w, r)
 	if !ok {
 		return
 	}
@@ -293,7 +317,7 @@ func (s *server) loginEnrol(w http.ResponseWriter, r *http.Request) {
 	secret, uri, err := s.mfa.Enrol(ctx, ps.OperatorID, ps.Email)
 	switch {
 	case errors.Is(err, errMFAAlreadyEnrolled):
-		ps.Enrol = false
+		s.pending.setEnrol(tok, false)
 		jsonErr(w, http.StatusConflict, "already_enrolled", "An authenticator is already set up. Enter its code.")
 		return
 	case err != nil:
@@ -367,14 +391,21 @@ func (s *server) loginCode(w http.ResponseWriter, r *http.Request) {
 	if err := s.throttleClear(ctx, scopeMFA, ps.OperatorID); err != nil {
 		slog.Warn("could not clear the code counter", "err", err)
 	}
-	// The account may have been disabled while the code was being typed.
-	var status string
-	if err := s.db.QueryRow(ctx, `SELECT status FROM operators WHERE id = $1`, ps.OperatorID).Scan(&status); err != nil || status != "active" {
+	// THE ACCOUNT AS IT IS NOW, not as the password step saw it: it may have been disabled, given other roles or a
+	// new password while the code was being typed.
+	cur, err := s.currentOperator(ctx, ps)
+	if err != nil {
 		s.pending.drop(tok)
 		s.clearPendingCookie(w)
+		if errors.Is(err, errNoRoles) {
+			s.audit(r, "operator.login_failed", "operator", ps.OperatorID, map[string]any{"reason": "no_roles", "source_ip": ip})
+			jsonErr(w, http.StatusForbidden, "forbidden", "no roles assigned")
+			return
+		}
 		jsonErr(w, http.StatusUnauthorized, "unauthenticated", "invalid credentials")
 		return
 	}
+	ps = cur
 	s.pending.drop(tok)
 	s.clearPendingCookie(w)
 	sess := &session{OperatorID: ps.OperatorID, Email: ps.Email, DisplayName: ps.DisplayName, Roles: ps.Roles,
@@ -398,6 +429,32 @@ func (s *server) loginCode(w http.ResponseWriter, r *http.Request) {
 		out["recovery_codes_left"] = left
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+var errNoRoles = errors.New("no roles assigned")
+
+// currentOperator reloads what the session is made from when the code step completes. It refuses an account
+// that is no longer active, or whose password changed since the password step; errNoRoles when it has none left.
+func (s *server) currentOperator(ctx context.Context, ps *pendingSignin) (*pendingSignin, error) {
+	var display, hash, status string
+	var mustChange bool
+	if err := s.db.QueryRow(ctx, `SELECT COALESCE(display_name,''), COALESCE(password_hash,''), status, must_change_password
+		  FROM operators WHERE id = $1`, ps.OperatorID).Scan(&display, &hash, &status, &mustChange); err != nil {
+		return nil, err
+	}
+	if status != "active" || hash == "" || passwordFingerprint(hash) != ps.PasswordFP {
+		return nil, errors.New("the account changed since the password step")
+	}
+	roles, err := s.loadRoles(ctx, ps.OperatorID)
+	if err != nil {
+		return nil, err
+	}
+	if len(roles) == 0 {
+		return nil, errNoRoles
+	}
+	cur := *ps
+	cur.DisplayName, cur.Roles, cur.MustChangePassword = display, roles, mustChange
+	return &cur, nil
 }
 
 // ----- the operator's own second step (Your account > Two-step sign-in) ----------------------------------------
