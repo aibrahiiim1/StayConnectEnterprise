@@ -28,11 +28,11 @@ func TestRetentionAppliesCentralPeriods(t *testing.T) {
 
 	// Appliances: one retired 7 years ago, one retired a year ago, one live.
 	oldApp := exec(`INSERT INTO appliances (serial, lifecycle_state, wan_mac, lan_mac, hostname, last_public_ip, updated_at)
-        VALUES ('RET-OLD','decommissioned','02:00:00:00:00:01','02:00:00:00:00:02','old-box','203.0.113.9',`+ago("7 years")+`)`)
+        VALUES ('RET-OLD','decommissioned','02:00:00:00:00:01','02:00:00:00:00:02','old-box','203.0.113.9',` + ago("7 years") + `)`)
 	newApp := exec(`INSERT INTO appliances (serial, lifecycle_state, wan_mac, hostname, updated_at)
-        VALUES ('RET-NEW','revoked','02:00:00:00:00:03','new-box',`+ago("1 year")+`)`)
+        VALUES ('RET-NEW','revoked','02:00:00:00:00:03','new-box',` + ago("1 year") + `)`)
 	liveApp := exec(`INSERT INTO appliances (serial, lifecycle_state, wan_mac, updated_at)
-        VALUES ('LIVE-1','assigned','02:00:00:00:00:04',`+ago("8 years")+`)`)
+        VALUES ('LIVE-1','assigned','02:00:00:00:00:04',` + ago("8 years") + `)`)
 
 	// History on the live appliance.
 	exec(`INSERT INTO appliance_lifecycle_events (appliance_id, to_state, actor, source_ip, created_at)
