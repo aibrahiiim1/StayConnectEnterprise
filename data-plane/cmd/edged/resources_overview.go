@@ -531,6 +531,9 @@ func (s *server) reportsOverview(w http.ResponseWriter, r *http.Request) {
 			attIn.PortalHTTPS = &c
 		}
 	}
+	if canDiag {
+		attIn.DefaultDBPassword = s.dbDefaultPassword.inUse(ctx)
+	}
 	out.Attention = deriveAttention(attIn)
 	writeJSON(w, http.StatusOK, out)
 }

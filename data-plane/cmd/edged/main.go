@@ -78,10 +78,12 @@ func envOr(k, d string) string {
 }
 
 type server struct {
-	db       *pgxpool.Pool
-	scd      *scdClient
-	netd     *netdClient
-	sessions *sessionStore
+	db *pgxpool.Pool
+	// dbDefaultPassword warns while the database accepts its default superuser password (GDPR audit C5).
+	dbDefaultPassword *defaultDBPasswordCheck
+	scd               *scdClient
+	netd              *netdClient
+	sessions          *sessionStore
 	// pending holds the "password accepted, code not yet entered" sign-ins; mfa is the authenticator service
 	// (operator_mfa.go, 0132).
 	pending  pendingSignins
@@ -216,15 +218,16 @@ func main() {
 	}
 
 	s := &server{
-		db:       pool,
-		scd:      newSCDClient(c.SCDSocket),
-		netd:     newNetdClient(envOr("EDGED_NETD_SOCKET", "/run/stayconnect/netd.sock")),
-		sessions: newSessionStore(sessionStoreCap),
-		tenantID: c.TenantID,
-		siteID:   c.SiteID,
-		secure:   c.CookieSecure,
-		surfaces: newMountedSurfaces(),
-		modCache: &moduleCache{},
+		dbDefaultPassword: newDefaultDBPasswordCheck(pool.Config().ConnConfig.Host, pool.Config().ConnConfig.Port),
+		db:                pool,
+		scd:               newSCDClient(c.SCDSocket),
+		netd:              newNetdClient(envOr("EDGED_NETD_SOCKET", "/run/stayconnect/netd.sock")),
+		sessions:          newSessionStore(sessionStoreCap),
+		tenantID:          c.TenantID,
+		siteID:            c.SiteID,
+		secure:            c.CookieSecure,
+		surfaces:          newMountedSurfaces(),
+		modCache:          &moduleCache{},
 	}
 	s.mfa = scdMFA{scd: s.scd, db: pool}
 

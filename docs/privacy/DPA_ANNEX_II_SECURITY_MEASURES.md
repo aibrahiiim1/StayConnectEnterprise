@@ -49,6 +49,11 @@ The annex has three parts:
   only.
 - **Services run apart:** separate service accounts, a database role per service with only the rights it needs
   (no superuser, no row-level-security bypass), and an internal socket that admits only the expected service.
+- **Database access:** the database listens on the appliance only. A new appliance gets a random superuser
+  password. An older appliance may still have the default one; the Admin Console warns until it is changed, and
+  the Processor changes it on the appliances it maintains.
+- **Database log:** the database logs errors without the statement or the values that caused them, and its
+  container log is limited by size (3 files of 10 MB).
 - **Offline operation:** guests keep being admitted from the last verified copy of the PMS data when the PMS
   link drops.
 

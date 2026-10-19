@@ -19,6 +19,9 @@ services:
       # for development hosts and for appliances whose cluster was initialised before it (audit N-10).
       POSTGRES_PASSWORD: ${STAYCONNECT_PG_PASSWORD:-stayconnect}
       POSTGRES_DB: stayconnect
+    # The database's own log keeps no guest data (GDPR audit 2026-10-19, C5): an error is logged without the
+    # statement that caused it and without its DETAIL line, which can carry the values of a duplicate key.
+    command: ["postgres", "-c", "log_min_error_statement=panic", "-c", "log_error_verbosity=terse"]
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
@@ -28,7 +31,13 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-    logging: *default-logging
+    # Smaller than the other containers: the docker log is outside the appliance's log retention, so it is
+    # bounded by size alone (GDPR audit C5).
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
 
   redis:
     image: redis:7-alpine
