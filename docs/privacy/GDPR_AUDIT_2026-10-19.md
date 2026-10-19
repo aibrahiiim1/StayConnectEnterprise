@@ -188,6 +188,8 @@ confirm genuine guests (2026-10-19):
 
 | Item | Status |
 |---|---|
+| B1 | **Fixed** (migration 0137): the export also carries the stay's VIP flag, travel agent, rate plan, PMS guest ids, linked stays and PMS events; verification grants and sign-in restrictions; remembered devices and post-stay access; network sightings and staff actions on devices; usage samples; payments, refunds and room charges; the device address and network of sign-in attempts; the address and browser codes were requested from; and audit details. Format `guest-data-export/2` |
+| B2 | **Fixed** (migration 0137): erasure follows stay links, covers PMS events that never resolved to the stay, refuses (instead of skipping) while a PMS event is unprocessed or a device is restricted, and erases a stay the PMS left open after its departure; retention anonymises such a stay too. Still open: retention skips unprocessed PMS events, because the PMS inbox guard keeps them intact. That needs a Product-Owner decision |
 | B6 | **Fixed:** the search text and reasons in `guest_data.*` entries are shown only to holders of `guest-data-rights`; other roles see that the read happened, and who did it |
 | B7 | **Fixed:** adding, disabling or resetting a staff account, and adding or removing a role, ask for the administrator's own password |
 | B8 | **Fixed:** what a guest typed is revealed only after the operator confirms their password (`POST /guest-signin-credentials/{id}`) |

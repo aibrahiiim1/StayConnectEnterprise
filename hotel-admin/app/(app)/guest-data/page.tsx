@@ -40,9 +40,11 @@ const KIND_LABELS: Record<Kind, string> = {
 
 // Why an erasure was refused, in the words a front office understands.
 const LIVE_REASONS: Record<string, string> = {
-  pms_open: "the PMS still shows this stay as reserved or in-house; the PMS would copy the guest straight back",
+  pms_open: "the PMS still shows this stay as reserved or in-house and its departure date has not passed; the PMS would copy the guest straight back",
+  pms_pending: "a PMS message about this stay has not been processed yet; try again once it has (see PMS activity)",
   access_live: "the guest's internet access has not ended yet",
   online: "one of the guest's devices is online right now",
+  signin_restricted: "one of the guest's devices is under a sign-in restriction; release it on Guest sign-in attempts first",
 };
 
 function saveJSON(doc: unknown) {

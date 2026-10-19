@@ -105,7 +105,7 @@ func TestIntegration_GuestDataRights_FindExportErase(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
 		t.Fatalf("export is not JSON: %v", err)
 	}
-	if doc.Format != "stayconnect.guest-data-export/1" || len(doc.Accounts) != 1 || doc.Accounts[0].Username != email ||
+	if doc.Format != "stayconnect.guest-data-export/2" || len(doc.Accounts) != 1 || doc.Accounts[0].Username != email ||
 		doc.Accounts[0].Notes != "room 101 guest" || len(doc.Devices) != 1 || len(doc.Sessions) != 1 || len(doc.Access) != 1 ||
 		len(doc.Codes) != 1 || len(doc.Activity) != 1 || len(doc.Attempts) != 1 {
 		t.Fatalf("export is incomplete: %s", raw)
@@ -233,6 +233,124 @@ func TestIntegration_GuestDataRights_ErasesAStay(t *testing.T) {
 	}
 	if !strings.HasPrefix(reservation, "anon-") || names != "" || payload != `{"anonymised": true}` || status != "CHECKED_OUT" {
 		t.Fatalf("stay after erasure: %s | %s | %s | %s", reservation, names, payload, status)
+	}
+}
+
+// GDPR audit B1 and B2 (migration 0137): the export carries what the stay's PMS records and the guest's
+// devices hold; erasure follows a room move, covers a PMS event that never resolved to the stay, refuses while
+// an event is still waiting or a device is restricted, and erases a stay the PMS forgot to close.
+func TestIntegration_GuestDataRights_ExportAndErasureCoverEverything(t *testing.T) {
+	f := newAPI(t)
+	ctx := context.Background()
+	sfx := fmt.Sprint(time.Now().UnixNano())
+	req := func(kind, id string) map[string]any {
+		return map[string]any{"kind": kind, "id": id, "reason": "guest asked in writing", "password": f.password}
+	}
+	inStay := func(sql string, args ...any) {
+		t.Helper()
+		if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, sql, args...)
+			return err
+		}); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	// An event the PMS sent that never resolved to a stay, naming the reservation.
+	orphan := func(res, status string) string {
+		t.Helper()
+		var id string
+		if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
+			if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.stay_events(tenant_id,site_id,pms_interface_id,external_event_identity,
+				  event_type,processing_status,payload)
+				SELECT $1,$2,s.pms_interface_id,'EVO-'||$3,'GUEST_CHANGE','PENDING',jsonb_build_object('reservation',$3::text,'last_name','Lovelace')
+				  FROM iam_v2.stays s WHERE s.external_reservation_id=$3 RETURNING id::text`, f.tenant, f.site, res).Scan(&id); err != nil {
+				return err
+			}
+			if status == "PENDING" {
+				return nil
+			}
+			_, err := tx.Exec(ctx, `UPDATE iam_v2.stay_events SET processing_status=$2, processed_at=now(),
+				review_code=CASE WHEN $2='MANUAL_REVIEW' THEN 'NO_STAY_FOR_RESERVATION' END WHERE id=$1::uuid`, id, status)
+			return err
+		}); err != nil {
+			t.Fatalf("seed orphan event: %v", err)
+		}
+		return id
+	}
+
+	// A checked-out stay, continued at another PMS (a transfer), with an event the PMS sent that never resolved.
+	first, second := "R-MOVE-A-"+sfx, "R-MOVE-B-"+sfx
+	a := seedGuestDataStay(t, f, first, "CHECKED_OUT")
+	b := seedGuestDataStay(t, f, second, "CHECKED_OUT")
+	inStay(`UPDATE iam_v2.stays SET vip=true, travel_agent='Grand Tours', rate_plan='BAR' WHERE id=$1::uuid`, a)
+	if err := controlled(ctx, f.pool, nil, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT iam_v2.p5_begin_controlled_operation('entitlement_transfer')`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO iam_v2.stay_links(tenant_id,site_id,from_stay,to_stay,reason)
+			VALUES ($1,$2,$3::uuid,$4::uuid,'CROSS_PMS_TRANSFER')`, f.tenant, f.site, a, b)
+		return err
+	}); err != nil {
+		t.Fatalf("seed stay link: %v", err)
+	}
+	ev := orphan(first, "MANUAL_REVIEW")
+
+	st, raw := f.doRaw(t, "POST", "/guest-data-rights/export", req("stay", a))
+	if st != 200 {
+		t.Fatalf("export = %d %s", st, raw)
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"remembered_devices", "pms_events", "post_stay_access", "payments", "refunds_that_ended_access",
+		"room_charges", "sign_in_restrictions", "verification_access"} {
+		if _, ok := doc[key]; !ok {
+			t.Errorf("the export has no %q", key)
+		}
+	}
+	var stays []map[string]any
+	var events []map[string]any
+	_ = json.Unmarshal(doc["hotel_stays"], &stays)
+	_ = json.Unmarshal(doc["pms_events"], &events)
+	if len(stays) != 2 {
+		t.Fatalf("the linked stay is not exported: %s", doc["hotel_stays"])
+	}
+	if !strings.Contains(string(doc["hotel_stays"]), `"travel_agent": "Grand Tours"`) || !strings.Contains(string(doc["hotel_stays"]), `"pms_guest_id"`) {
+		t.Fatalf("the stay's PMS details are missing: %s", doc["hotel_stays"])
+	}
+	if len(events) != 3 || !strings.Contains(string(doc["pms_events"]), "Lovelace") {
+		t.Fatalf("pms events = %s, want both stays' events and the unresolved one", doc["pms_events"])
+	}
+
+	// A waiting event refuses the erasure, and says why.
+	c := seedGuestDataStay(t, f, "R-WAIT-"+sfx, "CHECKED_OUT")
+	orphan("R-WAIT-"+sfx, "PENDING")
+	st, body := f.do(t, "POST", "/guest-data-rights/erase", req("stay", c))
+	if live, _ := body["live"].([]any); st != 409 || fmt.Sprint(live) != "[pms_pending]" {
+		t.Fatalf("erasing with a waiting PMS event = %d %v", st, body)
+	}
+
+	// A stay the PMS left in-house after its departure is erased; one departing tomorrow is not.
+	stale := seedGuestDataStay(t, f, "R-STALE-"+sfx, "IN_HOUSE")
+	inStay(`UPDATE iam_v2.stays SET arrival=current_date - 9, departure=current_date - 5 WHERE id=$1::uuid`, stale)
+	if st, body := f.do(t, "POST", "/guest-data-rights/erase", req("stay", stale)); st != 200 {
+		t.Fatalf("erasing a stay the PMS never closed = %d %v", st, body)
+	}
+
+	// Erasing the first stay erases the stay it continued as, and the unresolved event.
+	st, body = f.do(t, "POST", "/guest-data-rights/erase", req("stay", a))
+	if st != 200 {
+		t.Fatalf("erase = %d %v", st, body)
+	}
+	if counts, _ := body["counts"].(map[string]any); counts["hotel_stays"] != float64(2) || counts["pms_events"] != float64(3) {
+		t.Fatalf("erase counts = %v", body)
+	}
+	var resB, payload string
+	_ = f.pool.QueryRow(ctx, `SELECT external_reservation_id FROM iam_v2.stays WHERE id=$1`, b).Scan(&resB)
+	_ = f.pool.QueryRow(ctx, `SELECT payload::text FROM iam_v2.stay_events WHERE id=$1`, ev).Scan(&payload)
+	if !strings.HasPrefix(resB, "anon-") || payload != `{"anonymised": true}` {
+		t.Fatalf("after erasure: linked stay %q, unresolved event %s", resB, payload)
 	}
 }
 

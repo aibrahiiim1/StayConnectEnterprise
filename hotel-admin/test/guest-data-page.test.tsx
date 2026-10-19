@@ -51,7 +51,7 @@ describe("Guest data requests", () => {
   });
 
   it("exports the chosen record with a reason and the password", async () => {
-    post.mockResolvedValue({ format: "stayconnect.guest-data-export/1" });
+    post.mockResolvedValue({ format: "stayconnect.guest-data-export/2" });
     await renderPage();
     fireEvent.click(screen.getByRole("button", { name: /export/i }));
     const dialog = await screen.findByRole("dialog");

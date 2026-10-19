@@ -130,6 +130,16 @@ func TestIntegration_DataRetention_AnonymisesOnlyWhatOutlivedTheRetention(t *tes
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	oldStay := seedStay("R-OLD-"+suffix, "101", 60)
 	recentStay := seedStay("R-NEW-"+suffix, "102", 5)
+	// GDPR audit B2 (0137): a stay the PMS never closed is anonymised once its departure is past the retention;
+	// one still in-house with a departure to come is not.
+	forgotten := seedGuestDataStay(t, f, "R-FORGOT-"+suffix, "IN_HOUSE")
+	inHouse := seedGuestDataStay(t, f, "R-HERE-"+suffix, "IN_HOUSE")
+	if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE iam_v2.stays SET arrival = current_date - 70, departure = current_date - 60 WHERE id=$1::uuid`, forgotten)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	// Migration 0066's rollback copy of the names and room, for both stays (GDPR audit A6, migration 0135).
 	if _, err := f.pool.Exec(ctx, `INSERT INTO iam_v2.backfill_0066_identity_text (kind,row_id,tenant_id,site_id,prior_first_name,prior_last_name)
 		SELECT 'stay_guest', g.id, g.tenant_id, g.site_id, 'Ada', 'Lovelace' FROM iam_v2.stay_guests g WHERE g.stay_id = ANY($1::uuid[]);
@@ -263,6 +273,8 @@ func TestIntegration_DataRetention_AnonymisesOnlyWhatOutlivedTheRetention(t *tes
 	expect("old stay room", str(`SELECT normalized_room_number FROM iam_v2.stays WHERE id=$1`, oldStay), "<null>")
 	expect("old stay travel agent", str(`SELECT travel_agent FROM iam_v2.stays WHERE id=$1`, oldStay), "<null>")
 	expect("old stay status", str(`SELECT status FROM iam_v2.stays WHERE id=$1`, oldStay), "CHECKED_OUT")
+	prefixed("forgotten in-house stay", str(`SELECT external_reservation_id FROM iam_v2.stays WHERE id=$1`, forgotten), "anon-")
+	expect("current in-house stay", str(`SELECT external_reservation_id FROM iam_v2.stays WHERE id=$1`, inHouse), "R-HERE-"+suffix)
 	expect("old stay departure kept", str(`SELECT (departure IS NOT NULL)::text FROM iam_v2.stays WHERE id=$1`, oldStay), "true")
 	expect("old guest names", str(`SELECT concat_ws(',',first_name_norm,last_name_norm,display_name,external_guest_id) FROM iam_v2.stay_guests WHERE stay_id=$1`, oldStay), "")
 	expect("old event payload", str(`SELECT payload::text FROM iam_v2.stay_events WHERE stay_id=$1`, oldStay), `{"anonymised": true}`)
