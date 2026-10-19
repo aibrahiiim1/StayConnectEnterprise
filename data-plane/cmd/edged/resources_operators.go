@@ -71,6 +71,26 @@ func (s *server) confirmYourPassword(w http.ResponseWriter, r *http.Request, you
 	return true
 }
 
+// operatorIDParam is the {id} of an /operators/{id}/... route in canonical form (lower-case, hyphenated), or a
+// 400. Every "not yourself" check compares it with the session's operator id, which the database wrote in that
+// form: an upper-case or braced spelling of one's own id is the same row to Postgres, and compared raw it slipped
+// past "cannot disable / reset / demote yourself".
+func operatorIDParam(w http.ResponseWriter, r *http.Request) (string, bool) {
+	id, ok := canonicalUUID(chi.URLParam(r, "id"))
+	if !ok {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "invalid operator id")
+	}
+	return id, ok
+}
+
+// canonicalUUID accepts only the hyphenated 8-4-4-4-12 form and returns it lower-case.
+func canonicalUUID(s string) (string, bool) {
+	if !uuidRe.MatchString(s) {
+		return "", false
+	}
+	return strings.ToLower(s), true
+}
+
 func (s *server) loadEdgeOperator(ctx context.Context, id string) (*edgeOperator, error) {
 	var op edgeOperator
 	err := s.db.QueryRow(ctx, `
@@ -212,7 +232,10 @@ func (s *server) createEdgeOperator(w http.ResponseWriter, r *http.Request) {
 // disableEdgeOperator soft-deletes: status='disabled' and every live session
 // is destroyed. Self-disable is refused to avoid locking yourself out.
 func (s *server) disableEdgeOperator(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id, ok := operatorIDParam(w, r)
+	if !ok {
+		return
+	}
 	if sess := sessFrom(r.Context()); sess != nil && sess.OperatorID == id {
 		jsonErr(w, http.StatusConflict, "conflict", "cannot disable yourself")
 		return
@@ -250,7 +273,10 @@ func (s *server) disableEdgeOperator(w http.ResponseWriter, r *http.Request) {
 // choose their own password at the next sign-in. An operator changes their OWN password at POST
 // /edge/v1/auth/password, which asks for the current one; resetting yourself here would skip that.
 func (s *server) setEdgeOperatorPassword(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id, ok := operatorIDParam(w, r)
+	if !ok {
+		return
+	}
 	var in struct {
 		Password      string `json:"password"`
 		RequireChange bool   `json:"require_change"`
@@ -305,7 +331,10 @@ func (s *server) setEdgeOperatorPassword(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *server) addEdgeOperatorRole(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id, ok := operatorIDParam(w, r)
+	if !ok {
+		return
+	}
 	var in struct {
 		Role         string `json:"role"`
 		YourPassword string `json:"your_password"`
@@ -350,7 +379,10 @@ func (s *server) addEdgeOperatorRole(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) removeEdgeOperatorRole(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id, ok := operatorIDParam(w, r)
+	if !ok {
+		return
+	}
 	role := chi.URLParam(r, "role")
 	if !isValidEdgeRole(role) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "invalid role")

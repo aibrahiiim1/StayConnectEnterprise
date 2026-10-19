@@ -40,7 +40,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -508,7 +507,10 @@ func isTOTPCode(code string) bool {
 // sign-in. Every session of theirs ends. Not for one's own account: a stolen session plus the password must not
 // be enough to remove the second factor.
 func (s *server) resetEdgeOperatorMFA(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id, ok := operatorIDParam(w, r)
+	if !ok {
+		return
+	}
 	var in struct {
 		Password string `json:"password"`
 		Reason   string `json:"reason"`
