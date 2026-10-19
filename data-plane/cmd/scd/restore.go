@@ -30,6 +30,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -283,6 +284,10 @@ func (s *server) backupRestore(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if msg, isKey := keyProblem(err); isKey {
 			httpErr(w, http.StatusBadRequest, msg)
+			return
+		}
+		if errors.Is(err, errNotSQLBackup) {
+			httpErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		httpErr(w, http.StatusInternalServerError, "the backup could not be opened: "+err.Error())

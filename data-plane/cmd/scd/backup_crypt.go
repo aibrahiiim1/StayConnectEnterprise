@@ -114,33 +114,76 @@ func (nopCloser) Close() error { return nil }
 // it is backupcrypt.ErrWrongKey.
 var errNeedKey = errors.New("this backup is encrypted: provide a backup key holder's key to open it")
 
-func openBackup(path, identity string) (io.Reader, io.Closer, error) {
+// errNotSQLBackup is a backup that opened but is a pg_dump custom-format archive -- the nightly backup's shape
+// -- rather than the gzip SQL text verify and restore load with psql. Feeding one to psql would fail late and
+// obscurely, so it is refused up front and by name.
+var errNotSQLBackup = errors.New("this is a nightly (pg_dump custom-format) backup, not a database backup taken on the Backups screen: it cannot be loaded here")
+
+// backupFormat is what a backup holds once any encryption is removed. The two writers on this appliance do not
+// agree: an on-demand backup is gzip SQL text (writeDump), the nightly one is `pg_dump -Fc` encrypted as it
+// stands (stayconnect-site-backup.sh). The bytes, not the name, say which.
+type backupFormat int
+
+const (
+	formatGzipSQL  backupFormat = iota + 1 // gzip magic 1f 8b
+	formatPGCustom                         // "PGDMP"
+)
+
+// openBackupStream decrypts a backup when it is encrypted and reports which format it holds. A gzip backup is
+// returned decompressed; a custom-format archive is returned as it is. Anything else is an error.
+func openBackupStream(path, identity string) (io.Reader, backupFormat, io.Closer, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, nil, err
+		return nil, 0, nil, err
 	}
 	var src io.Reader = f
 	if strings.HasSuffix(path, backupcrypt.Suffix) {
 		if strings.TrimSpace(identity) == "" {
 			f.Close()
-			return nil, nil, errNeedKey
+			return nil, 0, nil, errNeedKey
 		}
 		id, err := backupcrypt.ParseIdentity(identity)
 		if err != nil {
 			f.Close()
-			return nil, nil, err
+			return nil, 0, nil, err
 		}
 		if src, err = backupcrypt.Decrypt(f, id); err != nil {
 			f.Close()
-			return nil, nil, err
+			return nil, 0, nil, err
 		}
 	}
-	gz, err := gzip.NewReader(bufio.NewReader(src))
-	if err != nil {
-		f.Close()
-		return nil, nil, fmt.Errorf("the backup is not a readable archive: %w", err)
+	br := bufio.NewReader(src)
+	magic, err := br.Peek(5)
+	switch {
+	case len(magic) >= 2 && magic[0] == 0x1f && magic[1] == 0x8b:
+		gz, err := gzip.NewReader(br)
+		if err != nil {
+			f.Close()
+			return nil, 0, nil, fmt.Errorf("the backup is not a readable archive: %w", err)
+		}
+		return gz, formatGzipSQL, f, nil
+	case len(magic) == 5 && string(magic) == "PGDMP":
+		return br, formatPGCustom, f, nil
 	}
-	return gz, f, nil
+	f.Close()
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, 0, nil, fmt.Errorf("the backup could not be read: %w", err)
+	}
+	return nil, 0, nil, errors.New("the backup is not a readable archive: it is neither gzip SQL nor a pg_dump archive")
+}
+
+// openBackup is openBackupStream for the callers that load SQL text with psql (verify, restore): a nightly
+// custom-format archive is refused with errNotSQLBackup rather than misread.
+func openBackup(path, identity string) (io.Reader, io.Closer, error) {
+	src, format, closer, err := openBackupStream(path, identity)
+	if err != nil {
+		return nil, nil, err
+	}
+	if format != formatGzipSQL {
+		closer.Close()
+		return nil, nil, errNotSQLBackup
+	}
+	return src, closer, nil
 }
 
 // keyProblem reports whether err is about the key rather than the backup, and says so in the operator's terms.
@@ -174,7 +217,8 @@ func loadBackupInto(ctx context.Context, path, identity, db string) ([]byte, err
 // ---------------------------------------------------------------------------- the restore test ----------
 
 // backupKeyTest proves the hotel still holds a working key: the newest encrypted backup on the appliance is
-// opened with the key supplied and its first bytes are decompressed. Nothing is loaded or kept. It answers
+// opened with the key supplied and its first bytes are read -- decompressed for an on-demand gzip backup, as
+// they stand for a nightly pg_dump archive, whose "PGDMP" header is itself the proof it decrypted correctly. Nothing is loaded or kept. It answers
 // which holder the key belongs to (its public key) so edged can record the test against that holder.
 func (s *server) backupKeyTest(w http.ResponseWriter, r *http.Request) {
 	var in struct {
@@ -195,7 +239,7 @@ func (s *server) backupKeyTest(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusConflict, "there is no encrypted backup on this appliance yet: take a backup first, then test the key")
 		return
 	}
-	src, closer, err := openBackup(path, id.String())
+	src, _, closer, err := openBackupStream(path, id.String())
 	if err != nil {
 		if msg, ok := keyProblem(err); ok {
 			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "backup": filepath.Base(path), "detail": msg})

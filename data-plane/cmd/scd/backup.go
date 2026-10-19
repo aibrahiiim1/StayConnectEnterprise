@@ -149,6 +149,9 @@ func (s *server) backupVerify(w http.ResponseWriter, r *http.Request) {
 		// tells an operator nothing and sent me looking in the wrong place. The first ERROR/FATAL line is the
 		// cause; the raw error is logged either way.
 		detail := firstProblem(string(out))
+		if len(out) == 0 {
+			detail = err.Error() // refused before psql ran, e.g. errNotSQLBackup
+		}
 		slog.Error("backup verification load failed", "err", err, "detail", detail)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok": false, "tables": 0, "duration": time.Since(started).Round(time.Second).String(),

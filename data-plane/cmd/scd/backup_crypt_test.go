@@ -173,3 +173,72 @@ func TestBackupKeyTestOpensTheNewestEncryptedBackup(t *testing.T) {
 		t.Fatalf("no key = %d", code)
 	}
 }
+
+// THE NIGHTLY BACKUP IS NOT GZIP. stayconnect-site-backup.sh encrypts a raw `pg_dump -Fc` stream, so when the
+// newest encrypted backup is a nightly one the key test must still answer ok for the holder's key -- it used to
+// gzip-decode it and answer 500. Verify and restore, which load SQL text with psql, refuse it by name.
+func TestBackupKeyTestAcceptsANightlyCustomFormatDump(t *testing.T) {
+	a, b := t.TempDir(), t.TempDir()
+	oldA, oldB := scdBackupDir, nightlyBackupDir
+	scdBackupDir, nightlyBackupDir = a, b
+	defer func() { scdBackupDir, nightlyBackupDir = oldA, oldB }()
+	secret, public, _ := backupcrypt.GenerateKey()
+	outsider, _, _ := backupcrypt.GenerateKey()
+	rs, _ := backupcrypt.ParseRecipients([]string{public})
+
+	// An older on-demand gzip backup, and a newer nightly custom-format dump.
+	fa, _ := os.Create(filepath.Join(a, "db-20261016T020000Z.sql.gz.age"))
+	wa, _ := backupcrypt.Encrypt(fa, rs)
+	gz := gzip.NewWriter(wa)
+	io.WriteString(gz, "CREATE TABLE guests();\n")
+	gz.Close()
+	wa.Close()
+	fa.Close()
+	nightly := filepath.Join(b, "site-20261017-020000.dump.age")
+	fn, _ := os.Create(nightly)
+	wn, _ := backupcrypt.Encrypt(fn, rs)
+	io.WriteString(wn, "PGDMP\x01\x0e\x00\x04\x08\x01\x01\x01"+strings.Repeat("\x00", 200))
+	wn.Close()
+	fn.Close()
+	future := t0().AddDate(10, 0, 0)
+	os.Chtimes(nightly, future, future)
+	if got := newestEncryptedBackup(); got != nightly {
+		t.Fatalf("newest = %q, want the nightly dump", got)
+	}
+
+	srv := &server{}
+	call := func(identity string) (int, map[string]any) {
+		body, _ := json.Marshal(map[string]string{"identity": identity})
+		rec := httptest.NewRecorder()
+		srv.backupKeyTest(rec, httptest.NewRequest(http.MethodPost, "/v1/backup/key-test", bytes.NewReader(body)))
+		var out map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec.Code, out
+	}
+	if code, out := call(secret); code != 200 || out["ok"] != true || out["backup"] != filepath.Base(nightly) || out["public_key"] != public {
+		t.Fatalf("the holder's key on a nightly dump = %d %v", code, out)
+	}
+	if code, out := call(outsider); code != 200 || out["ok"] != false {
+		t.Fatalf("another key on a nightly dump = %d %v", code, out)
+	}
+
+	// The SQL loaders never misread it.
+	if _, _, err := openBackup(nightly, secret); !errors.Is(err, errNotSQLBackup) {
+		t.Fatalf("openBackup on a nightly dump = %v, want errNotSQLBackup", err)
+	}
+	if _, err := loadBackupInto(t.Context(), nightly, secret, "nowhere"); !errors.Is(err, errNotSQLBackup) {
+		t.Fatalf("loadBackupInto on a nightly dump = %v, want errNotSQLBackup", err)
+	}
+	if _, format, c, err := openBackupStream(nightly, secret); err != nil || format != formatPGCustom {
+		t.Fatalf("openBackupStream on a nightly dump = %v %v", format, err)
+	} else {
+		c.Close()
+	}
+
+	// Content that is neither is refused, not guessed at.
+	junk := filepath.Join(a, "db-20261018T020000Z.sql.gz")
+	os.WriteFile(junk, []byte("not an archive"), 0o600)
+	if _, _, _, err := openBackupStream(junk, ""); err == nil || !strings.Contains(err.Error(), "not a readable archive") {
+		t.Fatalf("junk = %v", err)
+	}
+}
