@@ -62,8 +62,7 @@ func TestNoHotelNoticeShowsTheBuiltInOne(t *testing.T) {
 		!strings.Contains(html, "which is responsible for your personal data") {
 		t.Error("with no hotel notice, the built-in notice is not shown")
 	}
-	if !strings.Contains(html, `hidden
-         data-i18n="privacy.url"`) {
+	if !strings.Contains(html, `id="privacy-url" target="_blank" rel="noopener noreferrer" hidden><span`) {
 		t.Error("an empty notice link is shown")
 	}
 	html = render(portaldesign.ForGuests(map[string]any{"privacy_text": "The Hotel's own notice"}))

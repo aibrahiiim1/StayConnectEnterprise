@@ -31,8 +31,11 @@ const (
 	// the 3:1 the old check used was not enough.
 	minTextContrast = 4.5
 	// minPhotoOverlay is the least darkening a photograph gets under the hero's white text: a hotel that set
-	// 0% would otherwise put white words straight onto a bright sky.
-	minPhotoOverlay = 0.30
+	// 0% would otherwise put white words straight onto a bright sky. It is sized for the worst photograph, a
+	// white one: black at alpha a over white leaves rgb(255·(1-a)), and white text on that reaches 4.5:1 from
+	// a = 0.54. The welcome line is drawn at 0.95 opacity, which costs a little contrast, so the floor is 0.56
+	// (4.6:1 for that line, 4.8:1 for the name). The default darkening (0.35) is raised to it too.
+	minPhotoOverlay = 0.56
 	// defaultOverlay is --sc-overlay's value in portal_css.go.
 	defaultOverlay = 0.35
 )

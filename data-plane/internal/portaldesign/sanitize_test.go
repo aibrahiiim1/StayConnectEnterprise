@@ -316,3 +316,55 @@ func TestLinkAndImageRules(t *testing.T) {
 		}
 	}
 }
+
+// AN IMAGE WITH NO alt IS READ OUT BY ITS FILE NAME (WCAG 1.1.1). It is served as written, with a warning;
+// alt="" says the image is decoration and is not reported.
+func TestHTMLWarnsAboutAnImageWithNoAlt(t *testing.T) {
+	out, issues := SanitizeHTML(`<p><img src="/assets/a.png"><img src="/assets/b.png" width="20"></p>`)
+	if hasError(issues) {
+		t.Fatalf("a missing alt must not stop a save: %v", issues)
+	}
+	if len(issues) != 1 || issues[0].Severity != SeverityWarning || !strings.Contains(issues[0].Message, "no alt text") ||
+		!strings.Contains(issues[0].Message, "(×2)") {
+		t.Errorf("two images with no alt should be one counted warning: %v", issues)
+	}
+	if strings.Count(out, "<img") != 2 {
+		t.Errorf("the images were not served as written: %q", out)
+	}
+	for _, in := range []string{`<img src="/assets/a.png" alt="">`, `<img src="/assets/a.png" alt="The pool">`} {
+		if _, issues := SanitizeHTML(in); len(issues) != 0 {
+			t.Errorf("%q was reported: %v", in, issues)
+		}
+	}
+}
+
+// A FOCUS RING TAKEN AWAY BY THE HOTEL'S CSS is served (the portal's guard keeps its own ring) but reported.
+func TestCSSWarnsWhenAFocusOutlineIsRemoved(t *testing.T) {
+	for _, in := range []string{
+		`a:focus { outline: none }`,
+		`button:focus-visible { outline: 0 }`,
+		`.x:focus { outline-style: none }`,
+		`.x:focus { outline-width: 0px }`,
+		`input:focus { outline: 2px solid transparent }`,
+		`.a { &:focus { outline: none } }`,
+		`@media (min-width: 1px) { .b:FOCUS { outline: none } }`,
+	} {
+		out, issues := SanitizeCSS(in)
+		if hasError(issues) || len(issues) != 1 || issues[0].Severity != SeverityWarning || !strings.Contains(issues[0].Message, "focus outline") {
+			t.Errorf("%q: expected one focus-outline warning, got %v", in, issues)
+		}
+		if !strings.Contains(out, "outline") {
+			t.Errorf("%q: the declaration should still be served: %q", in, out)
+		}
+	}
+	for _, in := range []string{
+		`a:focus { outline: 3px solid #0f6b63 }`,
+		`a { outline: none }`,
+		`a:hover { outline: 0 }`,
+		`a:focus { outline-offset: 0 }`,
+	} {
+		if _, issues := SanitizeCSS(in); len(issues) != 0 {
+			t.Errorf("%q was reported: %v", in, issues)
+		}
+	}
+}

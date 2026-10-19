@@ -195,6 +195,11 @@ func writeNode(b *strings.Builder, n *html.Node, depth int, is *issueSet) {
 		}
 		writeAttr(b, key, val)
 	}
+	if tag == "img" && !seen["alt"] {
+		// Served as written, but said: a screen reader reads an image with no alt by its file name (WCAG 1.1.1).
+		// alt="" is a decision -- the image is decoration -- and is not reported.
+		is.warnf(`an <img> has no alt text: describe it in alt="…", or write alt="" if it is only decoration`)
+	}
 	if tag == "a" && (hasBlank || hasHref) {
 		// Whatever the operator wrote. A page opened from the sign-in page must not be able to navigate it
 		// (window.opener), and the guest's portal URL is nobody's referrer.

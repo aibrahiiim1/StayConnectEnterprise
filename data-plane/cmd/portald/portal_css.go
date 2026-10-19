@@ -240,6 +240,8 @@ const portalBaseCSS = `
   [data-stage="code"] input[name=code] { letter-spacing: 0.3em; font-size: 1.25rem; text-align: center; }
   .hint, .small { color: var(--sc-muted); font-size: 0.8125rem; line-height: 1.45; }
   .hint { margin: 6px 0 0; }
+  [data-otp-valid] { margin: -8px 0 14px; }
+  [data-otp-valid]:empty { margin: 0; }
   .small { margin: 0 0 14px; }
   .dest { color: var(--sc-ink); font-weight: 600; overflow-wrap: anywhere; }
 
@@ -274,11 +276,13 @@ const portalBaseCSS = `
     text-decoration: underline; text-underline-offset: 3px;
   }
 
-  /* ---- "Use Personal Account": a switch, with its words ------------------------------------------------- */
+  /* ---- "Use Personal Account": a switch, with its words -------------------------------------------------
+     The edge of anything a guest presses is --sc-edge (3.6:1 on the card, WCAG 1.4.11), as the fields' is;
+     --sc-line (1.3:1) is for dividers and panels, which are not controls. */
   .pill {
     display: inline-flex; align-items: center; justify-content: space-between;
     width: 100%; min-height: 52px; margin: 0 0 18px; padding: 6px 14px;
-    border: 1px solid var(--sc-line); border-radius: var(--sc-r-ctl);
+    border: 1px solid var(--sc-edge); border-radius: var(--sc-r-ctl);
     background: var(--sc-recess); color: var(--sc-ink);
     font-size: 0.9375rem; font-weight: 600; cursor: pointer;
     -webkit-user-select: none; user-select: none;
@@ -302,10 +306,10 @@ const portalBaseCSS = `
   }
   .alt button.link {
     margin: 0 8px 8px 0; padding: 0 16px;
-    border: 1px solid var(--sc-line); border-radius: 999px;
+    border: 1px solid var(--sc-edge); border-radius: 999px;
     background: var(--sc-card); color: var(--sc-ink); text-decoration: none;
   }
-  .alt button.link:hover { border-color: var(--sc-edge); }
+  .alt button.link:hover { border-color: var(--sc-muted); }
   /* The way in on screen: an ink outline twice as heavy -- marked by weight, not by colour. */
   .alt button.link[aria-pressed="true"] { border-color: var(--sc-ink); box-shadow: inset 0 0 0 1px var(--sc-ink); }
   [dir="rtl"] .alt button.link { margin: 0 0 8px 8px; }
@@ -332,7 +336,7 @@ const portalBaseCSS = `
   button.choice {
     display: flex; align-items: center;
     width: 100%; min-height: 64px; margin: 0 0 10px; padding: 12px 14px 12px 16px;
-    border: 1px solid var(--sc-line); border-radius: var(--sc-r-ctl);
+    border: 1px solid var(--sc-edge); border-radius: var(--sc-r-ctl);
     background: var(--sc-card); color: var(--sc-ink);
     font: inherit; text-align: left; cursor: pointer;
     box-shadow: 0 1px 2px rgba(18, 22, 28, 0.05);
@@ -916,6 +920,29 @@ main.card { display: block; }
 /* The hotel's own markup stays in its own box: paint containment clips it to the container, and makes the
    container the reference for position:fixed inside it -- so a fragment cannot lift itself over the forms. */
 #custom-html { position: relative; inset: auto; z-index: 0; contain: layout paint; transform: none; translate: none; }
+` + guardFocusAndInkCSS
+
+// guardFocusAndInkCSS is the part of the guard that is about SEEING the page rather than reaching it, on every
+// guest page (both guard sheets carry it):
+//
+//   - THE FOCUS RING CANNOT BE TAKEN AWAY (WCAG 2.4.7, 2.4.11). "outline: none" on :focus in the hotel's layer
+//     loses to this unlayered rule. It is the portal's own ring; the ink is written out, not var(--sc-ink),
+//     because a hotel stylesheet can redefine the variable. Only the outline is held -- the white halo and
+//     anything else a hotel does on focus are left alone. It is a rule of its own so that a browser without
+//     :focus-visible drops only it, and keeps the base sheet's :focus ring.
+//   - THE WORDS IN A FIELD AND IN A MESSAGE STAY READABLE (WCAG 1.4.3). Fields keep dark ink on white; the
+//     refusal, advisory and information boxes keep their own pairs, each at least 4.5:1. Borders, radius, size
+//     and type stay the hotel's.
+const guardFocusAndInkCSS = `
+a:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible,
+summary:focus-visible, [tabindex]:focus-visible { outline: 2px solid #14161a; outline-offset: 2px; }
+input[type=text]:focus-visible, input[type=password]:focus-visible, input[type=email]:focus-visible,
+input[type=tel]:focus-visible { outline-offset: 1px; }
+input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button]), select,
+textarea { color: #14161a; background-color: #fff; }
+.notice { color: #7d4a06; background-color: #fbf0dd; }
+.notice--error, .err:not(:empty) { color: #8f1c13; background-color: #fdeceb; }
+.err.err--ok:not(:empty) { color: #1d4f7c; background-color: #eaf2f8; }
 `
 
 // portalPageGuardCSS is the same guarantee for the pages after sign-in -- package choice, "You're online", the
@@ -957,4 +984,4 @@ main.card { display: block; }
 }
 .acct-form, .acct-form .field, .acct-form label, .acct-form input:not([type=hidden]), .acct-form button:not(:disabled) { opacity: 1; }
 *::before, *::after { pointer-events: none; }
-`
+` + guardFocusAndInkCSS
