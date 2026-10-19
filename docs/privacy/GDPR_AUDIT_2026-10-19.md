@@ -312,7 +312,7 @@ Also consider whether VIP and travel agent are needed at all (minimisation).
    - usage detail is missing from Step 3;
    - the staff activity log is anonymised after 730 days, not deleted;
    - the TLS switch is "Encrypt the connection (TLS)", on Protel only.
-9. **Fixed (with B11), except** the Central fetch-log line, which needs no change: the notice already lists its fixed periods. ~~Wording in the other documents:~~
+9. **Fixed (with B11).** The Central notice already names its fixed periods for people. The 30-day assignment-fetch log is fixed too, but it records appliance polls, not people, so the notice does not list it. ~~Wording in the other documents:~~
    - "every time" a guest record is opened should be "repeat views within 10 minutes are recorded once";
    - "a random token per guest" should be "per value";
    - add "a plain SMTP mode exists for internal relays";
