@@ -1848,13 +1848,15 @@ textarea { color: #14161a; background-color: #fff; }
         el.hidden = enabled.indexOf(el.dataset.helpMethod) < 0;
       });
       
-      const canRemember = hasSocial || ['email', 'sms', 'whatsapp'].some(function (m) { return enabled.indexOf(m) >= 0; });
-      document.getElementById('privacy-remember').hidden = !canRemember;
       
+      
+      const canRemember = (hasSocial || ['email', 'sms', 'whatsapp'].some(function (m) { return enabled.indexOf(m) >= 0; })) &&
+        location.protocol === 'https:';
+      document.getElementById('privacy-remember').hidden = !canRemember;
       const rememberEl = document.getElementById('remember-device');
       const rememberBox = document.getElementById('remember-device-box');
       if (rememberEl && rememberBox) {
-        rememberEl.hidden = !(canRemember && location.protocol === 'https:');
+        rememberEl.hidden = !canRemember;
         rememberBox.checked = /(?:^|; )og_remember=1(?:;|$)/.test(document.cookie);
         rememberBox.addEventListener('change', function () {
           try {
