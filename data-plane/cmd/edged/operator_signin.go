@@ -168,7 +168,9 @@ func (s *server) throttleStateFor(ctx context.Context, scope, value string) (thr
 }
 
 func (s *server) throttleFail(ctx context.Context, scope, value string) (failures int, lockedUntil *time.Time, newlyLocked bool, err error) {
-	err = s.db.QueryRow(ctx, `SELECT failures, locked_until, newly_locked FROM public.operator_signin_throttle_fail($1, $2)`,
+	// newly_locked is NULL, not false, when no lockout is running (NULL > now() in the function), so it is
+	// coalesced here; scanning NULL into a bool failed and lost the failure count from the audit entry.
+	err = s.db.QueryRow(ctx, `SELECT failures, locked_until, COALESCE(newly_locked, false) FROM public.operator_signin_throttle_fail($1, $2)`,
 		scope, throttleKey(scope, value)).Scan(&failures, &lockedUntil, &newlyLocked)
 	return
 }
