@@ -29,6 +29,8 @@ package main
 // the evidence it is waiting for. Counting honestly never needed a button.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -55,6 +57,16 @@ type reconciliationCaseOut struct {
 	// NeedsPMSEvidence is true for every case, and says so rather than implying some are actionable here.
 	// It exists so the screen can state what WOULD resolve the case without re-deriving that in the browser.
 	NeedsPMSEvidence bool `json:"needs_pms_evidence"`
+	// IdentityHidden: the reservation number was withheld from a role without pms-stay-identity (audit H-7;
+	// GDPR final check D2). The case key, which is built from it, is then an opaque digest.
+	IdentityHidden bool `json:"identity_hidden,omitempty"`
+}
+
+// opaqueCaseKey replaces a case key that names a reservation with a stable digest, so a list can still be keyed
+// and compared between reads without showing the reservation number.
+func opaqueCaseKey(k string) string {
+	sum := sha256.Sum256([]byte(k))
+	return "case:" + hex.EncodeToString(sum[:8])
 }
 
 func (s *server) pmsReconciliationRoutes() http.Handler {
@@ -88,6 +100,7 @@ func (s *server) scanReconciliationCases(w http.ResponseWriter, r *http.Request,
 	}
 	defer rows.Close()
 
+	identity := canSeeStayIdentity(r)
 	out := []reconciliationCaseOut{}
 	for rows.Next() {
 		var c reconciliationCaseOut
@@ -100,6 +113,9 @@ func (s *server) scanReconciliationCases(w http.ResponseWriter, r *http.Request,
 		}
 		// Every case is answered by the PMS, whatever its classification. The state says which evidence.
 		c.NeedsPMSEvidence = true
+		if !identity {
+			c.Reservation, c.CaseKey, c.IdentityHidden = "", opaqueCaseKey(c.CaseKey), true
+		}
 		out = append(out, c)
 	}
 	return out, true
@@ -238,7 +254,10 @@ func (s *server) listStaysPastDeparture(w http.ResponseWriter, r *http.Request) 
 		// "Not listed" and "somebody else is in that room now" are different facts. The second is the one
 		// that says the room has been re-let, which is what an operator actually needs to know.
 		RoomReLet bool `json:"room_now_holds_another_stay"`
+		// IdentityHidden: the reservation number was withheld (audit H-7; GDPR final check D2).
+		IdentityHidden bool `json:"identity_hidden,omitempty"`
 	}
+	identity := canSeeStayIdentity(r)
 	out := []stayOut{}
 	for rows.Next() {
 		var o stayOut
@@ -247,6 +266,9 @@ func (s *server) listStaysPastDeparture(w http.ResponseWriter, r *http.Request) 
 			slog.Error("pms reconciliation: read failed", "code", "stays_unreadable", "err", err)
 			jsonErr(w, http.StatusInternalServerError, "stays_unreadable", "the reconciliation data could not be read")
 			return
+		}
+		if !identity {
+			o.Reservation, o.IdentityHidden = "", true
 		}
 		out = append(out, o)
 	}

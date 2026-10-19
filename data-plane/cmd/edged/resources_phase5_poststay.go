@@ -59,6 +59,14 @@ type postStayProfileRow struct {
 	RevokedAt     *string `json:"revoked_at"`
 	RevokeReason  *string `json:"revoke_reason"`
 	Authenticable bool    `json:"authenticable"`
+	// IdentityHidden: the reservation number and the revoke reason were withheld from a role without
+	// pms-stay-identity (audit H-7; GDPR final check D2).
+	IdentityHidden bool `json:"identity_hidden,omitempty"`
+}
+
+// hidePostStayIdentity withholds the room-credential field, and the staff note that may name the guest.
+func hidePostStayIdentity(v *postStayProfileRow) {
+	v.Reservation, v.RevokeReason, v.IdentityHidden = "", nil, true
 }
 
 // listPostStayProfiles shows the site's post-stay identities. There is no PIN column and no way to ask for
@@ -86,6 +94,7 @@ func (s *server) listPostStayProfiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rows.Close()
+	identity := canSeeStayIdentity(r)
 	out := []postStayProfileRow{}
 	for rows.Next() {
 		var v postStayProfileRow
@@ -94,6 +103,9 @@ func (s *server) listPostStayProfiles(w http.ResponseWriter, r *http.Request) {
 			&v.RevokedAt, &v.RevokeReason, &v.Authenticable); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "scan_failed", err.Error())
 			return
+		}
+		if !identity {
+			hidePostStayIdentity(&v)
 		}
 		out = append(out, v)
 	}
@@ -125,6 +137,9 @@ func (s *server) getPostStayProfile(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		jsonErr(w, http.StatusNotFound, "not_found", "no such post-stay profile")
 		return
+	}
+	if !canSeeStayIdentity(r) {
+		hidePostStayIdentity(&v)
 	}
 	writeJSON(w, http.StatusOK, v)
 }
