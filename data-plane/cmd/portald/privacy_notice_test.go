@@ -80,3 +80,35 @@ func TestEveryLanguageHasThePrivacyWords(t *testing.T) {
 		}
 	}
 }
+
+// The remembered-device sentence follows exactly the box's condition: both are shown only where a code or an
+// identity provider is offered AND the page is on HTTPS. It used to be shown on plain HTTP, explaining a box
+// that was not there.
+func TestTheRememberSentenceFollowsTheBox(t *testing.T) {
+	tmpl, err := template.New("land").Parse(landingHTML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, newLandingView(httptest.NewRequest(http.MethodGet, "/", nil), map[string]any{}, "n", "", "", "")); err != nil {
+		t.Fatal(err)
+	}
+	html := buf.String()
+	decl := strings.Index(html, "const canRemember =")
+	if decl < 0 {
+		t.Fatal("the page no longer decides where the device can be remembered")
+	}
+	stmt := html[decl:]
+	stmt = stmt[:strings.Index(stmt, ";\n")]
+	if !strings.Contains(stmt, "location.protocol === 'https:'") {
+		t.Fatalf("canRemember does not require HTTPS: %s", stmt)
+	}
+	for _, want := range []string{
+		"document.getElementById('privacy-remember').hidden = !canRemember;",
+		"rememberEl.hidden = !canRemember;",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("the page does not carry %q", want)
+		}
+	}
+}

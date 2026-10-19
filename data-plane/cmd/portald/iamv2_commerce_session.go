@@ -115,7 +115,7 @@ func (h *handler) tryIAMv2AuthMode(w http.ResponseWriter, r *http.Request, paylo
 	// ONLY WHEN THE GUEST ASKED (GDPR audit B10, D-B10): "Remember this device" ticked, over HTTPS. Otherwise the
 	// credential scd issued is revoked at once, so no unused credential waits for this device.
 	if reply.ResumeToken != "" && reply.Method != "OPEN" {
-		if guestAskedToRemember(r) {
+		if guestAskedToRemember(r, reply.Method) {
 			setClientResumeCookie(w, r, reply.ResumeToken, reply.ResumeDays)
 		} else {
 			h.revokeResume(r.Context(), reply.ResumeToken)

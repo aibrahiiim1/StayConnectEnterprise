@@ -1242,14 +1242,16 @@ const landingHTML = `<!doctype html>
       document.querySelectorAll('[data-help-method]').forEach(function (el) {
         el.hidden = enabled.indexOf(el.dataset.helpMethod) < 0;
       });
-      // THE REMEMBERED-DEVICE COOKIE is explained wherever a sign-in can set it (client_resume.go).
-      const canRemember = hasSocial || ['email', 'sms', 'whatsapp'].some(function (m) { return enabled.indexOf(m) >= 0; });
+      // THE BOX is offered only where the device can be remembered: a code or an identity provider, over HTTPS
+      // (client_resume.go). The sentence explaining it follows exactly the same condition -- on plain HTTP there
+      // is no box to tick, and a sentence about ticking it would be false.
+      const canRemember = (hasSocial || ['email', 'sms', 'whatsapp'].some(function (m) { return enabled.indexOf(m) >= 0; })) &&
+        location.protocol === 'https:';
       document.getElementById('privacy-remember').hidden = !canRemember;
-      // The box is offered only where the device can be remembered: a code or an identity provider, over HTTPS.
       const rememberEl = document.getElementById('remember-device');
       const rememberBox = document.getElementById('remember-device-box');
       if (rememberEl && rememberBox) {
-        rememberEl.hidden = !(canRemember && location.protocol === 'https:');
+        rememberEl.hidden = !canRemember;
         rememberBox.checked = /(?:^|; )og_remember=1(?:;|$)/.test(document.cookie);
         rememberBox.addEventListener('change', function () {
           try {

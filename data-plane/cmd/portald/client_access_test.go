@@ -296,7 +296,46 @@ func TestTheDeviceIsRememberedOnlyWhenTheGuestAsks(t *testing.T) {
 		r := httptest.NewRequest(http.MethodGet, "http://portal.test/", nil)
 		r.AddCookie(&http.Cookie{Name: rememberCookie, Value: "1"})
 		return r
-	}()) {
+	}(), "OTP") {
 		t.Fatal("a tick over plain HTTP was honoured")
+	}
+}
+
+// The box is offered for a code or an identity provider only. A tick is a session cookie, so it must not carry
+// over to a sign-in by a method the box was never offered for: that credential is revoked, not kept.
+func TestARememberTickDoesNotCarryOverToAMethodWithoutTheBox(t *testing.T) {
+	ticked := func() *http.Request {
+		r := httptest.NewRequest(http.MethodPost, "https://portal.test/auth/account", nil)
+		r.AddCookie(&http.Cookie{Name: rememberCookie, Value: "1"})
+		return r
+	}
+	for method, want := range map[string]bool{"OTP": true, "SOCIAL": true, "ACCOUNT": false, "VOUCHER": false, "OPEN": false, "": false} {
+		if got := guestAskedToRemember(ticked(), method); got != want {
+			t.Fatalf("guestAskedToRemember(%q) = %v, want %v", method, got, want)
+		}
+	}
+
+	var revoked []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/sessions/resume-revoke", func(w http.ResponseWriter, r *http.Request) {
+		var in map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		revoked = append(revoked, in["resume_token"])
+		w.Write([]byte(`{"ok":true}`))
+	})
+	h := clientAccessHandler(t, mux)
+	payload := []byte(`{"auth_context_id":"ac-1","device_id":"dev-1","guest_network_id":"gn-1",` +
+		`"method":"ACCOUNT","authority":"iam_v2","identity_label":"a•••@example.com","resume_token":"tok-3"}`)
+	rec := httptest.NewRecorder()
+	if !h.tryIAMv2AuthMode(rec, ticked(), payload, true) {
+		t.Fatal("an IAM-v2 reply must be handled")
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == clientResumeCookie {
+			t.Fatalf("an account sign-in was remembered on a tick it never offered: %+v", c)
+		}
+	}
+	if len(revoked) != 1 || revoked[0] != "tok-3" {
+		t.Fatalf("the credential was not revoked: %v", revoked)
 	}
 }

@@ -61,11 +61,17 @@ func clearClientResumeCookie(w http.ResponseWriter, r *http.Request) {
 // D-B10). A session cookie the page sets; it carries no identifier.
 const rememberCookie = "og_remember"
 
-// guestAskedToRemember reports whether this sign-in may keep a remembered-device credential: the guest ticked
-// the box -- on the sign-in page (the cookie) or on the message-link page (the form field) -- and the request
-// is over HTTPS.
-func guestAskedToRemember(r *http.Request) bool {
-	if r == nil || r.TLS == nil {
+// rememberMethods are the sign-ins the box is offered for: a verified code or an identity provider (templates.go
+// shows it, and the sentence explaining it, exactly where one of these is enabled). The box is a choice made on
+// the page, kept in a session cookie, so without this a tick given while a code sign-in was on offer carried over
+// to a voucher, account or room sign-in that never offered it.
+var rememberMethods = map[string]bool{"OTP": true, "SOCIAL": true}
+
+// guestAskedToRemember reports whether this sign-in may keep a remembered-device credential: it is one the box
+// is offered for, the guest ticked the box -- on the sign-in page (the cookie) or on the message-link page (the
+// form field) -- and the request is over HTTPS.
+func guestAskedToRemember(r *http.Request, method string) bool {
+	if r == nil || r.TLS == nil || !rememberMethods[method] {
 		return false
 	}
 	if r.Method == http.MethodPost && r.PostFormValue("remember") == "1" {
