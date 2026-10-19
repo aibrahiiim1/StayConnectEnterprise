@@ -14,9 +14,10 @@ WHO IS RESPONSIBLE
 
 WHAT WE RECORD
 - Your device's network addresses (MAC and IP address), the name your device gives itself on the network while it is connected (often its owner's name), when you connect and disconnect, and how much data each session uses. Not the websites you visit.
-- What you sign in with: [[delete the ways you do not offer]] your room number and the detail asked for with it (checked against your reservation); a voucher code; an account name; an email address and password; a phone number; or the Google, Apple, Facebook or Microsoft account you choose, from which we keep only your email address, your account id with that company and, for a work or school account, the identifiers of that organisation. When you ask for a code, the address and browser it was requested from.
+- What you sign in with: [[delete the ways you do not offer]] your room number and the detail asked for with it (checked against your reservation); a voucher code; an account name; an email address and password; a phone number; or the Google, Apple, Facebook or Microsoft account you choose, from which we keep only your email address, your account id with that company and, for a work or school account, the identifiers of that organisation. When you ask for a code, the address and browser it was requested from. [[Only if you offer post-stay access:]] A PIN to reconnect after checkout, stored only in a form that cannot be read back, and until when it is valid.
 - [[Only if you offer room sign-in:]] To check room sign-ins, a copy of the current reservations from our reservation system: the names of everyone on the reservation (including room sharers), room, room type, rate plan, reservation number, dates of stay, our reservation system's guest number, whether the stay is marked VIP, and the travel agent, if any.
 - Sign-in attempts, including failed ones, to protect the network against misuse.
+- Technical logs of the Wi-Fi system, which contain your device's network addresses and the name you signed in with.
 - If you buy internet access: the package, the price and the payment reference. Card details are handled by the payment provider, not by us. [[Only if you offer room charge:]] If you charge it to your room, the room, reservation number and our reservation system's guest number go on the bill, and stay with our financial records for as long as the law requires.
 
 WHY
@@ -34,7 +35,7 @@ The Wi-Fi system runs on equipment in this hotel. [[Name of the Wi-Fi system sup
 Some of these companies may process data outside [[the European Economic Area]]; [[the safeguard used, for example the European Commission's standard contractual clauses]].
 
 HOW LONG WE KEEP IT
-Reservation details: [[period]] after checkout. Device addresses and sessions: [[period]] after the device was last seen. Email addresses, phone numbers, sign-in accounts and Wi-Fi accounts: [[period]] after they were last used. Sign-in attempts: [[period]]. After that they are deleted or made anonymous. Payment and room-charge records: as long as the law requires. Our backups keep a copy for up to [[backup period]], so something already deleted can remain in a backup until it expires.
+Reservation details: [[period]] after checkout. Device addresses and sessions: [[period]] after the device was last seen. Email addresses, phone numbers, sign-in accounts and Wi-Fi accounts: [[period]] after they were last used. Sign-in attempts: [[period]]. Technical logs: [[period, 14 days unless you changed it]]. After that they are deleted or made anonymous. Payment and room-charge records: as long as the law requires. Our backups keep a copy for up to [[backup period]] (longer for a backup we keep on purpose), so something already deleted can remain in a backup until it expires.
 
 COOKIES
 The sign-in page uses these cookies, and no advertising or tracking cookies:

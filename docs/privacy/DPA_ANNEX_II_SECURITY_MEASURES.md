@@ -122,7 +122,9 @@ The annex has three parts:
 - **Request logs name the route, not the person.** The appliance's services and Central log the kind of page or
   API served (for example `/edge/v1/usage/devices/{mac}`), never the address asked for, its query or the client's
   address. The web server's access logs drop the query, MAC addresses and request headers. So searches typed by
-  staff, single-use links and the web addresses guests' browsers ask for before sign-in are not logged.
+  staff, single-use links and the web addresses guests' browsers ask for before sign-in are not logged. Some
+  appliance services log a guest device's IP address with a technical event (for example when a phone checks for
+  the sign-in page, or a session starts); these logs are kept for the system-log period.
 
 ### System configuration and defaults
 

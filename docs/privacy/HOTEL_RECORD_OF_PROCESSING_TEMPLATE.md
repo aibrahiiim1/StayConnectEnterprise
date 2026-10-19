@@ -98,7 +98,7 @@ instead.
 | Usage detail (how much data each session used, sample by sample) | 365 days | ✏️ |
 | Staff activity log: IP address, browser and record details anonymised after | 730 days (2 years) | ✏️ |
 | Disabled staff accounts: email, name and password removed after | 730 days (2 years) | ✏️ |
-| Backups | 30 days, the newest 7 always kept | ✏️ |
+| Backups | 30 days; the newest 7 are kept whatever their age, and a backup you pin is kept until you unpin it | ✏️ |
 | System logs (web, address and service logs) | 14 days | ✏️ |
 | Staff notes (PMS case decisions, released devices, revoked post-stay access) removed after | 730 days (2 years) | ✏️ |
 
@@ -129,7 +129,7 @@ Leave out any row that depends on a feature you did not tick in Step 2.
 | # | Activity | Why (lawful basis) | Whose data | What data |
 |---|---|---|---|---|
 | 1 | **Guest Wi-Fi access** | To provide the Wi-Fi the guest asked for: contract (Art. 6(1)(b)) | Guests and visitors who connect | Device network addresses (MAC and IP), connection times, how much data each session used, and, while connected, the name the device gives itself on the network (often its owner's name, such as "Anna's iPhone"). **Not** the websites visited: OneGate does not record them, and its request logs name the page type served, never the address asked for |
-| 2 | **Signing guests in** | Contract (Art. 6(1)(b)) | As above | Only for the methods ticked in Step 2: room and the detail typed with it; voucher code; Wi-Fi username and password (stored hashed); email address; phone number; for Google, Apple, Facebook or Microsoft, the account id and email, and for a business account the organisation's ids |
+| 2 | **Signing guests in** | Contract (Art. 6(1)(b)) | As above | Only for the methods ticked in Step 2: room and the detail typed with it; voucher code; Wi-Fi username and password (stored hashed); email address; phone number; for Google, Apple, Facebook or Microsoft, the account id and email, and for a business account the organisation's ids; for post-stay access, a PIN (stored hashed) and its validity |
 | 3 | **Checking room sign-ins against reservations** *(only if a PMS is connected)* | Contract (Art. 6(1)(b)); for room sharers, legitimate interest (Art. 6(1)(f)) in letting everyone in the room connect | Everyone named on a reservation, **including room sharers who may never use the Wi-Fi** | Reservation number, room, arrival and departure, names, VIP flag, travel agent, room type, rate plan, the PMS guest id. **No** passports, ID documents or home addresses |
 | 4 | **Selling internet packages** *(only if card payments or room charge are on)* | Contract (Art. 6(1)(b)); keeping payment records, legal obligation (Art. 6(1)(c)) | Guests who buy a package | Package, price, payment reference. Card details go to Stripe or Paymob directly, never to the hotel. For room charge: the room, reservation number, PMS guest number and amount posted to the bill. These stay with the financial record for the statutory period, also after the reservation itself is anonymised: they are pseudonymous, not anonymous |
 | 5 | **Keeping the network secure** | Legitimate interest (Art. 6(1)(f)) in stopping misuse; legal obligation (Art. 6(1)(c)) if you ticked "Yes" in Step 4 | Guests and anyone who tries to sign in | Sign-in attempts, including failed ones (the room typed, device addresses; what was typed with it is stored sealed). System logs with device addresses and sign-in names |

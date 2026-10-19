@@ -162,7 +162,7 @@ every sign-in page, before the guest does anything; records which version each g
 - [ ] The privacy notice is completed and published 🔍 *(Portal settings → Content → Privacy notice)*, with no
       `[[...]]` left.
 - [ ] It names the code-sending, sign-in and payment companies you use.
-- [ ] It mentions that deleted data can remain in backups for up to 30 days.
+- [ ] It mentions that deleted data can remain in backups for up to 30 days, or longer in a backup you pin or when no newer backups are made.
 
 **Result:** [ ] Low ⭐  [ ] Medium  [ ] High
 

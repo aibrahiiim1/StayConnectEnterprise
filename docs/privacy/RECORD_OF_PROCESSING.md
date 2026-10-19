@@ -68,9 +68,9 @@ issuance), [[Central hosting provider: not decided yet; its name, and the countr
 [[safeguard: EU–US Data Privacy Framework certification or SCCs, to confirm for each]]. Only portal host names and
 one contact email are involved.
 
-**(f) Time limits for erasure.** As in the table. Every period is a setting in Central (System > Team > Data retention), applied hourly and audited. Backups of Central's database: the newest 7 are kept on the
-Central server. Server logs (web access log with IP addresses, service journal): **no limit configured
-[[D-F5]]**.
+**(f) Time limits for erasure.** As in the table. The main periods are settings in Central (System > Team > Data retention), applied hourly and audited; the session limits, the 30-day appliance fetch log and the web access log are fixed. Backups of Central's database: the newest 7 are kept on the
+Central server. The web server's access log (IP addresses) is rolled daily and kept 14 days. The service journal
+names the route served, never the person or their address, and is kept within the host's journal size limit.
 
 **(g) Security measures.**
 
