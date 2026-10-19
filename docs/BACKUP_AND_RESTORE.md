@@ -283,8 +283,12 @@ restores with `/etc` and is honoured), and only a factory-clean install brings i
 
 `stayconnect-central-backup.timer` (daily, 02:15) runs `deploy/scripts/central-backup.sh`: `pg_dump -Fc` of
 the `sc-central-pg` container's `stayconnect` database to
-`/opt/stayconnect/backups/db/central-<stamp>-scheduled.dump` (0600, proven readable with `pg_restore -l`
-before it counts). Every deploy takes the same dump as `central-<stamp>-pre-<sha12>.dump`. Retention is
+`/opt/stayconnect/backups/db/central-<stamp>-scheduled.dump.age` (0600, proven readable with `pg_restore -l`
+before it counts, then encrypted with `age` to every public key listed in `/etc/stayconnect/backup-recipients.txt`;
+Central keeps no private key, so it cannot read its own backups; restore with
+`age -d -i <key> <file> | docker exec -i sc-central-pg pg_restore ...`). Until that file lists a key the dump is a
+plain `.dump` and every run warns; once it does, a dump that cannot be encrypted is a failed backup, never a plain
+one. Add a key: `age-keygen -o key.txt` on the restorer's own machine, then append its `age1...` line to the file. Every deploy takes the same dump as `central-<stamp>-pre-<sha12>.dump`. Retention is
 `KEEP_DB` in `/etc/stayconnect/backup-retention.conf` (the newest dump and pinned dumps are never deleted);
 *System → Backup health* reports it. The dumps are **local only** — an off-host copy is the operator's
 responsibility ([DEPLOYMENT_CLOUD.md](DEPLOYMENT_CLOUD.md) §9). TimescaleDB note: restore into a database with

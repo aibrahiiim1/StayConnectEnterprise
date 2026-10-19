@@ -78,6 +78,7 @@ CENTRAL_TRUST_ITEMS=(
   "opt|opt/stayconnect/central/tls/server.key|0600|Central :443 key"
   "opt|opt/stayconnect/central/tls/san.cnf|0644|names the :443 certificate was issued for"
   "opt|etc/stayconnect/backup-retention.conf|0644|backup retention policy"
+  "opt|etc/stayconnect/backup-recipients.txt|0644|age public keys the database backups are encrypted to (no private key is ever here)"
   "opt|etc/stayconnect/operator-mfa.key|0600|console two-step sign-in key (without it every operator sets up their authenticator again)"
   "opt|etc/stayconnect/backup-retention.pins|0644|operator-pinned backup artefacts"
   "opt|etc/stayconnect/portal-tls/acme-account.key|0600|portal certificates: the ACME account key (CAA pins its account URL)"

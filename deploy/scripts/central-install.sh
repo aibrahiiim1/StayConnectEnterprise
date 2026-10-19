@@ -121,7 +121,7 @@ install_prereqs() {
   . /etc/os-release
   case "$ID" in ubuntu|debian) ;; *) die "--install-prereqs supports Ubuntu/Debian only (this is $ID)";; esac
   run apt-get update -q
-  run env DEBIAN_FRONTEND=noninteractive apt-get install -y -q ca-certificates curl gnupg openssl python3 ufw iproute2 debian-keyring debian-archive-keyring apt-transport-https
+  run env DEBIAN_FRONTEND=noninteractive apt-get install -y -q ca-certificates curl gnupg openssl python3 ufw iproute2 debian-keyring debian-archive-keyring apt-transport-https age
   if ! command -v docker >/dev/null; then
     run env DEBIAN_FRONTEND=noninteractive apt-get install -y -q docker.io
   fi
@@ -678,7 +678,8 @@ if [ "$DRY_RUN" = 1 ]; then say "DRY-RUN would run stayconnect-central-backup.se
 else
   systemctl start stayconnect-central-backup.service \
     || { journalctl -u stayconnect-central-backup -n 20 --no-pager >&2 || true; die "the first database backup failed"; }
-  say "first backup: $(ls -1t "$CENTRAL_DB_BACKUPS"/central-*.dump 2>/dev/null | head -1)"
+  say "first backup: $(ls -1t "$CENTRAL_DB_BACKUPS"/central-*.dump "$CENTRAL_DB_BACKUPS"/central-*.dump.age 2>/dev/null | head -1)"
+  grep -qE '^[[:space:]]*age1' "$SC_ETC/backup-recipients.txt" 2>/dev/null     || warn "database backups are NOT encrypted until $SC_ETC/backup-recipients.txt lists an age public key (age-keygen on the restorer's machine; the private key never comes here)"
 fi
 
 # ================================================================= 14. public trust, provenance, smoke

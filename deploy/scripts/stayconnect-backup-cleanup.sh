@@ -226,7 +226,7 @@ plan_central() {
   # DB dumps: the scheduled backups and pre-deploy dumps (central-backup.sh / central-deploy.sh write
   # $ROOT/backups/db/central-<stamp>-<reason>.dump), plus dumps from before that location existed in /root/backups.
   # One group, so KEEP_DB and "the newest is never deleted" apply across both.
-  retain_db "db-dump" "$KEEP_DB" $(ls -1d "$ROOT"/backups/db/central-*.dump /root/backups/*.sql /root/backups/*.sql.gz /root/backups/*.dump 2>/dev/null)
+  retain_db "db-dump" "$KEEP_DB" $(ls -1d "$ROOT"/backups/db/central-*.dump "$ROOT"/backups/db/central-*.dump.age /root/backups/*.sql /root/backups/*.sql.gz /root/backups/*.dump 2>/dev/null)
 
   # config backups
   retain_group "config-backup" "$KEEP_CONFIG" "" $(ls -1d /etc/netplan/*.bak* /etc/stayconnect/*.bak* 2>/dev/null)
