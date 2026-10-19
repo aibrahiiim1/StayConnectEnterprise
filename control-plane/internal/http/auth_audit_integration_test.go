@@ -25,6 +25,10 @@ func TestFailedLoginsAreAuditedWithinABudget(t *testing.T) {
 	if err := pool.QueryRow(ctx, `INSERT INTO operators (email, password_hash, status) VALUES ('ops@central.test',$1,'active') RETURNING id::text`, hash).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
+	// The account lockout (0053) is raised out of the way: this test is about the audit budget, not the lock.
+	if _, err := pool.Exec(ctx, `UPDATE central_security_settings SET signin_lock_failures = 20 WHERE id`); err != nil {
+		t.Fatal(err)
+	}
 	d := authDeps{Repo: &auth.Repo{DB: pool}, DB: pool, Failures: ratebudget.New(5, 300, time.Minute)}
 	post := func(body, ip string) int {
 		req := httptest.NewRequest(http.MethodPost, "/v1/auth/login", strings.NewReader(body))

@@ -40,8 +40,6 @@ const (
 	recoveryCodeCount = 10
 	recoveryAlphabet  = "ABCDEFGHJKMNPQRSTUVWXYZ23456789" // no 0/O, 1/I/L: read off paper and typed
 	recoveryCodeLen   = 10
-	mfaMaxFailures    = 5
-	mfaLockout        = 15 * time.Minute
 	PendingSigninTTL  = 5 * time.Minute
 	PendingCookieName = "sc_signin"
 )
@@ -194,15 +192,19 @@ func (s *MFA) load(ctx context.Context, tx pgx.Tx, operatorID string, confirmed 
 	return r, nil
 }
 
-// fail counts one wrong code. The fifth starts the lockout. It is committed even though the caller's answer is
+// fail counts one wrong code. signin_lock_failures wrong codes lock the authenticator for signin_lock_minutes, the
+// same two settings as the password lockout (central_security_settings, 0053). It is committed even though the caller's answer is
 // "wrong code", so it runs in its own statement after the check's transaction.
 func (s *MFA) fail(ctx context.Context, operatorID string) (lockedUntil *time.Time) {
 	_ = s.DB.QueryRow(ctx, `
+		WITH lim AS (SELECT COALESCE(max(signin_lock_failures), 5) AS n, COALESCE(max(signin_lock_minutes), 15) AS mins
+		               FROM central_security_settings WHERE id)
 		UPDATE operator_mfa SET
-		  failed_codes = CASE WHEN failed_codes + 1 >= $2 THEN 0 ELSE failed_codes + 1 END,
-		  locked_until = CASE WHEN failed_codes + 1 >= $2 THEN now() + make_interval(secs => $3) ELSE locked_until END
+		  failed_codes = CASE WHEN failed_codes + 1 >= lim.n THEN 0 ELSE failed_codes + 1 END,
+		  locked_until = CASE WHEN failed_codes + 1 >= lim.n THEN now() + make_interval(mins => lim.mins) ELSE locked_until END
+		  FROM lim
 		 WHERE operator_id = $1::uuid RETURNING CASE WHEN failed_codes = 0 THEN locked_until END`,
-		operatorID, mfaMaxFailures, mfaLockout.Seconds()).Scan(&lockedUntil)
+		operatorID).Scan(&lockedUntil)
 	return lockedUntil
 }
 

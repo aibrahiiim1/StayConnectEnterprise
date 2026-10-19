@@ -103,6 +103,10 @@ func (d authDeps) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if d.signinLocked(w, r, req.Email, "") {
+		return
+	}
+
 	op, err := d.Repo.FindByEmail(r.Context(), req.Email)
 	if err != nil || op.Status != "active" || op.PasswordHash == "" {
 		// Constant response for bad email vs bad password vs disabled; the audit row says which.
@@ -115,6 +119,9 @@ func (d authDeps) login(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		d.auditFailure(r, "auth.login_failed", opID, map[string]any{"email": req.Email, "reason": reason})
+		if d.signinFailed(w, r, req.Email, opID) {
+			return
+		}
 		api.Fail(w, r, http.StatusUnauthorized, api.CodeUnauthenticated, "invalid credentials")
 		return
 	}
@@ -124,9 +131,13 @@ func (d authDeps) login(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.auditFailure(r, "auth.login_failed", op.ID, map[string]any{"email": req.Email, "reason": "wrong password"})
+		if d.signinFailed(w, r, req.Email, op.ID) {
+			return
+		}
 		api.Fail(w, r, http.StatusUnauthorized, api.CodeUnauthenticated, "invalid credentials")
 		return
 	}
+	d.signinSucceeded(r, req.Email)
 
 	// THE PASSWORD IS ONE OF TWO STEPS (0052): no session yet. The authenticator code opens it
 	// (auth_mfa_handlers.go).
@@ -149,6 +160,9 @@ func (d authDeps) reauth(w http.ResponseWriter, r *http.Request) {
 		api.Fail(w, r, http.StatusBadRequest, api.CodeBadRequest, "password required")
 		return
 	}
+	if d.signinLocked(w, r, s.Email, s.OperatorID) {
+		return
+	}
 	op, err := d.Repo.FindByID(r.Context(), s.OperatorID)
 	if err != nil || op.Status != "active" || op.PasswordHash == "" {
 		d.auditFailure(r, "auth.reauth_failed", s.OperatorID, map[string]any{"reason": "operator not active"})
@@ -161,9 +175,13 @@ func (d authDeps) reauth(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.auditFailure(r, "auth.reauth_failed", s.OperatorID, map[string]any{"reason": "wrong password"})
+		if d.signinFailed(w, r, s.Email, s.OperatorID) {
+			return
+		}
 		api.Fail(w, r, http.StatusUnauthorized, api.CodeUnauthenticated, "reauthentication failed")
 		return
 	}
+	d.signinSucceeded(r, s.Email)
 	if c, err := r.Cookie(auth.SessionCookieName); err == nil {
 		api.MarkReauth(d.Store.R, c.Value)
 	}
