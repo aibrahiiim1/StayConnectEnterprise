@@ -580,3 +580,36 @@ func TestIntegration_GuestDataRights_AStayLinkDoesNotLeadIntoASharedStay(t *test
 		}
 	}
 }
+
+// GDPR final check, low item 5 (migration 0143): a stay the PMS left open with no departure date is erasable once
+// the PMS's latest full room list no longer has it, and refused while no such list says so.
+func TestIntegration_GuestDataRights_AnOpenStayWithNoDepartureLeftOffTheRoomList(t *testing.T) {
+	f := newAPI(t)
+	ctx := context.Background()
+	stay := seedGuestDataStay(t, f, "R-OPEN-"+fmt.Sprint(time.Now().UnixNano()), "IN_HOUSE")
+	var iface string
+	if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `UPDATE iam_v2.stays SET departure = NULL, arrival = current_date - 90 WHERE id=$1::uuid
+			RETURNING pms_interface_id::text`, stay).Scan(&iface); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	erase := func() (int, map[string]any) {
+		return f.do(t, "POST", "/guest-data-rights/erase", map[string]any{"kind": "stay", "id": stay, "reason": "guest asked", "password": f.password})
+	}
+	if st, body := erase(); st != 409 || fmt.Sprint(body["live"]) != "[pms_open]" {
+		t.Fatalf("with no room list the open stay must be refused: %d %v", st, body)
+	}
+	// The PMS publishes a full room list (generation 1) that does not have this stay.
+	if _, err := f.pool.Exec(ctx, `INSERT INTO iam_v2.pms_interface_runtime
+		  (tenant_id, site_id, pms_interface_id, runtime_generation, credential_mode, resync_generation_seq, published_resync_generation)
+		VALUES ($1,$2,$3::uuid,1,'NONE',1,1)`, f.tenant, f.site, iface); err != nil {
+		t.Fatalf("seed runtime: %v", err)
+	}
+	if st, body := erase(); st != 200 {
+		t.Fatalf("a stay left off the room list must be erasable: %d %v", st, body)
+	}
+}

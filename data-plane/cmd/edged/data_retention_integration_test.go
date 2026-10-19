@@ -501,6 +501,20 @@ func TestIntegration_DataRetention_StaffNotesFollowTheSetting(t *testing.T) {
 		return id
 	}
 	oldNote, newNote, oldSlot, newSlot := note(120), note(10), slot(120), slot(10)
+	// 0143: a room-charge block's note and clear reason, and the reason typed for an erasure.
+	var block string
+	if err := f.pool.QueryRow(ctx, `INSERT INTO iam_v2.stay_posting_blocks(tenant_id,site_id,pms_interface_id,stay_id,reason,source,
+		  note,created_by,created_at,cleared_at,cleared_by_source,cleared_by,cleared_reason)
+		VALUES ($1,$2,$3::uuid,$4::uuid,'ADMIN_BLOCK','OPERATOR','Mr Baker disputes the bill',gen_random_uuid(),
+		        now() - interval '130 days',now() - interval '120 days','OPERATOR',gen_random_uuid(),'Mr Baker paid at the desk')
+		RETURNING id::text`, f.tenant, f.site, iface, stay).Scan(&block); err != nil {
+		t.Fatalf("seed posting block: %v", err)
+	}
+	erasureRef := fmt.Sprintf("ER-%012X", time.Now().UnixNano()&0xffffffffffff)
+	if _, err := f.pool.Exec(ctx, `INSERT INTO iam_v2.guest_data_erasures(erasure_ref,tenant_id,site_id,subject_kind,erased_by,erase_reason,counts,erased_at)
+		VALUES ($1,$2,$3,'stay','op-1','Ada Lovelace asked by email','{}',now() - interval '120 days')`, erasureRef, f.tenant, f.site); err != nil {
+		t.Fatalf("seed erasure: %v", err)
+	}
 	tx, err := f.pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -538,8 +552,8 @@ func TestIntegration_DataRetention_StaffNotesFollowTheSetting(t *testing.T) {
 
 	var category string
 	var n int
-	if err := f.pool.QueryRow(ctx, `SELECT o_category, o_anonymised FROM iam_v2.run_staff_note_retention($1,$2,500)`, f.tenant, f.site).Scan(&category, &n); err != nil || category != "staff_notes" || n != 3 {
-		t.Fatalf("run = %q %d (%v), want staff_notes 3", category, n, err)
+	if err := f.pool.QueryRow(ctx, `SELECT o_category, o_anonymised FROM iam_v2.run_staff_note_retention($1,$2,500)`, f.tenant, f.site).Scan(&category, &n); err != nil || category != "staff_notes" || n != 6 {
+		t.Fatalf("run = %q %d (%v), want staff_notes 6", category, n, err)
 	}
 	str := func(q string, args ...any) string {
 		var v string
@@ -556,6 +570,8 @@ func TestIntegration_DataRetention_StaffNotesFollowTheSetting(t *testing.T) {
 		"recent slot reason": {str(`SELECT reason FROM iam_v2.device_slot_actions WHERE id=$1`, newSlot), "guest in 412 lost her phone"},
 		"revoke reason":      {str(`SELECT revoke_reason FROM iam_v2.post_stay_profiles WHERE id=$1`, profile), removed},
 		"who decided stays":  {str(`SELECT resolved_by FROM iam_v2.pms_case_resolutions WHERE id=$1`, oldNote), "op-1"},
+		"block note":         {str(`SELECT note || '|' || cleared_reason FROM iam_v2.stay_posting_blocks WHERE id=$1`, block), removed + "|" + removed},
+		"erasure reason":     {str(`SELECT erase_reason || '|' || erased_by FROM iam_v2.guest_data_erasures WHERE erasure_ref=$1`, erasureRef), removed + "|op-1"},
 	} {
 		if got[0] != got[1] {
 			t.Errorf("%s = %q, want %q", name, got[0], got[1])
