@@ -10,7 +10,7 @@ package main
 var a11yStrings = map[string]map[string]string{
 	"en": {
 		"link.newtab": "(opens in a new tab)",
-		"otp.valid":   "The code is valid for {n} minutes.",
+		"otp.valid":   "The code is valid for {n} min.",
 		"otp.resend":  "Send a new code",
 		"otp.resent":  "We sent you a new code.",
 	},
@@ -22,19 +22,19 @@ var a11yStrings = map[string]map[string]string{
 	},
 	"de": {
 		"link.newtab": "(öffnet in einem neuen Tab)",
-		"otp.valid":   "Der Code ist {n} Minuten lang gültig.",
+		"otp.valid":   "Der Code ist {n} Min. lang gültig.",
 		"otp.resend":  "Neuen Code senden",
 		"otp.resent":  "Wir haben Ihnen einen neuen Code gesendet.",
 	},
 	"fr": {
 		"link.newtab": "(s’ouvre dans un nouvel onglet)",
-		"otp.valid":   "Le code est valable {n} minutes.",
+		"otp.valid":   "Le code est valable {n} min.",
 		"otp.resend":  "Envoyer un nouveau code",
 		"otp.resent":  "Nous vous avons envoyé un nouveau code.",
 	},
 	"it": {
 		"link.newtab": "(si apre in una nuova scheda)",
-		"otp.valid":   "Il codice è valido per {n} minuti.",
+		"otp.valid":   "Il codice è valido per {n} min.",
 		"otp.resend":  "Invia un nuovo codice",
 		"otp.resent":  "Ti abbiamo inviato un nuovo codice.",
 	},

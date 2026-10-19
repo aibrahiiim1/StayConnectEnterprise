@@ -125,6 +125,9 @@ export const PORTAL_STRINGS: PortalString[] = [
   { group: "Email and SMS", key: "otp.sent.sms", english: "We texted a 6-digit code to", module: "sms_otp" },
   { group: "Email and SMS", key: "otp.sent.whatsapp", english: "We sent a 6-digit code on WhatsApp to", module: "whatsapp_otp" },
   { group: "Email and SMS", key: "otp.retry.sms", english: "Use a different number", module: ["sms_otp", "whatsapp_otp"] },
+  { group: "Email and SMS", key: "otp.valid", english: "The code is valid for {n} min.", module: ["sms_otp", "whatsapp_otp"] },
+  { group: "Email and SMS", key: "otp.resend", english: "Send a new code", module: ["sms_otp", "whatsapp_otp"] },
+  { group: "Email and SMS", key: "otp.resent", english: "We sent you a new code.", module: ["sms_otp", "whatsapp_otp"] },
 
   { group: "Email account", key: "acct.forgot.link", english: "Forgot password?", module: "email_otp" },
   { group: "Email account", key: "acct.create.link", english: "Create an account", module: "email_otp" },
@@ -162,6 +165,7 @@ export const PORTAL_STRINGS: PortalString[] = [
   { group: "Device info", key: "info.mac", english: "MAC address" },
   { group: "Device info", key: "info.help", english: "The site team may ask for these if you need help connecting." },
 
+  { group: "Messages", key: "link.newtab", english: "(opens in a new tab)" },
   { group: "Messages", key: "notice.nomethods", english: "There is no way to sign in on this network yet. Please contact the site team for assistance." },
   { group: "Messages", key: "notice.nopackages", english: "Internet access is not available here at the moment. You can still sign in, but there is nothing to connect you to yet — please let the site team know." },
   { group: "Messages", key: "err.generic", english: "We could not verify your stay. Please check your details or contact the site team for assistance.", module: "hospitality" },

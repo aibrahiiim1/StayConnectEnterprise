@@ -217,6 +217,8 @@
   [data-stage="code"] input[name=code] { letter-spacing: 0.3em; font-size: 1.25rem; text-align: center; }
   .hint, .small { color: var(--sc-muted); font-size: 0.8125rem; line-height: 1.45; }
   .hint { margin: 6px 0 0; }
+  [data-otp-valid] { margin: -8px 0 14px; }
+  [data-otp-valid]:empty { margin: 0; }
   .small { margin: 0 0 14px; }
   .dest { color: var(--sc-ink); font-weight: 600; overflow-wrap: anywhere; }
 
@@ -255,7 +257,7 @@
   .pill {
     display: inline-flex; align-items: center; justify-content: space-between;
     width: 100%; min-height: 52px; margin: 0 0 18px; padding: 6px 14px;
-    border: 1px solid var(--sc-line); border-radius: var(--sc-r-ctl);
+    border: 1px solid var(--sc-edge); border-radius: var(--sc-r-ctl);
     background: var(--sc-recess); color: var(--sc-ink);
     font-size: 0.9375rem; font-weight: 600; cursor: pointer;
     -webkit-user-select: none; user-select: none;
@@ -279,10 +281,10 @@
   }
   .alt button.link {
     margin: 0 8px 8px 0; padding: 0 16px;
-    border: 1px solid var(--sc-line); border-radius: 999px;
+    border: 1px solid var(--sc-edge); border-radius: 999px;
     background: var(--sc-card); color: var(--sc-ink); text-decoration: none;
   }
-  .alt button.link:hover { border-color: var(--sc-edge); }
+  .alt button.link:hover { border-color: var(--sc-muted); }
    
   .alt button.link[aria-pressed="true"] { border-color: var(--sc-ink); box-shadow: inset 0 0 0 1px var(--sc-ink); }
   [dir="rtl"] .alt button.link { margin: 0 0 8px 8px; }
@@ -309,7 +311,7 @@
   button.choice {
     display: flex; align-items: center;
     width: 100%; min-height: 64px; margin: 0 0 10px; padding: 12px 14px 12px 16px;
-    border: 1px solid var(--sc-line); border-radius: var(--sc-r-ctl);
+    border: 1px solid var(--sc-edge); border-radius: var(--sc-r-ctl);
     background: var(--sc-card); color: var(--sc-ink);
     font: inherit; text-align: left; cursor: pointer;
     box-shadow: 0 1px 2px rgba(18, 22, 28, 0.05);
@@ -869,6 +871,16 @@ main.card { display: block; }
 }
 .acct-form, .acct-form .field, .acct-form label, .acct-form input:not([type=hidden]), .acct-form button:not(:disabled) { opacity: 1; }
 *::before, *::after { pointer-events: none; }
+
+a:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible,
+summary:focus-visible, [tabindex]:focus-visible { outline: 2px solid #14161a; outline-offset: 2px; }
+input[type=text]:focus-visible, input[type=password]:focus-visible, input[type=email]:focus-visible,
+input[type=tel]:focus-visible { outline-offset: 1px; }
+input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button]), select,
+textarea { color: #14161a; background-color: #fff; }
+.notice { color: #7d4a06; background-color: #fbf0dd; }
+.notice--error, .err:not(:empty) { color: #8f1c13; background-color: #fdeceb; }
+.err.err--ok:not(:empty) { color: #1d4f7c; background-color: #eaf2f8; }
 </style>
 <script nonce="e2e-nonce">
   (function () {
@@ -892,7 +904,7 @@ main.card { display: block; }
 </head><body>
 <div class="page">
 <div class="sc-hero" aria-hidden="true"><div class="sc-hero-inner"><div class="sc-hero-name" dir="auto">Wi-Fi Access</div></div></div>
-<div class="langbar"><label class="lang"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" class="i-globe"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.4 2.6 3.7 5.6 3.7 9s-1.3 6.4-3.7 9c-2.4-2.6-3.7-5.6-3.7-9S9.6 5.6 12 3z"/></svg><select id="lang" aria-label="Language"><option value="en" selected>English</option><option value="ar">العربية</option><option value="de">Deutsch</option><option value="fr">Français</option><option value="it">Italiano</option><option value="ru">Русский</option></select><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" class="i-chev"><path d="m6 9 6 6 6-6"/></svg></label></div>
+<div class="langbar"><label class="lang"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" class="i-globe"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.4 2.6 3.7 5.6 3.7 9s-1.3 6.4-3.7 9c-2.4-2.6-3.7-5.6-3.7-9S9.6 5.6 12 3z"/></svg><select id="lang" aria-label="Language"><option value="en" lang="en" selected>English</option><option value="ar" lang="ar">العربية</option><option value="de" lang="de">Deutsch</option><option value="fr" lang="fr">Français</option><option value="it" lang="it">Italiano</option><option value="ru" lang="ru">Русский</option></select><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" class="i-chev"><path d="m6 9 6 6 6-6"/></svg></label></div>
 <main class="card card--page">
 <div class="sc-brandblock"><div class="brand"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" stroke-width="2"><path d="M5 12.6a10.5 10.5 0 0 1 14 0M1.9 9.1a15 15 0 0 1 20.2 0M8.5 16.1a5.5 5.5 0 0 1 7 0"/><path d="M12 20h.01"/></svg></span><p class="name" dir="auto">Wi-Fi Access</p></div></div>
 <div class="sc-body">
@@ -1124,11 +1136,24 @@ main.card { display: block; }
     })(imgs[i]);
   }
   var sel = document.getElementById('lang');
-  if (sel) sel.addEventListener('change', function () {
-    try { localStorage.setItem('sc-lang', sel.value); } catch (e) {}
-    try { document.cookie = 'sc-lang=' + encodeURIComponent(sel.value) + '; path=/; max-age=31536000; SameSite=Lax' + (location.protocol === 'https:' ? '; Secure' : ''); } catch (e) {}
-    location.reload();
-  });
+  if (sel) {
+    var pending = false, keyed = false;
+    var applyLang = function () {
+      if (!pending) return;
+      pending = false;
+      try { localStorage.setItem('sc-lang', sel.value); } catch (e) {}
+      try { document.cookie = 'sc-lang=' + encodeURIComponent(sel.value) + '; path=/; max-age=31536000; SameSite=Lax' + (location.protocol === 'https:' ? '; Secure' : ''); } catch (e) {}
+      location.reload();
+    };
+    sel.addEventListener('keydown', function (e) {
+      keyed = true;
+      if (e.key === 'Enter' && pending) { e.preventDefault(); applyLang(); }
+    });
+    sel.addEventListener('pointerdown', function () { keyed = false; });
+    sel.addEventListener('mousedown', function () { keyed = false; });
+    sel.addEventListener('change', function () { pending = true; if (!keyed) applyLang(); });
+    sel.addEventListener('blur', applyLang);
+  }
   
   
   var alertEl = document.querySelector('.notice[role=alert], .page-lead[role=alert]');
