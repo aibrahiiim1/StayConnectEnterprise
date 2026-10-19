@@ -295,7 +295,7 @@ func WrapMailer(m mail.Mailer, kind string, met *metrics.Registry, db *pgxpool.P
 
 func (i *instrumentedMailer) Send(ctx context.Context, msg mail.Message) error {
 	start := time.Now()
-	err := i.inner.Send(ctx, msg)
+	err := scrubError(i.inner.Send(ctx, msg))
 	dur := time.Since(start).Seconds()
 	result := "ok"
 	if err != nil {
@@ -323,7 +323,7 @@ func WrapSender(s sms.Sender, kind string, met *metrics.Registry, db *pgxpool.Po
 
 func (i *instrumentedSender) Send(ctx context.Context, msg sms.Message) error {
 	start := time.Now()
-	err := i.inner.Send(ctx, msg)
+	err := scrubError(i.inner.Send(ctx, msg))
 	dur := time.Since(start).Seconds()
 	result := "ok"
 	if err != nil {
@@ -352,7 +352,7 @@ func WrapWhatsApp(s whatsapp.Sender, kind string, met *metrics.Registry, db *pgx
 
 func (i *instrumentedWhatsApp) Send(ctx context.Context, msg whatsapp.Message) error {
 	start := time.Now()
-	err := i.inner.Send(ctx, msg)
+	err := scrubError(i.inner.Send(ctx, msg))
 	dur := time.Since(start).Seconds()
 	result := "ok"
 	if err != nil {

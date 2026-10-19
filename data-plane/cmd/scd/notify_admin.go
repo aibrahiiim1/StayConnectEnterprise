@@ -292,7 +292,9 @@ func (s *server) recordNotifyOutcome(ctx context.Context, id string, serr error)
 		_, _ = s.db.Exec(ctx, `UPDATE notification_providers SET last_success_at = now(), last_error = NULL, last_error_at = NULL WHERE id=$1::uuid AND tenant_id=$2`, id, s.tenID)
 		return
 	}
-	msg := serr.Error()
+	// The stored text is shown to every role that reads the provider screen: no recipient in it (B12). The
+	// answer to the test itself keeps the provider's words in full, for the administrator who typed the address.
+	msg := notifyloader.ScrubContacts(serr.Error())
 	if len(msg) > 500 {
 		msg = msg[:500]
 	}

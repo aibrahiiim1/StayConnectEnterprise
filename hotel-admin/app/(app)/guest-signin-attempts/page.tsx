@@ -169,6 +169,10 @@ export default function GuestSignInAttemptsPage() {
   const [detail, setDetail] = useState<SignInAttemptDetail | null>(null);
   const [creds, setCreds] = useState<SignInAttemptCredentials | null>(null);
   const [credsErr, setCredsErr] = useState<unknown>(null);
+  // WHAT A GUEST TYPED IS SHOWN ONLY AFTER THE OPERATOR CONFIRMS THEIR PASSWORD (GDPR audit B8). The password
+  // is cleared as soon as it has been sent, and when the panel closes.
+  const [credsPw, setCredsPw] = useState("");
+  const [revealing, setRevealing] = useState(false);
 
   // The credential permission is read once and FAILS CLOSED while it loads. The panel is not the boundary —
   // edged is — but a screen that flashed the values open before roles arrived would be its own small leak.
@@ -228,15 +232,22 @@ export default function GuestSignInAttemptsPage() {
     try {
       const d = await api.get<SignInAttemptDetail>("/guest-signin-attempts/" + a.id);
       setDetail(d);
-      if (maySeeCredentials && d.credentials_available) {
-        try {
-          setCreds(await api.get<SignInAttemptCredentials>("/guest-signin-credentials/" + a.id));
-        } catch (e) {
-          setCredsErr(e);
-        }
-      }
     } catch (e) {
       setOpenErr(e);
+    }
+  }
+
+  async function reveal() {
+    if (!detail) return;
+    setRevealing(true);
+    setCredsErr(null);
+    try {
+      setCreds(await api.post<SignInAttemptCredentials>("/guest-signin-credentials/" + detail.id, { password: credsPw }));
+    } catch (e) {
+      setCredsErr(e);
+    } finally {
+      setCredsPw("");
+      setRevealing(false);
     }
   }
 
@@ -432,7 +443,7 @@ export default function GuestSignInAttemptsPage() {
 
       <DetailDialog
         open={detail !== null}
-        onOpenChange={(v) => { if (!v) { setDetail(null); setCreds(null); setCredsErr(null); } }}
+        onOpenChange={(v) => { if (!v) { setDetail(null); setCreds(null); setCredsErr(null); setCredsPw(""); } }}
         title={detail?.room ? `Room ${detail.room}` : "Sign-in attempt"}
         description={detail ? detail.result_label : undefined}
         size="lg"
@@ -463,10 +474,27 @@ export default function GuestSignInAttemptsPage() {
                 This attempt was recorded while the appliance&rsquo;s sealing key was unavailable, so what the guest
                 entered was never stored. Everything else below is unaffected.
               </Callout>
-            ) : credsErr ? (
-              <ErrorBanner err={credsErr} />
             ) : creds === null ? (
-              <SkeletonRows rows={2} cols={2} />
+              <form
+                className="space-y-3 rounded-md border border-border bg-surface/50 p-3.5"
+                onSubmit={(e) => { e.preventDefault(); if (credsPw !== "") reveal(); }}
+              >
+                <p className="text-sm text-muted-foreground">
+                  What the guest typed is guest data. Confirm your password to see it; every view is recorded in the
+                  activity log.
+                </p>
+                {credsErr ? <ErrorBanner err={credsErr} className="mb-0" /> : null}
+                <div className="flex flex-wrap items-end gap-2">
+                  <label className="grid gap-1 text-sm">
+                    <span>Your password</span>
+                    <Input type="password" autoComplete="current-password" value={credsPw}
+                      onChange={(e) => setCredsPw(e.target.value)} className="w-60" />
+                  </label>
+                  <Button type="submit" disabled={credsPw === "" || revealing}>
+                    <KeyRound /> Show what was entered
+                  </Button>
+                </div>
+              </form>
             ) : detail.room_in_mirror === false ? (
               <Callout tone="warning" title="No eligible stay for this room exists in the appliance's guest list">
                 <p>

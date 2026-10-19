@@ -400,7 +400,7 @@ func TestIntegrationMustChangePassword_ConfinesTheSessionUntilChanged(t *testing
 	email := fmt.Sprintf("newop-%d@test.local", time.Now().UnixNano())
 	const first = "chosen-by-admin-1"
 	if r := admin.call(t, "POST", "/operators", ip, admin.sessTok, map[string]any{
-		"email": email, "password": first, "role": "hotel_it_manager", "require_change": true}, nil); r.code != 201 ||
+		"email": email, "password": first, "role": "hotel_it_manager", "require_change": true, "your_password": admin.password}, nil); r.code != 201 ||
 		r.body["must_change_password"] != true {
 		t.Fatalf("create: %d %s", r.code, r.raw)
 	}
@@ -464,7 +464,7 @@ func TestIntegrationAdminResetAndDisableEndTheOperatorsSessions(t *testing.T) {
 	admin := newSigninAPI(t, "site_admin")
 	ip := testIP()
 	email := fmt.Sprintf("colleague-%d@test.local", time.Now().UnixNano())
-	cr := admin.call(t, "POST", "/operators", ip, admin.sessTok, map[string]any{"email": email, "password": "colleague-pass-1", "role": "hotel_it_manager"}, nil)
+	cr := admin.call(t, "POST", "/operators", ip, admin.sessTok, map[string]any{"email": email, "password": "colleague-pass-1", "role": "hotel_it_manager", "your_password": admin.password}, nil)
 	if cr.code != 201 {
 		t.Fatalf("create: %d %s", cr.code, cr.raw)
 	}
@@ -478,7 +478,20 @@ func TestIntegrationAdminResetAndDisableEndTheOperatorsSessions(t *testing.T) {
 		admin.login(t, email, "wrong-wrong-wrong", ip)
 		admin.age(t, scopeAccount, email, time.Minute)
 	}
-	if r := admin.call(t, "POST", "/operators/"+id+"/set-password", ip, admin.sessTok, map[string]any{"password": "reset-by-admin-22"}, nil); r.code != 204 {
+	// B7: changing a colleague's account asks for the administrator's own password.
+	if r := admin.call(t, "POST", "/operators/"+id+"/set-password", ip, admin.sessTok, map[string]any{"password": "reset-by-admin-22"}, nil); r.code != 401 {
+		t.Fatalf("a reset without the administrator's password: %d %s", r.code, r.raw)
+	}
+	if r := admin.call(t, "POST", "/operators/"+id+"/roles", ip, admin.sessTok, map[string]any{"role": "site_admin", "your_password": "not-it-at-all"}, nil); r.code != 401 {
+		t.Fatalf("a role was added with a wrong password: %d %s", r.code, r.raw)
+	}
+	if r := admin.call(t, "POST", "/operators/"+id+"/roles", ip, admin.sessTok, map[string]any{"role": "front_office_operator", "your_password": admin.password}, nil); r.code != 201 {
+		t.Fatalf("add role: %d %s", r.code, r.raw)
+	}
+	if r := admin.call(t, "DELETE", "/operators/"+id+"/roles/front_office_operator", ip, admin.sessTok, map[string]any{"your_password": admin.password}, nil); r.code != 204 {
+		t.Fatalf("remove role: %d %s", r.code, r.raw)
+	}
+	if r := admin.call(t, "POST", "/operators/"+id+"/set-password", ip, admin.sessTok, map[string]any{"password": "reset-by-admin-22", "your_password": admin.password}, nil); r.code != 204 {
 		t.Fatalf("reset: %d %s", r.code, r.raw)
 	}
 	if r := admin.call(t, "GET", "/auth/whoami", ip, lr.cookie, nil, nil); r.code != 401 {
@@ -491,7 +504,10 @@ func TestIntegrationAdminResetAndDisableEndTheOperatorsSessions(t *testing.T) {
 	if r := admin.call(t, "POST", "/operators/"+admin.operator+"/set-password", ip, admin.sessTok, map[string]any{"password": "my-own-new-pass"}, nil); r.code != 409 {
 		t.Fatalf("an administrator reset their own password without the current one: %d", r.code)
 	}
-	if r := admin.call(t, "DELETE", "/operators/"+id, ip, admin.sessTok, nil, nil); r.code != 204 {
+	if r := admin.call(t, "DELETE", "/operators/"+id, ip, admin.sessTok, map[string]any{}, nil); r.code != 401 {
+		t.Fatalf("disabled without the administrator's password: %d %s", r.code, r.raw)
+	}
+	if r := admin.call(t, "DELETE", "/operators/"+id, ip, admin.sessTok, map[string]any{"your_password": admin.password}, nil); r.code != 204 {
 		t.Fatalf("disable: %d %s", r.code, r.raw)
 	}
 	if r := admin.call(t, "GET", "/auth/whoami", ip, l2.cookie, nil, nil); r.code != 401 {

@@ -670,6 +670,14 @@ func (s *server) auditRoutes() http.Handler {
 			    OR target_type ILIKE $%[1]d OR host(ip) ILIKE $%[1]d OR action = ANY($%[2]d))`, n, m)
 		}
 
+		// WHAT WAS SEARCHED FOR IS CLIENT DATA (GDPR audit B6). Every role that reads the trail sees that a search,
+		// a view, an export or an erasure happened, and who did it; only holders of guest-data-rights see the
+		// details: the search text, and the reason given for an export or erasure.
+		seeGuestDetail := false
+		if sess := sessFrom(req.Context()); sess != nil {
+			seeGuestDetail = permFor(sess.Roles, "guest-data-rights", permRead)
+		}
+
 		ctx, cancel := dbCtx(req)
 		defer cancel()
 
@@ -692,6 +700,9 @@ func (s *server) auditRoutes() http.Handler {
 				slog.Error("audit scan failed", "err", err)
 				jsonErr(w, http.StatusInternalServerError, "internal", "the audit trail could not be read")
 				return
+			}
+			if !seeGuestDetail && strings.HasPrefix(a.Action, "guest_data.") && len(a.Payload) > 0 {
+				a.Payload = json.RawMessage(`{"details_hidden":true}`)
 			}
 			out = append(out, a)
 		}

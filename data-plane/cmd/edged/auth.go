@@ -303,7 +303,7 @@ var rolePerms = map[string]map[string]perm{
 		// Guest sign-in attempts. The IT manager owns the PMS integration, and "which guests cannot sign in,
 		// and why" is the integration's most direct symptom — including the credential comparison, which is
 		// what turns "room sign-in is broken" into "this property's PMS spells names differently".
-		"guest-signin-attempts": permRead, "guest-signin-credentials": permRead,
+		"guest-signin-attempts": permRead, "guest-signin-credentials": permWrite,
 		// The protection policy is a property-wide configuration decision, which is this role's own
 		// territory — the same reasoning that puts auth-methods and checkout-grace here. Releasing one
 		// device's restriction comes with it: whoever may set the threshold may certainly waive one instance
@@ -340,7 +340,7 @@ var rolePerms = map[string]map[string]perm{
 		// THE RECEPTION DESK, and the role this feature was asked for. They already hold the guest's room,
 		// stay and access credentials; the comparison panel is how they answer the guest standing in front
 		// of them instead of asking that guest to try again while somebody watches a log.
-		"guest-signin-attempts": permRead, "guest-signin-credentials": permRead,
+		"guest-signin-attempts": permRead, "guest-signin-credentials": permWrite,
 		// THE DESK RELEASES, AND DOES NOT RE-TUNE. A guest who has just locked themselves out is standing at
 		// reception now, so the desk must be able to end that one wait — and is the only place that can see
 		// the guest and judge it. Changing the property's thresholds is a different decision made once, by
@@ -389,7 +389,7 @@ var rolePerms = map[string]map[string]perm{
 		// cleared a device's temporary-internet windows went with the email code. code-reveal reads a LIVE code.
 		"code-requests": permRead,
 		// Same desk, same conversation with the guest, same need.
-		"guest-signin-attempts": permRead, "guest-signin-credentials": permRead,
+		"guest-signin-attempts": permRead, "guest-signin-credentials": permWrite,
 		"guest-signin-restrictions": permWrite, "guest-signin-protection": permRead,
 		"guest-accounts": permWrite, "sessions": permWrite, "usage": permRead,
 		"pms-stays": permRead, "pms-events": permRead, "operational-alerts": permWrite, "checkout-grace": permRead,

@@ -80,9 +80,13 @@ func (s *server) signInAttemptsRoutes() http.Handler {
 // real, server-enforced boundary rather than a flag the UI consults. A caller holding only
 // guest-signin-attempts is refused by middleware here, before this handler runs — so hiding the button in the
 // browser and calling the API directly are the same answer.
+//
+// THE REVEAL IS A POST WITH THE OPERATOR'S PASSWORD (GDPR audit B8): what a guest typed is shown only after the
+// operator confirms it is them, and the password travels in the body, never the URL or a header. The roles that
+// may reveal hold "write" on this resource because revealing is its only action.
 func (s *server) signInCredentialsRoutes() http.Handler {
 	r := chi.NewRouter()
-	r.Get("/{id}", s.getSignInAttemptCredentials)
+	r.Post("/{id}", s.getSignInAttemptCredentials)
 	return r
 }
 
@@ -289,6 +293,18 @@ func (s *server) getSignInAttemptCredentials(w http.ResponseWriter, r *http.Requ
 	id := strings.TrimSpace(chi.URLParam(r, "id"))
 	if id == "" {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "attempt id is required")
+		return
+	}
+
+	var in struct {
+		Password string `json:"password"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
+		return
+	}
+	if !s.reauth(r, in.Password) {
+		s.reauthRefused(w, r, "your password is required to see what a client typed")
 		return
 	}
 

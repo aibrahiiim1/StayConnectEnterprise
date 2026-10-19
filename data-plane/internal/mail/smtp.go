@@ -34,6 +34,16 @@ const (
 	SMTPNone     SMTPSecurity = "none"     // no TLS at all: an internal relay only
 )
 
+// PLAIN SMTP STAYS ON THE HOTEL'S OWN NETWORK (GDPR audit B9). Guest email addresses, codes and staff reset
+// links must not cross the internet unencrypted, so "none" is accepted only for a relay at a loopback, private
+// or link-local address. A literal address is checked when the settings are saved; a host name is checked where
+// it matters, against the address actually connected to, so a name that resolves to a public server is refused.
+const plainSMTPRefused = "SMTP without TLS is allowed only for a mail server on this network (a private address); use starttls or tls for an outside server"
+
+func internalAddress(ip net.IP) bool {
+	return ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast())
+}
+
 // SMTPConfig is what the operator enters. The password arrives separately (sealed storage) and is never
 // returned by any API.
 type SMTPConfig struct {
@@ -62,6 +72,9 @@ func ValidateSMTPConfig(c SMTPConfig) string {
 	case SMTPStartTLS, SMTPTLS, SMTPNone:
 	default:
 		return "SMTP security must be starttls, tls or none"
+	}
+	if ip := net.ParseIP(host); c.Security == SMTPNone && ip != nil && !internalAddress(ip) {
+		return plainSMTPRefused
 	}
 	if c.Username != "" && c.Password == "" {
 		return "a password is required when a username is set"
@@ -119,6 +132,12 @@ func (s *SMTP) Send(ctx context.Context, m Message) error {
 	conn, err := s.Dialer(ctx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("smtp: connect to %s: %w", addr, err)
+	}
+	if s.cfg.Security == SMTPNone {
+		if ta, ok := conn.RemoteAddr().(*net.TCPAddr); !ok || !internalAddress(ta.IP) {
+			_ = conn.Close()
+			return errors.New("smtp: " + plainSMTPRefused)
+		}
 	}
 	if dl, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(dl)

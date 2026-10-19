@@ -184,6 +184,16 @@ confirm genuine guests (2026-10-19):
 
 ## B. Fix soon
 
+**Status:**
+
+| Item | Status |
+|---|---|
+| B6 | **Fixed:** the search text and reasons in `guest_data.*` entries are shown only to holders of `guest-data-rights`; other roles see that the read happened, and who did it |
+| B7 | **Fixed:** adding, disabling or resetting a staff account, and adding or removing a role, ask for the administrator's own password |
+| B8 | **Fixed:** what a guest typed is revealed only after the operator confirms their password (`POST /guest-signin-credentials/{id}`) |
+| B9 | **Fixed:** plain SMTP is accepted only for a loopback, private or link-local address, checked on save and at connect |
+| B12 | **Fixed:** email addresses and phone numbers are removed from provider errors before they are logged or stored. An error already stored is replaced at the provider's next send |
+
 **B1. The guest export (Art. 15/20) is incomplete.** `guest_data_export_records` and `public.guest_data_export`
 leave out:
 

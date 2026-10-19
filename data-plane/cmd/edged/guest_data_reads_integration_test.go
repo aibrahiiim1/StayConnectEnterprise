@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -87,6 +88,25 @@ func TestIntegration_GuestDataReads_AreRecorded(t *testing.T) {
 	}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("recorded\n  %v\nwant\n  %v", got, want)
+	}
+
+	// B6: what was searched for is shown only to holders of guest-data-rights. A viewer sees that a search
+	// happened, and by whom, but not the text.
+	searchPayload := func(c *apiFixture) string {
+		t.Helper()
+		st, body := c.do(t, http.MethodGet, "/audit?action=guest_data.searched", nil)
+		rows, _ := body["data"].([]any)
+		if st != http.StatusOK || len(rows) == 0 {
+			t.Fatalf("audit = %d %v", st, body)
+		}
+		return fmt.Sprint(rows[0].(map[string]any)["payload"])
+	}
+	if p := searchPayload(f); !strings.Contains(p, email) {
+		t.Fatalf("the site admin does not see the search text: %s", p)
+	}
+	viewer := newAPIIn(t, f.tenant, "site_viewer")
+	if p := searchPayload(viewer); strings.Contains(p, email) || !strings.Contains(p, "details_hidden") {
+		t.Fatalf("a site viewer sees the search text: %s", p)
 	}
 
 	// Erasing the guest anonymises what the log says about them: the opened record and the search for them.

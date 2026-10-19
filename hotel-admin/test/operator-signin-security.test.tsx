@@ -164,9 +164,12 @@ describe("Operators (N-8)", () => {
     expect(box.checked).toBe(true);
     await userEvent.type(within(dialog).getByLabelText(/^New password/), "temporary-pass-1");
     await userEvent.type(within(dialog).getByLabelText(/Type it again/), "temporary-pass-1");
+    // B7: the administrator's own password confirms the reset.
+    expect(within(dialog).getByRole("button", { name: "Reset password" })).toBeDisabled();
+    await userEvent.type(within(dialog).getByLabelText(/^Your password/), "admin-pass-1");
     await userEvent.click(within(dialog).getByRole("button", { name: "Reset password" }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("/operators/o2/set-password",
-      { password: "temporary-pass-1", require_change: true }));
+      { password: "temporary-pass-1", require_change: true, your_password: "admin-pass-1" }));
   });
 
   it("offers your own row Change my password, never an administrator reset", async () => {

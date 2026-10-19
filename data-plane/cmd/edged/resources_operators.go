@@ -57,6 +57,17 @@ func (s *server) operatorsRoutes() http.Handler {
 	return r
 }
 
+// confirmYourPassword is the step-up for changing a staff account (GDPR audit B7): creating one, resetting its
+// password, disabling it, and adding or removing a role all ask the administrator for their own password first.
+// The field is your_password because "password" in these bodies is the colleague's new one.
+func (s *server) confirmYourPassword(w http.ResponseWriter, r *http.Request, yours string) bool {
+	if !s.reauth(r, yours) {
+		s.reauthRefused(w, r, "your password is required to change a staff account")
+		return false
+	}
+	return true
+}
+
 func (s *server) loadEdgeOperator(ctx context.Context, id string) (*edgeOperator, error) {
 	var op edgeOperator
 	err := s.db.QueryRow(ctx, `
@@ -111,7 +122,8 @@ func (s *server) createEdgeOperator(w http.ResponseWriter, r *http.Request) {
 		Password    string `json:"password"`
 		Role        string `json:"role"`
 		// RequireChange: the new operator must choose their own password at first sign-in (0119).
-		RequireChange bool `json:"require_change"`
+		RequireChange bool   `json:"require_change"`
+		YourPassword  string `json:"your_password"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
@@ -131,6 +143,9 @@ func (s *server) createEdgeOperator(w http.ResponseWriter, r *http.Request) {
 	}
 	if !isValidEdgeRole(in.Role) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "invalid role")
+		return
+	}
+	if !s.confirmYourPassword(w, r, in.YourPassword) {
 		return
 	}
 
@@ -199,6 +214,16 @@ func (s *server) disableEdgeOperator(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusConflict, "conflict", "cannot disable yourself")
 		return
 	}
+	var in struct {
+		YourPassword string `json:"your_password"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
+		return
+	}
+	if !s.confirmYourPassword(w, r, in.YourPassword) {
+		return
+	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	ct, err := s.db.Exec(ctx,
@@ -226,6 +251,7 @@ func (s *server) setEdgeOperatorPassword(w http.ResponseWriter, r *http.Request)
 	var in struct {
 		Password      string `json:"password"`
 		RequireChange bool   `json:"require_change"`
+		YourPassword  string `json:"your_password"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
@@ -234,6 +260,9 @@ func (s *server) setEdgeOperatorPassword(w http.ResponseWriter, r *http.Request)
 	if sess := sessFrom(r.Context()); sess != nil && sess.OperatorID == id {
 		jsonErr(w, http.StatusConflict, "use_change_password",
 			"Change your own password with Change my password, which asks for your current password.")
+		return
+	}
+	if !s.confirmYourPassword(w, r, in.YourPassword) {
 		return
 	}
 	ctx, cancel := dbCtx(r)
@@ -275,7 +304,8 @@ func (s *server) setEdgeOperatorPassword(w http.ResponseWriter, r *http.Request)
 func (s *server) addEdgeOperatorRole(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var in struct {
-		Role string `json:"role"`
+		Role         string `json:"role"`
+		YourPassword string `json:"your_password"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
@@ -283,6 +313,9 @@ func (s *server) addEdgeOperatorRole(w http.ResponseWriter, r *http.Request) {
 	}
 	if !isValidEdgeRole(in.Role) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "invalid role")
+		return
+	}
+	if !s.confirmYourPassword(w, r, in.YourPassword) {
 		return
 	}
 	ctx, cancel := dbCtx(r)
@@ -322,6 +355,16 @@ func (s *server) removeEdgeOperatorRole(w http.ResponseWriter, r *http.Request) 
 	}
 	if sess := sessFrom(r.Context()); sess != nil && sess.OperatorID == id && role == "site_admin" {
 		jsonErr(w, http.StatusConflict, "conflict", "cannot remove your own site_admin role")
+		return
+	}
+	var in struct {
+		YourPassword string `json:"your_password"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
+		return
+	}
+	if !s.confirmYourPassword(w, r, in.YourPassword) {
 		return
 	}
 	ctx, cancel := dbCtx(r)

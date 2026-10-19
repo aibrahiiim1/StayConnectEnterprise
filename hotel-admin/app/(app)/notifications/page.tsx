@@ -405,11 +405,11 @@ export default function NotificationsPage() {
               <Field label="Mail server" required hint="The SMTP host name or address.">
                 <Input value={f.host} onChange={(e) => set("host", e.target.value)} placeholder="smtp.example.com" dir="ltr" required />
               </Field>
-              <Field label="Security" hint="STARTTLS upgrades a plain connection; TLS connects encrypted from the start. 'None' sends in the clear and is for a relay on your own network only.">
+              <Field label="Security" hint="STARTTLS upgrades a plain connection; TLS connects encrypted from the start. 'None' sends in the clear, so it is accepted only for a mail server at a private address on your own network.">
                 <Select value={f.security} onChange={(e) => set("security", e.target.value as Security)}>
                   <option value="starttls">STARTTLS (port 587)</option>
                   <option value="tls">TLS (port 465)</option>
-                  <option value="none">None (port 25)</option>
+                  <option value="none">None — internal relay only (port 25)</option>
                 </Select>
               </Field>
               <Field label="Port" hint={`Leave blank for the usual port for the security chosen (${IMPLIED_PORT[f.security]}). 1–65535.`}>

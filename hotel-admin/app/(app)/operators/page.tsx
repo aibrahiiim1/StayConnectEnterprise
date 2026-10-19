@@ -64,6 +64,9 @@ export default function OperatorsPage() {
   const [mfaReason, setMfaReason] = useState("");
   const [mfaPassword, setMfaPassword] = useState("");
   const [removingRole, setRemovingRole] = useState<{ op: EdgeOperator; role: string } | null>(null);
+  // Every change to a colleague's account asks for YOUR password first (GDPR audit B7). It is cleared whenever a
+  // dialog opens or the change succeeds, so it never outlives the one change it confirmed.
+  const [yourPw, setYourPw] = useState("");
 
   const writable = canWrite("operators", me?.roles ?? []);
 
@@ -77,7 +80,7 @@ export default function OperatorsPage() {
   }, []);
 
   function openNew() {
-    setEmail(""); setDisplayName(""); setPassword(""); setRole("site_viewer"); setRequireChangeNew(true);
+    setEmail(""); setDisplayName(""); setPassword(""); setRole("site_viewer"); setRequireChangeNew(true); setYourPw("");
     setFormErr(null);
     setShowNew(true);
   }
@@ -94,9 +97,10 @@ export default function OperatorsPage() {
         password,
         role,
         require_change: requireChangeNew,
+        your_password: yourPw,
       });
       setShowNew(false);
-      setPassword("");
+      setPassword(""); setYourPw("");
       toast.success("Operator added", `${email.trim()} can now sign in as ${ROLE_LABELS[role as SiteRole] ?? role}.`);
       await load();
     } catch (e) { setFormErr(e); }
@@ -115,11 +119,11 @@ export default function OperatorsPage() {
       setFormErr("The two passwords do not match."); setBusy(false); return;
     }
     try {
-      await api.post(`/operators/${pwFor.id}/set-password`, { password: newPw, require_change: requireChangeReset });
+      await api.post(`/operators/${pwFor.id}/set-password`, { password: newPw, require_change: requireChangeReset, your_password: yourPw });
       toast.success("Password reset", `${pwFor.email} has been signed out everywhere${requireChangeReset ? " and must choose a new password at the next sign-in" : ""}.`);
       await load();
       setPwFor(null);
-      setNewPw(""); setConfirmPw("");
+      setNewPw(""); setConfirmPw(""); setYourPw("");
     } catch (e) { setFormErr(e); }
     finally { setBusy(false); }
   }
@@ -136,11 +140,11 @@ export default function OperatorsPage() {
     finally { setBusy(false); }
   }
 
-  async function onDisable() {
+  async function onDisable({ password }: { password: string }) {
     if (!disabling) return;
     setBusy(true); setFormErr(null);
     try {
-      await api.del(`/operators/${disabling.id}`);
+      await api.del(`/operators/${disabling.id}`, { your_password: password });
       toast.success("Operator disabled", `${disabling.email} can no longer sign in.`);
       setDisabling(null);
       await load();
@@ -152,12 +156,12 @@ export default function OperatorsPage() {
   // grant the role on the spot: one slip of a select widened a colleague's access with nothing to catch it. The
   // request is the same one, sent only after the operator confirms.
   const [addingRole, setAddingRole] = useState<{ op: EdgeOperator; role: string } | null>(null);
-  async function onAddRole() {
+  async function onAddRole({ password }: { password: string }) {
     if (!addingRole) return;
     const { op, role } = addingRole;
     setBusy(true); setFormErr(null);
     try {
-      await api.post(`/operators/${op.id}/roles`, { role });
+      await api.post(`/operators/${op.id}/roles`, { role, your_password: password });
       toast.success("Role added", `${op.email} is now also ${ROLE_LABELS[role as SiteRole] ?? role}.`);
       setAddingRole(null);
       await load();
@@ -165,11 +169,11 @@ export default function OperatorsPage() {
     finally { setBusy(false); }
   }
 
-  async function onRemoveRole() {
+  async function onRemoveRole({ password }: { password: string }) {
     if (!removingRole) return;
     setBusy(true); setFormErr(null);
     try {
-      await api.del(`/operators/${removingRole.op.id}/roles/${removingRole.role}`);
+      await api.del(`/operators/${removingRole.op.id}/roles/${removingRole.role}`, { your_password: password });
       toast.success("Role removed");
       setRemovingRole(null);
       await load();
@@ -209,6 +213,7 @@ export default function OperatorsPage() {
                   "A password you set for someone must, by default, be replaced by them at their next sign-in.",
                   "Your own password is changed with Change my password, which asks for your current one.",
                   "A disabled operator can no longer sign in, and is signed out at once.",
+                  "Adding, disabling or resetting an operator, or changing their roles, asks for your own password first.",
                 ]}
               />
             </HelpSection>
@@ -333,7 +338,7 @@ export default function OperatorsPage() {
                               size="sm"
                               variant="ghost"
                               aria-label={`Reset the password for ${op.email}`}
-                              onClick={() => { setFormErr(null); setNewPw(""); setConfirmPw(""); setRequireChangeReset(true); setPwFor(op); }}
+                              onClick={() => { setFormErr(null); setNewPw(""); setConfirmPw(""); setYourPw(""); setRequireChangeReset(true); setPwFor(op); }}
                             >
                               Reset password
                             </Button>
@@ -397,7 +402,7 @@ export default function OperatorsPage() {
         submitLabel="Create operator"
         busy={busy}
         error={formErr}
-        disabled={!email.trim() || password.length < MIN_PASSWORD}
+        disabled={!email.trim() || password.length < MIN_PASSWORD || yourPw === ""}
         onSubmit={onCreate}
       >
         <div className="grid gap-4 sm:grid-cols-2">
@@ -429,6 +434,7 @@ export default function OperatorsPage() {
           </Select>
         </Field>
         <RequireChangeBox checked={requireChangeNew} onChange={setRequireChangeNew} />
+        <YourPasswordField value={yourPw} onChange={setYourPw} />
       </DialogForm>
 
       {/* ------------------------------------------------------------------ change password */}
@@ -441,7 +447,7 @@ export default function OperatorsPage() {
         submitLabel="Reset password"
         busy={busy}
         error={formErr}
-        disabled={newPw.length < MIN_PASSWORD || newPw !== confirmPw}
+        disabled={newPw.length < MIN_PASSWORD || newPw !== confirmPw || yourPw === ""}
         onSubmit={onSetPassword}
       >
         <Field label="New password" required hint={`At least ${MIN_PASSWORD} characters.`}>
@@ -468,6 +474,7 @@ export default function OperatorsPage() {
           />
         </Field>
         <RequireChangeBox checked={requireChangeReset} onChange={setRequireChangeReset} />
+        <YourPasswordField value={yourPw} onChange={setYourPw} />
       </DialogForm>
 
       {/* ------------------------------------------------------------------ disable */}
@@ -482,6 +489,8 @@ export default function OperatorsPage() {
         }
         confirmLabel="Disable account"
         confirmVariant="danger"
+        requirePassword
+        passwordLabel="Your password"
         busy={busy}
         error={formErr}
         onConfirm={onDisable}
@@ -498,6 +507,8 @@ export default function OperatorsPage() {
             : undefined
         }
         confirmLabel="Add role"
+        requirePassword
+        passwordLabel="Your password"
         busy={busy}
         error={formErr}
         onConfirm={onAddRole}
@@ -515,11 +526,22 @@ export default function OperatorsPage() {
         }
         confirmLabel="Remove role"
         confirmVariant="danger"
+        requirePassword
+        passwordLabel="Your password"
         busy={busy}
         error={formErr}
         onConfirm={onRemoveRole}
       />
     </PageShell>
+  );
+}
+
+/** The administrator's own password, confirming a change to a colleague's account (B7). */
+function YourPasswordField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <Field label="Your password" required hint="Confirms that it is you making this change.">
+      <Input type="password" autoComplete="current-password" value={value} onChange={(e) => onChange(e.target.value)} />
+    </Field>
   );
 }
 
