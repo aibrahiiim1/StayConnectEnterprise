@@ -48,6 +48,7 @@ lawyer: tick boxes, a few blanks, and where in Hotel Admin each answer is found.
 | 7 | ~~Retention periods for Central~~: decided 2026-10-19 (D-CR) and built (Central migration 0054): audit log 24 months; alerts and appliance history 6 years with the people removed after 24 months; disabled accounts 24 months; retired appliances and licences 6 years. All settings | Record Part 2 |
 | 8 | Central's hosting provider: a provider, not yet chosen (Product Owner, 2026-10-19). Name, country and, outside the UK and EEA, the safeguard | Annex III, Part C; record Part 2 |
 | 9 | ~~Our privacy notice for Central users~~: drafted 2026-10-19 ([CENTRAL_PRIVACY_NOTICE.md](CENTRAL_PRIVACY_NOTICE.md)). Where to publish it once approved: a link on Central's sign-in page | DPA clause 2.3 |
+| 10 | **Appliance SSH, to decide before launch (D-SSH).** It stays open for the hotel's IT. How the login is protected is still open: passwords hardened (lockout, no direct root login, logins recorded, strong passwords), key-only, or as today. GDPR does not require turning it off; it requires appropriate protection (Art. 32). See the plan, D-SSH | Annex II, Part C2; hotel DPIA R2 |
 
 ## Found while checking the code (not changed; backlog for the plan)
 
@@ -55,7 +56,7 @@ These either limit what the documents can promise or are facts a hotel's DPIA ne
 draft as it is today. Fixing one means updating the draft.
 
 - **Appliance:**
-  - SSH is open on the management interface by default (Annex II, Part C2).
+  - SSH is open on the appliance's uplink (management) interface by default, with the operating system's default login settings: no lockout, root and password login not restricted by us (Annex II, Part C2). Decision D-SSH, before launch.
   - Backups stay unencrypted until the first key holder is confirmed (Part C3).
   - The PMS link can be encrypted since C8 (2026-10-19), but it is off by default.
   - There is no disk encryption (C11).

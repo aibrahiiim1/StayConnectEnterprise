@@ -176,6 +176,17 @@ Each value ships as a hotel setting with this default, following `OPERATIONAL_SE
 
 - "14 days, but if it can be configurable by law make it that way": the default is 14 days, and a site administrator may set 1 to 730 days, so a hotel whose national law requires connection logs to be kept longer can follow it.
 
+### D-SSH, appliance SSH: **to decide before launch** (Product Owner, 2026-10-19)
+
+- **The fact:** the firewall accepts SSH on the uplink interface (`deploy/nftables/stayconnect.nft`, `ens160` port 22), and we ship no SSH settings, so the operating system's defaults apply: password login, no lockout. Guests cannot reach it. Whether the internet can depends on the hotel's own router.
+- **Decided:** SSH stays available, so the hotel's IT can manage the appliance. GDPR does not require turning it off; it requires security appropriate to the risk (Art. 32).
+- **Open until before launch:** how the login is protected. The options discussed:
+  1. **Passwords, hardened** (recommended, keeps it easy for admins): lockout after repeated failures (a setting), no direct root login, every login recorded, strong passwords required at set-up; keys optional.
+  2. **Key-only:** strongest, but harder for admins.
+  3. **As today:** hard to defend after a breach.
+- In every option the documents tell the hotel to reach SSH through its VPN, not directly from the internet.
+- Until decided, Annex II Part C2 and the hotel DPIA (R2) say SSH is open by default and ask the hotel to protect it.
+
 ### D-CR, Central retention (Product Owner, 2026-10-19)
 
 - The audit log: **24 months**.
