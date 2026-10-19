@@ -424,6 +424,15 @@ func (s *server) runRestore(ctx context.Context, name, identity string, rec *ver
 	}
 	ok("load", fmt.Sprintf("the backup loaded into a staging database (%d tables when verified)", rec.Tables))
 
+	// ---- 3b. who may open this hotel's backups is decided now, not by the backup (backup_key_carry.go) ----
+	if carried, detail := keyRegisterStep(ctx, pgDatabase, staging); !carried {
+		dropStaging()
+		fail("key_holders", detail)
+		return
+	} else {
+		ok("key_holders", detail)
+	}
+
 	// ---- 4. the swap: rename aside, rename in ----------------------------------------------------------
 	//
 	// Connections must be gone first or the rename is refused. The dependent services are stopped rather
