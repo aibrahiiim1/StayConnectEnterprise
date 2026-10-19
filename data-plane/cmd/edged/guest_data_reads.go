@@ -108,13 +108,18 @@ func newReadRecorder(write func(context.Context, readEntry) error) *readRecorder
 	return &readRecorder{in: make(chan readEntry, readQueueSize), write: write, now: time.Now, done: make(chan struct{})}
 }
 
-// record never blocks.
+// record hands the entry to the writer. When the queue is full it writes the entry itself rather than drop it
+// (D-F8 records every search): the response has already gone, so only this rare request waits for the write.
 func (rr *readRecorder) record(e readEntry) {
 	select {
 	case rr.in <- e:
 	default:
-		if n := rr.dropped.Add(1); n == 1 || n%100 == 0 {
-			slog.Warn("guest-data read not recorded: the queue is full", "dropped_total", n)
+		wctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := rr.write(wctx, e); err != nil {
+			if n := rr.dropped.Add(1); n == 1 || n%100 == 0 {
+				slog.Warn("guest-data read not recorded: the queue is full and the direct write failed", "dropped_total", n, "err", err)
+			}
 		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -76,9 +77,10 @@ func TestReadRecorderCollapsesTypingAndRepeats(t *testing.T) {
 	}
 }
 
-// A full queue drops the read instead of making the page wait.
-func TestReadRecorderNeverBlocks(t *testing.T) {
-	rr := newReadRecorder(func(context.Context, readEntry) error { return nil })
+// A full queue writes the read directly instead of dropping it, and does not wait for the queue to drain.
+func TestReadRecorderWritesWhenTheQueueIsFull(t *testing.T) {
+	var direct atomic.Int64
+	rr := newReadRecorder(func(context.Context, readEntry) error { direct.Add(1); return nil })
 	done := make(chan struct{})
 	go func() {
 		for i := 0; i < readQueueSize+50; i++ {
@@ -91,8 +93,16 @@ func TestReadRecorderNeverBlocks(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("record blocked with nobody draining the queue")
 	}
-	if rr.dropped.Load() != 50 {
-		t.Fatalf("dropped %d, want 50", rr.dropped.Load())
+	if direct.Load() != 50 || rr.dropped.Load() != 0 {
+		t.Fatalf("written directly %d, dropped %d; want 50 and 0", direct.Load(), rr.dropped.Load())
+	}
+	// Only a failing direct write is counted as lost.
+	rr = newReadRecorder(func(context.Context, readEntry) error { return context.DeadlineExceeded })
+	for i := 0; i < readQueueSize+3; i++ {
+		rr.record(readEntry{action: "guest_data.viewed"})
+	}
+	if rr.dropped.Load() != 3 {
+		t.Fatalf("dropped %d, want 3", rr.dropped.Load())
 	}
 }
 
