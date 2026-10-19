@@ -137,7 +137,7 @@ export function GraceHistory({ history, inForce }: { history: GraceHistoryItem[]
                     </SheetSection>
                   </>
                 ) : (
-                  <p className="text-sm text-muted-foreground">This version's terms were not recorded.</p>
+                  <p className="text-sm text-muted-foreground">This version&rsquo;s terms were not recorded.</p>
                 )}
               </SheetBody>
             </>

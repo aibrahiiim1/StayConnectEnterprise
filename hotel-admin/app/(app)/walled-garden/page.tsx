@@ -211,7 +211,7 @@ export default function WalledGardenPage() {
           ) : (
             <Table>
               <THead>
-                <TR><TH>Type</TH><TH>Address</TH><TH>Ports</TH><TH>Why</TH><TH>Added</TH><TH /></TR>
+                <TR><TH>Type</TH><TH>Address</TH><TH>Ports</TH><TH>Why</TH><TH>Added</TH><TH><span className="sr-only">Actions</span></TH></TR>
               </THead>
               <TBody>
                 {rows.map((r) => (
@@ -231,8 +231,8 @@ export default function WalledGardenPage() {
                     <TD className="text-right">
                       {writable && (
                         <>
-                          <Button size="sm" variant="ghost" onClick={() => openEdit(r)}>Edit</Button>
-                          <Button size="sm" variant="ghost" onClick={() => { setFormErr(null); setDeleting(r); }}>
+                          <Button size="sm" variant="ghost" aria-label={`Edit ${r.value}`} onClick={() => openEdit(r)}>Edit</Button>
+                          <Button size="sm" variant="ghost" aria-label={`Remove ${r.value}`} onClick={() => { setFormErr(null); setDeleting(r); }}>
                             Remove
                           </Button>
                         </>

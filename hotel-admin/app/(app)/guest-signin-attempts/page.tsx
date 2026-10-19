@@ -485,9 +485,9 @@ export default function GuestSignInAttemptsPage() {
                 </p>
                 {credsErr ? <ErrorBanner err={credsErr} className="mb-0" /> : null}
                 <div className="flex flex-wrap items-end gap-2">
-                  <label className="grid gap-1 text-sm">
+                  <label htmlFor="signin-attempt-creds-password" className="grid gap-1 text-sm">
                     <span>Your password</span>
-                    <Input type="password" autoComplete="current-password" value={credsPw}
+                    <Input id="signin-attempt-creds-password" type="password" autoComplete="current-password" value={credsPw}
                       onChange={(e) => setCredsPw(e.target.value)} className="w-60" />
                   </label>
                   <Button type="submit" disabled={credsPw === "" || revealing}>

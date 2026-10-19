@@ -457,7 +457,7 @@ export function NetworksCard({ snap }: { snap: OverviewSnapshot | null }) {
         <div className="min-w-0">
           <CardTitle>Client networks</CardTitle>
           <CardDescription className="mt-0.5 text-xs">
-            Address pool use comes from the DHCP server's live leases; devices online from active sessions.
+            Address pool use comes from the DHCP server&rsquo;s live leases; devices online from active sessions.
           </CardDescription>
         </div>
         <Link href="/network" className="shrink-0 text-xs text-muted-foreground hover:text-foreground">Networking →</Link>

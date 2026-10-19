@@ -8,7 +8,9 @@ import { Nav, NAV_ITEMS, NAV_SECTION_OF, activeNavHref } from "@/components/nav"
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ApplianceStatus } from "@/components/appliance-status";
 import { Skeleton } from "@/components/ui/misc";
-import { api } from "@/lib/api";
+import { api, type Whoami } from "@/lib/api";
+import { loginAfterExpiry } from "@/lib/safe-next";
+import { IdleWarning } from "@/components/idle-warning";
 import { useSidebarCollapsed } from "@/lib/sidebar-state";
 import { useCapabilities, surfaceAvailable } from "@/lib/capabilities";
 import { SurfaceNotEnabled } from "@/components/surface-not-enabled";
@@ -26,6 +28,8 @@ const OFF_MENU_SCREENS: { href: string; resource: string; label: string }[] = [
   { href: "/pms-reconciliation", resource: "pms-reconciliation", label: "Unresolved departures" },
   { href: "/roster-reconciliation", resource: "pms-roster-reconciliation", label: "Roster reconciliation" },
 ];
+
+const APP_TITLE = "OneGate Admin Console";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -64,10 +68,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // Session cookie is stale/invalid (expired, or edged restarted and dropped
   // its in-memory sessions). Explicitly clear the cookie so the middleware
   // won't bounce /login back to /dashboard (a redirect loop), then show the
-  // login form.
+  // login form. The login page is told why and where the operator was, so it can say the session ended and
+  // bring them back afterwards (lib/safe-next.ts decides whether that place may be followed).
   const bounce = useCallback(async () => {
     try { await api.post("/auth/logout"); } catch {}
-    router.replace("/login");
+    router.replace(loginAfterExpiry(window.location.pathname + window.location.search));
   }, [router]);
 
   // Who is signed in: asked once, then re-validated every 30 seconds (see useWhoamiSession). A failure bounces
@@ -91,6 +96,25 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     const item = NAV_ITEMS.find((i) => i.href === href);
     return { section: href ? NAV_SECTION_OF[href] : undefined, label: item?.label };
   }, [pathname]);
+
+  // EVERY SCREEN HAD THE SAME TAB TITLE (WCAG 2.4.2), so a tab list, the history menu and a screen reader's
+  // window announcement all said "OneGate Admin Console" whatever was open. The title follows the same label the
+  // top bar shows; a screen reached by link names itself from its own table.
+  const pageLabel = here.label
+    ?? OFF_MENU_SCREENS.find((i) => pathname === i.href || pathname.startsWith(i.href + "/"))?.label;
+  useEffect(() => {
+    document.title = pageLabel ? `${pageLabel} · ${APP_TITLE}` : APP_TITLE;
+  }, [pageLabel]);
+
+  // "Stay signed in" on the idle warning: a request edged counts as activity, answering the new end.
+  const keepAlive = useCallback(
+    () => api.get<{ expires_at: string }>("/auth/keepalive").then((r) => r.expires_at),
+    [],
+  );
+  const recheck = useCallback(
+    () => api.get<Whoami>("/auth/whoami").then((m) => m.expires_at),
+    [],
+  );
 
   async function onLogout() {
     try { await api.post("/auth/logout"); } catch {}
@@ -145,6 +169,26 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     // routes), and the page content scrolls in its own pane.
     <WhoamiProvider value={me}>
     <ToastProvider>
+    {/* SKIP TO CONTENT (WCAG 2.4.1): the first stop on every screen, visible only when focused, so a keyboard
+        user does not tab through thirty-odd menu links to reach the page they opened. Focus is moved by hand
+        because a hash link alone does not move it reliably in every browser. */}
+    <a
+      href="#content"
+      onClick={(e) => {
+        e.preventDefault();
+        mainRef.current?.focus();
+      }}
+      className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[100] focus:rounded-md focus:bg-card focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-foreground focus:shadow-overlay focus:outline-none focus:ring-2 focus:ring-ring"
+    >
+      Skip to content
+    </a>
+    <IdleWarning
+      expiresAt={me.expires_at}
+      onStay={keepAlive}
+      onCheck={recheck}
+      onSignOut={() => void onLogout()}
+      onExpired={() => void bounce()}
+    />
     <div className="flex h-screen overflow-hidden">
       {/* Below `lg` the column becomes a drawer instead of disappearing. A 64px-wide icon rail was the other
           option and is worse here: these labels ("Duplicate sources", "Grace Period") are not guessable
@@ -174,7 +218,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               anything. Focus goes to the panel itself instead: Escape still closes it, Tab still walks it,
               and the filter is still one tap away when somebody actually wants it.
 
-              Desktop is untouched. There is no drawer above `lg`, and "/" focuses the filter as before.
+              Desktop is untouched. There is no drawer above `lg`, and Ctrl+K focuses the filter as before.
             */
             onOpenAutoFocus={(e) => {
               e.preventDefault();
@@ -232,7 +276,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             omission. `PageShell` narrows the measure further where a screen wants it (a single form does not
             want 96rem) and owns the vertical rhythm; it no longer needs to supply the gutter.
           */}
-          <main ref={mainRef} className="min-w-0 flex-1 overflow-y-auto">
+          {/* The skip link's target. tabIndex -1 lets it take focus without adding a tab stop. */}
+          <main ref={mainRef} id="content" tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto focus:outline-none">
             <div className="mx-auto w-full max-w-[104rem] px-4 py-5 sm:px-6 sm:py-6 lg:px-8">
               {!capsKnown ? <Skeleton className="h-64" />
                 : unavailable ? <SurfaceNotEnabled label={unavailable} />

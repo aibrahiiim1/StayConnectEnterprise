@@ -72,6 +72,38 @@ export function SearchInput({
 }
 
 /**
+ * ResultsCount — says how many rows a search or a filter produced, to a screen reader (WCAG 4.1.3).
+ *
+ * Sighted operators see the table change; a screen-reader user who typed a query heard nothing at all. The region
+ * is always rendered (a live region that appears together with its text is often not announced), is visually
+ * hidden, and is polite, so it waits for the operator to stop typing rather than interrupting. `count` null means
+ * "no answer yet" and says nothing. `more` marks a page that is not the whole result ("50 or more").
+ */
+export function ResultsCount({
+  count,
+  noun = "result",
+  plural,
+  more = false,
+}: {
+  count: number | null | undefined;
+  noun?: string;
+  plural?: string;
+  more?: boolean;
+}) {
+  const text =
+    count == null
+      ? ""
+      : count === 0
+        ? `No ${plural ?? noun + "s"} found`
+        : `${count.toLocaleString()}${more ? " or more" : ""} ${count === 1 && !more ? noun : plural ?? noun + "s"} found`;
+  return (
+    <p role="status" aria-live="polite" className="sr-only">
+      {text}
+    </p>
+  );
+}
+
+/**
  * FilterChips — a single-choice filter with counts ("All 214 · Unused 180 · Used 30 · Cancelled 4").
  *
  * A count on each option answers "is there anything there?" before the click, which a <select> cannot.
@@ -97,6 +129,9 @@ export function FilterChips<T extends string>({
   };
   const onKeyDown = useRadioKeys(options.map((o) => o.value), value, onChange);
   return (
+    // A radiogroup is one tab stop on its CHECKED radio (roving tabIndex), never the group itself, which is the
+    // ARIA pattern; jsx-a11y reads the container role as a control.
+    // eslint-disable-next-line jsx-a11y/interactive-supports-focus
     <div role="radiogroup" aria-label={label} onKeyDown={onKeyDown}
       className={cn("flex flex-wrap items-center gap-1.5", className)}>
       {options.map((o) => {
@@ -357,7 +392,7 @@ export function Stepper({
               className={cn(
                 "inline-flex items-center gap-2 rounded-full text-xs font-medium",
                 clickable ? "cursor-pointer hover:text-foreground" : "cursor-default",
-                active ? "text-foreground" : done ? "text-muted-foreground" : "text-muted-foreground/70",
+                active ? "text-foreground" : "text-muted-foreground",
               )}
             >
               <span

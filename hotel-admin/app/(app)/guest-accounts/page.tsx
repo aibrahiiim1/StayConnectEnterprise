@@ -21,7 +21,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody,
   ConfirmDialog,
 } from "@/components/ui/dialog";
-import { Pagination, SearchInput } from "@/components/ui/data";
+import { Pagination, ResultsCount, SearchInput } from "@/components/ui/data";
 import { Select } from "@/components/ui/input";
 import { Switch, SkeletonRows } from "@/components/ui/misc";
 import { PasswordFormatCard } from "@/components/guest-accounts/password-format";
@@ -509,6 +509,7 @@ export default function GuestAccountsPage() {
               {PAGE_SIZES.map((n) => <option key={n} value={n}>{n} per page</option>)}
             </Select>
           </Toolbar>
+          <ResultsCount count={rows === null ? null : filtered.length} noun="client account" />
         </CardBody>
         {loadFailed ? (
           // A failed load is not an empty list and not a slow one. Saying so, and offering the one action
@@ -585,17 +586,17 @@ export default function GuestAccountsPage() {
                     {mayWrite && (
                       <TD className="text-end">
                         <div className="flex flex-wrap justify-end gap-1">
-                          <Button size="sm" variant="ghost" onClick={() => setManaging(a)}>
+                          <Button size="sm" variant="ghost" aria-label={`Manage ${a.username}`} onClick={() => setManaging(a)}>
                             <Settings2 /> Manage
                           </Button>
                           {!isRemovedAccount(a) && (<>
-                          <Button size="sm" variant="ghost" onClick={() => { setFormErr(null); setEditing(a); setPwFor(null); setShowNew(false); }}>
+                          <Button size="sm" variant="ghost" aria-label={`Edit ${a.username}`} onClick={() => { setFormErr(null); setEditing(a); setPwFor(null); setShowNew(false); }}>
                             <Pencil /> Edit
                           </Button>
                           {/* A self-service account's password is the client's, recovered only by the reset email
                               (contract §5): staff are not offered to set or show it. */}
                           {!a.self_registered && (
-                            <Button size="sm" variant="ghost" onClick={() => { setFormErr(null); setPwFor(a); setEditing(null); setShowNew(false); }}>
+                            <Button size="sm" variant="ghost" aria-label={`Password for ${a.username}`} onClick={() => { setFormErr(null); setPwFor(a); setEditing(null); setShowNew(false); }}>
                               <KeyRound /> Password
                             </Button>
                           )}
@@ -604,16 +605,16 @@ export default function GuestAccountsPage() {
                               <Send /> {resending === a.id ? "Sending…" : "Resend verification email"}
                             </Button>
                           )}
-                          <Button size="sm" variant="ghost"
+                          <Button size="sm" variant="ghost" aria-label={`${a.enabled ? "Disable" : "Enable"} ${a.username}`}
                             onClick={() => (a.enabled ? (setActionErr(null), setDisabling(a)) : void onToggle(a))}>
                             {a.enabled ? "Disable" : "Enable"}
                           </Button>
                           {(a.active_devices ?? 0) > 0 && (
-                            <Button size="sm" variant="ghost" onClick={() => { setActionErr(null); setDisconnecting(a); }}>
+                            <Button size="sm" variant="ghost" aria-label={`Disconnect ${a.username}`} onClick={() => { setActionErr(null); setDisconnecting(a); }}>
                               <Power /> Disconnect
                             </Button>
                           )}
-                          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => { setActionErr(null); setRemoval(null); setDeleting(a); }}>
+                          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" aria-label={`Remove ${a.username}`} onClick={() => { setActionErr(null); setRemoval(null); setDeleting(a); }}>
                             Remove
                           </Button>
                           </>)}

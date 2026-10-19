@@ -193,7 +193,7 @@ export function CodeSecurityTab({ canEditFormat }: { canEditFormat: boolean }) {
                     <TH>State</TH>
                     <TH className="text-right">Cards</TH>
                     <TH className="text-right">Still unused</TH>
-                    <TH />
+                    <TH><span className="sr-only">Actions</span></TH>
                   </TR>
                 </THead>
                 <TBody>

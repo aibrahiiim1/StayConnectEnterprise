@@ -247,7 +247,7 @@ export default function SocialProvidersPage() {
           ) : (
             <Table>
               <THead>
-                <TR><TH>Provider</TH><TH>Client ID</TH><TH>Status</TH><TH>Last used</TH><TH /></TR>
+                <TR><TH>Provider</TH><TH>Client ID</TH><TH>Status</TH><TH>Last used</TH><TH><span className="sr-only">Actions</span></TH></TR>
               </THead>
               <TBody>
                 {rows.map((p) => (
@@ -266,9 +266,9 @@ export default function SocialProvidersPage() {
                       {p.last_success_at ? formatRelative(p.last_success_at) : "Never"}
                     </TD>
                     <TD className="whitespace-nowrap text-right">
-                      {writable && <Button size="sm" variant="ghost" onClick={() => openEdit(p)}>Edit</Button>}
+                      {writable && <Button size="sm" variant="ghost" aria-label={`Edit ${p.display_name || PROVIDER_LABELS[p.provider] || p.provider}`} onClick={() => openEdit(p)}>Edit</Button>}
                       {writable && (
-                        <Button size="sm" variant="ghost" onClick={() => { setFormErr(null); setDeleting(p); }}>
+                        <Button size="sm" variant="ghost" aria-label={`Remove ${p.display_name || PROVIDER_LABELS[p.provider] || p.provider}`} onClick={() => { setFormErr(null); setDeleting(p); }}>
                           Remove
                         </Button>
                       )}

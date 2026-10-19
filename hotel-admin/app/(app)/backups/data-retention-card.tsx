@@ -16,6 +16,7 @@ import { Field, Input } from "@/components/ui/input";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { useToast } from "@/components/ui/toast";
 import { formatDate } from "@/lib/utils";
+import { useEditFocus } from "@/lib/use-edit-focus";
 
 type Key = "pms_stay_days" | "client_activity_days" | "inactive_identity_days" | "expired_record_days"
   | "audit_log_days" | "sign_in_attempt_days" | "log_days" | "staff_note_days";
@@ -44,6 +45,7 @@ export function DataRetentionCard({ writable }: { writable: boolean }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
+  const { triggerRef, panelRef } = useEditFocus(editing);
 
   const load = useCallback(async () => {
     try {
@@ -97,7 +99,7 @@ export function DataRetentionCard({ writable }: { writable: boolean }) {
             )}
           </div>
           {writable && !editing && data && (
-            <Button size="sm" variant="outline" onClick={() => {
+            <Button ref={triggerRef} size="sm" variant="outline" onClick={() => {
               setDraft(Object.fromEntries(RETENTION_ROWS.map((x) => [x.key, String(data.settings[x.key])])) as Record<Key, string>);
               setEditing(true);
             }}>Change</Button>
@@ -117,7 +119,7 @@ export function DataRetentionCard({ writable }: { writable: boolean }) {
           </dl>
         )}
         {editing && data && (
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div ref={panelRef} className="grid gap-3 sm:grid-cols-2">
             {RETENTION_ROWS.map((x) => {
               const b = data.bounds[x.key];
               return (

@@ -27,8 +27,8 @@ export function CardHeader({ className, ...p }: React.HTMLAttributes<HTMLDivElem
   );
 }
 
-export function CardTitle({ className, ...p }: React.HTMLAttributes<HTMLHeadingElement>) {
-  return <h2 className={cn("text-emphasis tracking-tight", className)} {...p} />;
+export function CardTitle({ className, children, ...p }: React.HTMLAttributes<HTMLHeadingElement>) {
+  return <h2 className={cn("text-emphasis tracking-tight", className)} {...p}>{children}</h2>;
 }
 
 export function CardDescription({ className, ...p }: React.HTMLAttributes<HTMLParagraphElement>) {

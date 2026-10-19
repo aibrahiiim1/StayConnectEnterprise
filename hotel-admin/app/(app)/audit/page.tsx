@@ -32,7 +32,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { SkeletonRows } from "@/components/ui/misc";
-import { FilterChips, KeyValueGrid, Pagination, SearchInput } from "@/components/ui/data";
+import { FilterChips, KeyValueGrid, Pagination, ResultsCount, SearchInput } from "@/components/ui/data";
 import { useServerPage, type PagedFields } from "@/lib/use-server-page";
 import { refreshingClass } from "@/components/ui/patterns";
 import { cn, formatDate } from "@/lib/utils";
@@ -256,6 +256,7 @@ export default function ActivityPage() {
             {RANGES.map((r) => <option key={r.label}>{r.label}</option>)}
           </Select>
         </Toolbar>
+        <ResultsCount count={rows?.length} noun="entry" plural="entries" />
         <FilterChips<Chip> label="Show" value={chip} onChange={setChip} options={chipOptions} />
       </div>
 

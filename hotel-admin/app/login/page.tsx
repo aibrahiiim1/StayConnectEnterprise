@@ -32,6 +32,7 @@ function LoginInner() {
   // Only a path on this console (lib/safe-next.ts): ?next=https://elsewhere is how a sign-in became a hand-off
   // to another site.
   const next = safeNextPath(params.get("next"));
+  const expired = params.get("reason") === "expired";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -116,17 +117,27 @@ function LoginInner() {
               </div>
             </div>
 
+            {/* WHY THE OPERATOR IS HERE, when the console sent them (the idle limit, or a session the appliance no
+                longer knows). Polite: it is information, not an error, and must not cut off the page's own
+                announcement. After signing in they go back to where they were. */}
+            <p role="status" className={expired ? "mb-4 rounded-lg border border-border bg-surface px-3.5 py-3 text-sm" : "sr-only"}>
+              {expired ? "Your session ended because there was no activity for a while. Sign in again to continue where you left off." : ""}
+            </p>
+
             {second ? (
               <SigninSecondStep step={second} onDone={finish} onRestart={restart} />
             ) : (
             <form onSubmit={onSubmit} className="space-y-4" noValidate={false}>
-              <div aria-live="assertive">
-                <ErrorBanner err={err} className="mb-0" />
-              </div>
+              {/* The banner is role="alert" itself; an aria-live wrapper around it made a screen reader read the
+                  error twice. */}
+              <ErrorBanner err={err} className="mb-0" />
               <Field label="Email or username">
                 <Input
                   type="text"
                   required
+                  // The page exists only to take these two fields, and it is reached by choice or by a redirect
+                  // that the status line above explains, so starting in the first field skips nothing.
+                  // eslint-disable-next-line jsx-a11y/no-autofocus
                   autoFocus
                   autoComplete="username"
                   value={email}

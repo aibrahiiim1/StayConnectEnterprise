@@ -396,7 +396,7 @@ export default function NewGuestNetworkPage() {
           {step === 0 && (
             <>
               <Field label="Name" required>
-                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Client Wi-Fi" autoFocus />
+                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Client Wi-Fi" />
               </Field>
               <Field label="Description" hint="Optional. Shown under the name in the list.">
                 <Input value={description} onChange={(e) => setDescription(e.target.value)} />

@@ -158,6 +158,9 @@ export function SigninSecondStep({ step, onDone, onRestart }: {
       )}
       <Field label={step === "enrol" ? "Code from the app" : "Code"}>
         <Input
+          // The step replaces the password form the operator just submitted, so their focus was inside it: this
+          // keeps it in the one field the step asks for instead of dropping it on the page.
+          // eslint-disable-next-line jsx-a11y/no-autofocus
           autoFocus
           required
           inputMode={step === "enrol" ? "numeric" : "text"}

@@ -79,9 +79,12 @@ export function Explain({ children, className }: { children: React.ReactNode; cl
         // aria-label rather than visible text: the tooltip content is the explanation, and announcing "help"
         // twice is worse than announcing it once.
         aria-label="What this means"
+        // A 24px target (WCAG 2.5.8) drawn around the same 14px icon: the -m-1 gives back the extra 4px on each
+        // side, so the text it sits in does not move. The icon is the solid muted ink, which clears 3:1 (1.4.11);
+        // at /70 it did not.
         className={cn(
-          "inline-flex size-4 shrink-0 items-center justify-center rounded-full align-text-bottom",
-          "text-muted-foreground/70 transition-colors hover:text-foreground",
+          "-m-1 inline-flex size-6 shrink-0 items-center justify-center rounded-full align-text-bottom",
+          "text-muted-foreground transition-colors hover:text-foreground",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
           className,
         )}

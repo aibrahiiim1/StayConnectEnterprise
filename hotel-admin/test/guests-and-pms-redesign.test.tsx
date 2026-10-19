@@ -69,7 +69,7 @@ describe("Post-stay access", () => {
     const user = userEvent.setup();
     render(<PostStayView canAct />);
 
-    await user.click(await screen.findByRole("button", { name: "Reset PIN" }));
+    await user.click(await screen.findByRole("button", { name: /^Reset PIN,/ }));
     const dialog = await screen.findByRole("dialog");
     const submit = within(dialog).getByRole("button", { name: "Reset PIN" });
     expect(submit).toBeDisabled();
@@ -98,7 +98,7 @@ describe("Post-stay access", () => {
     const user = userEvent.setup();
     render(<PostStayView canAct />);
 
-    await user.click(await screen.findByRole("button", { name: "End access" }));
+    await user.click(await screen.findByRole("button", { name: /^End access,/ }));
     const dialog = await screen.findByRole("dialog");
     const submit = within(dialog).getByRole("button", { name: "End access permanently" });
     expect(within(dialog).getByText(/cannot be undone/i)).toBeTruthy();
@@ -125,8 +125,8 @@ describe("Post-stay access", () => {
     const { PostStayView } = await import("@/components/phase5/post-stay-view");
     render(<PostStayView canAct={false} />);
     expect(await screen.findByText("Room 412")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Reset PIN" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "End access" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Reset PIN/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^End access/ })).toBeNull();
     expect(screen.getByText(/can view this but not change it/i)).toBeTruthy();
     // Raw ids stay off the table.
     expect(screen.queryByText("stay-uuid-1")).toBeNull();
@@ -204,7 +204,7 @@ describe("Guest accounts", () => {
     render(<Page />);
     expect(await screen.findByText("room101")).toBeTruthy();
     await screen.findByText(/can view this but not change it/i);
-    for (const name of [/add account/i, /^edit$/i, /password/i, /disable/i, /^delete$/i, /disconnect/i]) {
+    for (const name of [/add account/i, /^edit\b/i, /password/i, /disable/i, /^delete\b/i, /disconnect/i]) {
       expect(screen.queryByRole("button", { name })).toBeNull();
     }
     const sw = screen.getByRole("switch", { name: /offer username-and-password sign-in/i });

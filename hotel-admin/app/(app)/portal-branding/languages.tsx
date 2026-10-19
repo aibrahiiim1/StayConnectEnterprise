@@ -259,6 +259,9 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
             <Callout tone="warning">{shippedErr}</Callout>
           )}
 
+          {/* The tablist is entered at its selected tab (roving tabIndex, arrows below), never the list itself, which
+              is the ARIA pattern; jsx-a11y reads the container role as a control. */}
+          {/* eslint-disable-next-line jsx-a11y/interactive-supports-focus */}
           <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Language being edited"
             onKeyDown={(e) => {
               const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;

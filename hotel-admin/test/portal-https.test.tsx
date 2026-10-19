@@ -261,7 +261,7 @@ describe("Identity providers: derived callback URLs", () => {
     social([fb]);
     patch.mockResolvedValueOnce({});
     render(<SocialProvidersPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Edit\b/ }));
     const dlg = await screen.findByRole("dialog");
     expect(within(dlg).getByPlaceholderText("Unchanged")).toHaveValue("");
     const ticks = within(dlg).getAllByRole("checkbox") as HTMLInputElement[];

@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { useToast } from "@/components/ui/toast";
 import { formatDate } from "@/lib/utils";
+import { useEditFocus } from "@/lib/use-edit-focus";
 
 type PurgeRun = { ran_at: string; retention_days: number; records_deleted: number };
 type RetentionResp = {
@@ -38,6 +39,7 @@ export function AccountingRetentionCard({ writable }: { writable: boolean }) {
   const [data, setData] = useState<RetentionResp | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   const [editing, setEditing] = useState(false);
+  const { triggerRef, panelRef } = useEditFocus(editing);
   const [unlimited, setUnlimited] = useState(true);
   const [draft, setDraft] = useState("");
   const [reason, setReason] = useState("");
@@ -100,7 +102,7 @@ export function AccountingRetentionCard({ writable }: { writable: boolean }) {
           <div className="flex items-center gap-2">
             <Badge tone="neutral">{data ? retentionLabel(current) : "—"}</Badge>
             {writable && !editing && data && (
-              <Button size="sm" variant="outline" onClick={() => {
+              <Button ref={triggerRef} size="sm" variant="outline" onClick={() => {
                 setUnlimited(current == null); setDraft(String(current ?? 365)); setEditing(true);
               }}>Change</Button>
             )}
@@ -108,7 +110,7 @@ export function AccountingRetentionCard({ writable }: { writable: boolean }) {
         </div>
         <ErrorBanner err={err} />
         {editing && (
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div ref={panelRef} className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-2 sm:col-span-3">
               <label className="flex items-center gap-2 text-sm">
                 <input type="radio" name="accounting-retention" checked={unlimited} onChange={() => setUnlimited(true)} />

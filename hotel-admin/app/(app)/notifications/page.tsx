@@ -309,7 +309,7 @@ export default function NotificationsPage() {
           ) : (
             <Table>
               <THead>
-                <TR><TH>Sender</TH><TH>Service</TH><TH>Sends as</TH><TH>Health</TH><TH>Offered</TH><TH /></TR>
+                <TR><TH>Sender</TH><TH>Service</TH><TH>Sends as</TH><TH>Health</TH><TH>Offered</TH><TH><span className="sr-only">Actions</span></TH></TR>
               </THead>
               <TBody>
                 {rows.map((n) => {
@@ -349,10 +349,10 @@ export default function NotificationsPage() {
                         {n.enabled ? <Badge tone="ok">In use</Badge> : <Badge tone="default">Off</Badge>}
                       </TD>
                       <TD className="whitespace-nowrap text-right">
-                        {writable && <Button size="sm" variant="ghost" onClick={() => openTest(n)}>Send a test message</Button>}
-                        {writable && <Button size="sm" variant="ghost" onClick={() => openEdit(n)}>Edit</Button>}
+                        {writable && <Button size="sm" variant="ghost" aria-label={`Send a test message from ${n.display_name || CHANNEL_LABELS[n.channel] || n.channel}`} onClick={() => openTest(n)}>Send a test message</Button>}
+                        {writable && <Button size="sm" variant="ghost" aria-label={`Edit ${n.display_name || CHANNEL_LABELS[n.channel] || n.channel}`} onClick={() => openEdit(n)}>Edit</Button>}
                         {writable && (
-                          <Button size="sm" variant="ghost" onClick={() => { setFormErr(null); setDeleting(n); }}>
+                          <Button size="sm" variant="ghost" aria-label={`Remove ${n.display_name || CHANNEL_LABELS[n.channel] || n.channel}`} onClick={() => { setFormErr(null); setDeleting(n); }}>
                             Remove
                           </Button>
                         )}

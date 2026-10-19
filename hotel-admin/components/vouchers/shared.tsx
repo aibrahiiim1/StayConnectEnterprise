@@ -22,6 +22,8 @@ export function When({ iso, prefix, className }: { iso: string | null | undefine
   const abs = absoluteTime(iso);
   return (
     <Tooltip content={abs}>
+      {/* Focusable so the exact time in the tooltip is reachable from the keyboard (WCAG 1.4.13). */}
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex */}
       <time dateTime={iso} title={abs} tabIndex={0} className={className}>
         {prefix ? `${prefix} ` : ""}
         {relativeTime(iso)}
@@ -41,6 +43,8 @@ export function StatusBadge({ status, plain = false }: { status: EffectiveStatus
     );
   return (
     <Tooltip content={STATUS_EXPLAIN[status]}>
+      {/* Focusable so the explanation in the tooltip is reachable from the keyboard (WCAG 1.4.13). */}
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex */}
       <span tabIndex={0} className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
         <Badge tone={STATUS_TONE[status]} dot>
           {STATUS_WORDS[status]}

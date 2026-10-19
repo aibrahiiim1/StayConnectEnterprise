@@ -129,7 +129,7 @@ describe("an SMTP sender", () => {
     patch.mockResolvedValue({ ...SMTP });
     render(<NotificationsPage />);
     await screen.findByText("Site relay");
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Edit\b/ }));
     const dialog = await screen.findByRole("dialog");
     expect((within(dialog).getByLabelText(/Mail server/) as HTMLInputElement).value).toBe("smtp.example.com");
     expect((within(dialog).getByLabelText(/^Port/) as HTMLInputElement).value).toBe("587");

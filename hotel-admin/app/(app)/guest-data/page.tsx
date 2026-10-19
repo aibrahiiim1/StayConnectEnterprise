@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ResultsCount } from "@/components/ui/data";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { useToast } from "@/components/ui/toast";
 import { errMsg, formatDate } from "@/lib/utils";
@@ -158,6 +159,7 @@ export default function GuestDataPage() {
             </Button>
           </form>
           <ErrorBanner err={err} />
+          <ResultsCount count={matches?.length} noun="record" />
           {matches !== null && matches.length === 0 && (
             <EmptyState title="No guest found" hint="Records already erased or anonymised by retention are not shown." />
           )}
@@ -165,7 +167,7 @@ export default function GuestDataPage() {
             <div className="overflow-x-auto">
               <Table>
                 <THead>
-                  <TR><TH>Record</TH><TH>Found by</TH><TH>Status</TH><TH>Last activity</TH><TH /></TR>
+                  <TR><TH>Record</TH><TH>Found by</TH><TH>Status</TH><TH>Last activity</TH><TH><span className="sr-only">Actions</span></TH></TR>
                 </THead>
                 <TBody>
                   {matches.map((m) => (
@@ -178,10 +180,13 @@ export default function GuestDataPage() {
                       <TD>{m.status ? <Badge tone="neutral">{m.status}</Badge> : null}</TD>
                       <TD>{m.last_activity ? formatDate(m.last_activity) : "—"}</TD>
                       <TD className="whitespace-nowrap text-right">
-                        <Button size="sm" variant="outline" onClick={() => { setActionErr(null); setExporting(m); }}>
+                        {/* Named with the row: "Export" ten times over says nothing about which record (WCAG 2.4.6). */}
+                        <Button size="sm" variant="outline" aria-label={`Export ${KIND_LABELS[m.kind]} ${m.label}`}
+                          onClick={() => { setActionErr(null); setExporting(m); }}>
                           <Download /> Export
                         </Button>{" "}
-                        <Button size="sm" variant="danger" onClick={() => { setActionErr(null); setDone(null); setErasing(m); }}>
+                        <Button size="sm" variant="danger" aria-label={`Erase ${KIND_LABELS[m.kind]} ${m.label}`}
+                          onClick={() => { setActionErr(null); setDone(null); setErasing(m); }}>
                           <Eraser /> Erase
                         </Button>
                       </TD>

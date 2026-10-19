@@ -52,7 +52,7 @@ import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { DetailDialog } from "@/components/ui/dialog";
 import { Explain } from "@/components/ui/tooltip";
 import { DList, Metric, SkeletonRows } from "@/components/ui/misc";
-import { Pagination, SearchInput } from "@/components/ui/data";
+import { Pagination, ResultsCount, SearchInput } from "@/components/ui/data";
 import { formatDate, formatRelative } from "@/lib/utils";
 import { speedPair } from "@/lib/session-words";
 import { Hotel, Wifi, LogIn, LogOut, Ban, Undo2, Star } from "lucide-react";
@@ -320,6 +320,7 @@ export default function StaysPage() {
               {PAGE_SIZES.map((n) => <option key={n} value={n}>{n} per page</option>)}
             </Select>
           </Toolbar>
+          <ResultsCount count={filtered?.length} noun="stay" />
         </CardBody>
 
         <CardBody className="p-0">
@@ -343,7 +344,7 @@ export default function StaysPage() {
                   <TH>Status</TH>
                   <TH>Internet package</TH>
                   <TH>Room charge</TH>
-                  <TH />
+                  <TH><span className="sr-only">Actions</span></TH>
                 </TR>
               </THead>
               <tbody>
@@ -398,7 +399,7 @@ export default function StaysPage() {
                       )}
                     </TD>
                     <TD className="text-right">
-                      <Button size="sm" variant="ghost" disabled={detailBusy} onClick={() => void open(s.id)}>
+                      <Button size="sm" variant="ghost" disabled={detailBusy} aria-label={`View stay, room ${s.room ?? "unknown"}`} onClick={() => void open(s.id)}>
                         View
                       </Button>
                     </TD>

@@ -42,7 +42,7 @@ describe("Allowed sites", () => {
   it("edits a rule with PUT, keeping its ports", async () => {
     put.mockResolvedValue({});
     render(<WalledGardenPage />);
-    const edits = await screen.findAllByRole("button", { name: "Edit" });
+    const edits = await screen.findAllByRole("button", { name: /^Edit\b/ });
     fireEvent.click(edits[1]);
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: "Save rule" }));

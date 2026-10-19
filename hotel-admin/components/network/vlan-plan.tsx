@@ -123,7 +123,7 @@ export function VlanAddressingTable({
     <Table>
       <THead>
         <TR>
-          {separate && <TH />}
+          {separate && <TH><span className="sr-only">More settings</span></TH>}
           <TH>Network</TH><TH>VLAN</TH><TH>Subnet</TH><TH>Gateway</TH><TH>DHCP pool</TH>
         </TR>
       </THead>

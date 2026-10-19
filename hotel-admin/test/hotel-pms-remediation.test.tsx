@@ -141,7 +141,7 @@ describe("PMS routing (H-16)", () => {
     put.mockResolvedValue({});
     const { default: Page } = await import("@/app/(app)/pms-routing/page");
     render(<Page />);
-    await userEvent.click(await screen.findByRole("button", { name: "Change" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Change\b/ }));
     expect(await screen.findByTestId("legacy-route-note")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Save mapping" }));
     await waitFor(() => expect(put).toHaveBeenCalledWith("/pms-routing/g1",
@@ -218,7 +218,7 @@ describe("Post-stay reset (H-17)", () => {
     post.mockResolvedValue({ pin: "123456", valid_until: profile.valid_until });
     const { PostStayView } = await import("@/components/phase5/post-stay-view");
     render(<PostStayView canAct rolesKnown />);
-    await userEvent.click(await screen.findByRole("button", { name: "Reset PIN" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Reset PIN,/ }));
     const dialog = await screen.findByRole("dialog");
     await userEvent.type(within(dialog).getByLabelText(/^Reason/), "guest lost the printout");
     await userEvent.type(within(dialog).getByLabelText(/confirm your password/i), "pw");

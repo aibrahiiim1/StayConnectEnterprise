@@ -48,12 +48,15 @@ export const Select = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttrib
   },
 );
 
-export function Label({ className, ...p }: React.LabelHTMLAttributes<HTMLLabelElement>) {
+export function Label({ className, htmlFor, children, ...p }: React.LabelHTMLAttributes<HTMLLabelElement>) {
   return (
     <label
+      htmlFor={htmlFor}
       className={cn("mb-1.5 block text-label text-foreground", className)}
       {...p}
-    />
+    >
+      {children}
+    </label>
   );
 }
 
@@ -105,6 +108,9 @@ export function Field({
         ? { "aria-describedby": [childProps["aria-describedby"], describedBy].filter(Boolean).join(" ") }
         : null),
       ...(error ? { "aria-invalid": true } : null),
+      // The asterisk is visual only (WCAG 1.3.1 / 3.3.2), so the control says it is required itself. aria-required
+      // rather than `required`: several forms run their own validation and must not meet the browser's bubble.
+      ...(required && childProps["aria-required"] === undefined ? { "aria-required": true } : null),
     });
   }
 
@@ -113,7 +119,7 @@ export function Field({
       {label && (
         <Label htmlFor={controlId}>
           {label}
-          {required && <span className="ml-0.5 text-destructive">*</span>}
+          {required && <span aria-hidden="true" className="ml-0.5 text-destructive">*</span>}
         </Label>
       )}
       {control}

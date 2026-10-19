@@ -22,6 +22,9 @@ export function OneGateWordmark({
   return (
     <Tag
       className={cn("inline-flex items-baseline font-extrabold leading-none tracking-[-0.03em]", className)}
+      // The two halves are hidden, so the name comes from aria-label, which a plain span or div may not carry
+      // (axe: aria-prohibited-attr, so the name was dropped). As an image of the name it may; a heading may anyway.
+      role={Tag === "h1" ? undefined : "img"}
       aria-label="OneGate"
     >
       <span

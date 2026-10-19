@@ -31,6 +31,9 @@ export function ThemeToggle({ className }: { className?: string }) {
   const onKeyDown = useRadioKeys<string>(VALUES, current, setTheme);
 
   return (
+    // A radiogroup is one tab stop on its CHECKED radio (roving tabIndex, useRadioKeys), never the group
+    // itself, which is the ARIA pattern; jsx-a11y reads the container role as a control.
+    // eslint-disable-next-line jsx-a11y/interactive-supports-focus
     <div
       role="radiogroup"
       aria-label="Colour theme"

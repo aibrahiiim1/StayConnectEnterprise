@@ -406,6 +406,9 @@ export default function PortalSettingsPage() {
 
       <div className="grid gap-6 lg:grid-cols-[210px_minmax(0,1fr)] xl:grid-cols-[210px_minmax(0,1fr)_minmax(0,1.05fr)]">
         {/* ---- the rail --------------------------------------------------------------------------------- */}
+        {/* The tablist is entered at its selected tab (roving tabIndex, arrows below), never the list itself, which is
+            the ARIA pattern; jsx-a11y reads the container role as a control. */}
+        {/* eslint-disable-next-line jsx-a11y/interactive-supports-focus */}
         <div role="tablist" aria-label="Portal settings sections" aria-orientation="vertical"
           onKeyDown={(e) => {
             const i = SECTIONS.findIndex((x) => x.id === section);

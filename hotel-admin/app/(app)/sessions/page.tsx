@@ -34,7 +34,7 @@ import { Segmented } from "@/components/ui/tabs";
 import { ConfirmDialog, DetailDialog } from "@/components/ui/dialog";
 import { Explain } from "@/components/ui/tooltip";
 import { DList, Meter, MonoId, Metric, SkeletonRows } from "@/components/ui/misc";
-import { Pagination, SearchInput } from "@/components/ui/data";
+import { Pagination, ResultsCount, SearchInput } from "@/components/ui/data";
 import { LiveStatus, ReadOnlyNotice, refreshingClass } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
@@ -290,6 +290,7 @@ export default function SessionsPage() {
               )}
             </div>
           </Toolbar>
+          <ResultsCount count={rows?.length} noun="session" more={list.hasMore} />
         </CardBody>
 
         <CardBody className={cn("p-0", refreshing && rows !== null && refreshingClass)}>
@@ -515,6 +516,7 @@ const SessionRow = memo(function SessionRow({
             <Button
               size="sm"
               variant="ghost"
+              aria-label={`Disconnect ${s.mac}`}
               onClick={() => onDisconnect(s)}
             >
               <Power /> Disconnect
