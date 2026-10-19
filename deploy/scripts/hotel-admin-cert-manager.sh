@@ -223,6 +223,8 @@ hotel.stayconnect.local, ${ip} {
 			wrap json
 			fields {
 				request>headers delete
+				# A redirect target is a URL too (GDPR final check): it is not logged.
+				resp_headers>Location delete
 				request>uri regexp "[?].*\$|[0-9A-Fa-f]{2}(?:(?:[:-]|%3[Aa])[0-9A-Fa-f]{2}){5}" "[redacted]"
 			}
 		}
