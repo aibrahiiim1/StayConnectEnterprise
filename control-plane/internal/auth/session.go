@@ -28,6 +28,11 @@ type Session struct {
 	CreatedAt       time.Time `json:"created_at"`
 	LastSeenAt      time.Time `json:"last_seen_at"`
 	ExpiresAt       time.Time `json:"expires_at"`
+
+	// Set per request by Validate from the current settings and never stored: when the session ends if no
+	// further activity arrives (idle limit), and when it ends however active it is (absolute lifetime).
+	IdleExpiresAt     time.Time `json:"-"`
+	AbsoluteExpiresAt time.Time `json:"-"`
 }
 
 type SessionStore struct {

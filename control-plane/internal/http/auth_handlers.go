@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -70,6 +71,28 @@ type whoamiResp struct {
 	CustomerID   *string  `json:"customer_id"`
 	CustomerName *string  `json:"customer_name"`
 	Permissions  []string `json:"permissions"`
+
+	// Session timing, so the console can warn before a sign-in ends (WCAG 2.2.1). Additive, and omitted when
+	// unknown. idle_expires_at moves with each request that counts as activity (whoami does not);
+	// absolute_expires_at never moves. server_time lets the console correct for its own clock.
+	IdleExpiresAt     *time.Time `json:"idle_expires_at,omitempty"`
+	AbsoluteExpiresAt *time.Time `json:"absolute_expires_at,omitempty"`
+	ServerTime        *time.Time `json:"server_time,omitempty"`
+}
+
+// withSessionTiming adds the session's idle and absolute expiry times, as the session policy computed them.
+func withSessionTiming(resp whoamiResp, s *auth.Session, now time.Time) whoamiResp {
+	if !s.IdleExpiresAt.IsZero() {
+		idle := s.IdleExpiresAt.UTC()
+		resp.IdleExpiresAt = &idle
+	}
+	if !s.AbsoluteExpiresAt.IsZero() {
+		abs := s.AbsoluteExpiresAt.UTC()
+		resp.AbsoluteExpiresAt = &abs
+	}
+	n := now.UTC()
+	resp.ServerTime = &n
+	return resp
 }
 
 func (d authDeps) describe(ctx context.Context, s *auth.Session) whoamiResp {
@@ -211,5 +234,5 @@ func (d authDeps) whoami(w http.ResponseWriter, r *http.Request) {
 		api.Fail(w, r, http.StatusUnauthorized, api.CodeUnauthenticated, "not authenticated")
 		return
 	}
-	writeJSON(w, http.StatusOK, d.describe(r.Context(), s))
+	writeJSON(w, http.StatusOK, withSessionTiming(d.describe(r.Context(), s), s, time.Now()))
 }

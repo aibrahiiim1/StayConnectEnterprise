@@ -87,9 +87,12 @@ func Validate(s *Session, st OperatorState, now time.Time) (*Session, string, er
 		}
 	}
 	out.DefaultTenantID = st.DefaultTenant
-	if limit := s.CreatedAt.Add(time.Duration(maxHours) * time.Hour); out.ExpiresAt.After(limit) {
+	limit := s.CreatedAt.Add(time.Duration(maxHours) * time.Hour)
+	if out.ExpiresAt.After(limit) {
 		out.ExpiresAt = limit
 	}
+	out.AbsoluteExpiresAt = limit
+	out.IdleExpiresAt = s.LastSeenAt.Add(time.Duration(idle) * time.Minute)
 	return &out, "", nil
 }
 
