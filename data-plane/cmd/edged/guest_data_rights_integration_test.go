@@ -509,3 +509,74 @@ func TestIntegration_GuestDataRights_OneGuestOfASharedStay(t *testing.T) {
 		t.Fatalf("the last guest's erasure must anonymise the stay: %q %v", reservation, err)
 	}
 }
+
+// GDPR final check D1 (migration 0142): a one-guest stay that continued into a shared room. Exporting or erasing
+// it reaches the guest's own row on the shared stay, never the other guest, and never the shared stay whole.
+func TestIntegration_GuestDataRights_AStayLinkDoesNotLeadIntoASharedStay(t *testing.T) {
+	f := newAPI(t)
+	ctx := context.Background()
+	sfx := fmt.Sprint(time.Now().UnixNano())
+	first := seedGuestDataStay(t, f, "R-MOVE-A-"+sfx, "CHECKED_OUT")
+	shared := seedGuestDataStay(t, f, "R-MOVE-B-"+sfx, "CHECKED_OUT")
+	var adaFirst, adaShared, bob string
+	if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
+		// The same guest on both stays, by PMS guest number; Bob shares the second room.
+		if _, err := tx.Exec(ctx, `UPDATE iam_v2.stay_guests SET external_guest_id='G-ADA-'||$2 WHERE stay_id = ANY($1::uuid[])`,
+			[]string{first, shared}, sfx); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM iam_v2.stay_guests WHERE stay_id=$1`, first).Scan(&adaFirst); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM iam_v2.stay_guests WHERE stay_id=$1`, shared).Scan(&adaShared); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.stay_guests(tenant_id,site_id,pms_interface_id,stay_id,
+			  external_guest_id,first_name_norm,last_name_norm,display_name,is_primary)
+			SELECT tenant_id,site_id,pms_interface_id,id,'G-BOB-'||$2,'BOB','BAKER','Bob Baker',false FROM iam_v2.stays WHERE id=$1
+			RETURNING id::text`, shared, sfx).Scan(&bob); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `SELECT iam_v2.p5_begin_controlled_operation('entitlement_transfer')`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO iam_v2.stay_links(tenant_id,site_id,from_stay,to_stay,reason)
+			VALUES ($1,$2,$3::uuid,$4::uuid,'CROSS_PMS_TRANSFER')`, f.tenant, f.site, first, shared)
+		return err
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	req := func(kind, id string) map[string]any {
+		return map[string]any{"kind": kind, "id": id, "reason": "guest asked", "password": f.password}
+	}
+
+	st, raw := f.doRaw(t, "POST", "/guest-data-rights/export", req("stay", first))
+	if st != 200 || strings.Contains(strings.ToLower(raw), "baker") || strings.Contains(raw, "G-BOB-") ||
+		!strings.Contains(raw, "R-MOVE-B-"+sfx) || !strings.Contains(raw, "shared_stays_note") {
+		t.Fatalf("export of the first stay = %d %s", st, raw)
+	}
+
+	st, body := f.do(t, "POST", "/guest-data-rights/erase", req("stay", first))
+	counts, _ := body["counts"].(map[string]any)
+	if st != 200 || counts["hotel_stays"] != float64(1) || counts["stay_guests"] != float64(1) || counts["hotel_stays_kept_shared"] != float64(1) {
+		t.Fatalf("erase the first stay = %d %v", st, body)
+	}
+	str := func(q string, args ...any) string {
+		var v string
+		if err := f.pool.QueryRow(ctx, q, args...).Scan(&v); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+		return v
+	}
+	for name, got := range map[string][2]string{
+		"first stay anonymised": {str(`SELECT (external_reservation_id LIKE 'anon-%')::text FROM iam_v2.stays WHERE id=$1`, first), "true"},
+		"shared stay kept":      {str(`SELECT external_reservation_id FROM iam_v2.stays WHERE id=$1`, shared), "R-MOVE-B-" + sfx},
+		"Ada gone from shared":  {str(`SELECT concat_ws(',',first_name_norm,last_name_norm,display_name,external_guest_id) FROM iam_v2.stay_guests WHERE id=$1`, adaShared), ""},
+		"Bob kept":              {str(`SELECT concat_ws(',',first_name_norm,last_name_norm,display_name) FROM iam_v2.stay_guests WHERE id=$1`, bob), "BOB,BAKER,Bob Baker"},
+		"Ada gone from first":   {str(`SELECT concat_ws(',',first_name_norm,last_name_norm,display_name) FROM iam_v2.stay_guests WHERE id=$1`, adaFirst), ""},
+	} {
+		if got[0] != got[1] {
+			t.Errorf("%s = %q, want %q", name, got[0], got[1])
+		}
+	}
+}
