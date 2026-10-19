@@ -2,7 +2,7 @@
 
 // HOW LONG GUEST PERSONAL DATA IS KEPT (migration 0127; GDPR plan C1; Product-Owner decisions D-C1, D-C1a, D-C3).
 //
-// Six periods. When one ends, the appliance's hourly run ANONYMISES the data it covers: names, email addresses,
+// Eight periods. When one ends, the appliance's hourly run ANONYMISES the data it covers: names, email addresses,
 // phone numbers, room and reservation numbers, MAC and IP addresses are replaced or cleared, and nothing that is
 // still in use is touched. Records and totals stay, so reports keep working; the person behind them cannot be
 // identified any more. Sign-in attempts are the one exception: they are deleted, as before. The bounds and

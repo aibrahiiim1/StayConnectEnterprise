@@ -20,7 +20,7 @@ beforeEach(() => {
   get.mockReset(); post.mockReset();
   get.mockImplementation((path: string) => {
     if (path === "/guest-data-rights/erasures") return Promise.resolve({ erasures: [] });
-    if (path.startsWith("/guest-data-rights/search?q=")) return Promise.resolve({ matches: [account] });
+    if (path === "/guest-data-rights/search") return Promise.resolve({ matches: [account] });
     return Promise.resolve({});
   });
   URL.createObjectURL = vi.fn(() => "blob:x");
@@ -46,7 +46,8 @@ function fillDialog(dialog: HTMLElement, typed?: string) {
 describe("Guest data requests", () => {
   it("searches with the typed term", async () => {
     await renderPage();
-    expect(get).toHaveBeenCalledWith("/guest-data-rights/search?q=guest%40example");
+    // The search travels in a header, never in the URL (GDPR final check).
+    expect(get).toHaveBeenCalledWith("/guest-data-rights/search", { "X-Guest-Data-Search": "guest%40example" });
     expect(screen.getByText("Client account")).toBeTruthy();
   });
 

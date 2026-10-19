@@ -68,9 +68,9 @@ var guestDataReads = map[string]guestRead{
 	"/edge/v1/pms-stays":                           {targetType: "stays", searchHeaders: []string{staySearchHeader}},
 	"/edge/v1/pms-events":                          {targetType: "stay_events", searchHeaders: []string{pmsEventSearchHeader}},
 	"/edge/v1/guest-signin-attempts":               {targetType: "sign_in_attempts", searchHeaders: []string{signInSearchHeader}, searchQuery: []string{"room"}},
-	"/edge/v1/usage/stays":                         {targetType: "usage_stays", searchQuery: []string{"q"}},
+	"/edge/v1/usage/stays":                         {targetType: "usage_stays", searchHeaders: []string{usageSearchHeader}, searchQuery: []string{"q"}},
 	"/edge/v1/usage/sources":                       {targetType: "usage_sources", searchHeaders: []string{usageSearchHeader}, searchQuery: []string{"q"}},
-	"/edge/v1/guest-data-rights/search":            {targetType: "guest_data", searchQuery: []string{"q"}},
+	"/edge/v1/guest-data-rights/search":            {targetType: "guest_data", searchHeaders: []string{guestDataSearchHeader}, searchQuery: []string{"q"}},
 	"/edge/v1/network/dhcp/leases":                 {targetType: "dhcp_leases", searchHeaders: []string{dhcpSearchHeader}},
 }
 

@@ -3,7 +3,8 @@ package main
 // GUEST DATA RIGHTS: look up, export and erase one guest (migration 0128; GDPR remediation plan C3 and C4;
 // Product-Owner decisions D-C3 and D-C4).
 //
-//	GET  /edge/v1/guest-data-rights/search?q=   client accounts, guest identities and stays matching a search
+//	GET  /edge/v1/guest-data-rights/search      client accounts, guest identities and stays matching a search
+//	                                            (the text in X-Guest-Data-Search; ?q= is still read for an older console)
 //	GET  /edge/v1/guest-data-rights/erasures    the erasures that ran (reference, who, why, what was anonymised)
 //	POST /edge/v1/guest-data-rights/export      one guest's data as a JSON document           password + reason
 //	POST /edge/v1/guest-data-rights/erase       anonymise one guest; refused while live         password + reason
@@ -12,7 +13,8 @@ package main
 // identity and hand the export over; there is no guest self-service. All the deciding -- what belongs to the
 // guest, what is still live, what each column becomes -- is in the database functions, so export and erasure
 // share one definition of "this guest". Audit rows name the record id (export) or the erasure reference
-// (erasure), never the guest's name or address; the search term is not audited at all.
+// (erasure), never the guest's name or address. The search is recorded by guest_data_reads.go, and its text is
+// shown in the activity log only to holders of guest-data-rights.
 
 import (
 	"context"
@@ -26,6 +28,8 @@ import (
 )
 
 const guestDataEraseTimeout = time.Minute
+
+const guestDataSearchHeader = "X-Guest-Data-Search"
 
 // stay_guest is one guest of a stay with more than one guest named on it (migration 0141, GDPR audit C3).
 var guestDataKinds = map[string]bool{"account": true, "principal": true, "stay": true, "stay_guest": true}
@@ -44,7 +48,15 @@ func (s *server) searchGuestData(w http.ResponseWriter, r *http.Request) {
 		writeAwaitingAssignment(w, "guest data")
 		return
 	}
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	// THE SEARCH TRAVELS IN A HEADER (GDPR final check): it is a name, an email or a phone number, and a URL is
+	// what logs and browser histories keep.
+	q, ok := readSearch(w, r, guestDataSearchHeader)
+	if !ok {
+		return
+	}
+	if q == "" {
+		q = strings.TrimSpace(r.URL.Query().Get("q"))
+	}
 	if len(q) < 2 || len(q) > 200 {
 		jsonErr(w, http.StatusBadRequest, "invalid_search", "enter 2 to 200 characters")
 		return
@@ -114,6 +126,10 @@ func (s *server) listGuestDataErasures(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, e)
 	}
+	if rows.Err() != nil {
+		guestDataDBError(w, rows.Err(), "the erasures could not be read")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"erasures": out})
 }
 
@@ -162,6 +178,8 @@ func (s *server) exportGuestData(w http.ResponseWriter, r *http.Request) {
 	var doc []byte
 	if err := s.db.QueryRow(ctx, `SELECT public.guest_data_export($1::uuid,$2::uuid,$3,$4::uuid)::text`,
 		s.tenantID, s.siteID, in.Kind, in.ID).Scan(&doc); err != nil {
+		// A refused or failed export is recorded too: who tried, for which record, and why it did not happen.
+		s.audit(r, "guest_data.export_failed", in.Kind, in.ID, map[string]any{"reason": in.Reason})
 		guestDataDBError(w, err, "the export failed")
 		return
 	}

@@ -3,7 +3,7 @@ package main
 // GUEST-DATA RETENTION (migrations 0127, 0134 and 0140; GDPR remediation plan C1, F5 and F6; Product-Owner decisions D-C1, D-C1a, D-C3;
 // docs/OPERATIONAL_SETTINGS_POLICY.md).
 //
-//	GET /edge/v1/data-retention/   the six periods, their bounds and defaults, the change log and recent runs
+//	GET /edge/v1/data-retention/   the periods, their bounds and defaults, the change log and recent runs
 //	PUT /edge/v1/data-retention/   change them: password step-up, a reason, audited
 //
 // How long guest personal data is kept before scd's hourly run anonymises it: PMS stay data after checkout,

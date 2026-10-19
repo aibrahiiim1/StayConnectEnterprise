@@ -284,7 +284,7 @@ func runSeedAdmin(args []string) error {
 	// A weak seeded password is usable exactly once: the first sign-in can only replace it (0119).
 	mustChange := *allowWeak || len(*password) < 10
 	if len(*password) < 10 {
-		slog.Warn("seeding a WEAK site-admin password via --allow-weak — it must be changed at first sign-in", "email", *email)
+		slog.Warn("seeding a WEAK site-admin password via --allow-weak — it must be changed at first sign-in")
 	}
 	c := loadCfg()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -331,7 +331,7 @@ func runSeedAdmin(args []string) error {
 		throttleKey(scopeAccount, *email)); err != nil {
 		slog.Warn("could not clear a sign-in lockout for the seeded account", "err", err)
 	}
-	slog.Info("seeded site admin", "email", *email, "id", id, "must_change_password", mustChange)
+	slog.Info("seeded site admin", "id", id, "must_change_password", mustChange) // the id, not the email: the journal is outside retention
 	return nil
 }
 
@@ -392,6 +392,6 @@ func runResetMFA(args []string) error {
 		c.TenantID, id, strings.TrimSpace(*reason), removed); err != nil {
 		slog.Warn("reset-mfa: the audit entry could not be written", "err", err)
 	}
-	slog.Info("two-step sign-in reset; a new authenticator is set up at the next sign-in", "email", *email, "had_authenticator", removed)
+	slog.Info("two-step sign-in reset; a new authenticator is set up at the next sign-in", "id", id, "had_authenticator", removed)
 	return nil
 }

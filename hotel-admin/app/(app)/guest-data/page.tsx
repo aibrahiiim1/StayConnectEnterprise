@@ -89,7 +89,7 @@ export default function GuestDataPage() {
     if (term.length < 2) return;
     setSearching(true); setErr(null);
     try {
-      const r = await api.get<{ matches: Match[] }>(`/guest-data-rights/search?q=${encodeURIComponent(term)}`);
+      const r = await api.get<{ matches: Match[] }>("/guest-data-rights/search", { "X-Guest-Data-Search": encodeURIComponent(term) });
       setMatches(r.matches ?? []);
     } catch (e) { setErr(errMsg(e)); } finally { setSearching(false); }
   }

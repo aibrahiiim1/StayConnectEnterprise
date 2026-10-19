@@ -139,7 +139,14 @@ func (s *server) listUsageStays(w http.ResponseWriter, r *http.Request) {
 
 	// The room/reservation filter is one field in the UI, because an operator has "4202" or "BK-88213" in
 	// front of them and should not have to know which kind of thing it is.
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	// In the X-Usage-Search header like the other usage lists; ?q= is still read for an older console.
+	q, ok := readSearch(w, r, usageSearchHeader)
+	if !ok {
+		return
+	}
+	if q == "" {
+		q = strings.TrimSpace(r.URL.Query().Get("q"))
+	}
 
 	rows, err := s.db.Query(r.Context(), `
 		WITH stay_usage AS (
