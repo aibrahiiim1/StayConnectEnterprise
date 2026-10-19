@@ -46,7 +46,7 @@ Priority:
 | F2 | P0 | **Drafted; 24 hours decided, contact TBD (D-F2).** **Breach-response runbook** `docs/runbooks/PERSONAL_DATA_BREACH.md`: detection sources, who decides, the hotel's 72-hour deadline as controller, our duty to tell the hotel "without undue delay" as processor, evidence handling. | Art. 33/34: nothing exists | **D-F2:** Who in our organisation is the breach contact? Within how many hours do we promise to tell the hotel? |
 | F3 | P0 | **Our part drafted on `delivery/gdpr` (see [README.md](README.md)); the hotel's templates and the DPIA starter are still to do.** **Compliance pack** under `docs/privacy/`: data inventory / Art. 30 record template, sub-processor list (SendGrid, Twilio, Meta, Google, Microsoft, Apple, Stripe, Paymob), notes on data sent outside the EU, DPIA starter, DPA template for hotels. | Art. 28, 30, 35, Chapter V: nothing exists | **D-F3:** Legal review owner. These are engineering drafts and need a lawyer's sign-off before they reach a customer. |
 | F4 | P1 | **Turn off SendGrid click/open tracking** on verification and reset mail (`tracking_settings`). | Tracking that guests are not told about; rewritten links | none |
-| F5 | P1 | **Bound the logs:** a logrotate rule for `/var/log/stayconnect/*` and Caddy/Kea logs, plus a journald size and age limit. Stop the non-production OTP stubs from writing full recipients and codes. | Art. 5(1)(e): logs grow forever | **D-F5:** Log retention period (recommend 14 days) |
+| F5 | P1 | **Built on `delivery/gdpr` (migration 0134); D-F5 decided: 14 days, a hotel setting.** **Bound the logs:** a logrotate rule for `/var/log/stayconnect/*` and Caddy/Kea logs, plus a journald size and age limit. Stop the non-production OTP stubs from writing full recipients and codes. | Art. 5(1)(e): logs grow forever | **D-F5:** Log retention period (recommend 14 days) |
 | F6 | P1 | **Moved to C1.** Making the 30-day sign-in-attempt retention a hotel setting needs a migration: the settings policy requires a site-keyed table, a database CHECK and a change log written by a definer function. It ships with the C1 retention settings. | Breaks `OPERATIONAL_SETTINGS_POLICY` §0C | none (keep the 30-day default) |
 | F7 | P2 | **Built on `delivery/gdpr`, not yet deployed.** **Explain the remembered-device cookie on the portal** (one sentence, translated). Hotel Admin warns when a logo, background or font comes from an outside host. | Art. 13; outside hosts the guest is not told about | none |
 | F8 | P2 | **Built on `delivery/gdpr` (no migration).** **Audit routine reads of guest data:** staff viewing guest-account details, a stay's identity, usage by MAC. | Accountability: who looked at a guest | **D-F8:** Audit every view, or only opening one guest's detail (recommended; avoids flooding the log)? |
@@ -62,8 +62,8 @@ Priority:
 | C4 | P1 | **Built on `delivery/gdpr` (migration 0128), not yet deployed.** **Export one guest's data (access and portability).** The same lookup as C3, producing a machine-readable JSON/CSV bundle. Requires the operator's password again, is audited, and is limited to one role. | product semantics (guest-data surface) | **D-C4:** decided, see §4 (site_admin and hotel_it_manager; staff hand the export over). |
 | C5 | P0 | **Built on `delivery/gdpr` (migration 0129), not yet deployed.** **Encrypt backups and keep the keys apart.** Encrypt the nightly dump and the `/etc` archive to a public key, so the appliance can write backups but cannot read them back. Stop the seal keys travelling in the same unencrypted archive. Add an age limit to the on-demand dumps as well as the count limit. | security, keys and trust | **D-C5:** decided, see §4 (hotel-held keys, several holders, restore-test reminder, no escrow). |
 | C6 | P1 | **Built on `delivery/gdpr` (migration 0130).** **Record consent / notice acknowledgement.** Store the version of the notice and terms each guest saw, with the time. | schema, guest auth flow | **D-C6:** Lawful basis for Wi-Fi access. We recommend **contract / legitimate interest, not consent**, so we *record that the notice was shown* rather than block access on a checkbox. Consent is needed only if marketing is ever added. |
-| C7 | P1 | **Store less from the PMS.** Stop mirroring date of birth, VIP, travel agent and rate plan unless a feature needs them. Clear the existing values. | PMS protocol, schema, historical data | **D-C7:** Does any feature need date of birth (e.g. as a sign-in factor)? If none, drop it. |
-| C8 | P1 | **Encrypt the Protel FIAS link** (`UseTLS` is read but never used). | PMS configuration and traffic | **D-C8:** Does the hotel's Protel interface support TLS? Is turning it on at this hotel authorised? |
+| C7 | P1 | **Built on `delivery/gdpr` (migration 0133).** **Store less from the PMS.** Stop mirroring date of birth, VIP, travel agent and rate plan unless a feature needs them. Clear the existing values. | PMS protocol, schema, historical data | **D-C7:** Does any feature need date of birth (e.g. as a sign-in factor)? If none, drop it. |
+| C8 | P1 | **Built on `delivery/gdpr` (no migration), off by default.** **Encrypt the Protel FIAS link** (`UseTLS` is read but never used). | PMS configuration and traffic | **D-C8:** Does the hotel's Protel interface support TLS? Is turning it on at this hotel authorised? |
 | C9 | P1 | **Built on `delivery/gdpr` (no migration).** **Request fewer profile fields from social providers:** drop `profile`, `public_profile`, `name` and the Facebook `picture` field. Limit the free-text scope field in Hotel Admin to an allow-list. | guest authentication | **D-C9:** Reject or warn when a hotel adds extra scopes? |
 | C10 | P1 | **Built on `delivery/gdpr`: Hotel Admin (migration 0132) and Central (Central migration 0052).** **Harden operator access:** MFA for Hotel Admin and Central, an absolute session limit plus an idle timeout, `EDGED_COOKIE_SECURE` on by default. | security | **D-C10:** Which MFA method (TOTP recommended)? Mandatory for admin roles only, or for everyone? Idle timeout (recommend 30 min) and absolute limit (recommend 12 h)? |
 | C11 | P2 | **Encryption at rest:** disk encryption (LUKS) for new installs; TLS or Unix sockets for database connections. | appliance deployment, security | **D-C11:** Accept for new installs only (existing appliances need a reinstall)? How is the key unlocked at boot (TPM vs passphrase)? |
@@ -172,6 +172,34 @@ Each value ships as a hotel setting with this default, following `OPERATIONAL_SE
 - **The Two-step sign-in page** in the sidebar shows the state and makes new recovery codes (after step-up).
 - **The test tools sign in with both steps.** `cmd/acceptance`, `cmd/pkitest` and the two regression scripts (`scripts/lifecycle-regression.sh`, `scripts/replacement-factoryreset-regression.sh`, through `cmd/regtest -signin`) use `internal/opsignin`: the first sign-in sets the operator's authenticator up and keeps its secret in a 0600 keyring on the machine running the tool (`OPERATOR_TOTP_KEYRING`, default in the user's config directory); later sign-ins compute the code. An operator whose authenticator was set up elsewhere is refused with the `ctrlapi reset-mfa` command that hands it back. The older phase scripts (`scripts/phase*-test.sh`) still sign in with a password alone and are not current coverage.
 
+### D-F5, log retention: **14 days, a hotel setting** (Product Owner, 2026-10-19)
+
+- "14 days, but if it can be configurable by law make it that way": the default is 14 days, and a site administrator may set 1 to 730 days, so a hotel whose national law requires connection logs to be kept longer can follow it.
+
+### How F5 was built (migration 0134, on `delivery/gdpr`)
+
+- **One more data-retention period**, `log_days`, beside the six of 0127: Hotel Admin → Backups → Data retention, "System logs", 1-730 days, default 14, with the password and a reason, logged like the others.
+- **scd applies it hourly** (`cmd/scd/log_retention.go`): `journalctl --vacuum-time`; each file in `/var/log/stayconnect`, `/var/log/caddy` and `/var/log/kea` is cut once a day (copied to `<name>.<YYYYMMDD>` and emptied in place, safe for the appending writers); cuts, Kea's numbered and Caddy's rolled files older than the period are deleted; a live log nobody has written for longer than the period is emptied.
+- **journald archives daily** (`deploy/journald/stayconnect-retention.conf`, installed by `install-service-units.sh`), so the vacuum can remove each day.
+- The code-sender logs already write only a masked recipient in production builds; only development builds write codes.
+
+### How C7 was built (migration 0133, on `delivery/gdpr`)
+
+- **Checked:** Protel FIAS is asked only for RN, G#, GN, GF, GA, GD, A0 and A1; an unrequested field is used only inside the event fingerprint and never stored; the REST connectors map no birth date.
+- `iam_v2.stay_guests.date_of_birth` is dropped; retention and the guest export no longer name it. The down migration adds it back, empty.
+
+### How C8 was built (no migration, on `delivery/gdpr`)
+
+- A Protel connection gains **"Encrypt the connection (TLS)"**, off by default, and an optional **PMS certificate fingerprint (SHA-256)** that pins a self-signed certificate. Without a pin, the certificate must chain to a system authority and match the address.
+- pmsd wraps the socket in TLS 1.2 or later and **never falls back** to plain TCP: a failed handshake leaves the link down.
+- Stored as `config.tls` only when on, so existing connections read exactly as before. Turning it on for a hotel stays a separate decision (D-C8).
+
+### Also built on 2026-10-19 (gaps from the F3 review)
+
+- **Code device bindings** older than a day are now removed by the minute sweep, not only when the next code is sent.
+- **Central locks an account** after 5 wrong passwords (at sign-in or at the confirmation) for 15 minutes, both settings (Central migration 0053); unknown names lock alike, so the lock reveals no accounts; the authenticator-code lock uses the same settings.
+- **Central's database backups are encrypted** with age to the public keys in `/etc/stayconnect/backup-recipients.txt`; Central holds no private key. The installer adds `age` and warns while no key is listed.
+
 ### How C9 was built (no migration, on `delivery/gdpr`)
 
 - **Asked for by default** (when the hotel leaves Scopes empty): Google `openid email` (was `openid email profile`); Facebook `email` (was `email public_profile`), and the profile fetch asks only for `id,email` (was also name and picture); Apple `email` (was `name email`).
@@ -237,7 +265,7 @@ The product is still in development: there is no paying customer and no live hot
 ### Still open
 
 - **D-C11** (disk encryption): needs more information first.
-- **D-F2** (breach contact), **D-F3** (legal reviewer), **D-F5** (how long to keep logs).
+- **D-F2** (breach contact), **D-F3** (legal reviewer).
 
 ## 5. Proposed order
 

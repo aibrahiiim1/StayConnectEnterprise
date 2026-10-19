@@ -52,18 +52,23 @@ draft as it is today. Fixing one means updating the draft.
 - **Appliance:**
   - SSH is open on the management interface by default (Annex II, Part C2).
   - Backups stay unencrypted until the first key holder is confirmed (Part C3).
-  - The PMS link is cleartext (C8).
+  - The PMS link can be encrypted since C8 (2026-10-19), but it is off by default.
   - There is no disk encryption (C11).
-  - System logs are unbounded: Caddy access log, Kea DHCP log, journald (F5).
+  - ~~System logs are unbounded~~: fixed by F5 (migration 0134, 2026-10-19), 14 days by default.
 - **Retention gaps on the appliance:**
-  - `otp_code_escrow`, `otp_code_reveals` and `device_network_appearances` are outside the retention engine.
+  - ~~`otp_code_escrow`, `otp_code_reveals` and `device_network_appearances` are outside the retention engine~~.
+    Checked 2026-10-19: escrowed codes and reveals were already removed every minute, and network sightings refer
+    only to a device id, anonymous once the device is. The real gap, code device bindings kept on a quiet site,
+    is fixed.
   - Operator accounts have no retention.
   - Backups keep for up to 30 days data the live database has already anonymised. That is normal for backups, but
     the hotel's notice should say so.
 - **Central:**
-  - The audit log, security alerts and lifecycle events are never purged.
-  - Database backups are not encrypted.
-  - There is no per-account password lockout; only a per-address rate limit and the code lockout.
+  - The audit log, security alerts and lifecycle events are never purged (needs a retention decision).
+  - ~~Database backups are not encrypted~~: encrypted with age since 2026-10-19, once a key is listed in
+    `/etc/stayconnect/backup-recipients.txt`. Until a key is listed they stay plain, and every run warns.
+  - ~~There is no per-account password lockout~~: Central migration 0053 (2026-10-19), 5 wrong passwords lock for
+    15 minutes, both settings.
   - ctrlapi connects as the database superuser, and customers are kept apart in the application only, with no
     row-level security.
   - The audit log stores the email typed on a failed sign-in.

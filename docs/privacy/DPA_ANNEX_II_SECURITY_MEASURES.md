@@ -144,7 +144,9 @@ The Software is designed to be operated by the Controller. These matters stay wi
 5. **Retention settings** and the **privacy notice** shown to guests (Art. 13).
 6. **Its own providers** (email, SMS, WhatsApp, social sign-in, payment, PMS) and their agreements.
 7. **Disk encryption:** the Software does not encrypt the Appliance's disk. **[[Revisit after D-C11.]]**
-8. **The PMS link (Protel FIAS) is unencrypted** unless the PMS supports TLS and the Controller turns it on.
-   **[[Revisit after C8.]]** It should run on a trusted network segment.
-9. **System logs:** the Software does not yet limit how long system logs (web access log, address-assignment log,
-   service journal) are kept. **[[Revisit after D-F5; until then the Controller should set log rotation.]]**
+8. **The PMS link (Protel FIAS)** can be encrypted with TLS (with the PMS certificate pinned by its fingerprint),
+   but it is off by default and works only if the Controller's PMS supports TLS; the Controller decides to turn it
+   on. While it is off, the link should run on a trusted network segment.
+9. **System logs** (web access log, address-assignment log, service journal) are deleted after the Controller's
+   log period, 14 days by default (a setting of 1 to 730 days). The Controller sets a longer period only if its
+   national law requires connection logs to be kept.
