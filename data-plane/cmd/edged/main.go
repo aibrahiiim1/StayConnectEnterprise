@@ -389,6 +389,8 @@ func main() {
 			r.Use(s.requireAuth)
 			r.Use(s.recordGuestDataReads)
 			r.Get("/auth/whoami", s.whoami)
+			// The idle warning's "Stay signed in": a request that counts as activity, and nothing else.
+			r.Get("/auth/keepalive", s.keepalive)
 			// The operator's own password: the current one is a step-up; every session is ended (N-8).
 			r.Post("/auth/password", s.changeOwnPassword)
 			// The operator's own two-step sign-in: its state, and a new set of recovery codes (step-up).

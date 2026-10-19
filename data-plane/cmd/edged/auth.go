@@ -609,27 +609,47 @@ func (s *server) loadRoles(ctx context.Context, operatorID string) ([]string, er
 	return out, rows.Err()
 }
 
-func (s *server) whoami(w http.ResponseWriter, r *http.Request) {
-	sess := sessFrom(r.Context())
-	pol, ok := r.Context().Value(sessPolicyKey).(sessionPolicy)
-	if !ok {
-		pol = defaultSessionPolicy
-	}
-	// When the session ends if nothing else happens: the idle limit or the absolute one, whichever is first.
+// sessionEnds is when the session ends if nothing else happens: the idle limit or the absolute one, whichever is
+// first.
+func sessionEnds(sess *session, pol sessionPolicy) time.Time {
 	ends := sess.LastSeen.Add(pol.idle())
 	if abs := sess.CreatedAt.Add(pol.max()); abs.Before(ends) {
 		ends = abs
 	}
+	return ends
+}
+
+// sessionPolicyFrom is the session limits requireAuth applied to this request, or the defaults.
+func sessionPolicyFrom(ctx context.Context) sessionPolicy {
+	if pol, ok := ctx.Value(sessPolicyKey).(sessionPolicy); ok {
+		return pol
+	}
+	return defaultSessionPolicy
+}
+
+func (s *server) whoami(w http.ResponseWriter, r *http.Request) {
+	sess := sessFrom(r.Context())
+	pol := sessionPolicyFrom(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{
 		"operator_id":          sess.OperatorID,
 		"email":                sess.Email,
 		"display_name":         sess.DisplayName,
 		"roles":                sess.Roles,
 		"site_id":              s.siteID,
-		"expires_at":           ends.UTC(),
+		"expires_at":           sessionEnds(sess, pol).UTC(),
 		"idle_timeout_minutes": pol.IdleTimeoutMinutes,
 		// The console shows only the change-password form while this is true (0119).
 		"must_change_password": sess.MustChangePassword,
+	})
+}
+
+// keepalive: GET /edge/v1/auth/keepalive, the "Stay signed in" button of the console's idle warning (WCAG 2.2.1).
+// It does nothing itself: passing requireAuth is what counts as activity, which whoami deliberately is not. The
+// answer is the new end, so the console needs no second request to learn it. It cannot move the absolute limit.
+func (s *server) keepalive(w http.ResponseWriter, r *http.Request) {
+	sess := sessFrom(r.Context())
+	writeJSON(w, http.StatusOK, map[string]any{
+		"expires_at": sessionEnds(sess, sessionPolicyFrom(r.Context())).UTC(),
 	})
 }
 
