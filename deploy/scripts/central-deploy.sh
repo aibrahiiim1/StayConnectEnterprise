@@ -282,6 +282,7 @@ if [ "$DRY_RUN" = 0 ]; then
 fi
 
 step "6/8 Caddy"
+install_central_access_log_rotation
 render_caddyfile "$REL/deploy/caddy/Caddyfile.central" "$(setting CENTRAL_SITE_ADDRESSES | sed 's/,/, /g')" \
   "$(setting CENTRAL_TLS_MODE)" "$(setting CENTRAL_ACME_EMAIL)" > "$WORK/Caddyfile"
 if cmp -s "$WORK/Caddyfile" "$CADDYFILE_PATH" && [ "$units_changed" = 0 ]; then

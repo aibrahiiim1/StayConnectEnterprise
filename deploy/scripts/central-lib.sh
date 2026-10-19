@@ -350,6 +350,24 @@ print("" if v is None else (v if isinstance(v,str) else json.dumps(v)))' "$1" "$
 
 # ---------------------------------------------------------------- Caddy
 # render_caddyfile <template> <site-addresses> <internal|acme> [acme-email] — the concrete Central Caddyfile.
+# install_central_access_log_rotation: Caddy's access log holds client IP addresses, so it is rolled daily and kept
+# 14 days (GDPR audit 2026-10-19, C6). The Caddyfile turns Caddy's own rolling off; copytruncate keeps the file
+# Caddy has open, with its owner. Called by install and by every deploy, so an upgraded host gets it too.
+install_central_access_log_rotation() {
+  write_file /etc/logrotate.d/stayconnect-caddy-central 0644 <<'EOF'
+/var/log/caddy/central.log {
+    daily
+    rotate 14
+    maxage 14
+    copytruncate
+    compress
+    delaycompress
+    missingok
+    notifempty
+}
+EOF
+}
+
 render_caddyfile() {
   local tpl="$1" sites="$2" mode="$3" email="${4:-}" tls_line global_extra=""
   case "$mode" in
