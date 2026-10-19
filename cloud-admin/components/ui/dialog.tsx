@@ -148,6 +148,7 @@ export function DialogForm({
   busyLabel,
   error,
   disabled = false,
+  disabledReason,
   extraFooter,
   onSubmit,
   children,
@@ -164,11 +165,16 @@ export function DialogForm({
   busyLabel?: string;
   error?: unknown;
   disabled?: boolean;
+  /** Why the submit is disabled, in a few words ("Enter a reason to continue."). Shown beside the button and tied
+   *  to it with aria-describedby, so a disabled button is never a dead end without an explanation. */
+  disabledReason?: React.ReactNode;
   extraFooter?: React.ReactNode;
   onSubmit: (e: React.FormEvent<HTMLFormElement>) => void | Promise<void>;
   children: React.ReactNode;
 }) {
   const formId = React.useId();
+  const reasonId = React.useId();
+  const explain = disabled && !busy && Boolean(disabledReason);
   return (
     <Dialog open={open} onOpenChange={(v) => !busy && onOpenChange(v)}>
       <DialogContent size={size}>
@@ -191,10 +197,19 @@ export function DialogForm({
         </DialogBody>
         <DialogFooter>
           {extraFooter && <div className="me-auto flex items-center gap-2">{extraFooter}</div>}
+          {explain && (
+            <p id={reasonId} className="me-auto text-caption text-muted-foreground">{disabledReason}</p>
+          )}
           <Button type="button" variant="ghost" disabled={busy} onClick={() => onOpenChange(false)}>
             {cancelLabel}
           </Button>
-          <Button type="submit" form={formId} variant={submitVariant} disabled={busy || disabled}>
+          <Button
+            type="submit"
+            form={formId}
+            variant={submitVariant}
+            disabled={busy || disabled}
+            aria-describedby={explain ? reasonId : undefined}
+          >
             {busy ? busyLabel ?? `${submitLabel}…` : submitLabel}
           </Button>
         </DialogFooter>
@@ -286,6 +301,15 @@ export function ConfirmDialog({
     (!requireReason || reason.trim() !== "") &&
     (!requirePassword || password !== "") &&
     (!confirmText || typed === confirmText);
+  // What is still missing, in the order the fields appear.
+  const missing = [
+    requireReason && reason.trim() === "" ? (reasonOptions ? "choose a reason" : "enter a reason") : null,
+    confirmText && typed !== confirmText ? `type ${confirmText} exactly` : null,
+    requirePassword && password === "" ? "enter your password" : null,
+  ].filter(Boolean) as string[];
+  const notReady = missing.length
+    ? `To continue, ${missing.length > 1 ? `${missing.slice(0, -1).join(", ")} and ${missing[missing.length - 1]}` : missing[0]}.`
+    : undefined;
 
   return (
     <DialogForm
@@ -299,6 +323,7 @@ export function ConfirmDialog({
       busy={busy}
       error={error}
       disabled={!ready}
+      disabledReason={notReady}
       onSubmit={() => onConfirm({ reason: reason.trim(), password })}
     >
       {consequences && consequences.length > 0 && (

@@ -22,6 +22,32 @@ export class ApiError extends Error {
   }
 }
 
+// ------- An ended sign-in -------
+//
+// Any 401 from an authenticated route means the sign-in has ended (idle, lifetime, or access changed). The app shell
+// registers what happens then: back to the sign-in page, saying why. The sign-in routes themselves answer 401 for a
+// wrong password or code, and so does the step-up re-authentication; those are the form's to report, not an ended
+// sign-in.
+type UnauthorizedHandler = (err: ApiError) => void;
+let unauthorizedHandler: UnauthorizedHandler | null = null;
+
+const NOT_AN_ENDED_SIGNIN = ["/v1/auth/login", "/v1/auth/reauth", "/v1/auth/logout"];
+
+/** Registers what an ended sign-in does. Returns an unregister function. */
+export function setUnauthorizedHandler(fn: UnauthorizedHandler | null): () => void {
+  unauthorizedHandler = fn;
+  return () => {
+    if (unauthorizedHandler === fn) unauthorizedHandler = null;
+  };
+}
+
+/** True when a 401 on `path` means the sign-in has ended. */
+export function isEndedSignIn(status: number, path: string): boolean {
+  if (status !== 401) return false;
+  const bare = path.split("?")[0];
+  return !NOT_AN_ENDED_SIGNIN.some((p) => bare === p || bare.startsWith(p + "/"));
+}
+
 async function request<T>(method: string, path: string, body?: any): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method,
@@ -31,7 +57,11 @@ async function request<T>(method: string, path: string, body?: any): Promise<T> 
   });
   const contentType = res.headers.get("content-type") ?? "";
   const payload = contentType.includes("application/json") ? await res.json() : await res.text();
-  if (!res.ok) throw new ApiError(res.status, payload);
+  if (!res.ok) {
+    const err = new ApiError(res.status, payload);
+    if (unauthorizedHandler && isEndedSignIn(res.status, path)) unauthorizedHandler(err);
+    throw err;
+  }
   return payload as T;
 }
 
@@ -106,6 +136,12 @@ export type Whoami = {
   customer_id?: string | null;
   customer_name?: string | null;
   permissions?: string[];
+  /** When the sign-in ends without further activity (ISO time). Absent from an older Central. */
+  idle_expires_at?: string | null;
+  /** When the sign-in ends however active the person is (ISO time). */
+  absolute_expires_at?: string | null;
+  /** The server's clock when it answered, to correct for this browser's. */
+  server_time?: string | null;
 };
 
 export type Activation = "waiting" | "activating" | "activated" | "retiring" | "retired";

@@ -1,0 +1,6 @@
+{
+  "extends": ["next/core-web-vitals", "plugin:jsx-a11y/recommended"],
+  "rules": {
+    "jsx-a11y/label-has-associated-control": ["error", { "controlComponents": ["Switch"], "depth": 3 }]
+  }
+}

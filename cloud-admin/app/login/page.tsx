@@ -2,15 +2,16 @@
 
 // THE SIGN-IN SCREEN — outside the app shell, so it carries its own theme control.
 
-import { Suspense, useCallback, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ShieldCheck } from "lucide-react";
 import { BySemantics, OneGateLockup, OneGateMark } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import { Input, Field } from "@/components/ui/input";
-import { ErrorBanner } from "@/components/ui/error-banner";
+import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { api } from "@/lib/api";
+import { destinationAfterSignIn } from "@/lib/session-expiry";
 import { SigninSecondStep, type SecondStep } from "@/components/signin-second-step";
 
 export default function LoginPage() {
@@ -25,9 +26,18 @@ export default function LoginPage() {
 function LoginInner() {
   const router = useRouter();
   const params = useSearchParams();
-  // Only a path inside this console: "next" arrives in the address and must not send anyone elsewhere.
-  const asked = params.get("next") ?? "";
-  const next = asked.startsWith("/") && !asked.startsWith("//") ? asked : "/overview";
+  // Only a path inside this console: "next" arrives in the address and must not send anyone elsewhere
+  // (lib/session-expiry.ts safeNext).
+  const next = destinationAfterSignIn(params.get("next"));
+  const expired = params.get("reason") === "expired";
+
+  useEffect(() => { document.title = "Sign in · OneGate Central"; }, []);
+  // Why the person is here, said politely. Filled after the first render so the status region already exists
+  // when the text arrives, which is what makes a screen reader speak it.
+  const [notice, setNotice] = useState("");
+  useEffect(() => {
+    setNotice(expired ? "Your sign-in ended, so you were signed out. Sign in again to continue where you were." : "");
+  }, [expired]);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -97,15 +107,20 @@ function LoginInner() {
               <SigninSecondStep step={second} onDone={finish} onRestart={restart} />
             ) : (
             <form onSubmit={onSubmit} className="space-y-4">
-              <div aria-live="assertive">
-                <ErrorBanner err={err} className="mb-0" />
+              {/* The banner is its own alert; a live wrapper around it made screen readers announce it twice. */}
+              <ErrorBanner err={err} className="mb-0" />
+              <div role="status" aria-live="polite">
+                {notice && !err && <Callout tone="info">{notice}</Callout>}
               </div>
               <Field label="Email">
                 <Input
                   type="email"
                   required
+                  // The sign-in page has one job and this is where it starts; focusing it does not skip anything
+                  // a person would need to read first (the page heading and its one-line purpose are above it).
+                  // eslint-disable-next-line jsx-a11y/no-autofocus
                   autoFocus
-                  autoComplete="email"
+                  autoComplete="username"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                 />

@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Download, KeyRound, Mail, Plus, Smartphone, UserCheck, UserMinus, UserPen, Users } from "lucide-react";
-import { api, itemsOf, withStepUp, type CentralUser, type Items } from "@/lib/api";
+import { api, ApiError, itemsOf, withStepUp, type CentralUser, type Items } from "@/lib/api";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Field, Input, Select } from "@/components/ui/input";
+import { Field, Input, Select, useFieldErrors } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { ConfirmDialog, DialogForm } from "@/components/ui/dialog";
@@ -17,6 +17,17 @@ import { roleLabel } from "@/lib/permissions";
 import { ago, userStatusInfo } from "@/lib/status";
 
 const MIN_PASSWORD = 10;
+
+type UserField = "email" | "password" | "reason";
+
+/** Which field a refusal to add a user is about: a taken email (409), or the email or password the server
+ *  rejected (400, named in its sentence). Anything else stays in the banner. */
+function fieldOfCreate(e: ApiError): UserField | null {
+  if (e.status === 409) return "email";
+  if (e.status === 400 && /email/i.test(e.message)) return "email";
+  if (e.status === 400 && /password/i.test(e.message)) return "password";
+  return null;
+}
 
 function saveJSON(doc: unknown, name: string) {
   const url = URL.createObjectURL(new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" }));
@@ -90,9 +101,11 @@ export function UsersManager({
   const [dErr, setDErr] = useState<unknown>(null);
   const [form, setForm] = useState({ email: "", name: "", password: "", role: roles[roles.length - 1] as string });
   const [mfaReason, setMfaReason] = useState("");
+  const fields = useFieldErrors<UserField>();
 
   function open(d: NonNullable<typeof dialog>) {
     setDErr(null);
+    fields.clear();
     setMfaReason("");
     setForm({
       email: d.kind === "email" ? d.u.email : "",
@@ -103,9 +116,12 @@ export function UsersManager({
     setDialog(d);
   }
 
-  async function run(fn: () => Promise<unknown>, done: string, detail?: string) {
+  /** `fieldOf` names the field a refusal is about (a taken email, a short password); that refusal is shown under
+   *  the field, which takes focus, instead of in the banner. */
+  async function run(fn: () => Promise<unknown>, done: string, detail?: string, fieldOf?: (e: ApiError) => UserField | null) {
     setBusy(true);
     setDErr(null);
+    fields.clear();
     try {
       // Central requires a recent password re-entry for every change to a sign-in; the prompt appears once.
       await withStepUp(fn);
@@ -113,7 +129,9 @@ export function UsersManager({
       setDialog(null);
       await load();
     } catch (e) {
-      setDErr(e);
+      const field = e instanceof ApiError && fieldOf ? fieldOf(e) : null;
+      if (field && e instanceof ApiError) fields.fail({ [field]: e.message });
+      else setDErr(e);
     } finally {
       setBusy(false);
     }
@@ -233,23 +251,27 @@ export function UsersManager({
         busy={busy}
         error={dErr}
         disabled={!form.email.trim() || form.password.length < MIN_PASSWORD}
+        disabledReason={!form.email.trim()
+          ? `To continue, enter an email${form.password.length < MIN_PASSWORD ? ` and a password of at least ${MIN_PASSWORD} characters` : ""}.`
+          : `To continue, enter a password of at least ${MIN_PASSWORD} characters.`}
         onSubmit={() =>
           run(
             () => api.post(base, { email: form.email.trim(), display_name: form.name.trim() || undefined, password: form.password, role: form.role }),
             `${noun[0].toUpperCase()}${noun.slice(1)} added`,
             form.email.trim(),
+            fieldOfCreate,
           )
         }
       >
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Email" required>
-            <Input type="email" autoComplete="off" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          <Field label="Email" required error={fields.error("email")}>
+            <Input id={fields.id("email")} type="email" autoComplete="off" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
           </Field>
           <Field label="Name">
             <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           </Field>
-          <Field label="Initial password" required hint={`At least ${MIN_PASSWORD} characters.`}>
-            <Input type="password" autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+          <Field label="Initial password" required hint={`At least ${MIN_PASSWORD} characters.`} error={fields.error("password")}>
+            <Input id={fields.id("password")} type="password" autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
           </Field>
           <Field label="Role" required>
             <Select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
@@ -293,14 +315,16 @@ export function UsersManager({
         busy={busy}
         error={dErr}
         disabled={!form.email.trim().includes("@")}
+        disabledReason="To continue, enter a valid email address."
         onSubmit={() => {
           if (dialog?.kind !== "email") return;
           const u = dialog.u;
-          return run(() => api.patch(`${base}/${u.id}`, { email: form.email.trim() }), "Email corrected", form.email.trim());
+          return run(() => api.patch(`${base}/${u.id}`, { email: form.email.trim() }), "Email corrected", form.email.trim(),
+            (e) => (e.status === 400 || e.status === 409 ? "email" : null));
         }}
       >
-        <Field label="Email" required>
-          <Input type="email" autoComplete="off" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+        <Field label="Email" required error={fields.error("email")}>
+          <Input id={fields.id("email")} type="email" autoComplete="off" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
         </Field>
       </DialogForm>
 
@@ -317,17 +341,18 @@ export function UsersManager({
         busy={busy}
         error={dErr}
         disabled={mfaReason.trim().length < 4}
+        disabledReason="To continue, enter a reason of at least 4 characters."
         onSubmit={() => {
           if (dialog?.kind !== "export") return;
           const u = dialog.u;
           return run(async () => {
             const doc = await api.post<unknown>(`/cloud/v1/users/${u.id}/data-export`, { reason: mfaReason.trim() });
             saveJSON(doc, `central-user-${u.id.slice(0, 8)}.json`);
-          }, "Data downloaded", u.email);
+          }, "Data downloaded", u.email, (e) => (e.status === 400 ? "reason" : null));
         }}
       >
-        <Field label="Reason" required hint="Recorded with the download, for example: their written request of 19 October.">
-          <Input value={mfaReason} maxLength={500} onChange={(e) => setMfaReason(e.target.value)} />
+        <Field label="Reason" required hint="Recorded with the download, for example: their written request of 19 October." error={fields.error("reason")}>
+          <Input id={fields.id("reason")} value={mfaReason} maxLength={500} onChange={(e) => setMfaReason(e.target.value)} />
         </Field>
       </DialogForm>
 
@@ -342,14 +367,16 @@ export function UsersManager({
         busy={busy}
         error={dErr}
         disabled={form.password.length < MIN_PASSWORD}
+        disabledReason={`To continue, enter a password of at least ${MIN_PASSWORD} characters.`}
         onSubmit={() => {
           if (dialog?.kind !== "password") return;
           const u = dialog.u;
-          return run(() => api.post(`${base}/${u.id}/password`, { password: form.password }), "Password changed", u.email);
+          return run(() => api.post(`${base}/${u.id}/password`, { password: form.password }), "Password changed", u.email,
+            (e) => (e.status === 400 ? "password" : null));
         }}
       >
-        <Field label="New password" required hint={`At least ${MIN_PASSWORD} characters. ${form.password.length}/${MIN_PASSWORD}`}>
-          <Input type="password" autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+        <Field label="New password" required hint={`At least ${MIN_PASSWORD} characters. ${form.password.length}/${MIN_PASSWORD}`} error={fields.error("password")}>
+          <Input id={fields.id("password")} type="password" autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
         </Field>
       </DialogForm>
 
@@ -366,14 +393,16 @@ export function UsersManager({
         busy={busy}
         error={dErr}
         disabled={mfaReason.trim().length < 4}
+        disabledReason="To continue, enter a reason of at least 4 characters."
         onSubmit={() => {
           if (dialog?.kind !== "mfa") return;
           const u = dialog.u;
-          return run(() => api.post(`${base}/${u.id}/mfa-reset`, { reason: mfaReason.trim() }), "Two-step sign-in reset", u.email);
+          return run(() => api.post(`${base}/${u.id}/mfa-reset`, { reason: mfaReason.trim() }), "Two-step sign-in reset", u.email,
+            (e) => (e.status === 400 ? "reason" : null));
         }}
       >
-        <Field label="Reason" required hint="Recorded in the audit log, for example: lost their phone.">
-          <Input value={mfaReason} maxLength={500} onChange={(e) => setMfaReason(e.target.value)} />
+        <Field label="Reason" required hint="Recorded in the audit log, for example: lost their phone." error={fields.error("reason")}>
+          <Input id={fields.id("reason")} value={mfaReason} maxLength={500} onChange={(e) => setMfaReason(e.target.value)} />
         </Field>
       </DialogForm>
 

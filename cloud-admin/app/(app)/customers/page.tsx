@@ -4,11 +4,11 @@ import Link from "next/link";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Building2, Plus } from "lucide-react";
-import { api, itemsOf, qs, type Customer, type Items } from "@/lib/api";
+import { api, ApiError, itemsOf, qs, type Customer, type Items } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Field, Input } from "@/components/ui/input";
+import { Field, Input, useFieldErrors } from "@/components/ui/input";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
@@ -45,6 +45,7 @@ function Customers() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [createErr, setCreateErr] = useState<unknown>(null);
+  const nameErr = useFieldErrors<"name">();
 
   // A customer's own user has exactly one customer: go straight to it.
   const own = !can["customers.list"] ? subject.customerId : "";
@@ -70,13 +71,16 @@ function Customers() {
   async function create() {
     setBusy(true);
     setCreateErr(null);
+    nameErr.clear();
     try {
       const c = await api.post<Customer>("/cloud/v1/customers", { name: name.trim() });
       toast.success("Customer created", c.name);
       setCreating(false);
       router.push(`/customers/${c.id}`);
     } catch (e) {
-      setCreateErr(e);
+      // A refused name (400) or one already taken (409) is shown under the Name field, which takes focus.
+      if (e instanceof ApiError && (e.status === 400 || e.status === 409)) nameErr.fail({ name: e.message });
+      else setCreateErr(e);
     } finally {
       setBusy(false);
     }
@@ -91,7 +95,7 @@ function Customers() {
         description="The organisations that own sites. Open one to manage its sites, appliances, licenses and users."
         actions={
           can["customers.create"] ? (
-            <Button onClick={() => { setName(""); setCreateErr(null); setCreating(true); }}>
+            <Button onClick={() => { setName(""); setCreateErr(null); nameErr.clear(); setCreating(true); }}>
               <Plus /> New customer
             </Button>
           ) : undefined
@@ -176,10 +180,11 @@ function Customers() {
         busy={busy}
         error={createErr}
         disabled={!name.trim()}
+        disabledReason="To continue, enter the customer's name."
         onSubmit={create}
       >
-        <Field label="Name" required>
-          <Input value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" />
+        <Field label="Name" required error={nameErr.error("name")}>
+          <Input id={nameErr.id("name")} value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" />
         </Field>
       </DialogForm>
     </PageShell>

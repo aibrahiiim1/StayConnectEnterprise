@@ -44,17 +44,51 @@ export const Select = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttrib
   },
 );
 
-export function Label({ className, ...p }: React.LabelHTMLAttributes<HTMLLabelElement>) {
+export function Label({ className, htmlFor, children, ...p }: React.LabelHTMLAttributes<HTMLLabelElement>) {
   return (
     <label
+      htmlFor={htmlFor}
       className={cn("mb-1.5 block text-label text-foreground", className)}
       {...p}
-    />
+    >
+      {children}
+    </label>
   );
 }
 
 export function Hint({ className, ...p }: React.HTMLAttributes<HTMLParagraphElement>) {
   return <p className={cn("mt-1.5 text-xs text-muted-foreground", className)} {...p} />;
+}
+
+/**
+ * useFieldErrors — an error that belongs to one field is shown under THAT field and moves focus to it.
+ *
+ * A form whose submit fails because of one value (a client-side check, or a server answer that names the field)
+ * used to report it in the banner at the top of the dialog, tied to nothing: a screen-reader user heard the
+ * sentence and then had to find which control it meant. Now the caller gives each control `id={f.id("email")}`
+ * and its Field `error={f.error("email")}`; `f.fail({ email: "…" })` sets the message and focuses the first field
+ * named. Field already wires `aria-invalid` and `aria-describedby` from `error`.
+ */
+export function useFieldErrors<K extends string>() {
+  const base = React.useId();
+  const [errors, setErrors] = React.useState<Partial<Record<K, string>>>({});
+  const [focusOn, setFocusOn] = React.useState<{ key: K } | null>(null);
+  const id = React.useCallback((k: K) => `${base}-${k}`, [base]);
+
+  React.useEffect(() => {
+    if (focusOn) document.getElementById(id(focusOn.key))?.focus();
+  }, [focusOn, id]);
+
+  const fail = React.useCallback((errs: Partial<Record<K, string>>) => {
+    setErrors(errs);
+    const first = (Object.keys(errs) as K[]).find((k) => errs[k]);
+    if (first) setFocusOn({ key: first });
+    return Boolean(first);
+  }, []);
+  const clear = React.useCallback(() => setErrors({}), []);
+  const error = React.useCallback((k: K) => errors[k], [errors]);
+
+  return { id, error, fail, clear };
 }
 
 /**

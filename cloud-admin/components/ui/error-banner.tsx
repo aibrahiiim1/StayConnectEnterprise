@@ -38,7 +38,7 @@ export function ErrorBanner({ err, className }: { err: unknown; className?: stri
       </span>
       {traceId && (
         <span
-          className="shrink-0 font-mono text-xs opacity-70"
+          className="shrink-0 font-mono text-xs"
           title="Server trace id — include when reporting issues"
         >
           {traceId}

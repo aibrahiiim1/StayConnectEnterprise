@@ -95,18 +95,19 @@ export function TabList<T extends string>({
     onChange(t.value);
     refs.current[t.value]?.focus();
   }
+  // The arrow keys belong to the focused tab (the tablist itself is not a tab stop).
+  function onKeyDown(e: React.KeyboardEvent<HTMLButtonElement>) {
+    const i = tabs.findIndex((t) => t.value === value);
+    if (e.key === "ArrowRight") { e.preventDefault(); move(i + 1); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); move(i - 1); }
+    else if (e.key === "Home") { e.preventDefault(); move(0); }
+    else if (e.key === "End") { e.preventDefault(); move(tabs.length - 1); }
+  }
   return (
     <div
       role="tablist"
       aria-label={label}
       className={cn("flex gap-1 overflow-x-auto border-b border-border", className)}
-      onKeyDown={(e) => {
-        const i = tabs.findIndex((t) => t.value === value);
-        if (e.key === "ArrowRight") { e.preventDefault(); move(i + 1); }
-        else if (e.key === "ArrowLeft") { e.preventDefault(); move(i - 1); }
-        else if (e.key === "Home") { e.preventDefault(); move(0); }
-        else if (e.key === "End") { e.preventDefault(); move(tabs.length - 1); }
-      }}
     >
       {tabs.map((t) => {
         const active = t.value === value;
@@ -121,6 +122,7 @@ export function TabList<T extends string>({
             aria-controls={`${idBase}-panel-${t.value}`}
             tabIndex={active ? 0 : -1}
             onClick={() => onChange(t.value)}
+            onKeyDown={onKeyDown}
             className={cn(
               "relative -mb-px inline-flex h-10 shrink-0 items-center gap-1.5 border-b-2 px-3 text-sm font-medium transition-colors",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
@@ -157,7 +159,8 @@ export function TabPanel({
       id={`${idBase}-panel-${value}`}
       aria-labelledby={`${idBase}-tab-${value}`}
       tabIndex={0}
-      className={cn("focus-visible:outline-none", className)}
+      // The panel is a tab stop, so it needs a visible focus indicator like every other one (WCAG 2.4.7).
+      className={cn("rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background", className)}
     >
       {children}
     </div>

@@ -7,7 +7,7 @@
 // shown once, to keep somewhere safe. The QR code is drawn in the browser: the key must never be sent to anybody
 // else to draw it. The Admin Console on each appliance has the same step (hotel-admin).
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { KeyRound, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -37,6 +37,15 @@ export function SigninSecondStep({ step, onDone, onRestart }: {
   const [err, setErr] = useState<unknown>(null);
   const [recovery, setRecovery] = useState<string[] | null>(null);
   const [lowOnCodes, setLowOnCodes] = useState<number | null>(null);
+  const hintId = useId();
+
+  // A NEW VIEW TAKES FOCUS AT ITS HEADING. The recovery codes and the "codes running low" notice replace the form
+  // the person was typing in; without this, focus fell to the page and a screen reader said nothing at all.
+  const heading = useRef<HTMLHeadingElement | null>(null);
+  const view = recovery ? "recovery" : lowOnCodes !== null ? "low" : "form";
+  useEffect(() => {
+    if (view !== "form") heading.current?.focus();
+  }, [view]);
 
   useEffect(() => {
     if (step !== "enrol") return;
@@ -86,7 +95,7 @@ export function SigninSecondStep({ step, onDone, onRestart }: {
     return (
       <div className="space-y-4">
         <div className="space-y-1.5">
-          <h2 className="text-emphasis">Save your recovery codes</h2>
+          <h2 ref={heading} tabIndex={-1} className="text-emphasis focus:outline-none">Save your recovery codes</h2>
           <p className="text-sm text-muted-foreground">
             If you lose your phone, each of these codes signs you in once instead of the app. They are shown only
             now. Print them or keep them somewhere safe that is not your phone.
@@ -113,6 +122,7 @@ export function SigninSecondStep({ step, onDone, onRestart }: {
   if (lowOnCodes !== null) {
     return (
       <div className="space-y-4">
+        <h2 ref={heading} tabIndex={-1} className="text-emphasis focus:outline-none">Recovery codes running low</h2>
         <p className="text-sm">
           You signed in with a recovery code. {lowOnCodes === 0 ? "You have none left." : `You have ${lowOnCodes} left.`}{" "}
           Make a new set under Two-step sign-in in the sidebar.
@@ -124,9 +134,8 @@ export function SigninSecondStep({ step, onDone, onRestart }: {
 
   return (
     <form onSubmit={submit} className="space-y-4">
-      <div aria-live="assertive">
-        <ErrorBanner err={err} className="mb-0" />
-      </div>
+      {/* The banner is its own alert; a live wrapper around it made screen readers announce it twice. */}
+      <ErrorBanner err={err} className="mb-0" />
       {step === "enrol" ? (
         <div className="space-y-3">
           <div className="space-y-1.5">
@@ -138,6 +147,8 @@ export function SigninSecondStep({ step, onDone, onRestart }: {
           </div>
           {enrolment ? (
             <div className="flex flex-col items-center gap-2 rounded-lg border border-border bg-card p-3">
+              {/* A data: URL drawn in this browser; next/image has nothing to optimise here. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               {qr && <img src={qr} alt="QR code to scan with your authenticator app" width={208} height={208} className="rounded bg-white p-1" />}
               <div className="text-center text-caption text-muted-foreground">
                 Cannot scan? Enter this key in the app:
@@ -158,6 +169,9 @@ export function SigninSecondStep({ step, onDone, onRestart }: {
       )}
       <Field label={step === "enrol" ? "Code from the app" : "Code"}>
         <Input
+          // This field replaces the password form the person just submitted; without focus here it would fall to
+          // the page and a keyboard or screen-reader user would have to search for where to continue.
+          // eslint-disable-next-line jsx-a11y/no-autofocus
           autoFocus
           required
           inputMode={step === "enrol" ? "numeric" : "text"}
@@ -167,9 +181,21 @@ export function SigninSecondStep({ step, onDone, onRestart }: {
           onChange={(e) => setCode(e.target.value)}
         />
       </Field>
-      <Button type="submit" disabled={busy || code.trim() === "" || (step === "enrol" && !enrolment)} className="w-full" size="lg">
-        {busy ? "Checking…" : step === "enrol" ? "Confirm and sign in" : "Sign in"}
-      </Button>
+      {(() => {
+        // Why the button is disabled, said beside it and tied to it, so it is never a silent dead end.
+        const why = busy ? null
+          : step === "enrol" && !enrolment ? "Wait for the setup code to appear."
+          : code.trim() === "" ? (step === "enrol" ? "Enter the code your app shows to continue." : "Enter your code to continue.")
+          : null;
+        return (
+          <>
+            <Button type="submit" disabled={busy || why !== null} aria-describedby={why ? hintId : undefined} className="w-full" size="lg">
+              {busy ? "Checking…" : step === "enrol" ? "Confirm and sign in" : "Sign in"}
+            </Button>
+            {why && <p id={hintId} className="text-center text-caption text-muted-foreground">{why}</p>}
+          </>
+        );
+      })()}
       <Button type="button" variant="ghost" className="w-full" onClick={() => onRestart("")}>Back</Button>
     </form>
   );

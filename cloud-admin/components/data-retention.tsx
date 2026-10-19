@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, withStepUp } from "@/lib/api";
 import { Card, CardBody, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Field, Input } from "@/components/ui/input";
+import { Field, Input, useFieldErrors } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { useToast } from "@/components/ui/toast";
@@ -59,6 +59,7 @@ export function DataRetentionSetting({ canManage }: { canManage: boolean }) {
   const [reason, setReason] = useState("");
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  const fields = useFieldErrors<string>();
 
   function load(v: RetentionSettings) {
     setS(v);
@@ -81,15 +82,19 @@ export function DataRetentionSetting({ canManage }: { canManage: boolean }) {
       const b = s[`${f.key}_bounds`];
       const n = Number(vals[f.key]);
       if (!/^\d+$/.test(vals[f.key].trim()) || n < b.min || n > b.max) {
-        setErr(`${f.label}: enter a whole number from ${b.min} to ${b.max}.`);
+        // Reported under its own field, which takes focus.
+        setErr(null);
+        fields.fail({ [f.key]: `${f.label}: enter a whole number from ${b.min} to ${b.max}.` });
         return;
       }
       if (n !== s[f.key]) body[f.key] = n;
     }
     if (!reason.trim()) {
-      setErr("Enter a reason; it is recorded in the audit log.");
+      setErr(null);
+      fields.fail({ reason: "Enter a reason; it is recorded in the audit log." });
       return;
     }
+    fields.clear();
     body.reason = reason.trim();
     setBusy(true);
     setErr(null);
@@ -124,15 +129,16 @@ export function DataRetentionSetting({ canManage }: { canManage: boolean }) {
               const b = s[`${f.key}_bounds`];
               return (
                 <Field key={f.key} label={f.label} required
-                  hint={`${f.explain} From ${b.min} to ${b.max} ${b.unit}. Default ${b.default}.`}>
-                  <Input inputMode="numeric" aria-label={f.aria} value={vals[f.key]} disabled={!canManage}
+                  hint={`${f.explain} From ${b.min} to ${b.max} ${b.unit}. Default ${b.default}.`}
+                  error={fields.error(f.key)}>
+                  <Input id={fields.id(f.key)} inputMode="numeric" aria-label={f.aria} value={vals[f.key]} disabled={!canManage}
                     onChange={(e) => setVals((v) => ({ ...v, [f.key]: e.target.value }))} />
                 </Field>
               );
             })}
             {canManage && (
-              <Field label="Reason" required hint="Recorded in the audit log.">
-                <Input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)}
+              <Field label="Reason" required hint="Recorded in the audit log." error={fields.error("reason")}>
+                <Input id={fields.id("reason")} value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)}
                   placeholder="e.g. auditor's request" />
               </Field>
             )}
@@ -146,7 +152,9 @@ export function DataRetentionSetting({ canManage }: { canManage: boolean }) {
       </CardBody>
       {canManage && s && (
         <CardFooter>
-          <Button size="sm" disabled={busy || !changed} onClick={save}>
+          {!changed && !busy && <span id={fields.id("unchanged")} className="text-caption text-muted-foreground">No changes to save.</span>}
+          <Button size="sm" disabled={busy || !changed} onClick={save}
+            aria-describedby={!changed && !busy ? fields.id("unchanged") : undefined}>
             {busy ? "Saving…" : "Save"}
           </Button>
         </CardFooter>

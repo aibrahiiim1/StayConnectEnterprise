@@ -45,7 +45,9 @@ const TONE: Record<Tone, string> = {
   info: "text-info",
 };
 
-const DISMISS_AFTER_MS = 4500;
+// Long enough to read a two-line confirmation at a slow reading pace or with a screen magnifier; the timer still
+// pauses on hover and focus.
+const DISMISS_AFTER_MS = 8000;
 // Never `hidden` when empty either: a region must already be in the accessibility tree when content arrives.
 const REGION = "flex w-full flex-col items-center gap-2 sm:items-end";
 
@@ -117,7 +119,7 @@ function ToastCard({
   paused: boolean;
   onDismiss: (id: number) => void;
 }) {
-  // Time already shown survives a pause, so hovering at 4 s does not buy a fresh 4.5 s.
+  // Time already shown survives a pause, so hovering at 4 s does not buy a fresh 8 s.
   const remaining = React.useRef(DISMISS_AFTER_MS);
   React.useEffect(() => {
     if (t.tone === "err" || paused) return;

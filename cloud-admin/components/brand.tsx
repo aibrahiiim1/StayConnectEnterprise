@@ -22,8 +22,10 @@ export function OneGateWordmark({
   return (
     <Tag
       className={cn("inline-flex items-baseline font-extrabold leading-none tracking-[-0.03em]", className)}
-      aria-label="OneGate"
     >
+      {/* aria-label is not allowed on a plain span or div (axe aria-prohibited-attr), so a screen reader heard
+          nothing here; the name is real text instead, and the two styled halves stay hidden from it. */}
+      <span className="sr-only">OneGate</span>
       <span
         aria-hidden
         style={{ backgroundImage: ONE_GRADIENT, WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}

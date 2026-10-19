@@ -50,13 +50,13 @@ export function StepUpProvider({ children }: { children: React.ReactNode }) {
         size="sm"
         submitLabel="Confirm"
         disabled={password === ""}
+        disabledReason="Enter your password to continue."
         onSubmit={() => finish(password)}
       >
         <Field label="Password" required>
           <Input
             type="password"
             autoComplete="current-password"
-            autoFocus
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
