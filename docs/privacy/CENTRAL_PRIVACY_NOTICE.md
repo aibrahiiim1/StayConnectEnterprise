@@ -1,0 +1,113 @@
+# Privacy notice: OneGate Central
+
+> **DRAFT** for the D-F3 legal review. It is not to be published before that. Every fact was checked against the
+> code on `delivery/gdpr` (2026-10-19). `[[placeholders]]` are facts the code cannot give. The DPA (clause 2.3)
+> links to this notice. Once approved, publish it where Central's users can read it before signing in, for
+> example a link on the sign-in page.
+
+This notice is for **anyone who has an account on OneGate Central**: our own staff, and the staff of hotels and
+other customers who use Central to manage their OneGate appliances and licences. It explains what we record
+about you, why, and for how long.
+
+It does **not** cover hotel guests. Central holds no guest data: a hotel's guest Wi-Fi data stays on the
+appliance at the hotel, and the hotel's own privacy notice covers it.
+
+## Who we are
+
+**Semantics Technology Ltd** is responsible for this data (the "controller").
+
+- Registered office: 124 City Road, London EC1V 2NX, United Kingdom. Company number [[ ]].
+- Privacy contact: [[privacy contact email]].
+- Data protection officer: [[name and contact, or "we have not appointed one"]].
+- Representative in the EU: [[legal review: name and contact, or delete this line]].
+
+## What we record, and why
+
+| What | Details | Why | Lawful basis |
+|---|---|---|---|
+| **Your account** | Email address, name, role, whether the account is active, and when you last signed in. Your password is stored only as a one-way hash (argon2id). The secret behind your authenticator app is stored encrypted, and recovery codes only as hashes | To give you access to Central with the rights your role allows | Our staff: the employment contract. Customers' staff: our legitimate interest in providing the service your employer has contracted (Art. 6(1)(f)) |
+| **Your sign-in session** | Your account, roles, and when the session started and was last used. Not your IP address or browser | To keep you signed in, and to sign you out when the session should end | Legitimate interest: security (Art. 6(1)(f)) |
+| **The audit log** | What you did in Central and when, with your IP address and browser. A failed sign-in to an existing account is recorded against that account; for a name that has no account, only the attempt and its IP address are recorded, not what was typed | To protect Central, investigate misuse, and show who made each change | Legitimate interest: security and accountability (Art. 6(1)(f)) |
+| **Wrong-password counting** | A one-way hash of the name you typed and how many wrong passwords were tried, to lock the account for a while after repeated failures. It never holds the email address itself | To stop password guessing | Legitimate interest: security (Art. 6(1)(f)) |
+| **Your name in appliance history and alerts** | When you activate, retire or replace an appliance, or handle a security alert, the history records your email and IP address | To keep a reliable history of each appliance and licence | Legitimate interest: security and accountability (Art. 6(1)(f)) |
+| **Certificate contact** *(only if your organisation gives one)* | The contact email used when Central obtains a certificate for the hotel's guest portal | To obtain and renew that certificate | Contract with your organisation (Art. 6(1)(b)) |
+
+You must give an email address and set a password and an authenticator to have an account. Without them we
+cannot give you access.
+
+We do not use your data for marketing, sell it, or make decisions about you by automated means. An account that
+receives repeated wrong passwords is locked automatically for a short time (15 minutes by default). The lock ends
+by itself and decides nothing else about you.
+
+## Who receives it
+
+- **Our staff** who run Central, and the administrators of your own organisation, who can see your account and
+  its activity within their organisation.
+- **Our hosting provider:** [[Central hosting provider, not decided yet: name and country]], which runs the
+  servers Central's database is on, under a contract that allows it to use the data only to provide that
+  service.
+- **Let's Encrypt** (Internet Security Research Group, United States) receives the certificate contact email, if
+  one is given, and the guest portal's host names. Host names are published in public certificate transparency
+  logs. **Cloudflare** (United States) receives the guest portal's host names for DNS. Neither receives your
+  account details.
+- **Authorities**, only when the law requires it.
+
+## Data sent outside the UK
+
+- **Hosting:** [[none, if Central is hosted in the UK; otherwise the country and the safeguard]].
+- **Let's Encrypt and Cloudflare** are in the United States. Only host names and the certificate contact email
+  go there. [[Safeguard: each company's certification under the UK extension to the EU–US Data Privacy
+  Framework, or the UK International Data Transfer Agreement. Legal review to confirm for each.]]
+
+## How long we keep it
+
+Each period is a setting in Central (System → Team → Data retention). These are the defaults:
+
+| What | How long |
+|---|---|
+| Your account, while you use it | As long as the account is active |
+| Your account, after it is disabled | 24 months. Then your email, name, password and authenticator are removed for good |
+| Your sign-in session | Ends after 30 minutes without activity, and 12 hours after you signed in at most. A half-finished sign-in ends after 5 minutes |
+| The audit log | 24 months |
+| Wrong-password counts | Removed once 2 days have passed without a wrong password |
+| Your name and IP address in appliance history and alerts | 24 months. The history itself is kept 6 years without them |
+| Backups of Central's database | The newest 7 nightly backups, encrypted. Data removed from Central stays in a backup until that backup is replaced |
+
+## Cookies and your browser
+
+Central uses only what it needs to work:
+
+- `sc_signin`: holds a half-finished sign-in between your password and your authenticator code, for 5 minutes;
+- `sc_session`: keeps you signed in;
+- the console remembers in your browser whether you collapsed its side menu.
+
+There is no tracking or analytics, and the console loads nothing from other websites.
+
+## How we protect it
+
+Every account signs in with a password and an authenticator code. Sessions end on their own, and some actions
+ask for your password again. Each role sees only what it needs. Central is reached only over HTTPS, and
+appliances connect with their own certificates. Secrets are encrypted, and database backups are encrypted to our
+own key holders.
+
+## Your rights
+
+You can ask us:
+
+- for a copy of your data;
+- to correct it;
+- to delete it, or limit how we use it;
+- to give it to you in a portable form, where the law allows;
+- to stop using it, where we rely on our legitimate interest.
+
+Write to [[privacy contact email]]. We answer within one month. If your account belongs to a customer, you can
+also ask your organisation's administrator, who can correct or disable it.
+
+You can complain to the **Information Commissioner's Office** (ico.org.uk). If you are in the EU, you can also
+complain to the data protection authority in your country.
+
+## Changes
+
+We will update this notice when what we record changes, and show the date below.
+
+Last updated: [[date]]

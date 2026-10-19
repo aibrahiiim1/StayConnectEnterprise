@@ -172,7 +172,7 @@ role and a recent password re-entry (step-up), and so does every change to a Cen
 customer users: create, role, status, password, delete); login and re-authentication are rate-limited per client
 address, and failed attempts are audited within a budget (5 per address, 300 overall, per minute). Every console
 request re-reads its operator: disabling, demoting, removing or re-passwording someone ends their open sessions at
-their next request, and a sign-in lasts at most `central_security_settings.operator_session_max_hours` (default 24,
+their next request, and a sign-in lasts at most `central_security_settings.operator_session_max_hours` (default 12 since migration 0052,
 1–168, System → Team, audited) however active it is. In production ctrlapi refuses to start with the operator
 listener on every interface (unless `CTRLAPI_ALLOW_PUBLIC_LISTEN=true`) or with `CTRLAPI_COOKIE_SECURE=false`;
 console writes from a foreign Origin are refused. The signed appliance routes are rate-limited per address before

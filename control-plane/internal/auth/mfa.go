@@ -36,7 +36,7 @@ import (
 const (
 	mfaDomain = "central-operator-totp:v1"
 	// MFAIssuer is the name the authenticator app shows.
-	MFAIssuer         = "StayConnect Central"
+	MFAIssuer         = "OneGate Central"
 	recoveryCodeCount = 10
 	recoveryAlphabet  = "ABCDEFGHJKMNPQRSTUVWXYZ23456789" // no 0/O, 1/I/L: read off paper and typed
 	recoveryCodeLen   = 10

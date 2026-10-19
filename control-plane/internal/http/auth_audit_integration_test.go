@@ -56,4 +56,10 @@ func TestFailedLoginsAreAuditedWithinABudget(t *testing.T) {
 	if unknown != 1 {
 		t.Fatalf("an unknown-email failure must be audited too, got %d", unknown)
 	}
+	// What was typed is not kept: an unknown name may be anyone's address, and a known one is the actor id.
+	var typed int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action LIKE 'auth.%' AND payload::text LIKE '%@central.test%'`).Scan(&typed)
+	if typed != 0 {
+		t.Fatalf("%d sign-in audit entries hold a typed email address", typed)
+	}
 }

@@ -118,7 +118,7 @@ func (d authDeps) login(w http.ResponseWriter, r *http.Request) {
 				reason = "no password set"
 			}
 		}
-		d.auditFailure(r, "auth.login_failed", opID, map[string]any{"email": req.Email, "reason": reason})
+		d.auditFailure(r, "auth.login_failed", opID, map[string]any{"reason": reason})
 		if d.signinFailed(w, r, req.Email, opID) {
 			return
 		}
@@ -130,7 +130,7 @@ func (d authDeps) login(w http.ResponseWriter, r *http.Request) {
 			api.Fail(w, r, http.StatusServiceUnavailable, "busy", "Central is busy checking other sign-ins. Try again in a moment.")
 			return
 		}
-		d.auditFailure(r, "auth.login_failed", op.ID, map[string]any{"email": req.Email, "reason": "wrong password"})
+		d.auditFailure(r, "auth.login_failed", op.ID, map[string]any{"reason": "wrong password"})
 		if d.signinFailed(w, r, req.Email, op.ID) {
 			return
 		}

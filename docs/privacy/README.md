@@ -9,6 +9,7 @@
 | [RECORD_OF_PROCESSING.md](RECORD_OF_PROCESSING.md) | Our records of processing: as processor (Art. 30(2)) and, for Central, as controller (Art. 30(1)) | Draft (F3) |
 | [HOTEL_RECORD_OF_PROCESSING_TEMPLATE.md](HOTEL_RECORD_OF_PROCESSING_TEMPLATE.md) | For the hotel: its Art. 30 record for guest Wi-Fi, pre-filled. The hotel answers four short steps | Draft (F3) |
 | [HOTEL_DPIA_STARTER.md](HOTEL_DPIA_STARTER.md) | For the hotel: its risk assessment (Art. 35), with the risks and OneGate's measures pre-filled. The hotel ticks and chooses | Draft (F3) |
+| [CENTRAL_PRIVACY_NOTICE.md](CENTRAL_PRIVACY_NOTICE.md) | Our privacy notice for people with a Central account (Art. 13), linked from DPA clause 2.3 | Draft (F3) |
 | [../runbooks/PERSONAL_DATA_BREACH.md](../runbooks/PERSONAL_DATA_BREACH.md) | Breach response | Draft (F2) |
 
 **None of these goes to a customer before a lawyer has reviewed it (decision D-F3).** They are engineering drafts:
@@ -30,7 +31,7 @@ lawyer: tick boxes, a few blanks, and where in Hotel Admin each answer is found.
 - **We are a processor** only when we touch the data for the hotel: installation, support sessions the hotel
   opens, and files the hotel sends (DPA clause 2.2).
 - **We are a controller** for Central: staff accounts, appliance identity, licences, and Central's audit log
-  (DPA clause 2.3, record Part 2). That needs our own privacy notice, which does not exist yet.
+  (DPA clause 2.3, record Part 2). Our own privacy notice covers it ([CENTRAL_PRIVACY_NOTICE.md](CENTRAL_PRIVACY_NOTICE.md)).
 - **The hotel's email, SMS, social sign-in, payment and PMS providers are the hotel's own processors.** The hotel
   holds the accounts. They are listed for transparency (Annex III, Part B), not as our sub-processors.
 
@@ -46,7 +47,7 @@ lawyer: tick boxes, a few blanks, and where in Hotel Admin each answer is found.
 | 6 | Governing law and courts; the liability position | DPA clauses 11 and 13 |
 | 7 | ~~Retention periods for Central~~: decided 2026-10-19 (D-CR) and built (Central migration 0054): audit log 24 months; alerts and appliance history 6 years with the people removed after 24 months; disabled accounts 24 months; retired appliances and licences 6 years. All settings | Record Part 2 |
 | 8 | Central's hosting provider: a provider, not yet chosen (Product Owner, 2026-10-19). Name, country and, outside the UK and EEA, the safeguard | Annex III, Part C; record Part 2 |
-| 9 | Our privacy notice for Central users (needed for record Part 2) | DPA clause 2.3 |
+| 9 | ~~Our privacy notice for Central users~~: drafted 2026-10-19 ([CENTRAL_PRIVACY_NOTICE.md](CENTRAL_PRIVACY_NOTICE.md)). Where to publish it once approved: a link on Central's sign-in page | DPA clause 2.3 |
 
 ## Found while checking the code (not changed; backlog for the plan)
 
@@ -75,9 +76,10 @@ draft as it is today. Fixing one means updating the draft.
     15 minutes, both settings.
   - ctrlapi connects as the database superuser, and customers are kept apart in the application only, with no
     row-level security.
-  - The audit log stores the email typed on a failed sign-in.
+  - ~~The audit log stores the email typed on a failed sign-in~~: since 2026-10-19 a failure is recorded against the account if one exists, otherwise with no name.
+  - ~~The authenticator app shows "StayConnect Central"~~: "OneGate Central" for new enrolments since 2026-10-19; existing entries keep their old label and their codes still work.
 - **Documents:**
-  - `ROLE_AND_SCOPE_MATRIX.md` says the IT manager has no access to Operators; the code gives read access.
-  - `CENTRAL_CONTROL_PLANE.md` still says sessions last 24 hours; it is 12 since Central migration 0052.
+  - ~~`ROLE_AND_SCOPE_MATRIX.md` says the IT manager has no access to Operators~~: corrected to read-only, 2026-10-19.
+  - ~~`CENTRAL_CONTROL_PLANE.md` still says sessions last 24 hours~~: corrected to 12, 2026-10-19.
 - **Social sign-in** also keeps the business-account organisation claims (`hd`, `tid`, `oid`), not only the email
   and subject. The plan and Annex II now say so. C9 (asking providers for less) is still to be built.

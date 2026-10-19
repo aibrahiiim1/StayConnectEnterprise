@@ -60,7 +60,7 @@ Annex I describes this processing.
 2.3 **Processing for the Processor's own purposes.** Central holds the accounts of the Controller's staff who sign
 in to Central, the Appliance's identity and licence, and an audit log of actions taken in Central. The Processor
 decides why and how that data is processed, so it does this as a **controller**, not under this DPA. Its privacy
-notice ([[link]]) explains that processing. No guest data reaches Central.
+notice ([[link to the published notice; the draft is CENTRAL_PRIVACY_NOTICE.md]]) explains that processing. No guest data reaches Central.
 
 2.4 The Controller remains responsible for the lawfulness of the processing it carries out with the Software, for
 the information it gives data subjects (Art. 13 and 14 GDPR), and for its own processors (clause 7.6).

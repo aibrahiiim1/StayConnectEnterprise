@@ -39,7 +39,7 @@ the keys are unchanged, [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md)). Legen
 
 | /edge/v1 resource | site_admin | hotel_it_manager | front_office_operator | guest_relations_operator | voucher_operator | payments_operator | site_viewer |
 |---|---|---|---|---|---|---|---|
-| operators (staff) | W | **–** | – | – | – | – | – |
+| operators (staff) | W | **R** | – | – | – | – | – |
 | license (view/upload) | W | W | R | R | – | R | R |
 | guest-access-plans | W | W | R | R | – | R | R |
 | vouchers | W | W | **W** | **W** | **W** | R | R |
