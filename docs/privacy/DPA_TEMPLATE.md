@@ -239,13 +239,13 @@ Signed for the Processor: [[name, role, date]]
 
 | Category | Data | Default retention in the Software (a Controller setting) |
 |---|---|---|
-| PMS reservation data | Reservation number, room, arrival and departure, names of the guest and room sharers, VIP flag, travel agent, room type, rate plan, PMS guest id | Anonymised 30 days after checkout (7–3,650) |
+| PMS reservation data | Reservation number, room, arrival and departure, names of the guest and room sharers, VIP flag, travel agent, room type, rate plan, PMS guest id | Anonymised 30 days after checkout (7–3,650). A reservation the PMS never closed is anonymised the same period after its departure date. The room, reservation number and PMS guest number of a room charge stay with the payment record (below) |
 | Guest sign-in identity | Email address, phone number, social sign-in subject id (and, for business accounts, the provider's organisation identifiers), display name, guest account username and password hash | Anonymised after 365 days without activity (30–3,650) |
 | Devices and usage | Device MAC and IP address, session times, data volumes, the network used. While a device is connected, the name it gives itself on the network (DHCP host name, often the owner's name) is held in the address-assignment lease and shown to staff | Anonymised after 365 days (30–3,650). Usage detail deleted after 365 days (30–3,650, or unlimited). The device name leaves the lease file within about two hours of the device leaving. Addresses staff reserve for a device, with any name or note they type, stay until staff remove them |
 | Sign-in attempts | Room typed, device MAC and IP, and (sealed) the name and reservation number typed | Deleted after 30 days (7–365) |
 | One-time codes and links | Destination email or phone, hashed code, IP and browser user agent | Anonymised 7 days after expiry (1–365) |
-| Payments | Provider references and amounts. **No card data**: guests pay on the provider's own page | Kept for the statutory period. Not removed automatically |
+| Payments | Provider references and amounts; for room charges, the room, reservation number and PMS guest number posted to the bill. **No card data**: guests pay on the provider's own page | Kept for the statutory period (default 10 years), also in the compliance archive. Not removed automatically. The room-charge identifiers are pseudonymous, not anonymous, for that period |
 | Privacy notice record | Which version of the Controller's privacy notice was in force at each sign-in, and when | Follows the sign-in record |
-| Staff accounts | Email, display name, password hash, sealed authenticator secret, role, sign-in history | While the account exists |
+| Staff accounts | Email, display name, password hash, sealed authenticator secret, role, sign-in history | While the account is active. Anonymised 730 days after it is disabled (30–3,650). The staff member's email stays as the "changed by" label in the change history of settings |
 | Audit log | Staff member, action, time, IP and user agent, and the record acted on | IP, user agent and record anonymised after 730 days (90–3,650) |
 | Logs and backups | Device MAC and IP addresses and sign-in identifiers in system logs; a full copy of the database in backups | Backups: 30 days, with the newest 7 always kept. Logs: see Annex II, Part C |

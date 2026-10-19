@@ -83,4 +83,4 @@ draft as it is today. Fixing one means updating the draft.
   - ~~`ROLE_AND_SCOPE_MATRIX.md` says the IT manager has no access to Operators~~: corrected to read-only, 2026-10-19.
   - ~~`CENTRAL_CONTROL_PLANE.md` still says sessions last 24 hours~~: corrected to 12, 2026-10-19.
 - **Social sign-in** also keeps the business-account organisation claims (`hd`, `tid`, `oid`), not only the email
-  and subject. The plan and Annex II now say so. C9 (asking providers for less) is still to be built.
+  and subject. The plan and Annex II now say so. C9 (asking providers for less) is built.

@@ -72,8 +72,8 @@ Each risk shows what OneGate already does and what is yours. Tick what you have 
 *Could happen if:* someone at the hotel is curious about a particular guest (when they connected, which devices
 they used, their email or phone number).
 
-**OneGate already:** gives each role only the screens it needs; logs **every time** a staff member opens a guest's
-record or searches guest data, with who, when and from where (🔍 *Activity*, "Client data"); asks for a reason and
+**OneGate already:** gives each role only the screens it needs; logs when a staff member opens a guest's record
+(once per 10 minutes for the same record) or searches guest data, with who, when and from where (🔍 *Activity*, "Client data"); asks for a reason and
 the password again before exporting or deleting a guest's data.
 
 **Yours:**

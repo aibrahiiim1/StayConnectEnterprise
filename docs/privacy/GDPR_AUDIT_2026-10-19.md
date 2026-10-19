@@ -190,12 +190,14 @@ confirm genuine guests (2026-10-19):
 |---|---|
 | B1 | **Fixed** (migration 0137): the export also carries the stay's VIP flag, travel agent, rate plan, PMS guest ids, linked stays and PMS events; verification grants and sign-in restrictions; remembered devices and post-stay access; network sightings and staff actions on devices; usage samples; payments, refunds and room charges; the device address and network of sign-in attempts; the address and browser codes were requested from; and audit details. Format `guest-data-export/2` |
 | B2 | **Fixed** (migration 0137): erasure follows stay links, covers PMS events that never resolved to the stay, refuses (instead of skipping) while a PMS event is unprocessed or a device is restricted, and erases a stay the PMS left open after its departure; retention anonymises such a stay too. Still open: retention skips unprocessed PMS events, because the PMS inbox guard keeps them intact. That needs a Product-Owner decision |
+| B3 | **Documented:** Annex I, the hotel record template (row 4) and the guest notice template say that the room, reservation and PMS guest numbers of a room charge stay, pseudonymised, with the financial record for the statutory period, including in the compliance archive |
 | B4 | **Fixed** (migration 0138): a disabled staff account is anonymised after a set period (Operators → Disabled accounts; default 730 days, 30 to 3650, audited). Email, name, password, sign-on subject and authenticator are removed, as is the email in activity-log entries about the account. An anonymised account cannot be enabled again. Staff IPs in `system_network_audit` and `portal_https_settings_changes` are cleared after the activity-log period. The label in append-only change-history columns is kept as accountability evidence |
 | B5 | **Fixed** (Central migration 0055): the platform can download one user's data (Team → Data; reason, step-up, audited). An email can be corrected, and the history then follows it. Removing a user, or the retention run anonymising one, replaces their email with a removed-user label in event actors, settings and audit payloads, and the removal entry no longer repeats it |
 | B6 | **Fixed:** the search text and reasons in `guest_data.*` entries are shown only to holders of `guest-data-rights`; other roles see that the read happened, and who did it |
 | B7 | **Fixed:** adding, disabling or resetting a staff account, and adding or removing a role, ask for the administrator's own password |
 | B8 | **Fixed:** what a guest typed is revealed only after the operator confirms their password (`POST /guest-signin-credentials/{id}`) |
 | B9 | **Fixed:** plain SMTP is accepted only for a loopback, private or link-local address, checked on save and at connect |
+| B11 | **Fixed:** the guest notice template now lists the VIP flag, travel agent, room type, rate plan, PMS guest id and room sharers, business-account organisation ids, the code requester's address and browser, room charges, each portal cookie with its lifetime, the backup period, and outside pictures or fonts (C1). Whether VIP and travel agent are needed at all is left to the hotel |
 | B12 | **Fixed:** email addresses and phone numbers are removed from provider errors before they are logged or stored. An error already stored is replaced at the provider's next send |
 
 **B1. The guest export (Art. 15/20) is incomplete.** `guest_data_export_records` and `public.guest_data_export`
@@ -286,7 +288,7 @@ Also consider whether VIP and travel agent are needed at all (minimisation).
 
 ## C. Low, and document wording
 
-1. **Outside images and fonts:** the portal allows ones the hotel chooses (`cmd/portald/portal_design.go:59-60`),
+1. **Notice line added (with B11);** a preference for uploads is not enforced. ~~Outside images and fonts:~~ the portal allows ones the hotel chooses (`cmd/portald/portal_design.go:59-60`),
    which then see guests' IPs. Hotel Admin only warns. Add a line to the notice template, and prefer uploads.
 2. **Microsoft sign-in still asks for `profile`.** This was a deliberate choice in C9, because some personal
    accounts need it to give their email.
@@ -300,17 +302,17 @@ Also consider whether VIP and travel agent are needed at all (minimisation).
    - the chi request log writes query text;
    - the Caddy log on the Central host has no roll settings;
    - two admin CLI commands log an email.
-7. **Annex III Part B:**
+7. **Fixed (with B11).** ~~Annex III Part B:~~
    - lists "Opera (FIAS)", which is not offered;
    - leaves out the connectivity check (8.8.8.8, github.com; no personal data) and OS update sources;
    - should note Paymob's four regions.
-8. **Hotel record template, wrong statements:**
+8. **Fixed (with B3).** ~~Hotel record template, wrong statements:~~
    - backups *are* settings;
    - "Backups → Data retention" is really "Guest data kept for";
    - usage detail is missing from Step 3;
    - the staff activity log is anonymised after 730 days, not deleted;
    - the TLS switch is "Encrypt the connection (TLS)", on Protel only.
-9. **Wording in the other documents:**
+9. **Fixed (with B11), except** the Central fetch-log line, which needs no change: the notice already lists its fixed periods. ~~Wording in the other documents:~~
    - "every time" a guest record is opened should be "repeat views within 10 minutes are recorded once";
    - "a random token per guest" should be "per value";
    - add "a plain SMTP mode exists for internal relays";

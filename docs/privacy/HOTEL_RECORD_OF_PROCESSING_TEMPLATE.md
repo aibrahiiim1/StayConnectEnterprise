@@ -82,8 +82,9 @@ Tick each feature you use. 🔍 The page that shows it is in brackets.
 
 ### Step 3: How long you keep things
 
-🔍 *Backups → Data retention.* Copy each number from the screen. If you never changed it, the default is
-already right, and you can tick the box instead.
+🔍 *Backups → Guest data kept for*, *Backups → Usage detail kept for*, and *Operators → Disabled accounts*. Copy
+each number from the screen. If you never changed it, the default is already right, and you can tick the box
+instead.
 
 - [ ] I have not changed any of these: we use the defaults.
 
@@ -94,7 +95,10 @@ already right, and you can tick the box instead.
 | Guest accounts, emails and phone numbers, after last use | 365 days | ✏️ |
 | Used or expired codes and links, after expiry | 7 days | ✏️ |
 | Failed and successful sign-in attempts | 30 days | ✏️ |
-| Staff activity log | 730 days (2 years) | ✏️ |
+| Usage detail (how much data each session used, sample by sample) | 365 days | ✏️ |
+| Staff activity log: IP address, browser and record details anonymised after | 730 days (2 years) | ✏️ |
+| Disabled staff accounts: email, name and password removed after | 730 days (2 years) | ✏️ |
+| Backups | 30 days, the newest 7 always kept | ✏️ |
 | System logs (web, address and service logs) | 14 days | ✏️ |
 
 ### Step 4: Does a law make you keep connection records?
@@ -126,9 +130,9 @@ Leave out any row that depends on a feature you did not tick in Step 2.
 | 1 | **Guest Wi-Fi access** | To provide the Wi-Fi the guest asked for: contract (Art. 6(1)(b)) | Guests and visitors who connect | Device network addresses (MAC and IP), connection times, how much data each session used, and, while connected, the name the device gives itself on the network (often its owner's name, such as "Anna's iPhone"). **Not** the websites visited: OneGate does not record them, and its request logs name the page type served, never the address asked for |
 | 2 | **Signing guests in** | Contract (Art. 6(1)(b)) | As above | Only for the methods ticked in Step 2: room and the detail typed with it; voucher code; Wi-Fi username and password (stored hashed); email address; phone number; for Google, Apple, Facebook or Microsoft, the account id and email, and for a business account the organisation's ids |
 | 3 | **Checking room sign-ins against reservations** *(only if a PMS is connected)* | Contract (Art. 6(1)(b)); for room sharers, legitimate interest (Art. 6(1)(f)) in letting everyone in the room connect | Everyone named on a reservation, **including room sharers who may never use the Wi-Fi** | Reservation number, room, arrival and departure, names, VIP flag, travel agent, room type, rate plan, the PMS guest id. **No** passports, ID documents or home addresses |
-| 4 | **Selling internet packages** *(only if card payments or room charge are on)* | Contract (Art. 6(1)(b)); keeping payment records, legal obligation (Art. 6(1)(c)) | Guests who buy a package | Package, price, payment reference. Card details go to Stripe or Paymob directly, never to the hotel. For room charge: the room, reservation number and amount posted to the bill |
+| 4 | **Selling internet packages** *(only if card payments or room charge are on)* | Contract (Art. 6(1)(b)); keeping payment records, legal obligation (Art. 6(1)(c)) | Guests who buy a package | Package, price, payment reference. Card details go to Stripe or Paymob directly, never to the hotel. For room charge: the room, reservation number, PMS guest number and amount posted to the bill. These stay with the financial record for the statutory period, also after the reservation itself is anonymised: they are pseudonymous, not anonymous |
 | 5 | **Keeping the network secure** | Legitimate interest (Art. 6(1)(f)) in stopping misuse; legal obligation (Art. 6(1)(c)) if you ticked "Yes" in Step 4 | Guests and anyone who tries to sign in | Sign-in attempts, including failed ones (the room typed, device addresses; what was typed with it is stored sealed). System logs with device addresses and sign-in names |
-| 6 | **Staff accounts and the activity log** | Legitimate interest (Art. 6(1)(f)) in security and accountability; for employees, also the employment contract | Hotel staff who use Hotel Admin | Email, name, password (hashed), authenticator secret (sealed), role, sign-ins. Log of what each staff member did, including **every time they opened a guest's record or searched guest data**, with time, IP address and browser |
+| 6 | **Staff accounts and the activity log** | Legitimate interest (Art. 6(1)(f)) in security and accountability; for employees, also the employment contract | Hotel staff who use Hotel Admin | Email, name, password (hashed), authenticator secret (sealed), role, sign-ins. Log of what each staff member did, including **when they opened a guest's record or searched guest data** (opening the same record again within 10 minutes is recorded once), with time, IP address and browser |
 | 7 | **Showing the privacy notice** | Legal obligation (Art. 6(1)(c)) to inform guests (Art. 13), and to be able to show they were told | Guests who sign in | Which version of your privacy notice was shown at each sign-in, and when |
 | 8 | **Answering guest requests** (copy, deletion, correction) | Legal obligation (Art. 6(1)(c)) | Guests who ask | The request, a reference, and who handled it |
 | 9 | **Backups** | Legitimate interest (Art. 6(1)(f)) in recovering from a fault | Everyone above | A full copy of the database, encrypted to your own key holders |
@@ -173,13 +177,14 @@ addendum to the clauses.
 ### (f) How long data is kept
 
 As in your answers to **Step 3**. When a period ends, OneGate deletes the record, or makes it anonymous by
-removing everything that identifies the guest. It checks every hour.
+removing everything that identifies the person. It checks every hour.
 
-Two more points that are fixed, not settings:
+Two more points:
 
-- **Backups** keep their copy for 30 days, and the newest 7 are always kept. Data you deleted in the live system
-  can stay in a backup until that backup expires. Your privacy notice should say so.
-- **Staff accounts** are kept until you remove them in Hotel Admin (Operators). Remove leavers promptly.
+- **Backups** keep their copy for the period in Step 3. Data deleted in the live system can stay in a backup
+  until that backup expires. Your privacy notice should say so.
+- **Financial records** (payments, refunds, room charges) are kept for the period the law sets, and are not
+  removed automatically.
 
 ### (g) How the data is protected
 
@@ -195,8 +200,8 @@ Some protections are yours to switch on or look after. Tick each one you have do
       network by default.
 - [ ] The appliance is in a **locked room or cabinet**. Its disk is not encrypted.
 - [ ] Every staff member has **their own account**. No shared logins. Leavers are removed.
-- [ ] The **PMS link is encrypted** 🔍 *(PMS connection → TLS)*, if your PMS supports it, or it runs on a network
-      only the hotel uses.
+- [ ] The **PMS link is encrypted** 🔍 *(PMS connection → Encrypt the connection (TLS); offered for Protel)*,
+      or it runs on a network only the hotel uses.
 - [ ] Your **privacy notice** is completed and published 🔍 *(Portal settings → Content → Privacy notice)*.
 - [ ] Someone knows how to answer a guest request 🔍 *(Guest data requests)*: find the guest, send a copy, or
       delete.

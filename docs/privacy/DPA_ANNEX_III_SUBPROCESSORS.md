@@ -28,13 +28,15 @@ this purpose and receives nothing from them.
 
 | Provider | Used for | What the Appliance sends |
 |---|---|---|
-| SendGrid, or any SMTP server | Email codes, verification and password-reset links | The guest's email address and the code or link. Click and open tracking is switched off |
+| SendGrid, or the Controller's own SMTP server | Email codes, verification and password-reset links | The guest's email address and the code or link. Click and open tracking is switched off. An SMTP server is reached over TLS; a plain connection is accepted only for a mail server at a private address on the Controller's own network |
 | Twilio | SMS codes, WhatsApp codes | The guest's phone number and the message text |
 | Meta (WhatsApp Cloud API) | WhatsApp codes | The guest's phone number and the message text |
 | Google, Facebook (Meta), Microsoft, Apple | Social sign-in | The guest authenticates with the provider directly. The Appliance receives identity claims and keeps only the subject id, the verified email and, for business accounts, the organisation identifiers |
 | Stripe | Card payment for internet packages | Amount, currency, product name, a payment reference and return addresses. No guest identifier. The guest enters card details on Stripe's page |
-| Paymob (Egypt, Saudi Arabia, UAE, Oman) | Card payment | As for Stripe. The billing fields are sent as "NA" |
-| The PMS: Protel / Opera (FIAS), Apaleo, Mews, Opera Cloud | Reservation data in. Internet charges out | In: names, room, dates, reservation. Out: room, reservation number and amount of a charge |
+| Paymob (one of four regions the Controller chooses: Egypt, Saudi Arabia, UAE, Oman) | Card payment | As for Stripe. The billing fields are sent as "NA" |
+| The PMS: Protel (FIAS), Apaleo, Mews, Opera Cloud | Reservation data in. Internet charges out | In: names, room, dates, reservation. Out: room, reservation number and amount of a charge |
+| Internet connectivity check (8.8.8.8, and resolving github.com) | The appliance's own health screen | A ping and a name lookup. No personal data |
+| The operating system's and the container registry's update servers | Software updates, when the Controller runs them | The appliance's request for packages. No personal data |
 
 Some of these providers are outside the EEA. Any transfer to them is made by the Controller under its own
 agreement with the provider. The Controller's privacy notice should name them.

@@ -75,7 +75,9 @@ The annex has three parts:
 - **Sessions end** after 30 minutes idle and 12 hours at most (Controller settings). Session cookies are
   HttpOnly and Secure.
 - **Role-based access control is enforced on the server.** Sensitive actions require the password again: reveal
-  of credentials or codes, backups, network and PMS changes, staff and authenticator resets. Exporting or erasing
+  of credentials or codes (including what a guest typed at sign-in), backups, network and PMS changes, and every
+  change to a staff account: adding, disabling, resetting a password or an authenticator, and changing roles.
+  Email for guests goes over TLS, except to a mail server at a private address. Exporting or erasing
   a guest is limited to the site administrator and IT manager roles, needs the password and a reason, and is
   logged.
 - **Guest sign-in** is throttled, and one-time codes expire after 10 minutes and allow 5 tries.
@@ -108,8 +110,10 @@ The annex has three parts:
 
 - An audit log records staff sign-ins, failed sign-ins and lockouts, authenticator events, configuration changes,
   credential reveals, backup downloads, and guest exports and erasures, with time, staff member, IP address and
-  user agent. It also records every time staff open one guest's record or search guest data, written in the
-  background so pages do not slow down. Service accounts can add entries but cannot change or delete them.
+  user agent. It also records when staff open one guest's record (opening the same record again within 10
+  minutes is recorded once) or search guest data, written in the background so pages do not slow down. What was
+  searched for is shown only to roles with guest-data rights. Service accounts can add entries but cannot change
+  or delete them.
 - **Request logs name the route, not the person.** The appliance's services and Central log the kind of page or
   API served (for example `/edge/v1/usage/devices/{mac}`), never the address asked for, its query or the client's
   address. The web server's access logs drop the query, MAC addresses and request headers. So searches typed by

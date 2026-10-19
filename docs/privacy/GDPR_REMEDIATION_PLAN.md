@@ -114,7 +114,7 @@ Each value ships as a hotel setting with this default, following `OPERATIONAL_SE
 
 ### D-C1a, what happens when retention expires: **Anonymise, the same way erasure does**
 
-- The C1 retention jobs and the C3 erasure action share one anonymisation routine. When a category's retention period ends, its rows are anonymised under the D-C3 rules (a random token per guest, free text blanked); no rows are deleted.
+- The C1 retention jobs and the C3 erasure action share one anonymisation routine. When a category's retention period ends, its rows are anonymised under the D-C3 rules (a fresh random token per value, free text blanked); no rows are deleted.
 - Reports and totals (usage, entitlements, financials) keep working on the anonymised rows.
 - The `stay_events` append-only trigger is relaxed only for that routine blanking the guest fields; deletion stays refused.
 
