@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -86,5 +87,53 @@ func TestIntegration_ActivityLogGuestDetailsFollowTheirScreen(t *testing.T) {
 	}
 	if got := read(f, email); find(got, "guest_account.created") == nil {
 		t.Fatalf("the admin's search must find the entry: %v", got)
+	}
+}
+
+// The actor filter is held to the same rule as the search: actor=<a guest's MAC> must not confirm, through the
+// matches or the per-action counts, that the guest was here and when, to a role that cannot read the screen the
+// entries came from (payments_operator reads neither guest accounts nor networks).
+func TestIntegration_ActivityLogActorFilterHidesGuests(t *testing.T) {
+	f := newAPI(t)
+	ctx := context.Background()
+	n := time.Now().UnixNano()
+	mac := fmt.Sprintf("02:%02x:%02x:%02x:%02x:%02x", n&0xff, (n>>8)&0xff, (n>>16)&0xff, (n>>24)&0xff, (n>>32)&0xff)
+	for _, e := range []struct{ action, ttype string }{
+		{"guest_account.created", "guest_account"},
+		{"network.dhcp.reservation.created", "dhcp_reservation"},
+	} {
+		if _, err := f.pool.Exec(ctx, `INSERT INTO public.audit_log(tenant_id,ts,actor_type,actor_id,action,target_type,target_id,payload)
+			VALUES ($1,now(),'operator','op-1',$2,$3,$4,'{}'::jsonb)`, f.tenant, e.action, e.ttype, mac); err != nil {
+			t.Fatalf("seed %s: %v", e.action, err)
+		}
+	}
+	read := func(c *apiFixture, actor string) (rows []map[string]any, actions []map[string]any) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, c.srv.URL+"/edge/v1/audit?actor="+url.QueryEscape(actor), nil)
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: c.sessTok})
+		resp, err := c.srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var body struct {
+			Data    []map[string]any `json:"data"`
+			Actions []map[string]any `json:"actions"`
+		}
+		if resp.StatusCode != 200 || json.NewDecoder(resp.Body).Decode(&body) != nil {
+			t.Fatalf("audit read = %d", resp.StatusCode)
+		}
+		return body.Data, body.Actions
+	}
+	if rows, actions := read(f, mac); len(rows) != 2 || len(actions) != 2 {
+		t.Fatalf("the site admin's actor filter finds the device: %v %v", rows, actions)
+	}
+	pay := newAPIIn(t, f.tenant, "payments_operator")
+	if rows, actions := read(pay, mac); len(rows) != 0 || len(actions) != 0 {
+		t.Fatalf("the actor filter confirmed a guest to a role that cannot see them: %v %v", rows, actions)
+	}
+	// Who did it is still a filter anyone may use.
+	if rows, _ := read(pay, "op-1"); len(rows) < 2 {
+		t.Fatalf("filtering by the operator who acted must still work: %v", rows)
 	}
 }

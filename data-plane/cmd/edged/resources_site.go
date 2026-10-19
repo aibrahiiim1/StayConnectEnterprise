@@ -656,12 +656,27 @@ func (s *server) auditRoutes() http.Handler {
 		bind := func(v any) int { args = append(args, v); return len(args) }
 		period := ` WHERE tenant_id = $1`
 
+		// GUEST DETAILS IN THE TRAIL FOLLOW THE SCREEN THEY CAME FROM (GDPR audit B6; final check D3). An entry
+		// about a guest -- an account, a device, a stay, a sign-in -- names them in its target or its details. A
+		// role that cannot read that screen sees that the action happened, when, and who did it; not whom it was
+		// about, and neither a search nor the actor filter matches on it -- otherwise actor=<a MAC or an e-mail>
+		// would confirm that guest's presence, and when, through the matches and the per-action counts.
+		var roles []string
+		if sess := sessFrom(req.Context()); sess != nil {
+			roles = sess.Roles
+		}
+		hidden := hiddenGuestAuditPrefixes(roles)
+		hiddenLike := make([]string, len(hidden))
+		for i, h := range hidden {
+			hiddenLike[i] = likeEscape(h) + "%"
+		}
+
 		// ONE PLACEHOLDER, REFERENCED TWICE. On a sign-in the operator is the TARGET, not the actor, so an
 		// actor search that only looked at actor_id would miss every login on the appliance -- which is the
 		// most common thing anyone searches for.
 		if v := qv.Get("actor"); v != "" {
-			n := bind(v)
-			period += fmt.Sprintf(` AND (actor_id = $%d OR target_id = $%d)`, n, n)
+			n, h := bind(v), bind(hiddenLike)
+			period += fmt.Sprintf(` AND (actor_id = $%[1]d OR (target_id = $%[1]d AND NOT action LIKE ANY($%[2]d)))`, n, h)
 		}
 		if v := qv.Get("from"); v != "" {
 			if t, err := time.Parse(time.RFC3339, v); err == nil {
@@ -691,19 +706,6 @@ func (s *server) auditRoutes() http.Handler {
 		// network.guest.created and the rest without the screen enumerating them.
 		if p := qv.Get("action_prefix"); p != "" {
 			where += fmt.Sprintf(` AND action LIKE $%d`, bind(likeEscape(p)+"%"))
-		}
-		// GUEST DETAILS IN THE TRAIL FOLLOW THE SCREEN THEY CAME FROM (GDPR audit B6; final check D3). An entry
-		// about a guest -- an account, a device, a stay, a sign-in -- names them in its target or its details. A
-		// role that cannot read that screen sees that the action happened, when, and who did it; not whom it was
-		// about, and a search does not match on it either.
-		var roles []string
-		if sess := sessFrom(req.Context()); sess != nil {
-			roles = sess.Roles
-		}
-		hidden := hiddenGuestAuditPrefixes(roles)
-		hiddenLike := make([]string, len(hidden))
-		for i, h := range hidden {
-			hiddenLike[i] = likeEscape(h) + "%"
 		}
 		if search != "" {
 			titled := []string{}
