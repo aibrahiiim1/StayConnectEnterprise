@@ -175,15 +175,30 @@ func (s *server) exportGuestData(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), guestDataEraseTimeout)
 	defer cancel()
+	// THE REASON NAMES NOBODY (0144): it is kept in the activity log, which erasure does not remove.
+	if _, err := s.db.Exec(ctx, `SELECT public.guest_data_reason_check($1::uuid,$2::uuid,$3,$4::uuid,$5)`,
+		s.tenantID, s.siteID, in.Kind, in.ID, in.Reason); err != nil && !isUndefinedObject(err) {
+		if !writeGuestDataLive(w, err) {
+			guestDataDBError(w, err, "the export failed")
+		}
+		return
+	}
 	var doc []byte
 	if err := s.db.QueryRow(ctx, `SELECT public.guest_data_export($1::uuid,$2::uuid,$3,$4::uuid)::text`,
 		s.tenantID, s.siteID, in.Kind, in.ID).Scan(&doc); err != nil {
 		// A refused or failed export is recorded too: who tried, for which record, and why it did not happen.
 		s.audit(r, "guest_data.export_failed", in.Kind, in.ID, map[string]any{"reason": in.Reason})
+		if writeGuestDataLive(w, err) {
+			return
+		}
 		guestDataDBError(w, err, "the export failed")
 		return
 	}
-	s.audit(r, "guest_data.exported", in.Kind, in.ID, map[string]any{"reason": in.Reason})
+	// NO EXPORT UNRECORDED: the file leaves only once its audit entry is written.
+	if err := s.auditErr(r, "guest_data.exported", in.Kind, in.ID, map[string]any{"reason": in.Reason}); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "the export could not be recorded, so it was not sent")
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", `attachment; filename="guest-data-`+time.Now().UTC().Format("20060102-150405")+`.json"`)
 	w.Header().Set("Cache-Control", "no-store")
@@ -206,12 +221,8 @@ func (s *server) eraseGuestData(w http.ResponseWriter, r *http.Request) {
 		s.tenantID, s.siteID, in.Kind, in.ID, actor, in.Reason).Scan(&res)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "55006" {
-		reasons := strings.Split(pgErr.Detail, ",")
-		s.audit(r, "guest_data.erase_refused", in.Kind, in.ID, map[string]any{"live": reasons})
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"error": "guest_data_live", "live": reasons,
-			"message": "This guest is still active, so nothing was erased.",
-		})
+		s.audit(r, "guest_data.erase_refused", in.Kind, in.ID, map[string]any{"live": strings.Split(pgErr.Detail, ",")})
+		writeGuestDataLive(w, err)
 		return
 	}
 	if err != nil {
@@ -221,6 +232,25 @@ func (s *server) eraseGuestData(w http.ResponseWriter, r *http.Request) {
 	s.audit(r, "guest_data.erased", "guest_data_erasure", res.Ref, map[string]any{
 		"subject_kind": in.Kind, "reason": in.Reason, "counts": res.Counts})
 	writeJSON(w, http.StatusOK, res)
+}
+
+// writeGuestDataLive answers a refusal the database gave with its reasons (55006): the guest is still live, the
+// identity belongs to another site too, or the records changed while being locked. False for any other error.
+func writeGuestDataLive(w http.ResponseWriter, err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "55006" {
+		return false
+	}
+	reasons := strings.Split(pgErr.Detail, ",")
+	msg := "This guest is still active, so nothing was done."
+	switch {
+	case len(reasons) == 1 && reasons[0] == "other_site":
+		msg = "This guest identity was also used at another site, so it cannot be exported or erased here."
+	case len(reasons) == 1 && reasons[0] == "busy":
+		msg = "This guest's records changed while the request ran. Try again."
+	}
+	writeJSON(w, http.StatusConflict, map[string]any{"error": "guest_data_live", "live": reasons, "message": msg})
+	return true
 }
 
 func guestDataDBError(w http.ResponseWriter, err error, what string) {

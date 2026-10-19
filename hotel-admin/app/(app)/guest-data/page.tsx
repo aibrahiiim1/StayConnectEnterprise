@@ -48,6 +48,8 @@ const LIVE_REASONS: Record<string, string> = {
   access_live: "the guest's internet access has not ended yet",
   online: "one of the guest's devices is online right now",
   signin_restricted: "one of the guest's devices is under a sign-in restriction; release it on Guest sign-in attempts first",
+  other_site: "this guest identity was also used at another site, so it cannot be erased here",
+  busy: "the guest's records changed while this ran; try again",
 };
 
 function saveJSON(doc: unknown) {
@@ -135,7 +137,8 @@ export default function GuestDataPage() {
 
       <Callout tone="info">
         Check the guest&rsquo;s identity before you hand over an export or erase anything. Do not write the
-        guest&rsquo;s name or address in the reason: the reason is kept after the guest is erased.
+        guest&rsquo;s name, address, phone, room or reservation in the reason: the reason is kept after the guest is
+        erased, so a reason that names them is refused.
       </Callout>
 
       {done && (

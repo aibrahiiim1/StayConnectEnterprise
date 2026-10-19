@@ -18,4 +18,8 @@ BEGIN
   GRANT EXECUTE ON FUNCTION public.guest_data_export(uuid,uuid,text,uuid) TO svc_edged;
   GRANT EXECUTE ON FUNCTION public.guest_data_erase(uuid,uuid,text,uuid,text,text) TO svc_edged;
   GRANT SELECT ON iam_v2.guest_data_erasures TO svc_edged;
+  -- Migration 0144: edged refuses an export reason that names the guest before it runs the export.
+  IF to_regprocedure('public.guest_data_reason_check(uuid,uuid,text,uuid,text)') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION public.guest_data_reason_check(uuid,uuid,text,uuid,text) TO svc_edged;
+  END IF;
 END $g$;

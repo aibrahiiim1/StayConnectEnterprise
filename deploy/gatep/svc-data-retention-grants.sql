@@ -32,4 +32,9 @@ BEGIN
     GRANT EXECUTE ON FUNCTION iam_v2.data_retention_set(uuid,uuid,integer,integer,integer,integer,integer,integer,text,text) TO svc_edged;
   END IF;
   GRANT SELECT ON iam_v2.data_retention_changes, iam_v2.data_retention_runs TO svc_edged;
+  -- Migration 0144: retention and erasure read a PMS date as a day in the site's own time zone. The iam_v2
+  -- definers run as iam_v2_owner, which needs these three columns of public.sites and nothing else.
+  IF to_regclass('iam_v2.retention_floor') IS NOT NULL AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'iam_v2_owner') THEN
+    GRANT SELECT (id, tenant_id, timezone) ON public.sites TO iam_v2_owner;
+  END IF;
 END $g$;

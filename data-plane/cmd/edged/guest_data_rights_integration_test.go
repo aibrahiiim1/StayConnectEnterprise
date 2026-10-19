@@ -172,7 +172,9 @@ func TestIntegration_GuestDataRights_FindExportErase(t *testing.T) {
 	expect("session totals kept", str(`SELECT bytes_down::text FROM iam_v2.sessions WHERE id=$1`, session), "4096")
 	expect("sign-in attempt", str(`SELECT concat_ws(',',submitted_room,device_mac::text,host(device_ip)) || result FROM iam_v2.sign_in_attempts WHERE id=$1`, attempt), "CREDENTIAL_MISMATCH")
 	expect("code destination", str(`SELECT destination || coalesce(host(ip),'') FROM public.auth_otps WHERE id=$1`, otp), "anonymised")
-	expect("audit entry about the guest", str(`SELECT payload::text || coalesce(target_id,'-') FROM public.audit_log WHERE action='guest_account.password_set' AND tenant_id=$1`, f.tenant), `{"anonymised": true}-`)
+	// D-R2 (0144): the entry keeps who and when; what named the guest, and the record id, give way to the reference.
+	expect("audit entry about the guest", str(`SELECT concat_ws('|', actor_id, payload->>'username', payload->>'erasure_ref', coalesce(target_id,'-'))
+		FROM public.audit_log WHERE action='guest_account.password_set' AND tenant_id=$1`, f.tenant), "op-1|[erased]|"+ref+"|-")
 	expect("audit entry about someone else", str(`SELECT payload->>'username' FROM public.audit_log WHERE target_id=$1`, "other-"+sfx), "someone-else@example.com")
 	expect("export audit no longer points at the record", fmt.Sprint(audited("guest_data.exported", acct)), "0")
 	// The identity with the same address is a different record the operator did not choose: untouched.
@@ -605,8 +607,9 @@ func TestIntegration_GuestDataRights_AnOpenStayWithNoDepartureLeftOffTheRoomList
 	}
 	// The PMS publishes a full room list (generation 1) that does not have this stay.
 	if _, err := f.pool.Exec(ctx, `INSERT INTO iam_v2.pms_interface_runtime
-		  (tenant_id, site_id, pms_interface_id, runtime_generation, credential_mode, resync_generation_seq, published_resync_generation)
-		VALUES ($1,$2,$3::uuid,1,'NONE',1,1)`, f.tenant, f.site, iface); err != nil {
+		  (tenant_id, site_id, pms_interface_id, runtime_generation, credential_mode, resync_generation_seq, published_resync_generation,
+		   last_complete_sync_at)
+		VALUES ($1,$2,$3::uuid,1,'NONE',1,1, now())`, f.tenant, f.site, iface); err != nil {
 		t.Fatalf("seed runtime: %v", err)
 	}
 	if st, body := erase(); st != 200 {

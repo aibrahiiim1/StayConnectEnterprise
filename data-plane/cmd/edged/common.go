@@ -69,6 +69,13 @@ func dbCtx(r *http.Request) (context.Context, context.CancelFunc) {
 // audit appends to the site-local audit_log. Best-effort: never fails the
 // calling request.
 func (s *server) audit(r *http.Request, action, targetType, targetID string, payload map[string]any) {
+	if err := s.auditErr(r, action, targetType, targetID, payload); err != nil {
+		slog.Warn("audit write failed", "action", action, "err", err)
+	}
+}
+
+// auditErr is audit for an action that must not happen unrecorded: the caller refuses when it fails.
+func (s *server) auditErr(r *http.Request, action, targetType, targetID string, payload map[string]any) error {
 	sess := sessFrom(r.Context())
 	actorID := ""
 	if sess != nil {
@@ -85,9 +92,7 @@ func (s *server) audit(r *http.Request, action, targetType, targetID string, pay
         VALUES (NULLIF($1,'')::uuid, 'operator', NULLIF($2,''), $3, NULLIF($4,''), NULLIF($5,''),
                 CASE WHEN $6 = '' THEN NULL ELSE $6::inet END, NULLIF($7,''), $8::jsonb)
     `, s.tenantID, actorID, action, targetType, targetID, clientIP(r), r.UserAgent(), string(raw))
-	if err != nil {
-		slog.Warn("audit write failed", "action", action, "err", err)
-	}
+	return err
 }
 
 func clientIP(r *http.Request) string {
