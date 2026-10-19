@@ -27,7 +27,8 @@ import (
 
 const guestDataEraseTimeout = time.Minute
 
-var guestDataKinds = map[string]bool{"account": true, "principal": true, "stay": true}
+// stay_guest is one guest of a stay with more than one guest named on it (migration 0141, GDPR audit C3).
+var guestDataKinds = map[string]bool{"account": true, "principal": true, "stay": true, "stay_guest": true}
 
 func (s *server) guestDataRightsRoutes() http.Handler {
 	r := chi.NewRouter()
@@ -131,7 +132,7 @@ func (s *server) guestDataAction(w http.ResponseWriter, r *http.Request) (guestD
 		return in, "", false
 	}
 	if !guestDataKinds[in.Kind] {
-		jsonErr(w, http.StatusBadRequest, "invalid_kind", "kind must be account, principal or stay")
+		jsonErr(w, http.StatusBadRequest, "invalid_kind", "kind must be account, principal, stay or stay_guest")
 		return in, "", false
 	}
 	if !uuidRe.MatchString(in.ID) {

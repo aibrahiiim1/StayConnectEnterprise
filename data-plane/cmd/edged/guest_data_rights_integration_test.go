@@ -414,3 +414,98 @@ func seedGuestDataStay(t *testing.T, f *apiFixture, res, status string) string {
 	}
 	return stay
 }
+
+// GDPR audit C3 (migration 0141): a stay shared by two guests is exported and erased one guest at a time. Erasing
+// one leaves the other, the stay and its PMS record of the other guest alone; the last guest erased is the whole
+// stay, as before.
+func TestIntegration_GuestDataRights_OneGuestOfASharedStay(t *testing.T) {
+	f := newAPI(t)
+	ctx := context.Background()
+	res := "R-SHARED-" + fmt.Sprint(time.Now().UnixNano())
+	stay := seedGuestDataStay(t, f, res, "CHECKED_OUT")
+	var ada, bob string
+	if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM iam_v2.stay_guests WHERE stay_id=$1`, stay).Scan(&ada); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.stay_guests(tenant_id,site_id,pms_interface_id,stay_id,
+			  external_guest_id,first_name_norm,last_name_norm,display_name,is_primary)
+			SELECT tenant_id,site_id,pms_interface_id,id,'G-BOB','BOB','BAKER','Bob Baker',false FROM iam_v2.stays WHERE id=$1
+			RETURNING id::text`, stay).Scan(&bob); err != nil {
+			return err
+		}
+		var ev string
+		if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.stay_events(tenant_id,site_id,pms_interface_id,external_event_identity,
+			  event_type,processing_status,payload)
+			SELECT tenant_id,site_id,pms_interface_id,'EV-SH-'||$2,'GUEST_CHANGE','PENDING',
+			       jsonb_build_object('reservation',$2::text,'room','101','last_name','Lovelace','first_name','Ada',
+			         'sharers',jsonb_build_array(
+			           jsonb_build_object('external_guest_id','G-'||$2,'first_name','Ada','last_name','Lovelace','is_primary',true),
+			           jsonb_build_object('external_guest_id','G-BOB','first_name','Bob','last_name','Baker','is_primary',false)))
+			  FROM iam_v2.stays WHERE id=$1 RETURNING id::text`, stay, res).Scan(&ev); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `UPDATE iam_v2.stay_events SET processing_status='APPLIED', stay_id=$2::uuid, processed_at=now() WHERE id=$1::uuid`, ev, stay)
+		return err
+	}); err != nil {
+		t.Fatalf("seed second guest: %v", err)
+	}
+	req := func(kind, id string) map[string]any {
+		return map[string]any{"kind": kind, "id": id, "reason": "guest asked", "password": f.password}
+	}
+
+	// The search offers each guest, not the stay.
+	st, body := f.do(t, "GET", "/guest-data-rights/search?q="+res, nil)
+	kinds := map[string]int{}
+	for _, m := range body["matches"].([]any) {
+		kinds[m.(map[string]any)["kind"].(string)]++
+	}
+	if st != 200 || kinds["stay_guest"] != 2 || kinds["stay"] != 0 {
+		t.Fatalf("search = %d %v", st, body)
+	}
+	// The stay whole can be neither exported nor erased.
+	if st, _ := f.do(t, "POST", "/guest-data-rights/export", req("stay", stay)); st != 400 {
+		t.Fatalf("a shared stay was exported whole: %d", st)
+	}
+	if st, body := f.do(t, "POST", "/guest-data-rights/erase", req("stay", stay)); st != 409 || fmt.Sprint(body["live"]) != "[co_guests]" {
+		t.Fatalf("a shared stay was erased whole: %d %v", st, body)
+	}
+
+	// Ada's export holds Ada, not Bob.
+	st, raw := f.doRaw(t, "POST", "/guest-data-rights/export", req("stay_guest", ada))
+	if st != 200 || !strings.Contains(string(raw), "Lovelace") || strings.Contains(strings.ToLower(string(raw)), "baker") ||
+		strings.Contains(string(raw), "G-BOB") || !strings.Contains(string(raw), "shared_stays_note") || !strings.Contains(string(raw), res) {
+		t.Fatalf("export of one guest = %d %s", st, raw)
+	}
+
+	// Erasing Ada leaves Bob and the stay.
+	st, body = f.do(t, "POST", "/guest-data-rights/erase", req("stay_guest", ada))
+	counts, _ := body["counts"].(map[string]any)
+	if st != 200 || counts["stay_guests"] != float64(1) || counts["hotel_stays"] != float64(0) {
+		t.Fatalf("erase one guest = %d %v", st, body)
+	}
+	var reservation, adaNames, bobNames, payloads string
+	if err := f.pool.QueryRow(ctx, `SELECT s.external_reservation_id,
+		  (SELECT concat_ws(',',first_name_norm,last_name_norm,display_name,external_guest_id) FROM iam_v2.stay_guests WHERE id=$2),
+		  (SELECT concat_ws(',',first_name_norm,last_name_norm,display_name,external_guest_id) FROM iam_v2.stay_guests WHERE id=$3),
+		  (SELECT string_agg(payload::text, ' ') FROM iam_v2.stay_events WHERE stay_id=s.id)
+		FROM iam_v2.stays s WHERE s.id=$1`, stay, ada, bob).Scan(&reservation, &adaNames, &bobNames, &payloads); err != nil {
+		t.Fatal(err)
+	}
+	if reservation != res || adaNames != "" || bobNames != "BOB,BAKER,Bob Baker,G-BOB" ||
+		strings.Contains(strings.ToLower(payloads), "lovelace") || !strings.Contains(payloads, "Baker") || !strings.Contains(payloads, res) {
+		t.Fatalf("after erasing one guest: %s | %q | %q | %s", reservation, adaNames, bobNames, payloads)
+	}
+
+	// Bob is now the only guest: the search offers the stay, and erasing him is the whole stay.
+	st, body = f.do(t, "GET", "/guest-data-rights/search?q="+res, nil)
+	if m, _ := body["matches"].([]any); st != 200 || len(m) != 1 || m[0].(map[string]any)["kind"] != "stay" {
+		t.Fatalf("search after = %d %v", st, body)
+	}
+	if st, body := f.do(t, "POST", "/guest-data-rights/erase", req("stay_guest", bob)); st != 200 {
+		t.Fatalf("erase the last guest = %d %v", st, body)
+	}
+	if err := f.pool.QueryRow(ctx, `SELECT external_reservation_id FROM iam_v2.stays WHERE id=$1`, stay).Scan(&reservation); err != nil || !strings.HasPrefix(reservation, "anon-") {
+		t.Fatalf("the last guest's erasure must anonymise the stay: %q %v", reservation, err)
+	}
+}
