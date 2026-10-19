@@ -1,6 +1,9 @@
 # GDPR remediation plan
 
-**Status:** DRAFT for Product Owner decision. Nothing here is implemented yet.
+**Status (2026-10-20):** most items are BUILT on `delivery/gdpr` and tested against disposable databases; none is
+deployed to PRE-LIVE or Central, none is merged, and the legal documents await the lawyer (D-F3). Per item status
+is in the tables below and in [GDPR_AUDIT_2026-10-19.md](GDPR_AUDIT_2026-10-19.md) section E (branch review of
+2026-10-20). The decisions still open are listed under "Still open" in §4.
 **Branch:** `delivery/gdpr`; all GDPR work goes here, never on `master`.
 **Baseline:** audit of `master` at `18e34e90` (2026-10-17), read-only.
 
@@ -346,10 +349,33 @@ The product is still in development: there is no paying customer and no live hot
 - **D-F8: record views at the level the standards ask for, without slowing pages down.** Opening one guest's details and every guest search are recorded; list pages are not. Entries are written in the background, so a page never waits for the log.
 - **C12:** the account owner rotates the Gmail app password later.
 
+### Product Owner decisions of 2026-10-20 (branch review)
+
+- **D-R1, Central sign-in lock: per email and address, with an unlock.** Wrong passwords are counted per (email,
+  client address), so nobody can lock out an administrator from elsewhere; the per-address request limit stays.
+  `ctrlapi unlock-signin --email E --reason R` clears an account's locks (audited by account id), and an
+  administrator's "Reset two-step" clears them too. Built: Central migration 0056.
+- **D-R2, erasure and the activity log: keep who and when.** Erasing a guest keeps each activity entry's action,
+  staff member and time, adds the erasure reference, and removes the record id and every text naming the guest,
+  including staff searches whose text is part of the guest's name, room or another identifier. Built: 0144.
+- **D-R3, new recovery codes need the authenticator.** On both consoles, making new recovery codes needs the
+  password and a current 6-digit code (not a recovery code), with sign-in's replay rule and throttle.
+- **D-R4, who is the same guest: PMS number, else a unique full name.** On linked stays a guest is the same person
+  by PMS guest number; by first and last name only when a number is missing and exactly one guest on that stay
+  has that name. Two rows of one stay are always two guests. Otherwise the request is refused as ambiguous and
+  staff choose the guest row. Built: 0144.
+
 ### Still open
 
 - **D-C11** (disk encryption): needs more information first.
 - **D-F2** (breach contact), **D-F3** (legal reviewer).
+- **D-SSH** (appliance SSH before launch).
+- **Room sign-in network pause (A4) follow-up:** a single device changing its address can keep re-arming the pause
+  every 15 minutes, and staff confirmations do not carry over to the next pause. Carrying confirmations over, or
+  alerting staff to repeated pauses, is a product decision not yet taken; the pause works as decided.
+- **Enrolment at first sign-in** on both consoles needs only the password (inherent to self-enrolment, audited as
+  `operator.mfa_enrolled` / `auth.mfa_enrolled`). An administrator-issued enrolment code, or an email on
+  enrolment, would close it; not decided.
 
 ## 5. Proposed order
 

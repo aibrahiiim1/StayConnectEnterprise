@@ -376,8 +376,69 @@ All ten were taken up on 2026-10-19 (migration 0143 and code, documents). What i
 - The `[[placeholders]]` in the DPA, Annex II, Annex III, the records, the Central notice and the guest notice
   template, for the Product Owner and the lawyer: company and hotel details, contacts, ICO registration,
   hosting provider, breach contact, transfers and safeguards, signatures and dates.
-- Nothing above is deployed: appliance migrations 0133 to 0143 and Central 0053 to 0055 wait for authorisation.
+- Nothing above is deployed: appliance migrations 0127 to 0144 and Central 0052 to 0056 wait for authorisation.
   PRE-LIVE's database password has not been checked.
+
+---
+
+## E. Branch review: 2026-10-20
+
+An independent review of `delivery/gdpr` at `3a63b87f` and again at `b0b8506f`, with four Product-Owner
+decisions (D-R1 to D-R4, recorded in the plan §4). Every item below was confirmed in the code before it was
+fixed, and every fix carries a regression test that was run against a disposable database built exactly as a
+factory-clean appliance (or a migrated Central). Nothing is deployed.
+
+### Blockers found and fixed
+
+| Item | Found | Fixed by |
+|---|---|---|
+| E1 | `npm ci` failed in both consoles: the lockfiles missed `undici-types` | lockfiles regenerated; real `npm ci` passes |
+| E2 | A routine Central upgrade (`central-deploy.sh`) never created `operator-mfa.key`, so every console sign-in would be refused while the smoke test passed | the deploy creates the key with the new binary if absent (never replaced), runs `ctrlapi check-mfa-key` before the swap, and its smoke test requires `/readyz` `"signin":"available"` |
+| E3 | The backup restore test errored on the nightly backup (a raw `pg_dump -Fc`, not gzip), which is nearly always the newest | the content is identified by its first bytes; the SQL loaders refuse a nightly dump by name |
+| E4 | The stay-link walk passed **through** a shared stay, so erasing one guest could erase another guest's later room | 0144: the walk continues only from the guest's own stays |
+| E5 | Two guests with the same name (or a surname alone) were treated as one person | 0144, D-R4 |
+| E6 | A guest who checked in after the night's room list, with no departure date, could be erased mid-stay | 0144: the room list must be newer than the stay's last message |
+| E7 | Retention disabled and renamed valid client accounts made before 0104 (no creation time) | 0144: a recorded floor dates rows of unknown age; a future `valid_from` keeps an account |
+| E8 | Retention blanked unlinked review messages but left them in the staff queue | 0144: closed as `EXPIRED_UNDECIDED` (evidence `DATA_RETENTION`) first; a message about an open reservation is left alone |
+| E9 | The idle sign-out never fired on console pages that refresh themselves (both consoles) | the consoles mark timer-driven requests `X-OneGate-Background: 1`, which do not count as activity |
+| E10 | Log retention (root) followed symlinks planted in service-writable log directories | `O_NOFOLLOW`, checks on the open descriptor, unlink only after re-checking the name |
+| E11 | Central: anyone could keep every administrator locked out, with no unlock | Central 0056, D-R1 |
+| E12 | Central retention could hide a revocation from an offline appliance, and could reset the licence version an appliance then rejects | Central 0056: a revoked licence stays until its validity and grace end as well as the history period; the newest licence of every appliance is kept |
+
+### Medium and low items fixed
+
+- **Export and erasure (0144):** a shared stay is exported or erased only where the guest is on it; the records in
+  scope are locked during an erasure; an identity used at another site is refused (`other_site`); a reason naming
+  the guest is refused; the export carries code-device bindings, sign-in redirects and the 0066 copy of names; the
+  export is sent only once its audit entry is written; erasure matches the activity log by whole value or word,
+  only since the guest's first record (D-R2).
+- **Staff reads (F8):** an entry is written directly when the queue is full instead of dropped.
+- **Backups:** the nightly encrypts only to the holders of the site the appliance now serves (0144); a restore
+  keeps the live key-holder register (restore step "key holders"); an on-demand dump is encrypted even before scd
+  knows its site; Central backups accept ssh recipients and refuse to run in the clear when a recipients file is
+  configured but unusable.
+- **Sign-in:** new recovery codes need a current authenticator code (D-R3, both consoles); the code step rebuilds
+  the session from the account as it is now (roles, status, password); self-checks compare the canonical operator
+  id; Central code checks and failure counts are one locked transaction; a signed-out Central session cannot be
+  revived; recovery-code whitespace is ignored.
+- **Retention:** PMS dates are days in the site's time zone; anonymising a PMS payload may only remove from it;
+  devices never seen are dated from the floor; a staff account created disabled is dated; staff-address clean-up
+  works in batches; rolling back 0140 no longer fails on recorded runs.
+- **Logs and portal:** the activity log's actor filter hides guests like the search does; the remember-device
+  sentence and the honoured choice follow the HTTPS-only box exactly.
+- **Central:** a user's export masks other people's email addresses; an email correction rewrites only that
+  user's own entries; the deploy refuses a Caddyfile Caddy rejects before anything changes.
+
+### Not changed, by decision or pending one
+
+- The Room sign-in network pause works as decided (A4); repeated re-arming by one device and carrying staff
+  confirmations over are an open product decision (plan §4, Still open).
+- Enrolling an authenticator at first sign-in needs only the password; an administrator-issued code is an open
+  decision.
+- An account anchor still takes in the stay the account belongs to, as D-C4 defines "this guest"; if that account
+  belongs to an unnamed room-mate, the named guest's stay data is in scope. Recorded as a residual risk.
+- Upgrade note: `POST /auth/mfa/recovery-codes` (Hotel Admin) now needs `code`, and so does scd's route; edged and
+  scd deploy together. Migrations must run before the services (0136 and 0144 are read by scd and edged).
 
 ---
 
