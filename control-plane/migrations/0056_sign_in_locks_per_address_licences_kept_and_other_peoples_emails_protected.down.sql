@@ -1,4 +1,5 @@
--- 0056 down -- wrong-password locks are per email again (0053), and retention handles licences as 0054 did.
+-- 0056 down -- wrong-password locks are per email again (0053), retention handles licences as 0054 did, and
+-- the user export and email correction are as 0055 made them.
 -- The per-address counters cannot be read under the email-only key and are removed, which ends running lockouts.
 
 BEGIN;
@@ -148,5 +149,51 @@ BEGIN
   END IF;
   RETURN out;
 END $$;
+
+-- The user export as 0055 made it, and no per-user email correction.
+DROP FUNCTION IF EXISTS central_correct_actor_email(uuid, text, text);
+CREATE OR REPLACE FUNCTION central_user_data(p_operator uuid) RETURNS jsonb
+LANGUAGE plpgsql STABLE AS $$
+DECLARE o operators; e text;
+BEGIN
+  SELECT * INTO o FROM operators WHERE id = p_operator;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'user not found' USING ERRCODE = 'no_data_found';
+  END IF;
+  e := lower(o.email);
+  RETURN jsonb_build_object(
+    'format', 'onegate.central-user-export/1', 'exported_at', now(),
+    'account', jsonb_build_object(
+      'email', o.email, 'display_name', o.display_name, 'status', o.status, 'created_at', o.created_at,
+      'last_sign_in_at', o.last_login_at, 'disabled_at', o.disabled_at,
+      'two_step_sign_in', EXISTS (SELECT 1 FROM operator_mfa m WHERE m.operator_id = o.id AND m.confirmed_at IS NOT NULL)),
+    'roles', (SELECT COALESCE(jsonb_agg(jsonb_build_object('role', r.role, 'customer', t.name) ORDER BY r.role), '[]'::jsonb)
+                FROM operator_roles r LEFT JOIN tenants t ON t.id = r.tenant_id WHERE r.operator_id = o.id),
+    'activity', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                    'at', l.ts, 'action', l.action, 'on', l.target_type, 'target', l.target_id, 'from_ip', l.ip,
+                    'browser', l.user_agent, 'details', l.payload) ORDER BY l.ts), '[]'::jsonb)
+                   FROM audit_log l WHERE l.actor_id = o.id::text),
+    'about_this_account', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                    'at', l.ts, 'action', l.action, 'details', l.payload) ORDER BY l.ts), '[]'::jsonb)
+                   FROM audit_log l WHERE l.target_id = o.id::text AND l.actor_id IS DISTINCT FROM o.id::text),
+    'appliance_events', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                    'at', x.created_at, 'from', x.from_state, 'to', x.to_state, 'from_ip', x.source_ip, 'reason', x.reason)
+                    ORDER BY x.created_at), '[]'::jsonb)
+                   FROM appliance_lifecycle_events x WHERE lower(x.actor) = e),
+    'certificate_events', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                    'at', x.created_at, 'event', x.event, 'from_ip', x.source_ip) ORDER BY x.created_at), '[]'::jsonb)
+                   FROM appliance_certificate_events x WHERE lower(x.actor) = e),
+    'portal_certificate_events', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                    'at', x.at, 'kind', x.kind, 'hostname', x.hostname) ORDER BY x.at), '[]'::jsonb)
+                   FROM portal_tls_events x WHERE lower(x.actor) = e),
+    'licences_issued', (SELECT count(*) FROM licenses x WHERE x.created_by = o.id),
+    'assignments_made', (SELECT count(*) FROM appliance_assignments x WHERE x.operator_id = o.id));
+END $$;
+COMMENT ON FUNCTION central_user_data(uuid) IS
+  'One Central user''s data as a JSON document (0055, GDPR audit B5, Art. 15/20): the account, roles, '
+  'second-step status, their activity log entries and those about them, and the appliance, certificate and '
+  'portal-certificate events they made. Changes nothing.';
+DROP FUNCTION IF EXISTS central_mask_other_emails(jsonb, text);
+DROP FUNCTION IF EXISTS central_mask_other_emails_text(text, text);
 
 COMMIT;

@@ -1,5 +1,5 @@
--- 0056 -- A WRONG-PASSWORD LOCK HOLDS ONE ADDRESS, NOT THE ACCOUNT
--- (Review of the GDPR remediation branch, 2026-10-20; Product-Owner decision D-R1: "Email+IP, plus unlock".)
+-- 0056 -- SIGN-IN LOCKS PER ADDRESS, LICENCES KEPT FOR LICENSING, OTHER PEOPLE'S EMAILS PROTECTED
+-- (Review of the GDPR remediation branch, 2026-10-20; Product-Owner decision D-R1 for 1: "Email+IP, plus unlock".)
 --
 -- 1. SIGN-IN LOCKS PER (EMAIL, ADDRESS). 0053 counted wrong passwords per email alone, so anyone who knew an
 --    administrator's address could keep that administrator locked out for ever, from anywhere, and there was no
@@ -23,6 +23,18 @@
 --    version 1 and refused by the appliance as a rollback. Now a revoked licence is kept until its validity has
 --    ended as well, and the newest licence of every appliance is kept for good. The function is replaced; nothing
 --    else in it changes.
+--
+-- 3. A USER EXPORT NO LONGER HANDS OVER OTHER PEOPLE'S EMAILS. central_user_data() (0055) copied audit payloads
+--    as they are, and an entry like user.created carries the email of the person created. Any email address in
+--    the exported entries that is not the exported user's own now reads "[other user]"
+--    (central_mask_other_emails).
+--
+-- 4. CORRECTING AN EMAIL REWRITES ONLY THAT USER'S HISTORY. updateUser called central_forget_actor(old, new),
+--    which replaces every matching JSON string in the WHOLE audit log -- reachable by a customer's own
+--    administrator, who could thereby rewrite platform-wide history wherever that string appeared.
+--    central_correct_actor_email(id, old, new) changes the who-acted columns that hold the old address and only
+--    the audit entries made by or about that user (actor_id / target_id). Removing a user still forgets their
+--    email everywhere (central_forget_actor, unchanged).
 --
 -- Additive apart from the counters. Nothing is granted: ctrlapi owns these objects, as for 0053.
 
@@ -192,5 +204,109 @@ BEGIN
   END IF;
   RETURN out;
 END $$;
+
+-- 3. What a user export shows of other people.
+-- Every email address in s except own (compared case-insensitively) becomes [other user]. An address is the
+-- whole run of address characters around an @, so a shorter address inside a longer one is never matched.
+CREATE OR REPLACE FUNCTION central_mask_other_emails_text(s text, own text) RETURNS text
+LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE m text; o text := lower(btrim(COALESCE(own, '')));
+BEGIN
+  IF s IS NULL OR position('@' IN s) = 0 THEN
+    RETURN s;
+  END IF;
+  FOR m IN SELECT DISTINCT x[1] FROM regexp_matches(s, '([A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+)', 'g') AS x LOOP
+    IF lower(m) <> o THEN
+      s := regexp_replace(s, '(?<![A-Za-z0-9._%+-])' || regexp_replace(m, '([.+])', '\\\1', 'g') || '(?![A-Za-z0-9-]|\.[A-Za-z0-9])',
+                          '[other user]', 'g');
+    END IF;
+  END LOOP;
+  RETURN s;
+END $$;
+
+CREATE OR REPLACE FUNCTION central_mask_other_emails(doc jsonb, own text) RETURNS jsonb
+LANGUAGE sql IMMUTABLE AS $$ SELECT central_mask_other_emails_text(doc::text, own)::jsonb $$;
+COMMENT ON FUNCTION central_mask_other_emails(jsonb, text) IS
+  'doc with every email address other than own replaced by [other user] (0056): what a user export shows of '
+  'other people named in that user''s history.';
+
+CREATE OR REPLACE FUNCTION central_user_data(p_operator uuid) RETURNS jsonb
+LANGUAGE plpgsql STABLE AS $$
+DECLARE o operators; e text;
+BEGIN
+  SELECT * INTO o FROM operators WHERE id = p_operator;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'user not found' USING ERRCODE = 'no_data_found';
+  END IF;
+  e := lower(o.email);
+  RETURN jsonb_build_object(
+    'format', 'onegate.central-user-export/1', 'exported_at', now(),
+    'account', jsonb_build_object(
+      'email', o.email, 'display_name', o.display_name, 'status', o.status, 'created_at', o.created_at,
+      'last_sign_in_at', o.last_login_at, 'disabled_at', o.disabled_at,
+      'two_step_sign_in', EXISTS (SELECT 1 FROM operator_mfa m WHERE m.operator_id = o.id AND m.confirmed_at IS NOT NULL)),
+    'roles', (SELECT COALESCE(jsonb_agg(jsonb_build_object('role', r.role, 'customer', t.name) ORDER BY r.role), '[]'::jsonb)
+                FROM operator_roles r LEFT JOIN tenants t ON t.id = r.tenant_id WHERE r.operator_id = o.id),
+    'activity', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                    'at', l.ts, 'action', l.action, 'on', l.target_type, 'target', l.target_id, 'from_ip', l.ip,
+                    'browser', l.user_agent, 'details', central_mask_other_emails(l.payload, e)) ORDER BY l.ts), '[]'::jsonb)
+                   FROM audit_log l WHERE l.actor_id = o.id::text),
+    'about_this_account', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                    'at', l.ts, 'action', l.action, 'details', central_mask_other_emails(l.payload, e)) ORDER BY l.ts), '[]'::jsonb)
+                   FROM audit_log l WHERE l.target_id = o.id::text AND l.actor_id IS DISTINCT FROM o.id::text),
+    'appliance_events', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                    'at', x.created_at, 'from', x.from_state, 'to', x.to_state, 'from_ip', x.source_ip,
+                    'reason', central_mask_other_emails_text(x.reason, e))
+                    ORDER BY x.created_at), '[]'::jsonb)
+                   FROM appliance_lifecycle_events x WHERE lower(x.actor) = e),
+    'certificate_events', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                    'at', x.created_at, 'event', x.event, 'from_ip', x.source_ip) ORDER BY x.created_at), '[]'::jsonb)
+                   FROM appliance_certificate_events x WHERE lower(x.actor) = e),
+    'portal_certificate_events', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                    'at', x.at, 'kind', x.kind, 'hostname', x.hostname) ORDER BY x.at), '[]'::jsonb)
+                   FROM portal_tls_events x WHERE lower(x.actor) = e),
+    'licences_issued', (SELECT count(*) FROM licenses x WHERE x.created_by = o.id),
+    'assignments_made', (SELECT count(*) FROM appliance_assignments x WHERE x.operator_id = o.id));
+END $$;
+COMMENT ON FUNCTION central_user_data(uuid) IS
+  'One Central user''s data as a JSON document (0055, GDPR audit B5, Art. 15/20): the account, roles, '
+  'second-step status, their activity log entries and those about them, and the appliance, certificate and '
+  'portal-certificate events they made. Any other person''s email in those entries reads [other user] (0056). '
+  'Changes nothing.';
+
+-- 4. Correcting one user's email rewrites only what is attributable to that user.
+CREATE OR REPLACE FUNCTION central_correct_actor_email(p_operator uuid, p_old text, p_new text) RETURNS bigint
+LANGUAGE plpgsql AS $$
+DECLARE n bigint; total bigint := 0; was text := current_setting('central.retention', true);
+        e text := lower(btrim(p_old)); nw text := lower(btrim(p_new));
+BEGIN
+  IF p_operator IS NULL OR e IS NULL OR e = '' OR nw IS NULL OR nw = '' OR e = nw THEN
+    RETURN 0;
+  END IF;
+  -- Columns that hold who acted: the old address there IS this user.
+  UPDATE appliance_lifecycle_events SET actor = nw WHERE lower(actor) = e;
+  GET DIAGNOSTICS n = ROW_COUNT; total := total + n;
+  UPDATE appliance_certificate_events SET actor = nw WHERE lower(actor) = e;
+  GET DIAGNOSTICS n = ROW_COUNT; total := total + n;
+  PERFORM set_config('central.retention', 'on', true);
+  UPDATE portal_tls_events SET actor = nw WHERE lower(actor) = e;
+  GET DIAGNOSTICS n = ROW_COUNT; total := total + n;
+  PERFORM set_config('central.retention', COALESCE(was, ''), true);
+  UPDATE central_retention_settings SET updated_by = nw WHERE lower(updated_by) = e;
+  GET DIAGNOSTICS n = ROW_COUNT; total := total + n;
+  UPDATE central_security_settings SET updated_by = nw WHERE lower(updated_by) = e;
+  GET DIAGNOSTICS n = ROW_COUNT; total := total + n;
+  UPDATE portal_tls_settings SET updated_by = nw WHERE lower(updated_by) = e;
+  GET DIAGNOSTICS n = ROW_COUNT; total := total + n;
+  -- Audit entries this user made or that are about this user; nobody else's.
+  UPDATE audit_log SET payload = replace(payload::text, to_jsonb(e)::text, to_jsonb(nw)::text)::jsonb
+   WHERE (actor_id = p_operator::text OR target_id = p_operator::text)
+     AND payload::text LIKE '%' || replace(replace(to_jsonb(e)::text, '%', '\%'), '_', '\_') || '%';
+  GET DIAGNOSTICS n = ROW_COUNT; total := total + n;
+  RETURN total;
+END $$;
+COMMENT ON FUNCTION central_correct_actor_email(uuid, text, text) IS
+  'Replaces a corrected email with the new one in the history columns that record who acted and in the audit '
+  'entries made by or about that user only (0056). Returns how many records changed.';
 
 COMMIT;

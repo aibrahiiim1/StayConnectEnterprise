@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -133,6 +134,23 @@ func hasRole(s *auth.Session, role string) bool {
 	return false
 }
 
+// validUserEmail is the one check for a Central user's email, at creation and at a correction: a single plain
+// address (no display name, no comment, no spaces), with a dotted domain, at most 254 characters. The caller has
+// lower-cased and trimmed it.
+func validUserEmail(e string) bool {
+	if e == "" || len(e) > 254 || strings.ContainsAny(e, " \t\r\n<>\"(),;:\\") {
+		return false
+	}
+	a, err := mail.ParseAddress(e)
+	if err != nil || a.Address != e || a.Name != "" {
+		return false
+	}
+	at := strings.LastIndexByte(e, '@')
+	domain := e[at+1:]
+	return at > 0 && strings.Contains(domain, ".") && !strings.HasPrefix(domain, ".") && !strings.HasSuffix(domain, ".") &&
+		!strings.Contains(domain, "..")
+}
+
 // createUser inserts an operator with exactly one role. customerID "" = a Team member.
 func (b *Base) createUser(w http.ResponseWriter, r *http.Request, customerID string) {
 	var in userWrite
@@ -141,7 +159,7 @@ func (b *Base) createUser(w http.ResponseWriter, r *http.Request, customerID str
 		return
 	}
 	in.Email = strings.ToLower(strings.TrimSpace(in.Email))
-	if in.Email == "" || !strings.Contains(in.Email, "@") {
+	if !validUserEmail(in.Email) {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "a valid email is required")
 		return
 	}
@@ -202,7 +220,7 @@ func (b *Base) updateUser(w http.ResponseWriter, r *http.Request, customerID, id
 	// AN EMAIL CAN BE CORRECTED (GDPR audit B5, Art. 16). The history then names the person by the corrected
 	// address, so a correction is not a second identity.
 	in.Email = strings.ToLower(strings.TrimSpace(in.Email))
-	if in.Email != "" && (!strings.Contains(in.Email, "@") || len(in.Email) > 254) {
+	if in.Email != "" && !validUserEmail(in.Email) {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "a valid email is required")
 		return
 	}
@@ -266,7 +284,10 @@ func (b *Base) updateUser(w http.ResponseWriter, r *http.Request, customerID, id
 			Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
 			return
 		}
-		if _, err := tx.Exec(ctx, `SELECT central_forget_actor($1, $2)`, cur[0].Email, in.Email); err != nil {
+		// Only what is attributable to this user follows the correction (0056): the who-acted columns holding the old
+		// address and the audit entries made by or about them -- never a matching string anywhere else in the
+		// platform's history, which a customer's administrator must not be able to rewrite.
+		if _, err := tx.Exec(ctx, `SELECT central_correct_actor_email($1::uuid, $2, $3)`, id, cur[0].Email, in.Email); err != nil {
 			Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
 			return
 		}
