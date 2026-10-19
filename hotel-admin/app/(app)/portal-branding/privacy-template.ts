@@ -45,6 +45,7 @@ The sign-in page uses these cookies, and no advertising or tracking cookies:
 - og_resume: if you continue without signing in, lets this device come back to the access it started, for 30 days.
 - og_account: keeps you signed in to your account page, for 15 minutes.
 - sc_commerce: holds your package choice while you finish signing in or paying, for 10 minutes.
+The page also keeps two things in your browser's own storage, never sent to us: the language you choose (sc-lang), and, while a card payment is open, when it started (og-pay-…), until you close the page.
 
 YOUR RIGHTS
 You can ask to see your data, receive a copy, correct it, have it deleted, restrict its use, or object to it. Ask at reception or write to [[privacy contact email]]. You can also complain to [[your data protection authority, with its website]].

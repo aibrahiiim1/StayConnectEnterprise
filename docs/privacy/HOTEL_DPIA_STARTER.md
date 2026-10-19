@@ -221,6 +221,8 @@ off by default.* Cloud PMS links (Apaleo, Mews, Opera Cloud) are always encrypte
 
 **OneGate already:** finds one guest's records across the system, exports them as a file, and deletes them by
 making them anonymous (🔍 *Guest data requests*). Each request is logged with a reference to give the guest.
+When guests share a room, each is handled on their own; the room's shared internet access stays with the stay
+and is removed by the retention period, not by one guest's request.
 
 **Yours:**
 

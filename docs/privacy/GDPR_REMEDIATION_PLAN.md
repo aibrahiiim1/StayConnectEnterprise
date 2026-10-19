@@ -205,7 +205,8 @@ The Product Owner chose:
 - Dropping the table is still open.
 
 **A7: DHCP device names.** Documented in Annex I, the hotel record and the notice template. They live in Kea's
-lease file while a device is connected and leave it within about two hours.
+lease file while a device is connected and leave it when the lease ends plus up to two hours of clean-up
+(about four hours with the default two-hour lease).
 
 **A8: Central (0054 extended before its first deployment).**
 - Appliance moves and certificate-request addresses are now covered.

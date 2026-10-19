@@ -114,7 +114,10 @@ liable to the Controller for the performance of each Sub-processor's obligations
 
 7.1 **Data subject rights (Art. 28(3)(e)).** The Software lets the Controller answer requests itself: Hotel Admin's
 *Guest data requests* finds one guest's records, exports them as a machine-readable file (access and
-portability), and erases them by anonymisation. Retention settings limit how long data is kept. The Processor
+portability), and erases them by anonymisation. When other guests share the stay, one guest's export holds only
+their own details, and erasing one guest leaves the others; the room's shared internet access, devices and
+sessions cannot be told apart per guest, so they are neither exported to nor erased for one guest (they follow
+the retention periods). Retention settings limit how long data is kept. The Processor
 gives further reasonable assistance on request. A request the Processor receives directly from a data subject
 is passed to the Controller without undue delay and is not answered by the Processor.
 
@@ -241,7 +244,7 @@ Signed for the Processor: [[name, role, date]]
 |---|---|---|
 | PMS reservation data | Reservation number, room, arrival and departure, names of the guest and room sharers, VIP flag, travel agent, room type, rate plan, PMS guest id | Anonymised 30 days after checkout (7–3,650). A reservation the PMS never closed is anonymised the same period after its departure date. The room, reservation number and PMS guest number of a room charge stay with the payment record (below) |
 | Guest sign-in identity | Email address, phone number, social sign-in subject id (and, for business accounts, the provider's organisation identifiers), display name, guest account username and password hash; a post-stay PIN (one-way hash), when it was issued and until when it is valid, if post-stay access is offered | Anonymised after 365 days without activity (30–3,650) |
-| Devices and usage | Device MAC and IP address, session times, data volumes, the network used. While a device is connected, the name it gives itself on the network (DHCP host name, often the owner's name) is held in the address-assignment lease and shown to staff | Anonymised after 365 days (30–3,650). Usage detail deleted after 365 days (30–3,650, or unlimited). The device name leaves the lease file within about two hours of the device leaving. Addresses staff reserve for a device, with any name or note they type, stay until staff remove them |
+| Devices and usage | Device MAC and IP address, session times, data volumes, the network used. While a device is connected, the name it gives itself on the network (DHCP host name, often the owner's name) is held in the address-assignment lease and shown to staff | Anonymised after 365 days (30–3,650). Usage detail deleted after 365 days (30–3,650, or unlimited). The device name leaves the lease file when the address lease ends plus up to two hours of clean-up: about four hours after the device leaves with the default two-hour lease, longer if the Controller sets longer leases. Addresses staff reserve for a device, with any name or note they type, stay until staff remove them |
 | Sign-in attempts | Room typed, device MAC and IP, and (sealed) the name and reservation number typed | Deleted after 30 days (7–365) |
 | One-time codes and links | Destination email or phone, hashed code, IP and browser user agent | Anonymised 7 days after expiry (1–365) |
 | Payments | Provider references and amounts; for room charges, the room, reservation number and PMS guest number posted to the bill. **No card data**: guests pay on the provider's own page | Kept for the statutory period (default 10 years), also in the compliance archive. Not removed automatically. The room-charge identifiers are pseudonymous, not anonymous, for that period |

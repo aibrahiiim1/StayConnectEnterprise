@@ -55,7 +55,7 @@ The gaps fall into four groups:
 | A3 | **Fixed:** isolation on for new networks, and a warning while HTTPS is not active, as the Product Owner chose |
 | A4 | **Fixed** (migration 0136): a network pause with staff confirmation, as the Product Owner chose (below) |
 | A5 | **Fixed:** a built-in notice and a warning |
-| A6 | **Fixed by retention** (migration 0135); dropping the table is still the Product Owner's decision |
+| A6 | **Fixed by retention** (migration 0135); the table is kept (Product-Owner decision, 2026-10-19) |
 | A7 | **Documented** |
 | A8 | **Fixed** (0054 extended, HMAC counter key, notice and record corrected) |
 
@@ -344,37 +344,39 @@ against code. Nothing was deployed or changed by it.
 
 ### D, low (C)
 
-1. **Staff email in the appliance's admin commands.** Seed-admin and reset-two-step log the email; C6 fixed only
-   Central's (`cmd/edged/common.go`).
-2. **Device names last longer than documented.** Annex I says about two hours after a device leaves; with the
-   default lease, hold time and clean-up it is about four, and longer with longer leases (`DPA_TEMPLATE.md`
-   Annex I; `deploy/kea/kea-dhcp4.conf`).
-3. **More staff free text with no period:** posting-block notes and clear reasons, and voucher notes. The reason
-   typed for an erasure is kept for ever in the append-only erasure log (staff are told not to name the guest).
-4. **One guest of a shared stay:** their own sign-in attempts are not cleared or exported (they go at the
-   sign-in-attempt period); the stay's VIP flag and travel agent reach the export; audit entries about the
-   stay's PMS events are blanked for everyone; a name the PMS later corrected is not matched in older events.
-5. **A stay the PMS left open with no departure date** is never anonymised by retention, and erasure refuses it.
-6. **The guest-data search still carries names, emails or phone numbers in the URL.** Logs strip it today;
-   every other list sends the search in a header.
-7. **The access-log filter does not cover response headers** (`Location`). No current page puts guest data in
-   its path.
-8. **Shared-stay limits are not stated in the documents** (the room's shared access, devices and sessions are
-   not in a one-guest export, and stay after a one-guest erasure).
-9. **The guest notice's cookie list leaves out browser storage** (`sc-lang` language, `og-pay-*` during
-   payment). `og_resume` (30 days, set without a tick, not Secure over the HTTP fallback) should be confirmed
-   by the lawyer with D-F3.
-10. **Small things:** a failed guest-data export is not recorded; the erasure list does not check for a read
-    error; two code comments are out of date (the search is audited; there are eight retention periods); a PMS
-    event the stay engine is holding can survive an erasure that otherwise succeeds; non-ASCII name matching
-    depends on the database locale (not verified).
+All ten were taken up on 2026-10-19 (migration 0143 and code, documents). What is left of them is stated.
+
+1. **Fixed:** the appliance's seed-admin and reset-two-step commands log the account id, not the email.
+2. **Fixed (documents):** Annex I and the plan say the device name leaves the lease file when the lease ends plus
+   up to two hours of clean-up (about four hours with the default lease, longer with longer leases).
+3. **Fixed** (0143): room-charge block notes and clear reasons, voucher notes and the reason typed for an erasure
+   follow the staff-notes period; the records stay.
+4. **Fixed** (0143), with two limits left: a co-guest's export no longer carries the primary guest's VIP flag or
+   travel agent; erasing the primary guest takes those out of the PMS events too; one guest's request neither
+   blanks nor exports activity-log entries about the shared stay's PMS events. **Left, documented:** the room's
+   sign-in attempts cannot be told apart per guest and go at the sign-in-attempt period; a name spelling the PMS
+   corrected later is not matched in older events.
+5. **Fixed** (0143): an open stay with no departure is erasable, and anonymised by retention, once the PMS's
+   latest full room list no longer has it (retention also waits for no PMS message within the stay period).
+   Without a published room list nothing changes, so a long-staying guest never loses access.
+6. **Fixed:** the guest-data and usage-stays searches send their text in a header (`?q=` still read for an
+   older console).
+7. **Fixed:** the three access logs drop the `Location` response header.
+8. **Fixed (documents):** the DPA, Annex II and the DPIA say a shared stay is handled one guest at a time and
+   that the room's shared access is neither exported nor erased for one guest.
+9. **Fixed (notice template):** the guest notice names the two browser-storage entries. **Left for the
+   lawyer (D-F3):** `og_resume` (30 days, set without a tick, not Secure over the HTTP fallback).
+10. **Fixed:** a failed export is recorded; the erasure list reports a read error; the two comments are
+    corrected; an erasure refuses while a waiting PMS event it could not give up still names the guest.
+    **No change needed:** name matching upper-cases both sides in the database, so accented names match
+    whatever the locale.
 
 ### Still open, not defects
 
 - The `[[placeholders]]` in the DPA, Annex II, Annex III, the records, the Central notice and the guest notice
   template, for the Product Owner and the lawyer: company and hotel details, contacts, ICO registration,
   hosting provider, breach contact, transfers and safeguards, signatures and dates.
-- Nothing above is deployed: appliance migrations 0133 to 0141 and Central 0053 to 0055 wait for authorisation.
+- Nothing above is deployed: appliance migrations 0133 to 0143 and Central 0053 to 0055 wait for authorisation.
   PRE-LIVE's database password has not been checked.
 
 ---
