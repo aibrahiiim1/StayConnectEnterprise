@@ -34,7 +34,7 @@ export function ApplianceStatus({ className }: { className?: string }) {
     void load();
     return () => { alive.current = false; };
   }, [load]);
-  usePoll(() => void load(), 30_000);
+  usePoll(() => load(), 30_000);
 
   if (!health && !failed) {
     return <span className={cn("h-8 w-8 animate-pulse rounded-full bg-surface sm:w-24", className)} />;

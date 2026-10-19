@@ -525,7 +525,7 @@ func (s *server) requireAuth(next http.Handler) http.Handler {
 		// THE SESSION LIMITS (0132). The console's background whoami check is not activity: counting it would
 		// keep every open tab signed in for ever.
 		pol := s.sessionPolicyFor(r.Context())
-		touch := strings.TrimSuffix(r.URL.Path, "/") != "/edge/v1/auth/whoami"
+		touch := isActivity(r)
 		sess := s.sessions.active(ck.Value, pol.idle(), pol.max(), touch)
 		if sess == nil {
 			jsonErr(w, http.StatusUnauthorized, "unauthenticated", "session expired")
@@ -543,6 +543,23 @@ func (s *server) requireAuth(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, reauthNoteKey, &reauthNote{})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// backgroundHeader marks a request the console made on its own -- a poll, a refresh timer, the whoami check --
+// rather than on an operator's action. Polling screens (dashboard, sessions, interfaces, ...) used to count as
+// activity, so an open tab was never signed out for idleness and the idle warning closed itself.
+const backgroundHeader = "X-OneGate-Background"
+
+// isActivity reports whether a request extends the session's idle limit. Background requests and whoami do
+// not; the idle warning's keepalive always does, whatever the console sent with it.
+func isActivity(r *http.Request) bool {
+	switch strings.TrimSuffix(r.URL.Path, "/") {
+	case "/edge/v1/auth/keepalive":
+		return true
+	case "/edge/v1/auth/whoami":
+		return false
+	}
+	return r.Header.Get(backgroundHeader) == ""
 }
 
 func sessFrom(ctx context.Context) *session {

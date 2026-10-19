@@ -66,3 +66,48 @@ func TestKeepaliveDoesNotMoveTheAbsoluteLimit(t *testing.T) {
 		t.Fatalf("ends = %v, want the absolute limit %v", ends, want)
 	}
 }
+
+// A console poll carries X-OneGate-Background and must not extend the idle limit; the same request without it
+// is an operator's action and must.
+func TestBackgroundRequestsAreNotActivity(t *testing.T) {
+	s := &server{sessions: newSessionStore(sessionStoreCap)}
+	tok := s.sessions.create(&session{OperatorID: "op-1", Email: "op@example.test"})
+	idleSince := time.Now().Add(-20 * time.Minute)
+	s.sessions.mu.Lock()
+	s.sessions.m[tok].LastSeen = idleSince
+	s.sessions.mu.Unlock()
+	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	call := func(path string, background bool) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: tok})
+		if background {
+			req.Header.Set(backgroundHeader, "1")
+		}
+		rec := httptest.NewRecorder()
+		s.requireAuth(ok).ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s = %d", path, rec.Code)
+		}
+	}
+	lastSeen := func() time.Time {
+		s.sessions.mu.Lock()
+		defer s.sessions.mu.Unlock()
+		return s.sessions.m[tok].LastSeen
+	}
+	call("/edge/v1/dashboard", true)
+	if !lastSeen().Equal(idleSince) {
+		t.Fatal("a background poll counted as activity")
+	}
+	call("/edge/v1/auth/keepalive", true)
+	if lastSeen().Equal(idleSince) {
+		t.Fatal("keepalive did not count as activity")
+	}
+	s.sessions.mu.Lock()
+	s.sessions.m[tok].LastSeen = idleSince
+	s.sessions.mu.Unlock()
+	call("/edge/v1/dashboard", false)
+	if !lastSeen().After(idleSince.Add(19 * time.Minute)) {
+		t.Fatal("an operator's request did not count as activity")
+	}
+}

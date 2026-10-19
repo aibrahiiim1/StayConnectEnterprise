@@ -18,7 +18,7 @@
 // Every other role that can open this page sees the list and no Download button.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError, ListResp, BackupHealth, BackupSettings, Whoami } from "@/lib/api";
+import { api, ApiError, BACKGROUND_HEADER, ListResp, BackupHealth, BackupSettings, Whoami } from "@/lib/api";
 import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
 import { Card, CardBody, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
@@ -500,7 +500,7 @@ function RestoreDialog({ backup, onClose, onDone }: {
       await new Promise((r) => setTimeout(r, 4000));
       let r: RestoreResult | null = null;
       // A failed poll means edged is restarting, which is expected mid-restore. Keep asking.
-      try { r = await api.get<RestoreResult>("/backups/last-restore"); } catch { continue; }
+      try { r = await api.get<RestoreResult>("/backups/last-restore", { [BACKGROUND_HEADER]: "1" }); } catch { continue; }
       if (r?.present && r.running === false) { onDone(r); return; }
     }
   }

@@ -22,7 +22,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { api, CentralStatus, EdgeHealth } from "@/lib/api";
+import { api, inBackground, CentralStatus, EdgeHealth } from "@/lib/api";
 import {
   type OverviewRange, type OverviewSnapshot, OVERVIEW_RANGES, fetchOverview, fmtInt, normalizeOverview, reasonText,
 } from "@/lib/api/dashboard";
@@ -86,7 +86,7 @@ export default function DashboardPage() {
   }, [range, load]);
 
   useEffect(() => {
-    const id = setInterval(() => void load(rangeRef.current), 30_000);
+    const id = setInterval(() => void inBackground(() => load(rangeRef.current)), 30_000);
     return () => clearInterval(id);
   }, [load]);
 

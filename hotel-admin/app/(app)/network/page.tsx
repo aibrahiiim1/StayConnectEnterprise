@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  api, ListResp,
+  api, inBackground, ListResp,
   GuestNetwork, GuestNetworkStatus, NetRevision,
   ValidateResult, ApplyResult, ValidationIssue, HealthCheck,
 } from "@/lib/api";
@@ -84,7 +84,7 @@ export default function NetworkPage() {
   useEffect(() => {
     if (pending && left === 0 && reloadedFor.current !== pending.id) {
       reloadedFor.current = pending.id;
-      const t = setTimeout(reload, 2000);
+      const t = setTimeout(() => void inBackground(reload), 2000);
       return () => clearTimeout(t);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

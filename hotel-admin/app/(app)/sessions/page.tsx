@@ -125,7 +125,7 @@ export default function SessionsPage() {
   useEffect(() => { if (current && resp) setUpdatedAt(Date.now()); }, [current, resp]);
 
   // Paused while the tab is hidden; an operator switching back gets a fresh page at once.
-  usePoll(() => void list.reload(), 10_000, { enabled: tab === "active" });
+  usePoll(() => list.reload(), 10_000, { enabled: tab === "active" });
 
   async function onDisconnect(s: Session) {
     setBusy(true); setActionErr(null);

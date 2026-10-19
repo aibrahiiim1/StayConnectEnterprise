@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ShieldAlert } from "lucide-react";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, inBackground } from "@/lib/api";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { REASON_MAX_CHARS, REASON_MIN_CHARS } from "@/lib/reason";
 import { Card, CardBody, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -200,7 +200,7 @@ export function NetworkPausesNotice({ canAct }: { canAct: boolean }) {
   }, []);
   useEffect(() => {
     void load();
-    const t = setInterval(() => void load(), 30_000);
+    const t = setInterval(() => void inBackground(load), 30_000);
     return () => clearInterval(t);
   }, [load]);
 
