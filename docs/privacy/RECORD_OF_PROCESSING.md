@@ -52,23 +52,23 @@ from another country, or any sub-processor in DPA Annex III, Part A, outside the
 
 | Purpose | Data subjects | Personal data | Lawful basis | Retention today |
 |---|---|---|---|---|
-| **Central accounts:** sign-in and permissions for our platform staff and for customers' staff | Our staff; the hotels' staff who have a Central account | Email, display name, password hash (argon2id), sealed authenticator secret, recovery-code hashes, roles, status, last sign-in | Art. 6(1)(b) for our own staff (employment). Art. 6(1)(f) for customers' staff: providing the contracted service to their employer | While the account exists. **[[Decide a period after an account is disabled.]]** |
+| **Central accounts:** sign-in and permissions for our platform staff and for customers' staff | Our staff; the hotels' staff who have a Central account | Email, display name, password hash (argon2id), sealed authenticator secret, recovery-code hashes, roles, status, last sign-in | Art. 6(1)(b) for our own staff (employment). Art. 6(1)(f) for customers' staff: providing the contracted service to their employer | While the account is in use. Anonymised 24 months after it is disabled (email replaced; name, password, authenticator and roles removed) |
 | **Sessions** | As above | Session record: operator id, email, display name, roles, times. No IP or browser | Art. 6(1)(f): keeping the service secure | 30 minutes idle, 12 hours at most. Pending sign-ins 5 minutes |
-| **Security and accountability:** the audit log of Central actions | As above | Who did what and when, IP address and browser user agent. For a failed sign-in, the email address typed | Art. 6(1)(f): security, fraud prevention, accountability | **None defined: kept indefinitely. [[Decide a period, e.g. 24 months like the appliance.]]** |
-| **Appliance identity, activation and licensing** | Hotels. Personal data only where a hotel is a sole trader or a person can be identified | Serial, hardware fingerprint, MAC addresses, host name, the hotel's public IP, customer and site names, licence terms | Art. 6(1)(b): the licence contract | For the life of the customer relationship. **[[Decide a period after retirement.]]** Assignment fetch log: 30 days |
+| **Security and accountability:** the audit log of Central actions | As above | Who did what and when, IP address and browser user agent. For a failed sign-in, the email address typed | Art. 6(1)(f): security, fraud prevention, accountability | 24 months |
+| **Appliance identity, activation and licensing** | Hotels. Personal data only where a hotel is a sole trader or a person can be identified | Serial, hardware fingerprint, MAC addresses, host name, the hotel's public IP, customer and site names, licence terms | Art. 6(1)(b): the licence contract | For the life of the customer relationship. A retired appliance's MAC addresses, host name and public IP are cleared 6 years after retirement; ended licences are deleted 6 years after they end (the UK limitation period for a contract claim). Lifecycle history: 6 years, with the operator and IP address removed after 24 months. Assignment fetch log: 30 days |
 | **Guest-portal certificate** | The hotel's contact for certificates | Portal host names. The ACME contact email | Art. 6(1)(b) | While the portal certificate is managed. Host names are published permanently in Certificate Transparency logs |
-| **Security alerts** about appliances | As for licensing | Appliance serial, alert detail, source IP, who acknowledged it | Art. 6(1)(f): security | **None defined. [[Decide a period.]]** |
+| **Security alerts** about appliances | As for licensing | Appliance serial, alert detail, source IP, who acknowledged it | Art. 6(1)(f): security | Source IP and who acknowledged it removed after 24 months; closed alerts deleted after 6 years. Open alerts stay until closed |
 
 No guest data is processed in Central. It holds no guest records, and the Appliance sends it none.
 
 **(d) Recipients.** Cloudflare (DNS records and lookups for portal host names), Let's Encrypt / ISRG (certificate
-issuance), [[Central hosting provider, or "none: self-hosted"]]. See DPA Annex III, Part C.
+issuance), [[Central hosting provider: not decided yet; its name, and the country where Central's data is stored]]. See DPA Annex III, Part C.
 
 **(e) Transfers to a third country.** Let's Encrypt (ISRG) and Cloudflare are United States companies:
 [[safeguard: EU–US Data Privacy Framework certification or SCCs, to confirm for each]]. Only portal host names and
 one contact email are involved.
 
-**(f) Time limits for erasure.** As in the table. Backups of Central's database: the newest 7 are kept on the
+**(f) Time limits for erasure.** As in the table. Every period is a setting in Central (System > Team > Data retention), applied hourly and audited. Backups of Central's database: the newest 7 are kept on the
 Central server. Server logs (web access log with IP addresses, service journal): **no limit configured
 [[D-F5]]**.
 

@@ -176,6 +176,21 @@ Each value ships as a hotel setting with this default, following `OPERATIONAL_SE
 
 - "14 days, but if it can be configurable by law make it that way": the default is 14 days, and a site administrator may set 1 to 730 days, so a hotel whose national law requires connection logs to be kept longer can follow it.
 
+### D-CR, Central retention (Product Owner, 2026-10-19)
+
+- The audit log: **24 months**.
+- Security alerts and appliance history: "as long as possible while adhering to GDPR", settled as **6 years** for the events (the UK limitation period for a claim under the licence contract), with the **people removed after 24 months** (the security purpose, as for the audit log).
+- Disabled accounts: "as long as we can under GDPR", settled as **24 months** after disabling (the identity is needed only to read the audit log, which is kept 24 months).
+- Retired appliances and licence history: **6 years**.
+- Central's hosting provider: **not decided yet**; a placeholder in the record and Annex III.
+
+### How Central retention was built (Central migration 0054, on `delivery/gdpr`)
+
+- **Four settings**, `central_retention_settings`, under System > Team > Data retention, with a reason and step-up, audited from/to: audit log months (24, 6-120), people in the history months (24, 6-120), history years (6, 1-10), disabled account months (24, 1-120).
+- **`central_retention_apply()`, hourly from ctrlapi's housekeeping:** deletes audit entries, closed alerts, lifecycle, certificate and portal-certificate events past their period; removes the operator email, source IP and acknowledger from what is left after the shorter period; deletes ended licences (revoked, superseded or expired); clears a retired appliance's MAC addresses, host name and last public IP; anonymises disabled accounts (email replaced, name, password, authenticator and roles removed). Open alerts and live licences are never removed. Each run that changes anything is audited as `retention.applied`.
+- **Retired appliance records are cleared, not deleted:** deleting one revokes certificates and releases DNS names, which a background job must not do. `retired_appliance_identities` holds keys and serials only and stays, so a retired key stays refused.
+- `operators.disabled_at` is stamped by a trigger; an anonymised account cannot be enabled again. `portal_tls_events` stays append-only except to the retention function.
+
 ### How F5 was built (migration 0134, on `delivery/gdpr`)
 
 - **One more data-retention period**, `log_days`, beside the six of 0127: Hotel Admin → Backups → Data retention, "System logs", 1-730 days, default 14, with the password and a reason, logged like the others.

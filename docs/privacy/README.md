@@ -44,8 +44,8 @@ lawyer: tick boxes, a few blanks, and where in Hotel Admin each answer is found.
 | 4 | Confirm our internal practices: confidentiality clauses, training, encrypted support laptops, MFA on support systems | Annex II, Part A, rows marked [[confirm]] |
 | 5 | The breach contact (D-F2) | DPA clause 7.3 |
 | 6 | Governing law and courts; the liability position | DPA clauses 11 and 13 |
-| 7 | Retention periods for Central: disabled accounts, audit log, security alerts, retired appliances | Record Part 2 |
-| 8 | Whether Central is self-hosted or with a provider | Annex III, Part C; record Part 2 |
+| 7 | ~~Retention periods for Central~~: decided 2026-10-19 (D-CR) and built (Central migration 0054): audit log 24 months; alerts and appliance history 6 years with the people removed after 24 months; disabled accounts 24 months; retired appliances and licences 6 years. All settings | Record Part 2 |
+| 8 | Central's hosting provider: a provider, not yet chosen (Product Owner, 2026-10-19). Name, country and, outside the UK and EEA, the safeguard | Annex III, Part C; record Part 2 |
 | 9 | Our privacy notice for Central users (needed for record Part 2) | DPA clause 2.3 |
 
 ## Found while checking the code (not changed; backlog for the plan)
@@ -68,7 +68,7 @@ draft as it is today. Fixing one means updating the draft.
   - Backups keep for up to 30 days data the live database has already anonymised. That is normal for backups, but
     the hotel's notice should say so.
 - **Central:**
-  - The audit log, security alerts and lifecycle events are never purged (needs a retention decision).
+  - ~~The audit log, security alerts and lifecycle events are never purged~~: Central migration 0054 (2026-10-19), periods as decided in D-CR, all settings.
   - ~~Database backups are not encrypted~~: encrypted with age since 2026-10-19, once a key is listed in
     `/etc/stayconnect/backup-recipients.txt`. Until a key is listed they stay plain, and every run warns.
   - ~~There is no per-account password lockout~~: Central migration 0053 (2026-10-19), 5 wrong passwords lock for

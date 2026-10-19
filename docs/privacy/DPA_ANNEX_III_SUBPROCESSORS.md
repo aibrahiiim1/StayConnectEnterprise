@@ -48,4 +48,4 @@ clause 2.3), and are listed here for transparency. No guest data reaches them.
 |---|---|---|
 | Cloudflare (DNS API, and DNS-over-HTTPS together with Google Public DNS) | Publishing and checking the guest-portal host names for certificate issuance | Portal host names, the Appliance's **private** portal address, verification records |
 | Let's Encrypt (ISRG, United States) | Issuing the guest-portal certificate | Portal host names (published in public Certificate Transparency logs) and the contact email set in Central |
-| [[Central hosting: self-hosted, or the provider's name]] | Running Central | Central's database: staff accounts, Appliance identities, licences, audit log |
+| [[Central hosting provider: not decided yet. Name, country, and the transfer safeguard if outside the UK and EEA]] | Running Central | Central's database: staff accounts, Appliance identities, licences, audit log |

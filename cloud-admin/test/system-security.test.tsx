@@ -112,6 +112,57 @@ describe("System > Team: the sign-in lifetime setting", () => {
   });
 });
 
+const retention = {
+  audit_log_months: 24, audit_log_months_bounds: { default: 24, min: 6, max: 120, unit: "months" },
+  history_personal_months: 24, history_personal_months_bounds: { default: 24, min: 6, max: 120, unit: "months" },
+  history_years: 6, history_years_bounds: { default: 6, min: 1, max: 10, unit: "years" },
+  disabled_account_months: 24, disabled_account_months_bounds: { default: 24, min: 1, max: 120, unit: "months" },
+  updated_at: "2026-10-19T08:00:00Z", updated_by: "owner@example.test",
+};
+
+describe("System > Team: data retention (Central migration 0054)", () => {
+  it("shows the four periods with their bounds, refuses one out of range, and sends only what changed", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetch([
+      team,
+      { match: "/api/cloud/v1/settings/security", method: "GET", body: settings },
+      { match: "/api/cloud/v1/settings/retention", method: "GET", body: retention },
+      { match: "/api/cloud/v1/settings/retention", method: "PATCH", body: { ...retention, audit_log_months: 36 } },
+    ]);
+    renderAs(PLATFORM_ME, <TeamPage />);
+    const audit = await screen.findByLabelText("Months the audit log is kept");
+    expect(audit).toHaveValue("24");
+    expect(screen.getByLabelText("Years the history and licences are kept")).toHaveValue("6");
+    expect(screen.getByLabelText("Months before a disabled account is anonymised")).toHaveValue("24");
+    expect(screen.getByText(/From 1 to 10 years\. Default 6\./)).toBeInTheDocument();
+
+    await user.clear(audit);
+    await user.type(audit, "3");
+    await user.type(screen.getByPlaceholderText("e.g. auditor's request"), "auditor asked");
+    const saves = screen.getAllByRole("button", { name: "Save" });
+    await user.click(saves[saves.length - 1]);
+    expect(await screen.findByText(/Audit log \(months\): enter a whole number from 6 to 120/)).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+
+    await user.clear(audit);
+    await user.type(audit, "36");
+    await user.click(saves[saves.length - 1]);
+    await waitFor(() => expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(1));
+    expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ audit_log_months: 36, reason: "auditor asked" });
+  });
+
+  it("support staff see the periods but cannot change them", async () => {
+    mockFetch([
+      team,
+      { match: "/api/cloud/v1/settings/security", method: "GET", body: settings },
+      { match: "/api/cloud/v1/settings/retention", method: "GET", body: retention },
+    ]);
+    renderAs(SUPPORT_ME, <TeamPage />);
+    expect(await screen.findByLabelText("Months the audit log is kept")).toBeDisabled();
+    expect(screen.queryByPlaceholderText("e.g. auditor's request")).not.toBeInTheDocument();
+  });
+});
+
 describe("System > Backup health: the database backup", () => {
   it("a failed last run is shown as a problem with its error, next to the newest good dump", async () => {
     nav.reset("/system/backup-health");
