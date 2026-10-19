@@ -15,8 +15,9 @@ for organisations under 250 employees is not relied on: Central's processing is 
 
 | | |
 |---|---|
-| Name and contact details | Semantics Technology Ltd, [[registered address]], [[company registration number]], [[privacy contact email]] |
-| Representative in the Union (Art. 27), if we are established outside the EU | [[name and contact, or "not applicable"]] |
+| Name and contact details | Semantics Technology Ltd, registered office 124 City Road, London EC1V 2NX, United Kingdom, company number [[ ]], [[privacy contact email]] |
+| UK registration with the ICO (data protection fee) | [[registration number: a UK controller must pay the fee unless exempt]] |
+| Representative in the Union (Art. 27): we are established in the United Kingdom, outside the EU | [[legal review: whether one is needed; if so, name and contact]] |
 | Data protection officer (Art. 37), if one is designated | [[name and contact, or "none designated": record the reason]] |
 | Breach contact | [[D-F2]] |
 
@@ -36,9 +37,10 @@ each hotel's name, its contact details, its representative and DPO if any, and t
 We keep no guest data in our own systems beyond Customer Files. They are deleted when the case closes, within
 [[30]] days (DPA clause 9.2).
 
-**(c) Transfers to a third country.** [[None: the Services are performed from within the EEA.]] **or**
-[[Remote access and Customer Files reach [[country]] under the Standard Contractual Clauses, Module Two, with a
-transfer impact assessment.]] Add any transfer through a sub-processor in DPA Annex III, Part A.
+**(c) Transfers to a third country.** We work from the United Kingdom. For hotels in the EEA, remote access and
+Customer Files reach the UK under the EU adequacy decision for the United Kingdom (DPA clause 8.2). Any support
+from another country, or any sub-processor in DPA Annex III, Part A, outside the UK, EEA and adequate countries:
+[[none, or the country and the safeguard]].
 
 **(d) Security measures.** DPA Annex II, Part A.
 

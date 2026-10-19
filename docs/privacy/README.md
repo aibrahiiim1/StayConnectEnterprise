@@ -34,8 +34,8 @@ for those are a separate F3 item. The guest privacy-notice template already ship
 
 | # | Decision | Where it appears |
 |---|---|---|
-| 1 | Our company is **Semantics Technology Ltd** (Product Owner, 2026-10-18). Still needed: the registered address, the company number, the country of registration, and a privacy contact email | DPA parties, record |
-| 2 | **Where we and our support personnel are established.** Remote access from outside the EEA is a transfer under Chapter V (EDPB Guidelines 05/2021). If outside, the DPA needs the SCCs, Module Two, a transfer impact assessment, and possibly an Art. 27 representative | DPA clause 8, record Part 1(c) |
+| 1 | **Semantics Technology Ltd**, registered in the United Kingdom, office at 124 City Road, London EC1V 2NX, United Kingdom (Product Owner, 2026-10-18 and 19). Still needed: the company number, which UK register (England and Wales assumed), a privacy contact email, and the ICO registration | DPA parties, record |
+| 2 | **Transfers, now drafted for a UK company.** Remote access from the UK is a transfer for an EEA hotel, covered by the EU adequacy decision for the UK; no SCCs while it stands (DPA clause 8.2). Still needed: whether anyone supports hotels from outside the UK (clause 8.3), and the lawyer's view on an Art. 27 representative in the EU (clause 8.4). UK hotels are under the UK GDPR, which clause 1.1 now covers | DPA clause 8, record Part 1(c) |
 | 3 | The services our support uses (helpdesk, email, file transfer, remote screen sharing): each becomes a sub-processor | Annex III, Part A |
 | 4 | Confirm our internal practices: confidentiality clauses, training, encrypted support laptops, MFA on support systems | Annex II, Part A, rows marked [[confirm]] |
 | 5 | The breach contact (D-F2) | DPA clause 7.3 |

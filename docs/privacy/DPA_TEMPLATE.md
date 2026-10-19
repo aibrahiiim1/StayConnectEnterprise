@@ -7,14 +7,16 @@
 This Data Processing Agreement ("**DPA**") is made between:
 
 1. **[[Hotel legal name]]**, [[address]], [[registration number]] (the "**Controller**"); and
-2. **Semantics Technology Ltd**, [[registered address]], [[company registration number]] (the "**Processor**"),
+2. **Semantics Technology Ltd**, a company registered in England and Wales [[confirm: or Scotland / Northern Ireland]]
+   under number [[company number]], whose registered office is at 124 City Road, London EC1V 2NX, United Kingdom (the "**Processor**"),
 
 each a "**Party**". It forms part of the [[name of the licence / support agreement]] dated [[date]] (the
 "**Main Agreement**") and applies from the date the last Party signs it.
 
 ## 1. Definitions
 
-1.1 "**GDPR**" means Regulation (EU) 2016/679. "**Data Protection Law**" means the GDPR and any national law
+1.1 "**GDPR**" means Regulation (EU) 2016/679 and, where the Controller is established in the United Kingdom,
+the UK GDPR and the Data Protection Act 2018; references to an Article then mean the matching UK provision. "**Data Protection Law**" means the GDPR and any national law
 supplementing it that applies to the processing under this DPA. Terms such as *personal data*, *processing*,
 *controller*, *processor*, *data subject*, *personal data breach* and *supervisory authority* have the meanings
 given in Art. 4 GDPR.
@@ -152,16 +154,23 @@ agreements with them. Annex III, Part B lists them and the data the Software sen
 8.1 The Processor does not transfer the personal data to a country outside the European Economic Area, or to an
 international organisation, except under clause 8.2 or on the Controller's documented instructions.
 
-8.2 [[Choose one, after the D-F3 review. Remote access from outside the EEA is a transfer.]]
+8.2 **The Processor is established in the United Kingdom.** For a Controller in the EEA, access to the Appliance
+from the United Kingdom and Customer Files received there are transfers to a country covered by the European
+Commission's adequacy decision for the United Kingdom (Art. 45 GDPR; Commission Implementing Decision (EU)
+2021/1772, as renewed) [[legal review: confirm the decision is in force on signature]]. No further safeguard is
+needed while that decision stands. If it ends, the Parties enter into the Standard Contractual Clauses, Module Two
+(Commission Implementing Decision (EU) 2021/914), before any further transfer. For a Controller in the United
+Kingdom, the processing takes place in the United Kingdom.
 
-- **[[If the Processor and all support personnel are in the EEA:]]** The Processor performs the Services from
-  within the EEA. A Sub-processor outside the EEA is engaged only if that country has an adequacy decision
-  (Art. 45) or the Standard Contractual Clauses (Commission Implementing Decision (EU) 2021/914) are in place.
-- **[[If the Processor, or any support personnel, is outside the EEA (in [[country]]):]]** The Parties enter into
-  the Standard Contractual Clauses, Module Two (controller to processor), set out in [[Schedule]], which prevail
-  over this DPA if they conflict. The Processor has carried out a transfer impact assessment, available to the
-  Controller on request. Where Art. 3(2) GDPR applies to the Processor, it names its representative in the Union
-  under Art. 27: [[representative]].
+8.3 **Personnel and Sub-processors elsewhere.** Before any of the Processor's personnel performs a Service from a
+country that is neither in the EEA nor the United Kingdom, nor covered by an adequacy decision, or before a
+Sub-processor there is engaged, the Processor puts in place the Standard Contractual Clauses (and, for a UK
+Controller, the UK International Data Transfer Addendum) and a transfer impact assessment, and tells the
+Controller under clause 6.2. [[Product Owner: does anyone support hotels from outside the UK? If so, name the
+country here.]]
+
+8.4 **Representative in the Union (Art. 27).** [[Legal review: whether Art. 3(2) GDPR applies to the Processor, and
+if so the name and address of its representative in the Union.]]
 
 ## 9. Deletion and return (Art. 28(3)(g))
 
@@ -204,7 +213,8 @@ Standard Contractual Clauses, where they apply, prevail over both.
 
 ## 13. Governing law
 
-13.1 This DPA is governed by [[the law of an EU Member State]], and the courts of [[place]] have exclusive
+13.1 This DPA is governed by [[the law of England and Wales, or of the Controller's EU Member State: legal review]],
+and the courts of [[place]] have exclusive
 jurisdiction, without prejudice to data subjects' rights under Art. 79 GDPR.
 
 Signed for the Controller: [[name, role, date]]
