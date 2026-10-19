@@ -324,6 +324,61 @@ Also consider whether VIP and travel agent are needed at all (minimisation).
 
 ---
 
+## D. Final check: 2026-10-19, after the A, B and C fixes
+
+A read-only re-check of the `delivery/gdpr` branch (appliance migrations up to 0141, Central up to 0055), in
+four parts: logs and guest-facing protections, retention/export/erasure coverage, staff access, and documents
+against code. Nothing was deployed or changed by it.
+
+**Every A, B and C fix holds in the current code.** No new gap needs fixing before launch. These were found:
+
+### D, fix soon (B)
+
+| # | Finding | Evidence |
+|---|---|---|
+| D1 | **Stay links get round the shared-stay rule of C3.** Erasing or exporting a single-guest stay, or the only guest of one, follows room moves and transfers into linked stays, and does not check whether a linked stay has other guests. A shared linked stay is then exported with the other guests' names, and erased whole. The shared-stay filter applies to the account and identity kinds only. | `migrations/0141` scope (link expansion, filter for `account`/`principal` only); checks on the record asked for only (export, erasure `co_guests`) |
+| D2 | **Reservation numbers reach the view-only role.** `site_viewer` must not see reservation numbers (with the room they are the room sign-in credential, audit H-7), but the PMS reconciliation lists and the post-stay profile list and detail return them without the `canSeeStayIdentity` check the stay pages use. Post-stay is behind a flag. | `cmd/edged/resources_pms_reconciliation.go` (cases, past departures); `resources_phase5_poststay.go`; compare `resources_phase5_transfer.go` |
+| D3 | **Guest identifiers in the activity log are shown to roles that cannot see the guest.** B6 hides the details of `guest_data.*` entries only. The entry's target (a device MAC for a device view) stays visible and searchable, and other entries carry a guest username or MAC in their details (`guest_account.*`, DHCP reservations, sign-in restriction releases, network-pause confirmations). `payments_operator` reads the activity log but not guest accounts. | `cmd/edged/resources_site.go` (target shown and searched); `guest_accounts_iamv2.go`, `guest_accounts_manage.go`, `resources_network.go` |
+| D4 | **Central's record of processing says its server logs have no limit.** The access log is now kept 14 days (C6). The service journal on Central still has no limit set, and "every period is a setting" is not true for the access log or the 30-day fetch log. | `docs/privacy/RECORD_OF_PROCESSING.md` (f); `deploy/scripts/central-lib.sh`; `control-plane/internal/api/appliance_ops.go` |
+| D5 | **Annex II says the services never log the guest's address; the portal does.** When a phone checks for the sign-in page, the portal logs the guest's IP (only fixed probe paths, never browsing). The system-log period covers these lines, but the sentence is wrong. Also: the post-stay PIN sign-in is missing from the lists of what is recorded (guest notice, Annex I, hotel record); the guest notice gives no period for system logs; and the backup periods read as absolute, though pinned sets and the newest 7 can be older than 30 days. | `DPA_ANNEX_II_SECURITY_MEASURES.md` (request logs); `cmd/portald/portal_https.go`, `main.go`; `privacy-template.ts`; `deploy/scripts/stayconnect-backup-cleanup.sh` |
+
+### D, low (C)
+
+1. **Staff email in the appliance's admin commands.** Seed-admin and reset-two-step log the email; C6 fixed only
+   Central's (`cmd/edged/common.go`).
+2. **Device names last longer than documented.** Annex I says about two hours after a device leaves; with the
+   default lease, hold time and clean-up it is about four, and longer with longer leases (`DPA_TEMPLATE.md`
+   Annex I; `deploy/kea/kea-dhcp4.conf`).
+3. **More staff free text with no period:** posting-block notes and clear reasons, and voucher notes. The reason
+   typed for an erasure is kept for ever in the append-only erasure log (staff are told not to name the guest).
+4. **One guest of a shared stay:** their own sign-in attempts are not cleared or exported (they go at the
+   sign-in-attempt period); the stay's VIP flag and travel agent reach the export; audit entries about the
+   stay's PMS events are blanked for everyone; a name the PMS later corrected is not matched in older events.
+5. **A stay the PMS left open with no departure date** is never anonymised by retention, and erasure refuses it.
+6. **The guest-data search still carries names, emails or phone numbers in the URL.** Logs strip it today;
+   every other list sends the search in a header.
+7. **The access-log filter does not cover response headers** (`Location`). No current page puts guest data in
+   its path.
+8. **Shared-stay limits are not stated in the documents** (the room's shared access, devices and sessions are
+   not in a one-guest export, and stay after a one-guest erasure).
+9. **The guest notice's cookie list leaves out browser storage** (`sc-lang` language, `og-pay-*` during
+   payment). `og_resume` (30 days, set without a tick, not Secure over the HTTP fallback) should be confirmed
+   by the lawyer with D-F3.
+10. **Small things:** a failed guest-data export is not recorded; the erasure list does not check for a read
+    error; two code comments are out of date (the search is audited; there are eight retention periods); a PMS
+    event the stay engine is holding can survive an erasure that otherwise succeeds; non-ASCII name matching
+    depends on the database locale (not verified).
+
+### Still open, not defects
+
+- The `[[placeholders]]` in the DPA, Annex II, Annex III, the records, the Central notice and the guest notice
+  template, for the Product Owner and the lawyer: company and hotel details, contacts, ICO registration,
+  hosting provider, breach contact, transfers and safeguards, signatures and dates.
+- Nothing above is deployed: appliance migrations 0133 to 0141 and Central 0053 to 0055 wait for authorisation.
+  PRE-LIVE's database password has not been checked.
+
+---
+
 ## Verified as correct
 
 - **No card data reaches the appliance.** The payment callback refuses card-like values. Paymob billing fields are
