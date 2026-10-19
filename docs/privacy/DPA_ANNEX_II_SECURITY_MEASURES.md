@@ -44,7 +44,8 @@ The annex has three parts:
 
 - **Network separation:** the firewall drops by default. Guests reach only their own gateway (address assignment,
   name resolution, portal) until signed in, never the management network or each other's networks. Guest IPv6 is
-  dropped, and per-network client isolation is available. The Admin Console is served on the management interface
+  dropped, and client isolation (devices on a network cannot reach each other) is on by default for a new
+  network with a sign-in page. The Admin Console is served on the management interface
   only.
 - **Services run apart:** separate service accounts, a database role per service with only the rights it needs
   (no superuser, no row-level-security bypass), and an internal socket that admits only the expected service.
@@ -105,6 +106,10 @@ The annex has three parts:
   credential reveals, backup downloads, and guest exports and erasures, with time, staff member, IP address and
   user agent. It also records every time staff open one guest's record or search guest data, written in the
   background so pages do not slow down. Service accounts can add entries but cannot change or delete them.
+- **Request logs name the route, not the person.** The appliance's services and Central log the kind of page or
+  API served (for example `/edge/v1/usage/devices/{mac}`), never the address asked for, its query or the client's
+  address. The web server's access logs drop the query, MAC addresses and request headers. So searches typed by
+  staff, single-use links and the web addresses guests' browsers ask for before sign-in are not logged.
 
 ### System configuration and defaults
 
@@ -150,3 +155,7 @@ The Software is designed to be operated by the Controller. These matters stay wi
 9. **System logs** (web access log, address-assignment log, service journal) are deleted after the Controller's
    log period, 14 days by default (a setting of 1 to 730 days). The Controller sets a longer period only if its
    national law requires connection logs to be kept.
+10. **HTTPS for the guest portal.** Until the portal's certificate is issued, the sign-in page is served over plain
+    HTTP, and what guests type to sign in crosses the guest network unencrypted. Hotel Admin warns on the Sign-in
+    methods page while this lasts. The Controller completes Portal HTTPS before guests rely on typed sign-in
+    methods, and keeps client isolation on.

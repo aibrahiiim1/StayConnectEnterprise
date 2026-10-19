@@ -81,7 +81,7 @@ func NewRouter(d Deps) http.Handler {
 	// No middleware.RealIP: it believes any client's X-Forwarded-For. clientip.From decides per request and
 	// trusts forwarding headers only from the loopback proxy.
 	r.Use(traceIDHeader)
-	r.Use(middleware.Logger)
+	r.Use(requestLog)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(15 * time.Second))
 	r.Use(corsMiddleware(d.AllowOrigins))

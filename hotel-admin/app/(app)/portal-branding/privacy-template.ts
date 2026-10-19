@@ -13,7 +13,7 @@ WHO IS RESPONSIBLE
 [[Hotel legal name]], [[address]], is responsible for your personal data on this Wi-Fi network (the "controller"). Contact: [[privacy contact email]]. [[If you have a data protection officer: their name and email. Otherwise delete this sentence.]]
 
 WHAT WE RECORD
-- Your device's network addresses (MAC and IP address), when you connect and disconnect, and how much data each session uses.
+- Your device's network addresses (MAC and IP address), the name your device gives itself on the network while it is connected, when you connect and disconnect, and how much data each session uses. Not the websites you visit.
 - What you sign in with: [[delete the ways you do not offer]] your room number and the detail asked for with it (checked against your reservation); a voucher code; an account name; an email address and password; a phone number; or the Google, Apple, Facebook or Microsoft account you choose, from which we keep only your email address and your account id with that company.
 - [[Only if you offer room sign-in:]] To check room sign-ins, a copy of the current reservations from our reservation system: name, room, reservation number and dates of stay.
 - Sign-in attempts, including failed ones, to protect the network against misuse.

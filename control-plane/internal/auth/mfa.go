@@ -61,6 +61,8 @@ type MFA struct {
 	aead  cipher.AEAD
 	keyID string
 	mac   []byte
+	// throttle keys the wrong-password counter (signin_throttle.go).
+	throttle []byte
 }
 
 // LoadMFAKeyFile reads a 32-byte key file (raw, or base64 of 32 bytes).
@@ -94,7 +96,9 @@ func NewMFA(db *pgxpool.Pool, key []byte) (*MFA, error) {
 	id := sha256.Sum256(append([]byte(mfaDomain+"|id:"), key...))
 	m := hmac.New(sha256.New, key)
 	m.Write([]byte(mfaDomain + "|recovery-mac"))
-	return &MFA{DB: db, aead: gcm, keyID: hex.EncodeToString(id[:8]), mac: m.Sum(nil)}, nil
+	t := hmac.New(sha256.New, key)
+	t.Write([]byte(mfaDomain + "|signin-throttle"))
+	return &MFA{DB: db, aead: gcm, keyID: hex.EncodeToString(id[:8]), mac: m.Sum(nil), throttle: t.Sum(nil)}, nil
 }
 
 func (s *MFA) ready() error {

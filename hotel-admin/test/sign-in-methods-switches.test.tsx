@@ -27,8 +27,9 @@ const g = api.get as unknown as ReturnType<typeof vi.fn>;
 const put = api.put as unknown as ReturnType<typeof vi.fn>;
 const list = <T,>(data: T[]) => ({ data, meta: { has_more: false } });
 
-function routes(methods: Record<string, unknown>) {
+function routes(methods: Record<string, unknown>, httpsActive?: boolean) {
   g.mockImplementation((path: string) => {
+    if (path === "/portal-https" && httpsActive !== undefined) return Promise.resolve({ state: { https_active: httpsActive } });
     if (path === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
     if (path === "/auth-methods") return Promise.resolve(methods);
     // No SMS sender any more, and no identity provider application.
@@ -66,5 +67,26 @@ describe("Sign-in methods: a method that cannot deliver can still be switched of
     expect(screen.getByText(/not set up/i)).toBeInTheDocument();
     await userEvent.click(box);
     await waitFor(() => expect(put).toHaveBeenCalledWith("/auth-methods", { social: { google: { enabled: false } } }));
+  });
+});
+
+describe("Sign-in methods: plain-HTTP warning (GDPR audit A3)", () => {
+  it("warns while the portal has no HTTPS and a typed sign-in method is on", async () => {
+    routes({ sms: { enabled: true } }, false);
+    render(<SignInMethodsPage />);
+    expect(await screen.findByText("Sign-ins are not encrypted yet")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Portal HTTPS" })).toHaveAttribute("href", "/portal-https");
+  });
+
+  it("says nothing once HTTPS is active, or when no typed method is on", async () => {
+    routes({ sms: { enabled: true } }, true);
+    const { unmount } = render(<SignInMethodsPage />);
+    await screen.findByRole("switch", { name: "SMS code" });
+    expect(screen.queryByText("Sign-ins are not encrypted yet")).not.toBeInTheDocument();
+    unmount();
+    routes({ open: { enabled: true } }, false);
+    render(<SignInMethodsPage />);
+    await screen.findByRole("switch", { name: "SMS code" });
+    expect(screen.queryByText("Sign-ins are not encrypted yet")).not.toBeInTheDocument();
   });
 });

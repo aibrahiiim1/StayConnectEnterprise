@@ -495,9 +495,11 @@ const landingHTML = `<!doctype html>
          load before the guest is online. The remembered-device sentence is shown where the device can be
          remembered (a verified code or an identity provider), and on the welcome-back screen itself. -->
     <div class="privacy" id="privacy">
-      <details class="privacy-notice" id="privacy-notice"{{if not .PrivacyText}} hidden{{end}}>
+      <details class="privacy-notice" id="privacy-notice">
         <summary data-i18n="privacy.link" data-i18n-en="How we use your data">{{index .T "privacy.link"}}</summary>
-        <div class="privacy-text" id="privacy-text" dir="auto">{{.PrivacyText}}</div>
+        <div class="privacy-text" id="privacy-text" dir="auto"{{if not .PrivacyText}} hidden{{end}}>{{.PrivacyText}}</div>
+        <p class="privacy-text" id="privacy-default"{{if .PrivacyText}} hidden{{end}}
+           data-i18n="privacy.default" data-i18n-en="This Wi-Fi is provided by the hotel, which is responsible for your personal data on it. To give you internet access and keep the network secure, it records your device’s network addresses, when you connect and how much data you use, and what you sign in with. These records are deleted or made anonymous after a set time. Ask at reception for the hotel’s full privacy notice, or to see, correct or delete your data.">{{index .T "privacy.default"}}</p>
       </details>
       <a class="privacy-url" id="privacy-url"{{with .PrivacyURL}} href="{{.}}"{{end}} target="_blank" rel="noopener noreferrer"{{if not .PrivacyURL}} hidden{{end}}
          data-i18n="privacy.url" data-i18n-en="Privacy notice">{{index .T "privacy.url"}}</a>
@@ -962,7 +964,8 @@ const landingHTML = `<!doctype html>
       if (d.terms_url) { terms.href = d.terms_url; } else { terms.removeAttribute('href'); }
       document.getElementById('brand-terms-wrap').hidden = !d.terms_url;
       document.getElementById('privacy-text').textContent = d.privacy_text || '';
-      document.getElementById('privacy-notice').hidden = !d.privacy_text;
+      document.getElementById('privacy-text').hidden = !d.privacy_text;
+      document.getElementById('privacy-default').hidden = !!d.privacy_text;
       const privacyURL = document.getElementById('privacy-url');
       if (d.privacy_url) { privacyURL.href = d.privacy_url; } else { privacyURL.removeAttribute('href'); }
       privacyURL.hidden = !d.privacy_url;

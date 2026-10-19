@@ -92,7 +92,15 @@ portal.stayconnect.local {
 
 	log {
 		output file /var/log/caddy/portal.log
-		format json
+		# No query, no MAC address and no request headers in the access log (GDPR audit 2026-10-19):
+		# a query carries searches, single-use codes and links; headers carry the X-*-Search fields.
+		format filter {
+			wrap json
+			fields {
+				request>headers delete
+				request>uri regexp "[?].*$|[0-9A-Fa-f]{2}(?:(?:[:-]|%3[Aa])[0-9A-Fa-f]{2}){5}" "[redacted]"
+			}
+		}
 	}
 }
 

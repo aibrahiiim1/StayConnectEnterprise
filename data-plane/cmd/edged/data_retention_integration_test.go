@@ -130,6 +130,17 @@ func TestIntegration_DataRetention_AnonymisesOnlyWhatOutlivedTheRetention(t *tes
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	oldStay := seedStay("R-OLD-"+suffix, "101", 60)
 	recentStay := seedStay("R-NEW-"+suffix, "102", 5)
+	// Migration 0066's rollback copy of the names and room, for both stays (GDPR audit A6, migration 0135).
+	if _, err := f.pool.Exec(ctx, `INSERT INTO iam_v2.backfill_0066_identity_text (kind,row_id,tenant_id,site_id,prior_first_name,prior_last_name)
+		SELECT 'stay_guest', g.id, g.tenant_id, g.site_id, 'Ada', 'Lovelace' FROM iam_v2.stay_guests g WHERE g.stay_id = ANY($1::uuid[]);
+		`, []string{oldStay, recentStay}); err != nil {
+		t.Fatalf("seed 0066 copy: %v", err)
+	}
+	if _, err := f.pool.Exec(ctx, `INSERT INTO iam_v2.backfill_0066_identity_text (kind,row_id,tenant_id,site_id,prior_room)
+		SELECT 'stay_room', s.id, s.tenant_id, s.site_id, '101A' FROM iam_v2.stays s WHERE s.id = ANY($1::uuid[])`,
+		[]string{oldStay, recentStay}); err != nil {
+		t.Fatalf("seed 0066 copy: %v", err)
+	}
 
 	// --- An account used two years ago (its entitlement ended then, its device last seen then) and a live one.
 	oldAcct, oldDevice, oldSession := seedEndedAccount(t, f, "old-"+suffix+"@example.com", longAgo, "10.77.0.10")
@@ -259,6 +270,13 @@ func TestIntegration_DataRetention_AnonymisesOnlyWhatOutlivedTheRetention(t *tes
 	// The recent stay is untouched.
 	expect("recent stay reservation", str(`SELECT external_reservation_id FROM iam_v2.stays WHERE id=$1`, recentStay), "R-NEW-"+suffix)
 	expect("recent guest name", str(`SELECT last_name_norm FROM iam_v2.stay_guests WHERE stay_id=$1`, recentStay), "lovelace")
+	copyOf := func(stay string) string {
+		return str(`SELECT coalesce(string_agg(concat_ws(',',x.prior_first_name,x.prior_last_name,x.prior_room), ';' ORDER BY x.kind),'')
+			FROM iam_v2.backfill_0066_identity_text x
+			WHERE x.row_id = $1::uuid OR x.row_id IN (SELECT g.id FROM iam_v2.stay_guests g WHERE g.stay_id = $1::uuid)`, stay)
+	}
+	expect("old stay's 0066 copy", copyOf(oldStay), ";")
+	expect("recent stay's 0066 copy", copyOf(recentStay), "Ada,Lovelace;101A")
 
 	// The old account, its device and its session.
 	prefixed("old account username", str(`SELECT username FROM iam_v2.guest_access_accounts WHERE id=$1`, oldAcct), "anon-")

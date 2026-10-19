@@ -26,6 +26,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, ListResp, Whoami } from "@/lib/api";
+import type { PortalHTTPSDoc } from "@/lib/portal-https";
 import { canRead, canWrite } from "@/lib/roles";
 import { GuestSignInProtectionCard } from "@/components/guest-signin-protection";
 import { CodeRequestsCard } from "@/components/code-requests";
@@ -35,7 +36,7 @@ import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/compon
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Select } from "@/components/ui/input";
-import { ErrorBanner } from "@/components/ui/error-banner";
+import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { PageHeader, PageShell } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Skeleton, Switch } from "@/components/ui/misc";
@@ -88,6 +89,12 @@ type SocialProvider = { provider: string; enabled: boolean };
 
 const SOCIAL_LABELS: Record<string, string> = { google: "Google", apple: "Apple", facebook: "Facebook", microsoft: "Microsoft" };
 
+/** Whether any method on which the client types a secret (room and name, password, code) is switched on. */
+export function typedSignInOn(cfg: AuthMethods): boolean {
+  return !!(cfg.voucher?.enabled || cfg.guest_account?.enabled || cfg.pms?.enabled || cfg.email_account?.enabled ||
+    cfg.sms?.enabled || cfg.whatsapp?.enabled);
+}
+
 export default function SignInMethodsPage() {
   const toast = useToast();
   // The role is read once and FAILS CLOSED while it loads: an editable field that appears and then turns
@@ -114,6 +121,8 @@ export default function SignInMethodsPage() {
   const [cfg, setCfg] = useState<AuthMethods | null>(null);
   const [notify, setNotify] = useState<NotifyProvider[]>([]);
   const [social, setSocial] = useState<SocialProvider[]>([]);
+  // Whether the sign-in page is served over HTTPS yet (GDPR audit A3). null: unknown, nothing is shown.
+  const [httpsActive, setHttpsActive] = useState<boolean | null>(null);
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState<string | null>(null);
   // Whether Room sign-in can serve a guest right now. Only a one-line warning is shown here — the detail is on
@@ -138,6 +147,12 @@ export default function SignInMethodsPage() {
         const n = await api.get<ListResp<NotifyProvider>>("/notification-providers");
         setNotify(n.data ?? []);
       } catch { /* readiness unknown; rendered as such */ }
+    }
+    if (roles !== null && canRead("portal-https", roles)) {
+      try {
+        const d = await api.get<PortalHTTPSDoc>("/portal-https");
+        setHttpsActive(typeof d?.state?.https_active === "boolean" ? d.state.https_active : null);
+      } catch { /* unknown; no warning rather than a wrong one */ }
     }
     if (socialMod && roles !== null && canRead("social-providers", roles)) {
       try {
@@ -246,6 +261,15 @@ export default function SignInMethodsPage() {
         <ReadOnlyNotice>Your role can see which sign-in methods are offered but not change them.</ReadOnlyNotice>
       )}
       <ErrorBanner err={err} className="mb-0" />
+
+      {httpsActive === false && typedSignInOn(cfg) && (
+        <Callout tone="warning" title="Sign-ins are not encrypted yet">
+          The client sign-in page is still served over plain HTTP, because the portal has no HTTPS certificate yet. Until
+          it has, what clients type to sign in (room and name, passwords, codes) crosses the client network unencrypted,
+          and another device on that network could read it. Keep client isolation on for client networks, and finish{" "}
+          <Link href="/portal-https" className="underline">Portal HTTPS</Link> before clients rely on these methods.
+        </Callout>
+      )}
 
       <div className="grid gap-4 md:grid-cols-2">
         <MethodCard

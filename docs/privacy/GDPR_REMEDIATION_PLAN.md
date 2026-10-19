@@ -176,6 +176,47 @@ Each value ships as a hotel setting with this default, following `OPERATIONAL_SE
 
 - "14 days, but if it can be configurable by law make it that way": the default is 14 days, and a site administrator may set 1 to 730 days, so a hotel whose national law requires connection logs to be kept longer can follow it.
 
+### The audit's before-launch items (GDPR_AUDIT_2026-10-19.md, section A), built 2026-10-19
+
+The Product Owner chose:
+- a warning, not refusal, for the plain-HTTP portal;
+- client isolation on for new networks;
+- a built-in short notice when the hotel has none.
+
+**A1 and A2: request logs.**
+- edged, portald, scd and Central log the matched route pattern only (`data-plane/internal/reqlog`,
+  `control-plane/internal/http/reqlog.go`): no path, query or client address.
+- The Caddy access logs (portal, Hotel Admin, Central) drop request headers, the query and MAC addresses
+  through a log filter.
+
+**A3: guest networks.**
+- A new network with a captive portal isolates its clients unless told otherwise. A replacement keeps its
+  predecessor's value.
+- Sign-in methods warns while Portal HTTPS is not active and a typed sign-in method is on.
+
+**A5: the privacy notice.**
+- The portal shows a short built-in notice (`privacy.default`, in every portal language) whenever the hotel
+  has written none.
+- Saving the portal design warns while there is none.
+
+**A6: the 0066 copy (migration 0135).**
+- `anonymise_stay` also clears 0066's copy of the names and room, and the copy is cleared now for stays
+  already anonymised.
+- Dropping the table is still open.
+
+**A7: DHCP device names.** Documented in Annex I, the hotel record and the notice template. They live in Kea's
+lease file while a device is connected and leave it within about two hours.
+
+**A8: Central (0054 extended before its first deployment).**
+- Appliance moves and certificate-request addresses are now covered.
+- The certificate contact is removed from portal-certificate history.
+- Idle wrong-password counters are swept hourly, and the counter key is an HMAC.
+- The Central notice and record are corrected: the Central-wide certificate contact, conditional backup
+  encryption, and who in a customer can see accounts.
+
+**A4: open (D-A4).** A cap per network on failed room sign-ins, with an alert, fits the earlier ruling against
+per-room and per-address throttles. It waits for the Product Owner.
+
 ### D-SSH, appliance SSH: **to decide before launch** (Product Owner, 2026-10-19)
 
 - **The fact:** the firewall accepts SSH on the uplink interface (`deploy/nftables/stayconnect.nft`, `ens160` port 22), and we ship no SSH settings, so the operating system's defaults apply: password login, no lockout. Guests cannot reach it. Whether the internet can depends on the hotel's own router.

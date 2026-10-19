@@ -30,7 +30,7 @@ appliance at the hotel, and the hotel's own privacy notice covers it.
 | **The audit log** | What you did in Central and when, with your IP address and browser. A failed sign-in to an existing account is recorded against that account; for a name that has no account, only the attempt and its IP address are recorded, not what was typed | To protect Central, investigate misuse, and show who made each change | Legitimate interest: security and accountability (Art. 6(1)(f)) |
 | **Wrong-password counting** | A one-way hash of the name you typed and how many wrong passwords were tried, to lock the account for a while after repeated failures. It never holds the email address itself | To stop password guessing | Legitimate interest: security (Art. 6(1)(f)) |
 | **Your name in appliance history and alerts** | When you activate, retire or replace an appliance, or handle a security alert, the history records your email and IP address | To keep a reliable history of each appliance and licence | Legitimate interest: security and accountability (Art. 6(1)(f)) |
-| **Certificate contact** *(only if your organisation gives one)* | The contact email used when Central obtains a certificate for the hotel's guest portal | To obtain and renew that certificate | Contract with your organisation (Art. 6(1)(b)) |
+| **Certificate contact** *(only if you are the one we name)* | One contact email for all of Central, registered with Let's Encrypt for the guest-portal certificates, normally one of ours. A change to it is recorded in the history with the old and new address | To obtain and renew the certificates | Legitimate interest in running the service (Art. 6(1)(f)) |
 
 You must give an email address and set a password and an authenticator to have an account. Without them we
 cannot give you access.
@@ -41,13 +41,16 @@ by itself and decides nothing else about you.
 
 ## Who receives it
 
-- **Our staff** who run Central, and the administrators of your own organisation, who can see your account and
-  its activity within their organisation.
+- **Our staff** who run Central.
+- **People at your own organisation with a Central account**, depending on their role: administrators, and also
+  auditor and viewer roles, can see the organisation's accounts with their last sign-in and its audit log,
+  including IP addresses.
+- **For our own staff:** when you act on a customer's records, that customer's accounts can see in its history
+  and audit log that you did, with your email and IP address.
 - **Our hosting provider:** [[Central hosting provider, not decided yet: name and country]], which runs the
   servers Central's database is on, under a contract that allows it to use the data only to provide that
   service.
-- **Let's Encrypt** (Internet Security Research Group, United States) receives the certificate contact email, if
-  one is given, and the guest portal's host names. Host names are published in public certificate transparency
+- **Let's Encrypt** (Internet Security Research Group, United States) receives the certificate contact email and the guest portal's host names. Host names are published in public certificate transparency
   logs. **Cloudflare** (United States) receives the guest portal's host names for DNS. Neither receives your
   account details.
 - **Authorities**, only when the law requires it.
@@ -61,7 +64,7 @@ by itself and decides nothing else about you.
 
 ## How long we keep it
 
-Each period is a setting in Central (System → Team → Data retention). These are the defaults:
+The main periods are settings in Central (System → Team → Data retention); the session limits, the five-minute sign-in step and the two-day counter are fixed. These are the defaults:
 
 | What | How long |
 |---|---|
@@ -69,9 +72,9 @@ Each period is a setting in Central (System → Team → Data retention). These 
 | Your account, after it is disabled | 24 months. Then your email, name, password and authenticator are removed for good |
 | Your sign-in session | Ends after 30 minutes without activity, and 12 hours after you signed in at most. A half-finished sign-in ends after 5 minutes |
 | The audit log | 24 months |
-| Wrong-password counts | Removed once 2 days have passed without a wrong password |
-| Your name and IP address in appliance history and alerts | 24 months. The history itself is kept 6 years without them |
-| Backups of Central's database | The newest 7 nightly backups, encrypted. Data removed from Central stays in a backup until that backup is replaced |
+| Wrong-password counts | Removed within an hour once 2 days have passed without a wrong password |
+| Your name and IP address in appliance history, appliance moves, certificate requests and alerts | 24 months. The history itself is kept 6 years without them |
+| Backups of Central's database | The newest 7 nightly backups, encrypted once a key holder is registered. Data removed from Central stays in a backup until that backup is replaced |
 
 ## Cookies and your browser
 
@@ -88,7 +91,7 @@ There is no tracking or analytics, and the console loads nothing from other webs
 Every account signs in with a password and an authenticator code. Sessions end on their own, and some actions
 ask for your password again. Each role sees only what it needs. Central is reached only over HTTPS, and
 appliances connect with their own certificates. Secrets are encrypted, and database backups are encrypted to our
-own key holders.
+own key holders once one is registered.
 
 ## Your rights
 

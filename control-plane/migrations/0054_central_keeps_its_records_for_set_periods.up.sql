@@ -11,6 +11,9 @@
 --   history_personal_months  (24, 6-120)  in security alerts and appliance, certificate and portal-certificate
 --                                         history, the people are removed: the operator's email, the source IP
 --                                         address and who acknowledged an alert. The events themselves stay.
+--                                         Also: who moved an appliance between customers and from where
+--                                         (appliance_assignments), the address a certificate was requested
+--                                         from, and the certificate contact email in portal-certificate history.
 --   history_years            (6, 1-10)    those events are deleted (open alerts are kept until closed); ended
 --                                         licences are deleted; a retired appliance's MAC addresses, host name
 --                                         and last public IP are cleared. The licence is a contract record, and
@@ -22,6 +25,8 @@
 -- Retired appliance records are cleared, not deleted: deleting one revokes certificates and releases DNS names
 -- (appliance_ops.go), which a background job must not do. retired_appliance_identities holds only keys and
 -- serials, no personal data, and is kept so a retired key stays refused.
+--
+-- Wrong-password counters idle for two days are swept on every run.
 --
 -- operators gains disabled_at (set by trigger) and anonymised_at; an anonymised account cannot be re-enabled.
 -- portal_tls_events stays append-only except to this function.
@@ -107,6 +112,8 @@ BEGIN
   GET DIAGNOSTICS n = ROW_COUNT; out := out || jsonb_build_object('certificate_events_deleted', n); total := total + n;
   DELETE FROM portal_tls_events WHERE at < history_cut;
   GET DIAGNOSTICS n = ROW_COUNT; out := out || jsonb_build_object('portal_tls_events_deleted', n); total := total + n;
+  DELETE FROM appliance_assignments WHERE created_at < history_cut;
+  GET DIAGNOSTICS n = ROW_COUNT; out := out || jsonb_build_object('assignment_moves_deleted', n); total := total + n;
 
   -- The people in what is left, after the shorter period. An actor that is an email becomes 'removed';
   -- 'system' and appliance actors are kept.
@@ -123,8 +130,19 @@ BEGIN
      SET source_ip = NULL, actor = CASE WHEN actor LIKE '%@%' THEN 'removed' ELSE actor END
    WHERE created_at < people_cut AND (source_ip IS NOT NULL OR actor LIKE '%@%');
   GET DIAGNOSTICS n = ROW_COUNT; out := out || jsonb_build_object('certificate_events_anonymised', n); total := total + n;
-  UPDATE portal_tls_events SET actor = 'removed' WHERE at < people_cut AND actor LIKE '%@%';
+  -- A settings change records the certificate contact email it changed (portaltls/admin.go): it goes too.
+  UPDATE portal_tls_events
+     SET actor = CASE WHEN actor LIKE '%@%' THEN 'removed' ELSE actor END, detail = detail - 'contact_email'
+   WHERE at < people_cut AND (actor LIKE '%@%' OR detail ? 'contact_email');
   GET DIAGNOSTICS n = ROW_COUNT; out := out || jsonb_build_object('portal_tls_events_anonymised', n); total := total + n;
+  -- Who moved an appliance between customers, and from where (0022).
+  UPDATE appliance_assignments SET operator_id = NULL, source_ip = NULL
+   WHERE created_at < people_cut AND (operator_id IS NOT NULL OR source_ip IS NOT NULL);
+  GET DIAGNOSTICS n = ROW_COUNT; out := out || jsonb_build_object('assignment_moves_anonymised', n); total := total + n;
+  -- The address an appliance asked for its certificate from (0023).
+  UPDATE appliance_certificate_requests SET source_ip = NULL
+   WHERE requested_at < people_cut AND source_ip IS NOT NULL;
+  GET DIAGNOSTICS n = ROW_COUNT; out := out || jsonb_build_object('certificate_requests_anonymised', n); total := total + n;
 
   -- Ended licences: revoked, superseded by a newer one, or expired, before the history period. A licence with
   -- none of those ends at infinity and is never removed.
@@ -158,6 +176,12 @@ BEGIN
     DELETE FROM operator_signin_pending p USING operators o WHERE p.operator_id = o.id AND o.anonymised_at IS NOT NULL;
     DELETE FROM operator_roles r USING operators o WHERE r.operator_id = o.id AND o.anonymised_at IS NOT NULL;
   END IF;
+
+  -- Wrong-password counters untouched for two days (0053 removed them only, by chance, on a later failure). A
+  -- routine sweep, so it is reported but does not by itself make the run an audited event.
+  DELETE FROM operator_signin_throttle
+   WHERE last_failure_at < now() - interval '2 days' AND (locked_until IS NULL OR locked_until < now());
+  GET DIAGNOSTICS n = ROW_COUNT; out := out || jsonb_build_object('signin_counters_deleted', n);
 
   PERFORM set_config('central.retention', 'off', true);
   IF total > 0 THEN

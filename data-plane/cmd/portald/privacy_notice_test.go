@@ -46,16 +46,29 @@ func TestTheSignInPageCarriesThePrivacyNotice(t *testing.T) {
 	}
 }
 
-func TestNoNoticeMeansNothingEmptyIsShown(t *testing.T) {
+// GDPR audit 2026-10-19, A5: a hotel that wrote no notice still shows guests a short built-in one, and an
+// empty link is not shown. The hotel's own text, once written, replaces the built-in one.
+func TestNoHotelNoticeShowsTheBuiltInOne(t *testing.T) {
 	tmpl, _ := template.New("land").Parse(landingHTML)
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, newLandingView(httptest.NewRequest(http.MethodGet, "/", nil), map[string]any{}, "n", "", "", "")); err != nil {
-		t.Fatal(err)
+	render := func(d map[string]any) string {
+		var buf bytes.Buffer
+		if err := tmpl.Execute(&buf, newLandingView(httptest.NewRequest(http.MethodGet, "/", nil), d, "n", "", "", "")); err != nil {
+			t.Fatal(err)
+		}
+		return buf.String()
 	}
-	html := buf.String()
-	if !strings.Contains(html, `id="privacy-notice" hidden`) || !strings.Contains(html, `hidden
+	html := render(map[string]any{})
+	if strings.Contains(html, `id="privacy-notice" hidden`) || strings.Contains(html, `id="privacy-default" hidden`) ||
+		!strings.Contains(html, "which is responsible for your personal data") {
+		t.Error("with no hotel notice, the built-in notice is not shown")
+	}
+	if !strings.Contains(html, `hidden
          data-i18n="privacy.url"`) {
-		t.Error("an empty notice or link is shown")
+		t.Error("an empty notice link is shown")
+	}
+	html = render(portaldesign.ForGuests(map[string]any{"privacy_text": "The Hotel's own notice"}))
+	if !strings.Contains(html, `id="privacy-default" hidden`) || !strings.Contains(html, "The Hotel&#39;s own notice") {
+		t.Error("the hotel's notice does not replace the built-in one")
 	}
 }
 

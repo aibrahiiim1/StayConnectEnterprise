@@ -149,6 +149,12 @@ func Validate(d map[string]any) []Issue {
 	text("welcome_text", MaxWelcomeText)
 	text("help_text", MaxHelpText)
 	text("privacy_text", MaxPrivacyText)
+	// No notice of the hotel's own (GDPR audit 2026-10-19, A5): guests then see the portal's short built-in
+	// notice, which cannot name the hotel or its periods, so the hotel is told every time it saves.
+	if s, _ := d["privacy_text"].(string); strings.TrimSpace(s) == "" {
+		out = append(out, Issue{Field: "privacy_text", Severity: SeverityWarning, Message: "no privacy notice of your own: " +
+			"clients see only a short general notice. Start from the template under Content → Privacy notice and complete it"})
+	}
 	if s, ok := d["privacy_text"].(string); ok {
 		if n := len(rePlaceholder.FindAllString(s, -1)); n > 0 {
 			out = append(out, Issue{Field: "privacy_text", Severity: SeverityWarning, Message: fmt.Sprintf(

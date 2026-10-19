@@ -46,6 +46,29 @@ The gaps fall into four groups:
 
 ## A. Fix before launch
 
+**Status, 2026-10-19 (same day):**
+
+| Item | Status |
+|---|---|
+| A1 | **Fixed** (`internal/reqlog`, Caddy log filters) |
+| A2 | **Fixed** (`internal/reqlog`) |
+| A3 | **Fixed:** isolation on for new networks, and a warning while HTTPS is not active, as the Product Owner chose |
+| A4 | **Open:** needs a Product-Owner decision (below) |
+| A5 | **Fixed:** a built-in notice and a warning |
+| A6 | **Fixed by retention** (migration 0135); dropping the table is still the Product Owner's decision |
+| A7 | **Documented** |
+| A8 | **Fixed** (0054 extended, HMAC counter key, notice and record corrected) |
+
+**A4, why it is open.** The room sign-in limit per device replaced a per-room and per-address throttle by an
+earlier Product-Owner ruling, recorded in `cmd/scd/phase3_auth.go`:
+
+- a per-room limit lets an attacker lock a real guest out of their own room;
+- an address is shared behind NAT.
+
+Re-adding either would reverse that ruling. An option that fits it: a per-network cap on the total number of
+failed room sign-ins, which raises an operational alert and slows all room sign-ins on that network while an
+attack lasts. Its cost is that honest guests wait during an attack.
+
 **A1. Guest search terms are written to the request logs. ✔ confirmed**
 
 - **Evidence:**

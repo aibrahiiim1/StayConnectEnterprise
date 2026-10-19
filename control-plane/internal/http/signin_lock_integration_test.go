@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -76,6 +78,12 @@ func TestSignInLocksAfterRepeatedWrongPasswords(t *testing.T) {
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM operator_signin_throttle WHERE key_hash LIKE '%@%'`).Scan(&n)
 	if n != 0 {
 		t.Fatal("the throttle stores an email address")
+	}
+	// Nor a plain hash of one, which a list of addresses would reverse (GDPR audit A8): the key is an HMAC.
+	plain := sha256.Sum256([]byte("lock@central.test"))
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM operator_signin_throttle WHERE key_hash = $1`, hex.EncodeToString(plain[:])).Scan(&n)
+	if n != 0 {
+		t.Fatal("the throttle key is a plain SHA-256 of the email")
 	}
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action = 'auth.signin_locked'`).Scan(&n)
 	if n != 2 {

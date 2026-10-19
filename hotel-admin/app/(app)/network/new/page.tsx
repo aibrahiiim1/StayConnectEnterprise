@@ -86,7 +86,8 @@ export default function NewGuestNetworkPage() {
   const [captivePortal, setCaptivePortal] = useState(true);
   const [internetAccess, setInternetAccess] = useState(true);
   const [nat, setNat] = useState(true);
-  const [clientIsolation, setClientIsolation] = useState(false);
+  // On by default for a new network (GDPR audit A3): one client must not reach another's device.
+  const [clientIsolation, setClientIsolation] = useState(true);
 
   // apply flow
   const [created, setCreated] = useState<{ id: string; bridge_name: string; portal_url: string } | null>(null);

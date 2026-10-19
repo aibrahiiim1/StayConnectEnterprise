@@ -48,6 +48,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/otpkey"
 	"github.com/stayconnect/enterprise/data-plane/internal/pms"
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsloader"
+	"github.com/stayconnect/enterprise/data-plane/internal/reqlog"
 	"github.com/stayconnect/enterprise/data-plane/internal/sealbox"
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
 	"github.com/stayconnect/enterprise/data-plane/internal/signinattempt"
@@ -933,7 +934,8 @@ func main() {
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(middleware.Logger)
+	// No path, query or client address in the request log (reqlog; GDPR audit 2026-10-19).
+	r.Use(reqlog.Middleware)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(10 * time.Second))
 	// WHO MAY ASK FOR WHAT. One socket carries the guest-authentication routes portald needs and the

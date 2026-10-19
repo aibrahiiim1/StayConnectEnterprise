@@ -50,6 +50,23 @@ func TestRetentionAppliesCentralPeriods(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Who moved the appliance, a certificate request, a settings change naming the certificate contact, and an
+	// idle wrong-password counter.
+	exec(`INSERT INTO appliance_assignments (appliance_id, operator_id, source_ip, created_at)
+        VALUES ($1,$2::uuid,'198.51.100.7',`+ago("7 years")+`)`, liveApp, f.session.OperatorID)
+	midMove := exec(`INSERT INTO appliance_assignments (appliance_id, operator_id, source_ip, created_at)
+        VALUES ($1,$2::uuid,'198.51.100.7',`+ago("3 years")+`)`, liveApp, f.session.OperatorID)
+	csr := exec(`INSERT INTO appliance_certificate_requests (appliance_id, csr_pem, source_ip, requested_at)
+        VALUES ($1,'csr','198.51.100.8',`+ago("3 years")+`)`, liveApp)
+	if _, err := f.pool.Exec(f.ctx, `INSERT INTO portal_tls_events (appliance_id, kind, actor, detail, at) VALUES
+        (NULL,'settings_changed','someone@central.test','{"contact_email":{"from":"a@central.test","to":"b@central.test"},"zone_name":{"from":"x","to":"y"}}',`+ago("3 years")+`)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `INSERT INTO operator_signin_throttle (key_hash, failures, window_started_at, last_failure_at)
+        VALUES (repeat('a',64), 2, `+ago("3 days")+`, `+ago("3 days")+`), (repeat('b',64), 1, now(), now())`); err != nil {
+		t.Fatal(err)
+	}
+
 	// Alerts: an old closed one, an old open one, a middle-aged acknowledged one.
 	exec(`INSERT INTO appliance_security_alerts (appliance_id, kind, status, resolved, source_ip, created_at)
         VALUES ($1,'x','resolved',true,'198.51.100.5',`+ago("7 years")+`)`, liveApp)
@@ -113,6 +130,12 @@ func TestRetentionAppliesCentralPeriods(t *testing.T) {
 		{"certificate event anonymised", `SELECT count(*) FROM appliance_certificate_events WHERE appliance_id=$1 AND actor='removed' AND source_ip IS NULL`, []any{liveApp}, 1},
 		{"old portal event deleted despite append-only", `SELECT count(*) FROM portal_tls_events WHERE appliance_id=$1 AND kind='old'`, []any{liveApp}, 0},
 		{"portal event anonymised", `SELECT count(*) FROM portal_tls_events WHERE appliance_id=$1 AND kind='mid' AND actor='removed'`, []any{liveApp}, 1},
+		{"certificate contact removed from portal history, the rest kept", `SELECT count(*) FROM portal_tls_events
+            WHERE kind='settings_changed' AND actor='removed' AND NOT detail ? 'contact_email' AND detail ? 'zone_name'`, nil, 1},
+		{"7-year-old appliance move deleted", `SELECT count(*) FROM appliance_assignments WHERE created_at < now() - interval '6 years'`, nil, 0},
+		{"3-year-old move kept without the person", `SELECT count(*) FROM appliance_assignments WHERE id=$1 AND operator_id IS NULL AND source_ip IS NULL`, []any{midMove}, 1},
+		{"certificate request loses its address", `SELECT count(*) FROM appliance_certificate_requests WHERE id=$1 AND source_ip IS NULL`, []any{csr}, 1},
+		{"idle wrong-password counter swept, a fresh one kept", `SELECT count(*) FROM operator_signin_throttle`, nil, 1},
 
 		{"old closed alert deleted", `SELECT count(*) FROM appliance_security_alerts WHERE appliance_id=$1 AND status='resolved'`, []any{liveApp}, 0},
 		{"old open alert kept", `SELECT count(*) FROM appliance_security_alerts WHERE id=$1`, []any{openOld}, 1},

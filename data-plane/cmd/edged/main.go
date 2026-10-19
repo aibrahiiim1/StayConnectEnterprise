@@ -38,6 +38,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/posting"
+	"github.com/stayconnect/enterprise/data-plane/internal/reqlog"
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
 	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
@@ -364,7 +365,8 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
+	// No path, query or client address in the request log (reqlog; GDPR audit 2026-10-19).
+	r.Use(reqlog.Middleware)
 	r.Use(middleware.Recoverer)
 	// 15 s for every request but the network applies, which wait for netd (route_timeout.go).
 	r.Use(routeTimeout(defaultRequestTimeout, networkApplyTimeout))

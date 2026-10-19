@@ -31,7 +31,7 @@ func (d authDeps) signinLocked(w http.ResponseWriter, r *http.Request, email, op
 	if d.DB == nil || email == "" {
 		return false
 	}
-	until, err := auth.SigninLockedUntil(r.Context(), d.DB, email)
+	until, err := auth.SigninLockedUntil(r.Context(), d.DB, d.MFA.SigninName(email))
 	if err != nil {
 		slog.Warn("sign-in lockout could not be read", "err", err)
 		return false
@@ -49,7 +49,7 @@ func (d authDeps) signinFailed(w http.ResponseWriter, r *http.Request, email, op
 	if d.DB == nil || email == "" {
 		return false
 	}
-	until, err := auth.SigninFailed(r.Context(), d.DB, email)
+	until, err := auth.SigninFailed(r.Context(), d.DB, d.MFA.SigninName(email))
 	if err != nil {
 		slog.Warn("sign-in failure could not be counted", "err", err)
 		return false
@@ -66,7 +66,7 @@ func (d authDeps) signinSucceeded(r *http.Request, email string) {
 	if d.DB == nil || email == "" {
 		return
 	}
-	if err := auth.SigninSucceeded(r.Context(), d.DB, email); err != nil {
+	if err := auth.SigninSucceeded(r.Context(), d.DB, d.MFA.SigninName(email)); err != nil {
 		slog.Warn("sign-in failures could not be cleared", "err", err)
 	}
 }
