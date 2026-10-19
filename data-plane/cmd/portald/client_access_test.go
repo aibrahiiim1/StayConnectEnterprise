@@ -26,7 +26,7 @@ func otpPayload(extra string) []byte {
 func TestAVerifiedCodeStartsTheJourneyAsJSONAndKeepsTheDeviceCredential(t *testing.T) {
 	h := portalFixture()
 	rec := httptest.NewRecorder()
-	if !h.tryIAMv2AuthMode(rec, httptest.NewRequest(http.MethodPost, "/auth/otp/verify", nil), otpPayload(`,"resume_token":"tok-1"`), true) {
+	if !h.tryIAMv2AuthMode(rec, httptest.NewRequest(http.MethodPost, "https://portal.test/auth/otp/verify", nil), otpPayload(`,"resume_token":"tok-1"`), true) {
 		t.Fatal("an IAM-v2 reply must be handled")
 	}
 	if rec.Code != http.StatusOK {
@@ -122,7 +122,7 @@ func TestTheLandingPageGreetsARememberedDeviceAndHidesTheForms(t *testing.T) {
 		w.Write([]byte(`{"ok":true,"identity_label":"a•••@example.com","method":"OTP"}`))
 	})
 	h := clientAccessHandler(t, mux)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "https://portal.test/", nil)
 	req.RemoteAddr = "10.20.0.50:4321"
 	req.AddCookie(&http.Cookie{Name: clientResumeCookie, Value: "tok-1"})
 	rec := httptest.NewRecorder()
@@ -139,7 +139,7 @@ func TestTheLandingPageGreetsARememberedDeviceAndHidesTheForms(t *testing.T) {
 	}
 	// Without the cookie: no greeting.
 	rec = httptest.NewRecorder()
-	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req2 := httptest.NewRequest(http.MethodGet, "https://portal.test/", nil)
 	req2.RemoteAddr = "10.20.0.50:4321"
 	h.index(rec, req2)
 	if strings.Contains(rec.Body.String(), `id="welcome"`) {
@@ -163,7 +163,7 @@ func TestConnectGoesThroughTheResolvingDeviceLookupAndTheSameJourney(t *testing.
 		w.Write(otpPayload(""))
 	})
 	h := clientAccessHandler(t, mux)
-	req := httptest.NewRequest(http.MethodPost, "/auth/resume", nil)
+	req := httptest.NewRequest(http.MethodPost, "https://portal.test/auth/resume", nil)
 	req.RemoteAddr = "10.20.0.50:4321"
 	req.AddCookie(&http.Cookie{Name: clientResumeCookie, Value: "tok-1"})
 	rec := httptest.NewRecorder()
@@ -233,4 +233,35 @@ func mustMAC(s string) net.HardwareAddr {
 		panic(err)
 	}
 	return m
+}
+
+// GDPR audit B10: over the plain-HTTP fallback the device is not remembered. The credential is neither stored in a
+// cookie that would cross the network in clear text, nor honoured if an older portal stored one, and the guest
+// signs in as usual.
+func TestTheDeviceIsRememberedOverHTTPSOnly(t *testing.T) {
+	rec := httptest.NewRecorder()
+	setClientResumeCookie(rec, httptest.NewRequest(http.MethodPost, "http://portal.test/auth/otp/verify", nil), "tok-1", 30)
+	if len(rec.Result().Cookies()) != 0 {
+		t.Fatalf("a remembered-device cookie was set over plain HTTP: %v", rec.Result().Cookies())
+	}
+	rec = httptest.NewRecorder()
+	setClientResumeCookie(rec, httptest.NewRequest(http.MethodPost, "https://portal.test/auth/otp/verify", nil), "tok-1", 30)
+	if c := rec.Result().Cookies(); len(c) != 1 || !c[0].Secure || !c[0].HttpOnly {
+		t.Fatalf("over HTTPS the cookie must be set, Secure and HttpOnly: %v", c)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/sessions/resume-peek", func(w http.ResponseWriter, r *http.Request) {
+		t.Error("a credential sent over plain HTTP was looked up")
+		w.Write([]byte(`{"ok":true,"identity_label":"a•••@example.com","method":"OTP"}`))
+	})
+	h := clientAccessHandler(t, mux)
+	req := httptest.NewRequest(http.MethodGet, "http://portal.test/", nil)
+	req.RemoteAddr = "10.20.0.50:4321"
+	req.AddCookie(&http.Cookie{Name: clientResumeCookie, Value: "tok-1"})
+	rec = httptest.NewRecorder()
+	h.index(rec, req)
+	if strings.Contains(rec.Body.String(), `id="welcome"`) {
+		t.Fatal("a device was greeted from a cookie sent over plain HTTP")
+	}
 }

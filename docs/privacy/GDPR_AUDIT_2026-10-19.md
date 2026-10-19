@@ -197,6 +197,7 @@ confirm genuine guests (2026-10-19):
 | B7 | **Fixed:** adding, disabling or resetting a staff account, and adding or removing a role, ask for the administrator's own password |
 | B8 | **Fixed:** what a guest typed is revealed only after the operator confirms their password (`POST /guest-signin-credentials/{id}`) |
 | B9 | **Fixed:** plain SMTP is accepted only for a loopback, private or link-local address, checked on save and at connect |
+| B10 | **Partly fixed:** the remembered-device cookie is set and honoured over the portal's HTTPS only, where it is Secure. Without HTTPS a device is not remembered. Whether it needs a "Remember this device" box, unticked by default, is the lawyer's question (D-F3) |
 | B11 | **Fixed:** the guest notice template now lists the VIP flag, travel agent, room type, rate plan, PMS guest id and room sharers, business-account organisation ids, the code requester's address and browser, room charges, each portal cookie with its lifetime, the backup period, and outside pictures or fonts (C1). Whether VIP and travel agent are needed at all is left to the hotel |
 | B12 | **Fixed:** email addresses and phone numbers are removed from provider errors before they are logged or stored. An error already stored is replaced at the provider's next send |
 
