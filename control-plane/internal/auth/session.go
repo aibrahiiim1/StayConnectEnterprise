@@ -92,6 +92,10 @@ func (s *SessionStore) Get(ctx context.Context, token string) (*Session, error) 
 
 // Touch records activity on a session: LastSeenAt moves to now (at most once a minute, to keep Redis writes
 // bounded) and the Redis TTL slides. The idle and absolute limits are enforced by Validate.
+//
+// ONLY A SESSION THAT STILL EXISTS IS WRITTEN (SET ... XX). A request that read the session just before a
+// sign-out deleted it would otherwise write it back, and the signed-out session would work again for its
+// whole lifetime.
 func (s *SessionStore) Touch(ctx context.Context, sess *Session) error {
 	if time.Since(sess.LastSeenAt) <= time.Minute {
 		return nil
@@ -103,7 +107,11 @@ func (s *SessionStore) Touch(ctx context.Context, sess *Session) error {
 	if err != nil {
 		return err
 	}
-	return s.R.Set(ctx, key(sess.Token), buf, SessionTTL).Err()
+	err = s.R.SetXX(ctx, key(sess.Token), buf, SessionTTL).Err()
+	if err == redis.Nil { // gone meanwhile: nothing to touch
+		return nil
+	}
+	return err
 }
 
 // Destroy removes a session.

@@ -25,6 +25,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -196,11 +197,15 @@ func (s *MFA) load(ctx context.Context, tx pgx.Tx, operatorID string, confirmed 
 	return r, nil
 }
 
-// fail counts one wrong code. signin_lock_failures wrong codes lock the authenticator for signin_lock_minutes, the
-// same two settings as the password lockout (central_security_settings, 0053). It is committed even though the caller's answer is
-// "wrong code", so it runs in its own statement after the check's transaction.
-func (s *MFA) fail(ctx context.Context, operatorID string) (lockedUntil *time.Time) {
-	_ = s.DB.QueryRow(ctx, `
+// failTx counts one wrong code. signin_lock_failures wrong codes lock the authenticator for signin_lock_minutes, the
+// same two settings as the password lockout (central_security_settings, 0053).
+//
+// IT RUNS IN THE CHECK'S OWN TRANSACTION, with the authenticator row already locked FOR UPDATE by load, and that
+// transaction COMMITS although the answer is "wrong code". A count written in a separate statement after the
+// check let a burst of parallel wrong codes all be checked before the first failure landed, so five guesses
+// became as many as could be sent at once. Now each check waits for the previous one's verdict and count.
+func (s *MFA) failTx(ctx context.Context, tx pgx.Tx, operatorID string) (lockedUntil *time.Time, err error) {
+	err = tx.QueryRow(ctx, `
 		WITH lim AS (SELECT COALESCE(max(signin_lock_failures), 5) AS n, COALESCE(max(signin_lock_minutes), 15) AS mins
 		               FROM central_security_settings WHERE id)
 		UPDATE operator_mfa SET
@@ -209,7 +214,7 @@ func (s *MFA) fail(ctx context.Context, operatorID string) (lockedUntil *time.Ti
 		  FROM lim
 		 WHERE operator_id = $1::uuid RETURNING CASE WHEN failed_codes = 0 THEN locked_until END`,
 		operatorID).Scan(&lockedUntil)
-	return lockedUntil
+	return lockedUntil, err
 }
 
 // Confirm proves a freshly set-up authenticator with its first code and makes the recovery codes.
@@ -227,7 +232,8 @@ func (s *MFA) Confirm(ctx context.Context, operatorID, code string) (codes []str
 		step, valid := totp.Check(r.secret, code, time.Now())
 		if !valid {
 			wrong = true
-			return nil
+			lockedUntil, err = s.failTx(ctx, tx, operatorID)
+			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE operator_mfa SET confirmed_at = now(), last_used_step = $2, failed_codes = 0,
 			locked_until = NULL WHERE operator_id = $1::uuid`, operatorID, step); err != nil {
@@ -240,7 +246,7 @@ func (s *MFA) Confirm(ctx context.Context, operatorID, code string) (codes []str
 		return nil, false, nil, err
 	}
 	if wrong {
-		return nil, false, s.fail(ctx, operatorID), nil
+		return nil, false, lockedUntil, nil
 	}
 	return codes, true, nil, nil
 }
@@ -251,68 +257,81 @@ func (s *MFA) Verify(ctx context.Context, operatorID, code string) (method strin
 	if err := s.ready(); err != nil {
 		return "", 0, false, nil, err
 	}
-	c := totp.Normalize(code)
-	method = "totp"
-	wrong := false
 	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
-		r, err := s.load(ctx, tx, operatorID, true)
-		if err != nil {
-			return err
-		}
-		if len(c) == totp.Digits {
-			step, valid := totp.Check(r.secret, c, time.Now())
-			if !valid || (r.last != nil && step <= *r.last) {
-				wrong = true
-				return nil
-			}
-			_, err = tx.Exec(ctx, `UPDATE operator_mfa SET last_used_step = $2, failed_codes = 0 WHERE operator_id = $1::uuid`,
-				operatorID, step)
-			return err
-		}
-		method = "recovery_code"
-		tag, err := tx.Exec(ctx, `UPDATE operator_mfa_recovery_codes SET used_at = now()
-			WHERE operator_id = $1::uuid AND code_mac = $2 AND used_at IS NULL`, operatorID, s.recoveryMAC(operatorID, code))
-		if err != nil {
-			return err
-		}
-		if tag.RowsAffected() != 1 {
-			wrong = true
-			return nil
-		}
-		_, err = tx.Exec(ctx, `UPDATE operator_mfa SET failed_codes = 0 WHERE operator_id = $1::uuid`, operatorID)
+		var err error
+		method, ok, lockedUntil, err = s.verifyTx(ctx, tx, operatorID, code, true)
 		return err
 	})
 	if err != nil {
 		return "", 0, false, nil, err
 	}
-	if wrong {
-		return method, 0, false, s.fail(ctx, operatorID), nil
+	if !ok {
+		return method, 0, false, lockedUntil, nil
 	}
 	_ = s.DB.QueryRow(ctx, `SELECT count(*) FROM operator_mfa_recovery_codes WHERE operator_id = $1::uuid AND used_at IS NULL`,
 		operatorID).Scan(&left)
 	return method, left, true, nil, nil
 }
 
-// NewRecoveryCodes replaces every recovery code with a fresh set.
-func (s *MFA) NewRecoveryCodes(ctx context.Context, operatorID string) ([]string, error) {
-	if err := s.ready(); err != nil {
-		return nil, err
+// verifyTx checks code inside tx, with the authenticator row locked FOR UPDATE until tx ends. A 6-digit code is
+// refused when its step is not newer than the last one used (a code is never accepted twice). A recovery code is
+// tried only when allowRecovery. A wrong code is counted in tx (failTx), so the caller must COMMIT tx whatever
+// the verdict; ok=false then.
+func (s *MFA) verifyTx(ctx context.Context, tx pgx.Tx, operatorID, code string, allowRecovery bool) (method string, ok bool, lockedUntil *time.Time, err error) {
+	c := totp.Normalize(code)
+	method = "totp"
+	r, err := s.load(ctx, tx, operatorID, true)
+	if err != nil {
+		return method, false, nil, err
 	}
-	var codes []string
-	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
-		var one int
-		if err := tx.QueryRow(ctx, `SELECT 1 FROM operator_mfa WHERE operator_id = $1::uuid AND confirmed_at IS NOT NULL FOR UPDATE`,
-			operatorID).Scan(&one); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return ErrMFANotEnrolled
-			}
+	wrong := func() (string, bool, *time.Time, error) {
+		until, err := s.failTx(ctx, tx, operatorID)
+		return method, false, until, err
+	}
+	if len(c) == totp.Digits || !allowRecovery {
+		step, valid := totp.Check(r.secret, c, time.Now())
+		if !valid || (r.last != nil && step <= *r.last) {
+			return wrong()
+		}
+		_, err = tx.Exec(ctx, `UPDATE operator_mfa SET last_used_step = $2, failed_codes = 0 WHERE operator_id = $1::uuid`,
+			operatorID, step)
+		return method, err == nil, nil, err
+	}
+	method = "recovery_code"
+	tag, err := tx.Exec(ctx, `UPDATE operator_mfa_recovery_codes SET used_at = now()
+		WHERE operator_id = $1::uuid AND code_mac = $2 AND used_at IS NULL`, operatorID, s.recoveryMAC(operatorID, code))
+	if err != nil {
+		return method, false, nil, err
+	}
+	if tag.RowsAffected() != 1 {
+		return wrong()
+	}
+	_, err = tx.Exec(ctx, `UPDATE operator_mfa SET failed_codes = 0 WHERE operator_id = $1::uuid`, operatorID)
+	return method, err == nil, nil, err
+}
+
+// NewRecoveryCodes replaces every recovery code with a fresh set. It needs a CURRENT code from the authenticator
+// app (Product-Owner decision D-R3, 2026-10-20): the password step-up alone, or a recovery code, is not enough,
+// because a new set of recovery codes is a new set of second factors. The code is checked exactly like a sign-in
+// code -- never twice, wrong ones counted towards the same lockout -- in the same transaction that replaces the
+// set. ok=false is a wrong code; lockedUntil is set when it started a lockout.
+func (s *MFA) NewRecoveryCodes(ctx context.Context, operatorID, code string) (codes []string, ok bool, lockedUntil *time.Time, err error) {
+	if err := s.ready(); err != nil {
+		return nil, false, nil, err
+	}
+	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		var err error
+		_, ok, lockedUntil, err = s.verifyTx(ctx, tx, operatorID, code, false)
+		if err != nil || !ok {
 			return err
 		}
-		var err error
 		codes, err = s.replaceRecoveryCodes(ctx, tx, operatorID)
 		return err
 	})
-	return codes, err
+	if err != nil {
+		return nil, false, nil, err
+	}
+	return codes, ok, lockedUntil, nil
 }
 
 // ResetMFA removes an operator's authenticator and recovery codes. It needs no key: it opens nothing. Usable
@@ -361,8 +380,20 @@ func (s *MFA) replaceRecoveryCodes(ctx context.Context, tx pgx.Tx, operatorID st
 
 func (s *MFA) recoveryMAC(operatorID, code string) string {
 	m := hmac.New(sha256.New, s.mac)
-	m.Write([]byte(operatorID + "\x00" + strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(code), "-", ""))))
+	m.Write([]byte(operatorID + "\x00" + normalizeRecoveryCode(code)))
 	return hex.EncodeToString(m.Sum(nil))
+}
+
+// normalizeRecoveryCode is a recovery code as it was generated: the alphabet's upper-case letters and digits,
+// with every space, tab, line break and dash removed wherever it was typed or pasted ("abcde fghjk",
+// "ABCDE-\nFGHJK"), not only at the ends.
+func normalizeRecoveryCode(code string) string {
+	return strings.ToUpper(strings.Map(func(r rune) rune {
+		if r == '-' || unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, code))
 }
 
 // ----- the five minutes between the password and the code ------------------------------------------------------

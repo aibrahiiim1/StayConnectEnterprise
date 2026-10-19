@@ -6,7 +6,7 @@ package http
 //	POST /v1/auth/login/enrol                            -> {secret, otpauth_uri}            (first sign-in)
 //	POST /v1/auth/login/code           {code}            -> the session (whoami shape); first sign-in adds recovery_codes
 //	GET  /v1/auth/mfa                                    -> the operator's own two-step state
-//	POST /v1/auth/mfa/recovery-codes   (after step-up)   -> a new set of recovery codes
+//	POST /v1/auth/mfa/recovery-codes   {code} (after step-up) -> a new set of recovery codes (D-R3: needs a current code)
 //
 // The password step (login) is unchanged up to the point where it used to create the session. The password
 // step-up (/v1/auth/reauth) stays a password: re-confirming inside a session opened with two factors may use one
@@ -25,6 +25,7 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/audit"
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 	"github.com/stayconnect/enterprise/control-plane/internal/clientip"
+	"github.com/stayconnect/enterprise/control-plane/internal/totp"
 )
 
 const maxMFACodeLen = 32
@@ -240,12 +241,45 @@ func (d authDeps) mfaStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, st)
 }
 
-// mfaRecoveryCodes: POST /v1/auth/mfa/recovery-codes (after the password step-up).
+// mfaRecoveryCodes: POST /v1/auth/mfa/recovery-codes {code} (after the password step-up).
+//
+// A new set of recovery codes needs the password step-up AND a current 6-digit code from the authenticator app
+// (Product-Owner decision D-R3, 2026-10-20). The code is checked like a sign-in code: never accepted twice, and
+// wrong ones count towards the same lockout. A recovery code is not accepted here. A wrong code answers 400, not
+// 401: this route is inside a session, and the console reads a 401 as the sign-in having ended.
 func (d authDeps) mfaRecoveryCodes(w http.ResponseWriter, r *http.Request) {
 	s := auth.FromContext(r.Context())
-	codes, err := d.MFA.NewRecoveryCodes(r.Context(), s.OperatorID)
-	if err != nil {
+	var in struct {
+		Code string `json:"code"`
+	}
+	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&in)
+	if c := totp.Normalize(in.Code); len(c) != totp.Digits || strings.Trim(c, "0123456789") != "" {
+		api.Fail(w, r, http.StatusBadRequest, "code_required",
+			"Enter the 6-digit code your authenticator app shows now. A recovery code cannot be used for this.")
+		return
+	}
+	codes, ok, locked, err := d.MFA.NewRecoveryCodes(r.Context(), s.OperatorID, in.Code)
+	var lockedErr auth.ErrMFALocked
+	switch {
+	case errors.As(err, &lockedErr):
+		w.Header().Set("Retry-After", strconv.Itoa(max(1, int(time.Until(lockedErr.Until).Seconds())+1)))
+		api.Fail(w, r, http.StatusTooManyRequests, "too_many_attempts",
+			"Too many wrong codes. Wait until "+lockedErr.Until.UTC().Format("15:04")+" UTC and try again.")
+		return
+	case errors.Is(err, auth.ErrMFANotEnrolled):
+		api.Fail(w, r, http.StatusConflict, "not_enrolled", "No authenticator is set up for this account.")
+		return
+	case err != nil:
 		api.Fail(w, r, http.StatusServiceUnavailable, "mfa_unavailable", "New recovery codes could not be made. Try again shortly.")
+		return
+	case !ok:
+		d.auditFailure(r, "auth.mfa_failed", s.OperatorID, map[string]any{"reason": "wrong code", "for": "new recovery codes"})
+		if locked != nil {
+			audit.Emit(r.Context(), d.DB, audit.Entry{ActorType: "system", Action: "auth.mfa_locked", TargetType: "operator",
+				TargetID: s.OperatorID, IP: clientip.From(r), Payload: map[string]any{"locked_until": locked.UTC()}})
+		}
+		api.Fail(w, r, http.StatusBadRequest, "wrong_code",
+			"That code is not right. Enter the 6-digit code your authenticator app shows now.")
 		return
 	}
 	audit.Op(r.Context(), d.DB, r, "auth.mfa_recovery_codes_replaced", "operator", s.OperatorID, nil)

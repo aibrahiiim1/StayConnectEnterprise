@@ -1,17 +1,19 @@
 "use client";
 
 // TWO-STEP SIGN-IN — the operator's own authenticator (Central migration 0052, GDPR plan C10). The app is set up at
-// sign-in, so this page shows the state and makes a new set of recovery codes (after the password step-up).
+// sign-in, so this page shows the state and makes a new set of recovery codes: after the password step-up AND with
+// a current code from the authenticator app (Product-Owner decision D-R3) -- a recovery code is not accepted for it.
 // Losing the phone is solved by a recovery code or by an administrator's reset, never from here: a stolen session
 // plus a password must not be able to remove the second step.
 
 import { useCallback, useEffect, useState } from "react";
-import { api, withStepUp } from "@/lib/api";
+import { api, ApiError, withStepUp } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ErrorBanner } from "@/components/ui/error-banner";
+import { Field, Input, useFieldErrors } from "@/components/ui/input";
 import { formatDateTime } from "@/lib/status";
 
 type MFAState = { enrolled: boolean; confirmed_at?: string; recovery_codes_left: number };
@@ -21,6 +23,8 @@ export default function TwoStepSigninPage() {
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [codes, setCodes] = useState<string[] | null>(null);
+  const [code, setCode] = useState("");
+  const f = useFieldErrors<"code">();
 
   const load = useCallback(async () => {
     try { setState(await api.get<MFAState>("/v1/auth/mfa")); } catch (e) { setErr(e); }
@@ -28,12 +32,25 @@ export default function TwoStepSigninPage() {
   useEffect(() => { void load(); }, [load]);
 
   async function makeCodes() {
-    setBusy(true); setErr(null);
+    setErr(null); f.clear();
+    const c = code.replace(/[\s-]/g, "");
+    if (!/^\d{6}$/.test(c)) {
+      f.fail({ code: "Enter the 6-digit code your authenticator app shows now. A recovery code cannot be used here." });
+      return;
+    }
+    setBusy(true);
     try {
-      const r = await withStepUp(() => api.post<{ recovery_codes: string[] }>("/v1/auth/mfa/recovery-codes", {}));
+      const r = await withStepUp(() => api.post<{ recovery_codes: string[] }>("/v1/auth/mfa/recovery-codes", { code: c }));
       setCodes(r.recovery_codes);
+      setCode("");
       await load();
-    } catch (e) { setErr(e); } finally { setBusy(false); }
+    } catch (e) {
+      // A wrong, used or malformed code belongs to the field; anything else (a lockout, Central unavailable) to the banner.
+      if (e instanceof ApiError && (e.code === "wrong_code" || e.code === "code_required")) {
+        setCode("");
+        f.fail({ code: e.message });
+      } else setErr(e);
+    } finally { setBusy(false); }
   }
 
   return (
@@ -76,9 +93,32 @@ export default function TwoStepSigninPage() {
             </ul>
           )}
           {state?.enrolled && (
-            <Button size="sm" variant="secondary" disabled={busy} onClick={() => void makeCodes()}>
-              {busy ? "Making…" : "Make new recovery codes"}
-            </Button>
+            <form
+              className="space-y-3"
+              noValidate
+              onSubmit={(e) => { e.preventDefault(); void makeCodes(); }}
+            >
+              <Field
+                label="Code from your authenticator app"
+                hint="The 6-digit code the app shows now. You will also be asked for your password."
+                error={f.error("code")}
+              >
+                <Input
+                  id={f.id("code")}
+                  name="code"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  pattern="[0-9]*"
+                  maxLength={9}
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  className="max-w-[12rem] font-mono tracking-widest"
+                />
+              </Field>
+              <Button type="submit" size="sm" variant="secondary" disabled={busy}>
+                {busy ? "Making…" : "Make new recovery codes"}
+              </Button>
+            </form>
           )}
         </CardBody>
       </Card>
