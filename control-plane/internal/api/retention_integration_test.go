@@ -76,13 +76,17 @@ func TestRetentionAppliesCentralPeriods(t *testing.T) {
         VALUES ($1,'x','acknowledged','198.51.100.5',$2::uuid,'{"last_source_ip":"198.51.100.6","repeats":3}',`+ago("3 years")+`)`,
 		liveApp, f.session.OperatorID)
 
-	// Licences: one revoked 7 years ago, one superseded 7 years ago by a still-live one, one expired a year ago.
+	// Licences: one revoked 7 years ago and expired 5 years ago, one revoked 7 years ago but still valid (an
+	// appliance may never have heard of the revocation), one revoked 7 years ago whose grace period has not run
+	// out, one superseded 7 years ago by a still-live one, one expired a year ago.
 	cust, site := f.customerSite("Retention Hotel")
 	lic := func(status, extra string, args ...any) string {
 		return exec(`INSERT INTO licenses (tenant_id, site_id, status, valid_until, signed_envelope, key_id, created_at`+extra,
 			append([]any{cust, site, status}, args...)...)
 	}
-	revoked := lic("revoked", `, revoked_at) VALUES ($1,$2,$3, now() + interval '1 year','e','k',`+ago("8 years")+`,`+ago("7 years")+`)`)
+	revoked := lic("revoked", `, revoked_at) VALUES ($1,$2,$3,`+ago("5 years")+`,'e','k',`+ago("8 years")+`,`+ago("7 years")+`)`)
+	revokedStillValid := lic("revoked", `, revoked_at) VALUES ($1,$2,$3, now() + interval '1 year','e','k',`+ago("8 years")+`,`+ago("7 years")+`)`)
+	revokedInGrace := lic("revoked", `, revoked_at, grace_period_days) VALUES ($1,$2,$3,`+ago("1 day")+`,'e','k',`+ago("8 years")+`,`+ago("7 years")+`, 30)`)
 	superseded := lic("superseded", `) VALUES ($1,$2,$3, now() + interval '1 year','e','k',`+ago("8 years")+`)`)
 	live := lic("active", `, supersedes_license_id) VALUES ($1,$2,$3, now() + interval '1 year','e','k',`+ago("7 years")+`,$4::uuid)`, superseded)
 	expiredRecently := lic("active", `) VALUES ($1,$2,$3,`+ago("1 year")+`,'e','k',`+ago("2 years")+`)`)
@@ -142,7 +146,9 @@ func TestRetentionAppliesCentralPeriods(t *testing.T) {
 		{"alert loses IPs and acknowledger", `SELECT count(*) FROM appliance_security_alerts WHERE id=$1 AND source_ip IS NULL
             AND acknowledged_by IS NULL AND NOT detail ? 'last_source_ip' AND detail->>'repeats' = '3'`, []any{midAlert}, 1},
 
-		{"revoked licence deleted", `SELECT count(*) FROM licenses WHERE id=$1`, []any{revoked}, 0},
+		{"revoked and expired licence deleted", `SELECT count(*) FROM licenses WHERE id=$1`, []any{revoked}, 0},
+		{"revoked licence still valid kept", `SELECT count(*) FROM licenses WHERE id=$1`, []any{revokedStillValid}, 1},
+		{"revoked licence in its grace period kept", `SELECT count(*) FROM licenses WHERE id=$1`, []any{revokedInGrace}, 1},
 		{"superseded licence deleted", `SELECT count(*) FROM licenses WHERE id=$1`, []any{superseded}, 0},
 		{"live licence kept", `SELECT count(*) FROM licenses WHERE id=$1`, []any{live}, 1},
 		{"recently expired licence kept", `SELECT count(*) FROM licenses WHERE id=$1`, []any{expiredRecently}, 1},
