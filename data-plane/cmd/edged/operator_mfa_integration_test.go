@@ -238,3 +238,52 @@ func TestIntegrationMFA_AnAdministratorResetsAColleagueNotThemselves(t *testing.
 		t.Fatal("the reset was not audited")
 	}
 }
+
+// D-R3: new recovery codes need the password AND a current authenticator code -- never a recovery code -- and the
+// code is throttled, audited and accepted once, like the sign-in code.
+func TestIntegrationMFA_NewRecoveryCodesNeedACurrentAuthenticatorCode(t *testing.T) {
+	sf := newSigninAPI(t, "site_admin")
+	ip := testIP()
+	since := time.Now().Add(-time.Second)
+	sess := sf.login(t, sf.email, sf.password, ip)
+	if sess.code != 200 {
+		t.Fatalf("sign-in = %d %s", sess.code, sess.raw)
+	}
+	sf.track(scopeMFA, sf.operator)
+	sf.track(scopeReauth, sf.operator)
+	ask := func(body map[string]any) resp {
+		return sf.call(t, "POST", "/auth/mfa/recovery-codes", ip, sess.cookie, body, nil)
+	}
+	if r := ask(map[string]any{"password": sf.password}); r.code != 400 || r.body["error"] != "code_required" {
+		t.Fatalf("without a code = %d %s", r.code, r.raw)
+	}
+	if r := ask(map[string]any{"password": sf.password, "code": "ABCDE-FGHJK"}); r.code != 400 || r.body["error"] != "code_required" {
+		t.Fatalf("with a recovery code = %d %s", r.code, r.raw)
+	}
+	wrong := "000000"
+	if sf.mfa.codeFor(sf.operator) == wrong {
+		wrong = "000001"
+	}
+	if r := ask(map[string]any{"password": sf.password, "code": wrong}); r.code != 401 || r.body["error"] != "wrong_code" {
+		t.Fatalf("with a wrong code = %d %s", r.code, r.raw)
+	}
+	if n := sf.auditCount(t, "operator.mfa_failed", sf.operator, since); n != 1 {
+		t.Fatalf("the wrong code was audited %d times", n)
+	}
+	sf.age(t, scopeMFA, sf.operator, time.Minute)
+	code := sf.mfa.codeFor(sf.operator)
+	if r := ask(map[string]any{"password": "not-the-password", "code": code}); r.code != 401 || r.body["error"] != "reauth_required" {
+		t.Fatalf("with a wrong password = %d %s", r.code, r.raw)
+	}
+	sf.age(t, scopeReauth, sf.operator, time.Minute)
+	r := ask(map[string]any{"password": sf.password, "code": code})
+	if fresh, _ := r.body["recovery_codes"].([]any); r.code != 200 || len(fresh) != 10 {
+		t.Fatalf("with the password and the code = %d %s", r.code, r.raw)
+	}
+	if r := ask(map[string]any{"password": sf.password, "code": code}); r.code != 401 || r.body["error"] != "wrong_code" {
+		t.Fatalf("the same code again = %d %s", r.code, r.raw)
+	}
+	if n := sf.auditCount(t, "operator.mfa_recovery_codes_replaced", sf.operator, since); n != 1 {
+		t.Fatalf("new codes audited %d times", n)
+	}
+}

@@ -29,6 +29,7 @@ type fakeAuthenticator struct {
 	secret    []byte
 	confirmed bool
 	recovery  map[string]bool // code -> used
+	lastStep  int64           // the newest code spent making recovery codes
 }
 
 func newFakeMFA(db *pgxpool.Pool) *fakeMFA {
@@ -118,14 +119,20 @@ func (f *fakeMFA) Verify(_ context.Context, id, code string) (string, int, bool,
 	return "recovery_code", left, true, nil
 }
 
-func (f *fakeMFA) NewRecoveryCodes(_ context.Context, id string) ([]string, error) {
+// NewRecoveryCodes takes the authenticator's code only, once each, like scd.
+func (f *fakeMFA) NewRecoveryCodes(_ context.Context, id, code string) ([]string, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	a := f.ops[id]
 	if a == nil || !a.confirmed {
-		return nil, errMFANotEnrolled
+		return nil, false, errMFANotEnrolled
 	}
-	return f.newCodes(a), nil
+	step, ok := totp.Check(a.secret, code, time.Now())
+	if !ok || (a.lastStep != 0 && step <= a.lastStep) {
+		return nil, false, nil
+	}
+	a.lastStep = step
+	return f.newCodes(a), true, nil
 }
 
 func (f *fakeMFA) Reset(_ context.Context, id string) (bool, error) {

@@ -10,7 +10,7 @@ package main
 //	POST /v1/admin/operator-mfa/enrol           {operator_id, issuer, account} -> {secret, otpauth_uri}
 //	POST /v1/admin/operator-mfa/confirm         {operator_id, code}            -> {confirmed, recovery_codes}
 //	POST /v1/admin/operator-mfa/verify          {operator_id, code}            -> {ok, method, recovery_codes_left}
-//	POST /v1/admin/operator-mfa/recovery-codes  {operator_id}                  -> {recovery_codes}
+//	POST /v1/admin/operator-mfa/recovery-codes  {operator_id, code}            -> {ok, recovery_codes}
 //	POST /v1/admin/operator-mfa/reset           {operator_id}                  -> {removed}
 //
 // The secret leaves this process exactly once, in the enrol answer, for the QR code; after that only codes come
@@ -223,14 +223,7 @@ func (s *server) operatorMFAVerify(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if len(code) == totp.Digits {
-			step, valid := totp.Check(secret, code, time.Now())
-			// A code already accepted -- or an older one -- is refused: someone who saw it cannot reuse it.
-			if !valid || (last != nil && step <= *last) {
-				return errWrongCode
-			}
-			_, err = tx.Exec(r.Context(), `UPDATE public.operator_mfa SET last_used_step = $2 WHERE operator_id = $1`,
-				req.OperatorID, step)
-			return err
+			return spendTOTP(r.Context(), tx, req.OperatorID, secret, last, code)
 		}
 		method = "recovery_code"
 		ct, err := tx.Exec(r.Context(), `UPDATE public.operator_mfa_recovery_codes SET used_at = now()
@@ -265,30 +258,56 @@ func (s *server) operatorMFAVerify(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "method": method, "recovery_codes_left": left})
 }
 
+// spendTOTP accepts a 6-digit code once: it must be valid now and newer than the last code accepted, and its step
+// is recorded so the same code -- or an older one -- is refused next time.
+func spendTOTP(ctx context.Context, tx pgx.Tx, operatorID string, secret []byte, last *int64, code string) error {
+	step, valid := totp.Check(secret, code, time.Now())
+	// A code already accepted -- or an older one -- is refused: someone who saw it cannot reuse it.
+	if !valid || (last != nil && step <= *last) {
+		return errWrongCode
+	}
+	_, err := tx.Exec(ctx, `UPDATE public.operator_mfa SET last_used_step = $2 WHERE operator_id = $1`, operatorID, step)
+	return err
+}
+
+// operatorMFARecoveryCodes makes a new set only against a current authenticator code (Product-Owner decision
+// D-R3): a stolen session plus the password must not be enough to mint codes that later sign in with the
+// password alone. Only the authenticator's 6 digits count -- a recovery code is refused here and NOT spent --
+// and the code is spent in the same transaction that replaces the set, with the same replay rule as sign-in.
 func (s *server) operatorMFARecoveryCodes(w http.ResponseWriter, r *http.Request) {
 	req, ok := s.operatorMFARequest(w, r)
 	if !ok {
 		return
 	}
+	code := totp.Normalize(req.Code)
 	var codes []string
 	err := pgx.BeginFunc(r.Context(), s.db, func(tx pgx.Tx) error {
-		var one int
-		if err := tx.QueryRow(r.Context(), `SELECT 1 FROM public.operator_mfa
-			WHERE operator_id = $1 AND confirmed_at IS NOT NULL FOR UPDATE`, req.OperatorID).Scan(&one); err != nil {
+		secret, last, err := s.openOperatorSecret(r.Context(), tx, req.OperatorID, true)
+		if err != nil {
 			return err
 		}
-		var err error
+		if len(code) != totp.Digits {
+			return errWrongCode
+		}
+		if err := spendTOTP(r.Context(), tx, req.OperatorID, secret, last, code); err != nil {
+			return err
+		}
 		codes, err = s.replaceRecoveryCodes(r.Context(), tx, req.OperatorID)
 		return err
 	})
 	switch {
+	case errors.Is(err, errWrongCode):
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false})
+	case errors.Is(err, sealbox.ErrSeal):
+		slog.Error("operator mfa: a stored authenticator does not open (key replaced?)", "operator_id", req.OperatorID)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "mfa_unavailable"})
 	case errors.Is(err, pgx.ErrNoRows):
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "not_enrolled"})
 	case err != nil:
 		slog.Error("operator mfa: new recovery codes failed", "err", err)
 		httpErr(w, http.StatusInternalServerError, "recovery codes failed")
 	default:
-		writeJSON(w, http.StatusOK, map[string]any{"recovery_codes": codes})
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "recovery_codes": codes})
 	}
 }
 

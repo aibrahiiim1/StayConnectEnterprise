@@ -159,10 +159,34 @@ func TestIntegrationOperatorMFA_SealedSingleUseAndReset(t *testing.T) {
 	if _, v := post(s.operatorMFAVerify, map[string]string{"operator_id": other, "code": codes[4].(string)}); v["ok"] == true {
 		t.Fatal("a recovery code worked for another operator")
 	}
-	// A new set replaces the old one.
-	_, nc := post(s.operatorMFARecoveryCodes, map[string]string{"operator_id": op})
-	if fresh, _ := nc["recovery_codes"].([]any); len(fresh) != 10 {
+	// A NEW SET NEEDS A CURRENT AUTHENTICATOR CODE (D-R3). Every step in the window is spent by now, so the
+	// record is wound back to leave one usable code (now-1).
+	if _, err := owner.Exec(ctx, `UPDATE public.operator_mfa SET last_used_step = $2 WHERE operator_id = $1`, op, totp.Step(now)-2); err != nil {
+		t.Fatal(err)
+	}
+	if _, v := post(s.operatorMFARecoveryCodes, map[string]string{"operator_id": op}); v["ok"] != false || v["recovery_codes"] != nil {
+		t.Fatalf("new codes without a code = %v", v)
+	}
+	// A recovery code is refused here, and is not spent by being tried.
+	if _, v := post(s.operatorMFARecoveryCodes, map[string]string{"operator_id": op, "code": codes[6].(string)}); v["ok"] != false {
+		t.Fatalf("new codes with a recovery code = %v", v)
+	}
+	var unspent int
+	_ = owner.QueryRow(ctx, `SELECT count(*) FROM public.operator_mfa_recovery_codes WHERE operator_id=$1 AND used_at IS NULL`, op).Scan(&unspent)
+	if unspent != 9 {
+		t.Fatalf("trying a recovery code for new codes spent it: %d left", unspent)
+	}
+	if _, v := post(s.operatorMFARecoveryCodes, map[string]string{"operator_id": op, "code": "000000"}); v["ok"] != false && totp.Code(secret, totp.Step(time.Now())) != "000000" {
+		t.Fatalf("new codes with a wrong code = %v", v)
+	}
+	prev := totp.Code(secret, totp.Step(now)-1)
+	_, nc := post(s.operatorMFARecoveryCodes, map[string]string{"operator_id": op, "code": prev})
+	if fresh, _ := nc["recovery_codes"].([]any); nc["ok"] != true || len(fresh) != 10 {
 		t.Fatalf("new codes = %v", nc)
+	}
+	// The code that made them cannot make another set.
+	if _, v := post(s.operatorMFARecoveryCodes, map[string]string{"operator_id": op, "code": prev}); v["ok"] != false {
+		t.Fatalf("a used code made new codes again: %v", v)
 	}
 	if _, v := post(s.operatorMFAVerify, map[string]string{"operator_id": op, "code": codes[5].(string)}); v["ok"] != false {
 		t.Fatal("an old recovery code survived a new set")

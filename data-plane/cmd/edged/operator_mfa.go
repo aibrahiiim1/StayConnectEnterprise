@@ -43,6 +43,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/totp"
 )
 
 const (
@@ -79,7 +81,9 @@ type mfaService interface {
 	Confirm(ctx context.Context, operatorID, code string) (recoveryCodes []string, ok bool, err error)
 	// Verify checks a code or a recovery code against a confirmed authenticator.
 	Verify(ctx context.Context, operatorID, code string) (method string, recoveryLeft int, ok bool, err error)
-	NewRecoveryCodes(ctx context.Context, operatorID string) ([]string, error)
+	// NewRecoveryCodes replaces the set, but only against a current authenticator code (never a recovery code),
+	// spent with the same replay rule as sign-in. ok is false for a wrong or already-used code.
+	NewRecoveryCodes(ctx context.Context, operatorID, code string) (recoveryCodes []string, ok bool, err error)
 	Reset(ctx context.Context, operatorID string) (removed bool, err error)
 }
 
@@ -147,12 +151,13 @@ func (m scdMFA) Verify(ctx context.Context, operatorID, code string) (string, in
 	return out.Method, out.Left, out.OK, err
 }
 
-func (m scdMFA) NewRecoveryCodes(ctx context.Context, operatorID string) ([]string, error) {
+func (m scdMFA) NewRecoveryCodes(ctx context.Context, operatorID, code string) ([]string, bool, error) {
 	var out struct {
+		OK    bool     `json:"ok"`
 		Codes []string `json:"recovery_codes"`
 	}
-	err := m.post(ctx, "recovery-codes", map[string]string{"operator_id": operatorID}, &out)
-	return out.Codes, err
+	err := m.post(ctx, "recovery-codes", map[string]string{"operator_id": operatorID, "code": code}, &out)
+	return out.Codes, out.OK, err
 }
 
 func (m scdMFA) Reset(ctx context.Context, operatorID string) (bool, error) {
@@ -415,30 +420,86 @@ func (s *server) getOwnMFA(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, st)
 }
 
-// POST /auth/mfa/recovery-codes {password}: a new set, replacing every earlier code.
+// POST /auth/mfa/recovery-codes {password, code}: a new set, replacing every earlier code.
+//
+// THE PASSWORD AND A CURRENT AUTHENTICATOR CODE (Product-Owner decision D-R3). With the password alone, a stolen
+// session plus the password could mint codes that later sign in with the password alone -- the second factor
+// bypassed for good. The code is the authenticator's 6 digits, never a recovery code; it is checked by scd with
+// sign-in's replay rule and counted against sign-in's wrong-code throttle and audit.
 func (s *server) newOwnRecoveryCodes(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Password string `json:"password"`
+		Code     string `json:"code"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "password required")
+		return
+	}
+	code := totp.Normalize(in.Code)
+	if !isTOTPCode(code) {
+		jsonErr(w, http.StatusBadRequest, "code_required",
+			"Enter the 6-digit code your authenticator app shows now. A recovery code cannot be used to make new ones.")
 		return
 	}
 	if !s.reauth(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
+	if s.mfa == nil {
+		jsonErr(w, http.StatusServiceUnavailable, "mfa_unavailable", "Two-step sign-in is unavailable right now.")
+		return
+	}
 	sess := sessFrom(r.Context())
+	ip := clientIP(r)
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	codes, err := s.mfa.NewRecoveryCodes(ctx, sess.OperatorID)
-	if err != nil {
-		slog.Error("new recovery codes failed", "err", err)
+	unlock := signinLocks.lock("mfa\x00" + sess.OperatorID)
+	defer unlock()
+	stIP, err1 := s.throttleStateFor(ctx, scopeIP, ip)
+	stOp, err2 := s.throttleStateFor(ctx, scopeMFA, sess.OperatorID)
+	if err1 != nil || err2 != nil {
+		slog.Error("code throttle unreadable; refusing new recovery codes", "ip_err", err1, "operator_err", err2)
 		jsonErr(w, http.StatusServiceUnavailable, "mfa_unavailable", "New recovery codes could not be made. Try again shortly.")
 		return
 	}
-	s.audit(r, "operator.mfa_recovery_codes_replaced", "operator", sess.OperatorID, map[string]any{"source_ip": clientIP(r)})
+	if wait := max(stIP.refusal(false), stOp.refusal(true)); wait > 0 {
+		writeThrottled(w, wait, "codes")
+		return
+	}
+	codes, valid, err := s.mfa.NewRecoveryCodes(ctx, sess.OperatorID, code)
+	switch {
+	case errors.Is(err, errMFANotEnrolled):
+		jsonErr(w, http.StatusConflict, "not_enrolled", "Two-step sign-in is not set up for your account.")
+		return
+	case err != nil:
+		slog.Error("new recovery codes failed", "err", err)
+		jsonErr(w, http.StatusServiceUnavailable, "mfa_unavailable", "New recovery codes could not be made. Try again shortly.")
+		return
+	case !valid:
+		s.recordFailure(r, "operator.mfa_failed", "operator.mfa_locked", sess.OperatorID, "wrong_code",
+			map[string]string{scopeMFA: sess.OperatorID, scopeIP: ip})
+		jsonErr(w, http.StatusUnauthorized, "wrong_code",
+			"That code is not right. Enter the 6-digit code your authenticator app shows now; a code already used is not accepted again.")
+		return
+	}
+	if err := s.throttleClear(ctx, scopeMFA, sess.OperatorID); err != nil {
+		slog.Warn("could not clear the code counter", "err", err)
+	}
+	s.audit(r, "operator.mfa_recovery_codes_replaced", "operator", sess.OperatorID, map[string]any{"source_ip": ip})
 	writeJSON(w, http.StatusOK, map[string]any{"recovery_codes": codes})
+}
+
+// isTOTPCode reports whether a normalised code is the authenticator's 6 digits (a recovery code never is).
+func isTOTPCode(code string) bool {
+	if len(code) != totp.Digits {
+		return false
+	}
+	for _, c := range code {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // ----- an administrator resetting a colleague's second step ----------------------------------------------------

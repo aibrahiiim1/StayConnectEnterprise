@@ -4,6 +4,9 @@
 // area at the foot of the sidebar. The app is set up at sign-in, so this page shows the state and makes a new set
 // of recovery codes. Losing the phone is solved by a recovery code or by a site administrator's reset on the
 // Operators screen, never from here: a stolen session plus a password must not be able to remove the second step.
+//
+// A NEW SET NEEDS THE PASSWORD AND A CURRENT CODE FROM THE APP (Product-Owner decision D-R3): with the password
+// alone, a stolen session could mint codes that later sign in without the app. A recovery code is not accepted.
 
 import { useCallback, useEffect, useState } from "react";
 import { Smartphone } from "lucide-react";
@@ -23,6 +26,8 @@ export default function TwoStepSigninPage() {
   const [err, setErr] = useState<unknown>(null);
   const [making, setMaking] = useState(false);
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [codeErr, setCodeErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [codes, setCodes] = useState<string[] | null>(null);
 
@@ -31,14 +36,24 @@ export default function TwoStepSigninPage() {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
+  const codeReady = /^\d{6}$/.test(code.replace(/\s/g, ""));
+
+  function stopMaking() {
+    setMaking(false); setPassword(""); setCode(""); setCodeErr(null);
+  }
+
   async function makeCodes() {
-    setBusy(true); setErr(null);
+    setBusy(true); setErr(null); setCodeErr(null);
     try {
-      const r = await api.post<{ recovery_codes: string[] }>("/auth/mfa/recovery-codes", { password });
-      setCodes(r.recovery_codes); setMaking(false); setPassword("");
+      const r = await api.post<{ recovery_codes: string[] }>("/auth/mfa/recovery-codes", { password, code });
+      setCodes(r.recovery_codes); stopMaking();
       await load();
     } catch (e) {
-      setErr(e instanceof ApiError && e.code === "reauth_required" ? new Error("Your password was not accepted.") : e);
+      if (e instanceof ApiError && (e.code === "wrong_code" || e.code === "code_required")) {
+        setCodeErr(e.message); setCode("");
+      } else {
+        setErr(e instanceof ApiError && e.code === "reauth_required" ? new Error("Your password was not accepted.") : e);
+      }
     } finally { setBusy(false); }
   }
 
@@ -75,7 +90,8 @@ export default function TwoStepSigninPage() {
             </Badge>
           </div>
           <p className="text-sm text-muted-foreground">
-            Each signs you in once without the app. Making a new set replaces every earlier code.
+            Each signs you in once without the app. Making a new set replaces every earlier code, and needs your
+            password and the code your authenticator app shows now.
           </p>
           {codes && (
             <ul aria-label="New recovery codes" className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-card p-3 font-mono text-sm">
@@ -90,10 +106,24 @@ export default function TwoStepSigninPage() {
               <Field label="Your password" required hint="Confirms the change.">
                 <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
               </Field>
-              <Button size="sm" variant="primary" disabled={busy || password === ""} onClick={() => void makeCodes()}>
+              <Field
+                label="Code from your authenticator app"
+                required
+                hint="The 6 digits the app shows now. A recovery code cannot be used here."
+                error={codeErr ?? undefined}
+              >
+                <Input
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={7}
+                  value={code}
+                  onChange={(e) => { setCode(e.target.value); setCodeErr(null); }}
+                />
+              </Field>
+              <Button size="sm" variant="primary" disabled={busy || password === "" || !codeReady} onClick={() => void makeCodes()}>
                 {busy ? "Making…" : "Make codes"}
               </Button>
-              <Button size="sm" variant="ghost" disabled={busy} onClick={() => setMaking(false)}>Cancel</Button>
+              <Button size="sm" variant="ghost" disabled={busy} onClick={stopMaking}>Cancel</Button>
             </div>
           )}
         </CardBody>
