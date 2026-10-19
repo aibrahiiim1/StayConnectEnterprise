@@ -45,10 +45,13 @@ func (s *server) backupRecipients(ctx context.Context) ([]age.Recipient, error) 
 	if s.db == nil {
 		return nil, errors.New("the database is not reachable, so the backup keys could not be read")
 	}
+	// Without its own site scd asks as the nightly backup does, for the holders of the site the appliance serves
+	// (0144): a dump is never written in the clear while that site's holders exist.
+	q, args := `SELECT k FROM public.backup_key_recipients($1::uuid,$2::uuid) k`, []any{s.tenID, s.siteID}
 	if s.tenID == "" || s.siteID == "" {
-		return nil, nil // no site yet: nothing can have been set up for it
+		q, args = `SELECT k FROM public.backup_key_recipients() k`, nil
 	}
-	rows, err := s.db.Query(ctx, `SELECT k FROM public.backup_key_recipients($1::uuid,$2::uuid) k`, s.tenID, s.siteID)
+	rows, err := s.db.Query(ctx, q, args...)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "42883" {
