@@ -63,7 +63,19 @@ const STATUS_WORDS: Record<string, { label: string; tone: "ok" | "warn" | "err" 
     label: "Rejected", tone: "err",
     meaning: "The message could not be understood or contradicted what the appliance already holds.",
   },
+  FAILED: {
+    label: "Not applied", tone: "err",
+    meaning: "The message was closed without being applied to the guest list.",
+  },
 };
+
+// Reason codes with their own sentence. Others are shown as their code in plain letters.
+const REVIEW_CODE_WORDS: Record<string, string> = {
+  // GDPR audit B2 (migration 0139): still waiting long after it arrived, so it will not be applied; its guest
+  // details were removed when the retention period or an erasure request ended.
+  RETENTION_GIVEN_UP: "Given up: never processed, guest details removed",
+};
+const reviewCodeWords = (c: string) => REVIEW_CODE_WORDS[c] ?? c.replace(/_/g, " ").toLowerCase();
 
 // Protocol verbs, in hotel words. An unknown type falls through to its raw value rather than being hidden: a
 // connector sending something this table has not been taught must still be visible.
@@ -335,7 +347,7 @@ export default function StayEventsPage() {
                         <Badge tone={st.tone}>{st.label}</Badge>
                         {e.review_code && (
                           <div className="mt-0.5 text-2xs text-muted-foreground">
-                            {e.review_code.replace(/_/g, " ").toLowerCase()}
+                            {reviewCodeWords(e.review_code)}
                           </div>
                         )}
                       </TD>
@@ -403,7 +415,7 @@ export default function StayEventsPage() {
                 { label: "Stay status", value: detail.stay_status?.replace(/_/g, " ").toLowerCase() ?? "—" },
                 { label: "PMS connection", value: detail.pms_interface_label || "—" },
                 { label: "Message type", value: `${typeWords(detail.event_type)} (${detail.event_type})` },
-                { label: "Reason code", value: detail.review_code ?? "—" },
+                { label: "Reason code", value: detail.review_code ? `${reviewCodeWords(detail.review_code)} (${detail.review_code})` : "—" },
                 { label: "Time at the PMS", value: detail.pms_timestamp_utc ? formatDate(detail.pms_timestamp_utc) : "—" },
                 { label: "Received here", value: formatDate(detail.received_at) },
                 {

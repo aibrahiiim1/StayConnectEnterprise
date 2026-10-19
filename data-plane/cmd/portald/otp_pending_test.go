@@ -140,7 +140,7 @@ func TestTheMessageLinkOpensAPageAndOnlyTheButtonVerifies(t *testing.T) {
 		t.Fatalf("malformed link: %d", rec.Code)
 	}
 	// The button: the same verification as the code box, from the connection's device, then the journey.
-	form := "c=11111111-2222-4333-8444-555555555555&k=123456"
+	form := "c=11111111-2222-4333-8444-555555555555&k=123456&remember=1" // the guest ticked "Remember this device"
 	req := httptest.NewRequest(http.MethodPost, "https://portal.test/auth/otp/link", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.RemoteAddr = "10.20.0.50:4321"

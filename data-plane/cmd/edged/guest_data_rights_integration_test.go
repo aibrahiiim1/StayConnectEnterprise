@@ -331,6 +331,29 @@ func TestIntegration_GuestDataRights_ExportAndErasureCoverEverything(t *testing.
 		t.Fatalf("erasing with a waiting PMS event = %d %v", st, body)
 	}
 
+	// D-B2 (0139): an event still waiting after 24 hours will not be processed. It no longer blocks the erasure:
+	// it is given up, FAILED with RETENTION_GIVEN_UP, and its contents blanked.
+	old := seedGuestDataStay(t, f, "R-OLDWAIT-"+sfx, "CHECKED_OUT")
+	var oldEv string
+	if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `INSERT INTO iam_v2.stay_events(tenant_id,site_id,pms_interface_id,external_event_identity,
+			  event_type,processing_status,received_at,payload)
+			SELECT $1,$2,s.pms_interface_id,'EVO-'||$3,'GUEST_CHANGE','PENDING',now() - interval '2 days',
+			       jsonb_build_object('reservation',$3::text,'last_name','Lovelace')
+			  FROM iam_v2.stays s WHERE s.external_reservation_id=$3 RETURNING id::text`, f.tenant, f.site, "R-OLDWAIT-"+sfx).Scan(&oldEv)
+	}); err != nil {
+		t.Fatalf("seed old waiting event: %v", err)
+	}
+	if st, body := f.do(t, "POST", "/guest-data-rights/erase", req("stay", old)); st != 200 {
+		t.Fatalf("erasing with a two-day-old waiting event = %d %v", st, body)
+	}
+	var evStatus, evCode, evPayload string
+	_ = f.pool.QueryRow(ctx, `SELECT processing_status, coalesce(review_code,''), payload::text FROM iam_v2.stay_events WHERE id=$1`, oldEv).
+		Scan(&evStatus, &evCode, &evPayload)
+	if evStatus != "FAILED" || evCode != "RETENTION_GIVEN_UP" || evPayload != `{"anonymised": true}` {
+		t.Fatalf("the old waiting event after erasure: %s %s %s", evStatus, evCode, evPayload)
+	}
+
 	// A stay the PMS left in-house after its departure is erased; one departing tomorrow is not.
 	stale := seedGuestDataStay(t, f, "R-STALE-"+sfx, "IN_HOUSE")
 	inStay(`UPDATE iam_v2.stays SET arrival=current_date - 9, departure=current_date - 5 WHERE id=$1::uuid`, stale)

@@ -57,6 +57,39 @@ func clearClientResumeCookie(w http.ResponseWriter, r *http.Request) {
 	clearPortalCookie(w, r, clientResumeCookie)
 }
 
+// rememberCookie is the guest's own choice, "Remember this device" ticked on the sign-in page (GDPR audit B10,
+// D-B10). A session cookie the page sets; it carries no identifier.
+const rememberCookie = "og_remember"
+
+// guestAskedToRemember reports whether this sign-in may keep a remembered-device credential: the guest ticked
+// the box -- on the sign-in page (the cookie) or on the message-link page (the form field) -- and the request
+// is over HTTPS.
+func guestAskedToRemember(r *http.Request) bool {
+	if r == nil || r.TLS == nil {
+		return false
+	}
+	if r.Method == http.MethodPost && r.PostFormValue("remember") == "1" {
+		return true
+	}
+	c, err := r.Cookie(rememberCookie)
+	return err == nil && c.Value == "1"
+}
+
+// revokeResume asks scd to revoke a resume credential, best effort.
+func (h *handler) revokeResume(ctx context.Context, token string) {
+	if h.scd == nil {
+		return
+	}
+	body, _ := json.Marshal(map[string]string{"resume_token": token})
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix/v1/sessions/resume-revoke", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if resp, err := h.scd.Do(req); err == nil {
+		resp.Body.Close()
+	} else {
+		slog.Warn("scd resume revoke", "err", err)
+	}
+}
+
 // rememberedToken is the credential the Welcome-back line and Connect may use: over HTTPS only.
 func (h *handler) rememberedToken(r *http.Request) string {
 	if r.TLS == nil {

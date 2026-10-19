@@ -39,7 +39,8 @@ Reservation details: [[period]] after checkout. Device addresses and sessions: [
 COOKIES
 The sign-in page uses these cookies, and no advertising or tracking cookies:
 - sc-lang: the language you choose, for a year.
-- og_client: if you sign in with a code or an online account over a secure (https) connection, remembers this device so you can reconnect with one tap, for [[period]]. Signing out, or "Not you?", forgets it.
+- og_remember: notes, for this visit only, that you ticked "Remember this device".
+- og_client: only if you tick "Remember this device" and sign in with a code or an online account over a secure (https) connection, remembers this device so you can reconnect with one tap, for [[period]]. Signing out, or "Not you?", forgets it.
 - og_resume: if you continue without signing in, lets this device come back to the access it started, for 30 days.
 - og_account: keeps you signed in to your account page, for 15 minutes.
 - sc_commerce: holds your package choice while you finish signing in or paying, for 10 minutes.

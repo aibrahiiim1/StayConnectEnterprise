@@ -26,7 +26,9 @@ func otpPayload(extra string) []byte {
 func TestAVerifiedCodeStartsTheJourneyAsJSONAndKeepsTheDeviceCredential(t *testing.T) {
 	h := portalFixture()
 	rec := httptest.NewRecorder()
-	if !h.tryIAMv2AuthMode(rec, httptest.NewRequest(http.MethodPost, "https://portal.test/auth/otp/verify", nil), otpPayload(`,"resume_token":"tok-1"`), true) {
+	req := httptest.NewRequest(http.MethodPost, "https://portal.test/auth/otp/verify", nil)
+	req.AddCookie(&http.Cookie{Name: rememberCookie, Value: "1"}) // the guest ticked "Remember this device"
+	if !h.tryIAMv2AuthMode(rec, req, otpPayload(`,"resume_token":"tok-1"`), true) {
 		t.Fatal("an IAM-v2 reply must be handled")
 	}
 	if rec.Code != http.StatusOK {
@@ -263,5 +265,38 @@ func TestTheDeviceIsRememberedOverHTTPSOnly(t *testing.T) {
 	h.index(rec, req)
 	if strings.Contains(rec.Body.String(), `id="welcome"`) {
 		t.Fatal("a device was greeted from a cookie sent over plain HTTP")
+	}
+}
+
+// GDPR audit B10 (D-B10): a device is remembered only when the guest ticked "Remember this device". Unticked, the
+// credential scd issued is revoked at once and no cookie is set.
+func TestTheDeviceIsRememberedOnlyWhenTheGuestAsks(t *testing.T) {
+	var revoked []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/sessions/resume-revoke", func(w http.ResponseWriter, r *http.Request) {
+		var in map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		revoked = append(revoked, in["resume_token"])
+		w.Write([]byte(`{"ok":true}`))
+	})
+	h := clientAccessHandler(t, mux)
+	rec := httptest.NewRecorder()
+	if !h.tryIAMv2AuthMode(rec, httptest.NewRequest(http.MethodPost, "https://portal.test/auth/otp/verify", nil), otpPayload(`,"resume_token":"tok-2"`), true) {
+		t.Fatal("an IAM-v2 reply must be handled")
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == clientResumeCookie {
+			t.Fatalf("the device was remembered without the guest asking: %+v", c)
+		}
+	}
+	if len(revoked) != 1 || revoked[0] != "tok-2" {
+		t.Fatalf("the unwanted credential was not revoked: %v", revoked)
+	}
+	if guestAskedToRemember(func() *http.Request {
+		r := httptest.NewRequest(http.MethodGet, "http://portal.test/", nil)
+		r.AddCookie(&http.Cookie{Name: rememberCookie, Value: "1"})
+		return r
+	}()) {
+		t.Fatal("a tick over plain HTTP was honoured")
 	}
 }

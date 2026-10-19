@@ -488,6 +488,15 @@ const landingHTML = `<!doctype html>
   </div>
 
       <div class="alt" id="alt-methods" style="display:none"></div>
+      <!-- REMEMBER THIS DEVICE (GDPR audit B10, D-B10). Unticked by default; ticking it is the guest's own request
+           for the remembered-device cookie, which is what makes that cookie lawful without a cookie banner
+           (PECR reg. 6, ePrivacy Art. 5(3)). The choice lives in a session cookie for this visit only, so it
+           survives the trip to an identity provider; the server keeps the credential only when it is set, and
+           only over HTTPS (client_resume.go). -->
+      <label class="remember-device" id="remember-device" hidden>
+        <input type="checkbox" id="remember-device-box">
+        <span data-i18n="remember.device" data-i18n-en="Remember this device, so I can reconnect with one tap">{{index .T "remember.device"}}</span>
+      </label>
     </div>
 
     <!-- THE PRIVACY NOTICE (GDPR Art. 13), on the card under every way in -- the welcome-back button included --
@@ -504,7 +513,7 @@ const landingHTML = `<!doctype html>
       <a class="privacy-url" id="privacy-url"{{with .PrivacyURL}} href="{{.}}"{{end}} target="_blank" rel="noopener noreferrer"{{if not .PrivacyURL}} hidden{{end}}
          data-i18n="privacy.url" data-i18n-en="Privacy notice">{{index .T "privacy.url"}}</a>
       <p class="privacy-remember" id="privacy-remember"{{if not .Welcome}} hidden{{end}}
-         data-i18n="privacy.remember" data-i18n-en="If you sign in with a code or an online account, this device is remembered with a cookie so you can reconnect with one tap. Signing out, or “Not you?”, forgets it.">{{index .T "privacy.remember"}}</p>
+         data-i18n="privacy.remember" data-i18n-en="If you tick “Remember this device”, a cookie keeps it remembered so you can reconnect with one tap. Signing out, or “Not you?”, forgets it.">{{index .T "privacy.remember"}}</p>
     </div>
     </div>
 
@@ -1194,8 +1203,21 @@ const landingHTML = `<!doctype html>
         el.hidden = enabled.indexOf(el.dataset.helpMethod) < 0;
       });
       // THE REMEMBERED-DEVICE COOKIE is explained wherever a sign-in can set it (client_resume.go).
-      document.getElementById('privacy-remember').hidden =
-        !(hasSocial || ['email', 'sms', 'whatsapp'].some(function (m) { return enabled.indexOf(m) >= 0; }));
+      const canRemember = hasSocial || ['email', 'sms', 'whatsapp'].some(function (m) { return enabled.indexOf(m) >= 0; });
+      document.getElementById('privacy-remember').hidden = !canRemember;
+      // The box is offered only where the device can be remembered: a code or an identity provider, over HTTPS.
+      const rememberEl = document.getElementById('remember-device');
+      const rememberBox = document.getElementById('remember-device-box');
+      if (rememberEl && rememberBox) {
+        rememberEl.hidden = !(canRemember && location.protocol === 'https:');
+        rememberBox.checked = /(?:^|; )og_remember=1(?:;|$)/.test(document.cookie);
+        rememberBox.addEventListener('change', function () {
+          try {
+            document.cookie = 'og_remember=' + (rememberBox.checked ? '1' : '') + '; path=/; SameSite=Lax; Secure' +
+              (rememberBox.checked ? '' : '; max-age=0');
+          } catch (e) {}
+        });
+      }
       if (enabled.length === 0 && (openOn || hasSocial)) {
         // Open selection and/or the identity providers are the only ways in: no tabs, no empty sign-in panel.
         tabsEl.style.display = 'none';

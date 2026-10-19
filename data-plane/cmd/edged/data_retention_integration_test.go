@@ -132,6 +132,22 @@ func TestIntegration_DataRetention_AnonymisesOnlyWhatOutlivedTheRetention(t *tes
 	recentStay := seedStay("R-NEW-"+suffix, "102", 5)
 	// GDPR audit B2 (0137): a stay the PMS never closed is anonymised once its departure is past the retention;
 	// one still in-house with a departure to come is not.
+	// D-B2 (0139): an event still waiting 60 days after it arrived is given up; one from today is left alone.
+	waiting := func(ref string, ago string) string {
+		var id string
+		if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `INSERT INTO iam_v2.stay_events(tenant_id,site_id,pms_interface_id,external_event_identity,
+				  event_type,processing_status,received_at,payload)
+				VALUES ($1,$2,$3::uuid,$4,'GUEST_CHANGE','PENDING',now() - $5::interval,
+				        jsonb_build_object('reservation',$4::text,'last_name','Lovelace')) RETURNING id::text`,
+				f.tenant, f.site, iface, ref, ago).Scan(&id)
+		}); err != nil {
+			t.Fatalf("seed waiting event: %v", err)
+		}
+		return id
+	}
+	staleEvent := waiting("EVW-OLD-"+suffix, "60 days")
+	freshEvent := waiting("EVW-NEW-"+suffix, "0 days")
 	forgotten := seedGuestDataStay(t, f, "R-FORGOT-"+suffix, "IN_HOUSE")
 	inHouse := seedGuestDataStay(t, f, "R-HERE-"+suffix, "IN_HOUSE")
 	if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
@@ -273,6 +289,19 @@ func TestIntegration_DataRetention_AnonymisesOnlyWhatOutlivedTheRetention(t *tes
 	expect("old stay room", str(`SELECT normalized_room_number FROM iam_v2.stays WHERE id=$1`, oldStay), "<null>")
 	expect("old stay travel agent", str(`SELECT travel_agent FROM iam_v2.stays WHERE id=$1`, oldStay), "<null>")
 	expect("old stay status", str(`SELECT status FROM iam_v2.stays WHERE id=$1`, oldStay), "CHECKED_OUT")
+	expect("stale waiting event", str(`SELECT processing_status || ' ' || review_code || ' ' || payload::text FROM iam_v2.stay_events WHERE id=$1`, staleEvent),
+		`FAILED RETENTION_GIVEN_UP {"anonymised": true}`)
+	expect("fresh waiting event", str(`SELECT processing_status FROM iam_v2.stay_events WHERE id=$1`, freshEvent), "PENDING")
+	// The guard still refuses anything less than giving an event up whole, even to the owner inside a run.
+	if err := asOwner(ctx, f.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT set_config('iam_v2.anonymise','retention',true), iam_v2.begin_controlled_operation('stay')`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `UPDATE iam_v2.stay_events SET payload='{"anonymised": true}'::jsonb WHERE id=$1::uuid`, freshEvent)
+		return err
+	}); err == nil {
+		t.Fatal("a waiting event was blanked without being given up")
+	}
 	prefixed("forgotten in-house stay", str(`SELECT external_reservation_id FROM iam_v2.stays WHERE id=$1`, forgotten), "anon-")
 	expect("current in-house stay", str(`SELECT external_reservation_id FROM iam_v2.stays WHERE id=$1`, inHouse), "R-HERE-"+suffix)
 	expect("old stay departure kept", str(`SELECT (departure IS NOT NULL)::text FROM iam_v2.stays WHERE id=$1`, oldStay), "true")
