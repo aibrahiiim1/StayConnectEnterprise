@@ -61,11 +61,13 @@ func main() {
 			err = runResetMFA(os.Args[2:])
 		case "unlock-signin":
 			err = runUnlockSignin(os.Args[2:])
+		case "check-mfa-key":
+			err = runCheckMFAKey(os.Args[2:])
 		case "serve", "":
 			goto serve
 		default:
 			fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", os.Args[1])
-			fmt.Fprintf(os.Stderr, "usage: ctrlapi [serve | seed-admin | gen-vendor-key | gen-assignment-key | gen-registry-key | assignment-key verify-only|revoke | gen-mfa-key | reset-mfa | unlock-signin]\n")
+			fmt.Fprintf(os.Stderr, "usage: ctrlapi [serve | seed-admin | gen-vendor-key | gen-assignment-key | gen-registry-key | assignment-key verify-only|revoke | gen-mfa-key | check-mfa-key | reset-mfa | unlock-signin]\n")
 			os.Exit(2)
 		}
 		if err != nil {
@@ -657,4 +659,61 @@ func unlockSignin(ctx context.Context, pool *pgxpool.Pool, mfa *auth.MFA, email,
 	audit.System(ctx, pool, "user.signin_unlocked", "operator", id, map[string]any{
 		"reason": strings.TrimSpace(reason), "locks_cleared": n, "via": "command line"})
 	return id, n, nil
+}
+
+// runCheckMFAKey proves the console two-step sign-in key before a release depends on it (central-deploy.sh runs it
+// with the NEW binary before switching releases, and central-install.sh after creating or carrying the key):
+//
+//	ctrlapi check-mfa-key [--key <path>] [--no-db]
+//
+// It fails when the key is missing or malformed, or -- unless --no-db -- when the database holds confirmed
+// authenticators and the key opens none of them (a wrong key would refuse every operator who set up the app).
+// The database is CTRLAPI_DB_URL, as for every subcommand.
+func runCheckMFAKey(args []string) error {
+	fs := flag.NewFlagSet("check-mfa-key", flag.ExitOnError)
+	keyPath := fs.String("key", envOrDefault("CTRLAPI_OPERATOR_MFA_KEY", defaultMFAKeyPath), "the key file")
+	noDB := fs.Bool("no-db", false, "check the file only, not against the enrolled authenticators")
+	_ = fs.Parse(args)
+	raw, err := auth.LoadMFAKeyFile(*keyPath)
+	if err != nil {
+		return fmt.Errorf("console two-step sign-in key: %w (create one with: ctrlapi gen-mfa-key --out %s)", err, *keyPath)
+	}
+	if *noDB {
+		m, err := auth.NewMFA(nil, raw)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("console two-step sign-in key %s loads (key id %s); not checked against the database\n", *keyPath, m.KeyID())
+		return nil
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	pool, err := db.Open(ctx, cfg.DBURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	m, err := auth.NewMFA(pool, raw)
+	if err != nil {
+		return err
+	}
+	opened, unreadable, err := m.CheckKey(ctx)
+	if errors.Is(err, auth.ErrMFAWrongKey) {
+		return fmt.Errorf("%s (key id %s) opens none of the %d confirmed authenticators: it is not the key they were set up "+
+			"with. Restore the right key file; do not replace it", *keyPath, m.KeyID(), unreadable)
+	}
+	if err != nil {
+		return err
+	}
+	if unreadable > 0 {
+		slog.Warn("some authenticators were set up under another key and cannot be used until reset (ctrlapi reset-mfa)",
+			"unreadable", unreadable)
+	}
+	fmt.Printf("console two-step sign-in key %s is good (key id %s): opens %d of %d confirmed authenticators\n",
+		*keyPath, m.KeyID(), opened, opened+unreadable)
+	return nil
 }

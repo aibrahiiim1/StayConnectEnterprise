@@ -197,7 +197,14 @@ func readyz(d Deps) http.HandlerFunc {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "not-ready", "redis": "unreachable"})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"status": "ready", "version": d.Version})
+		// signin says whether console sign-in can work: without the two-step sign-in key every sign-in is refused
+		// (auth_mfa_handlers.go), while appliances are served normally. central-deploy.sh's smoke test requires
+		// "available", so a release that comes up without the key is rolled back.
+		signin := "available"
+		if d.MFA == nil {
+			signin = "unavailable"
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ready", "version": d.Version, "signin": signin})
 	}
 }
 

@@ -13,12 +13,14 @@
 # the file the console's System → Backup health page reads through ctrlapi.
 #
 # ENCRYPTED TO PUBLIC KEYS (GDPR remediation plan, gap found by the F3 review; the appliance's backups have been
-# encrypted the same way since its migration 0129). /etc/stayconnect/backup-recipients.txt lists age public keys
-# (age1..., one per line; # comments allowed), held by the people who may restore. Each dump is checked as a
+# encrypted the same way since its migration 0129). /etc/stayconnect/backup-recipients.txt lists the public keys
+# age encrypts to -- age keys (age1...) or SSH public keys (ssh-ed25519 / ssh-rsa), one per line; # comments
+# allowed -- held by the people who may restore. Each dump is checked as a
 # readable archive while still plain (a 0600 file in the 0700 backup directory, for seconds), then encrypted to every listed key with `age -R`; the plain
 # copy is removed. Central keeps no private key, so a copy of its disk or of this directory cannot be read. Once
-# the file lists a key, a dump that cannot be encrypted is a failed backup, never a plain one. Until it lists
-# one, dumps are written unencrypted and the run says so (and the status records "encrypted": false).
+# the file EXISTS, a dump that cannot be encrypted is a failed backup, never a plain one -- including when the
+# file lists no key age can use (only an SSH key used to be overlooked, and the dump silently written in the
+# clear). Without the file, dumps are written unencrypted and the run says so ("encrypted": false).
 # Restore: age -d -i <your key file> central-...dump.age | docker exec -i sc-central-pg pg_restore ...
 #
 # LOCAL ONLY. A copy of this directory that leaves the host is the operator's responsibility: where it goes is
@@ -36,7 +38,7 @@ REASON=scheduled
 while [ $# -gt 0 ]; do
   case "$1" in
     --reason) REASON="$2"; shift 2 ;;
-    -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,29p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -96,7 +98,9 @@ chmod 0600 "$TMP"
 
 RECIPIENTS="${CENTRAL_BACKUP_RECIPIENTS:-$SC_ETC/backup-recipients.txt}"
 ENCRYPTED=false
-if [ -f "$RECIPIENTS" ] && grep -qE '^[[:space:]]*age1' "$RECIPIENTS"; then
+if [ -f "$RECIPIENTS" ]; then
+  backup_recipients_usable "$RECIPIENTS" \
+    || { FAIL_WHY="$RECIPIENTS lists no key age can encrypt to (age1..., ssh-ed25519 or ssh-rsa)"; die "$FAIL_WHY — no backup written"; }
   command -v age >/dev/null 2>&1 || { FAIL_WHY="age is not installed but backup keys are configured"; die "$FAIL_WHY (apt-get install age)"; }
   age -R "$RECIPIENTS" -o "$TMP.age" "$TMP" 2>"$ERR"     || { cat "$ERR" >&2; FAIL_WHY="the dump could not be encrypted"; die "the dump could not be encrypted — no backup written"; }
   [ "$(head -c 21 "$TMP.age")" = "age-encryption.org/v1" ]     || { FAIL_WHY="the encrypted dump has no age header"; die "$FAIL_WHY — no backup written"; }
@@ -106,7 +110,7 @@ if [ -f "$RECIPIENTS" ] && grep -qE '^[[:space:]]*age1' "$RECIPIENTS"; then
   mv -f "$TMP.age" "$DUMP"
   ENCRYPTED=true
 else
-  warn "no backup key in $RECIPIENTS: this dump is NOT encrypted (list an age public key there)"
+  warn "no backup key file $RECIPIENTS: this dump is NOT encrypted (list an age or SSH public key there)"
   mv -f "$TMP" "$DUMP"
 fi
 record_run ok "$DUMP" "" "$ENCRYPTED"

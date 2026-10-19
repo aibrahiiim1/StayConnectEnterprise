@@ -453,13 +453,12 @@ else
   if [ "$n" = 3 ]; then say "appliance CA exists — kept (root $(cert_fpr "$PKI_ROOT_CRT" | cut -c1-23)…)"
   else say "the appliance Root/Intermediate CA is created by ctrlapi on its first start (step 11)"; fi
 fi
-if [ -s "$KEY_MFA" ]; then say "console two-step sign-in key exists — kept"
-else
-  run "$CTRLAPI_BIN_PATH" gen-mfa-key --out "$KEY_MFA"
-  if [ "$MODE" = restore ]; then
-    warn "the bundle had no console two-step sign-in key: a NEW one was created. Operators who had set up an
+# The same helper central-deploy.sh uses (central-lib.sh): created when absent, never replaced, 0600 root.
+had_mfa_key=0; [ -s "$KEY_MFA" ] && had_mfa_key=1
+ensure_mfa_key "$CTRLAPI_BIN_PATH" "$KEY_MFA" || die "the console two-step sign-in key $KEY_MFA could not be created"
+if [ "$had_mfa_key" = 0 ] && [ "$MODE" = restore ]; then
+  warn "the bundle had no console two-step sign-in key: a NEW one was created. Operators who had set up an
     authenticator cannot sign in until it is reset: ctrlapi reset-mfa --email <them> --reason \"restored without key\""
-  fi
 fi
 case "$TLS_MODE" in internal|acme) ;; *) die "--tls must be internal or acme" ;; esac
 [ "$TLS_MODE" = acme ] || [ "$DRY_RUN" = 1 ] || [ -s "$CENTRAL_TLS_DIR/ca.crt" ] || die "--tls internal but no Central TLS CA at $CENTRAL_TLS_DIR"
@@ -591,6 +590,11 @@ else
     done
     PRE_ROOT="$(sha256_of "$PKI_ROOT_CRT")"; PRE_INT="$(sha256_of "$PKI_INT_CRT")"
   fi
+  # A carried two-step sign-in key must open the carried authenticators (a key created just now cannot, and the
+  # warning above says what to do about that).
+  if [ "$had_mfa_key" = 1 ]; then
+    check_mfa_key "$CTRLAPI_BIN_PATH" "$KEY_MFA" || die "the console two-step sign-in key $KEY_MFA failed its check (above)"
+  fi
   unit_restart_noblock stayconnect-ctrlapi
   ctrlapi_ready 90 || { journalctl -u stayconnect-ctrlapi -n 60 --no-pager >&2 || true; die "ctrlapi did not become ready"; }
   if [ "$MODE" = restore ]; then
@@ -680,7 +684,8 @@ else
   systemctl start stayconnect-central-backup.service \
     || { journalctl -u stayconnect-central-backup -n 20 --no-pager >&2 || true; die "the first database backup failed"; }
   say "first backup: $(ls -1t "$CENTRAL_DB_BACKUPS"/central-*.dump "$CENTRAL_DB_BACKUPS"/central-*.dump.age 2>/dev/null | head -1)"
-  grep -qE '^[[:space:]]*age1' "$SC_ETC/backup-recipients.txt" 2>/dev/null     || warn "database backups are NOT encrypted until $SC_ETC/backup-recipients.txt lists an age public key (age-keygen on the restorer's machine; the private key never comes here)"
+  backup_recipients_usable "$SC_ETC/backup-recipients.txt" \
+    || warn "database backups are NOT encrypted until $SC_ETC/backup-recipients.txt lists an age or SSH public key (age-keygen on the restorer's machine; the private key never comes here)"
 fi
 
 # ================================================================= 14. public trust, provenance, smoke

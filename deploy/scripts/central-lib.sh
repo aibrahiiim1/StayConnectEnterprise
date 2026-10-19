@@ -328,6 +328,48 @@ ctrlapi_ready() {
   return 1
 }
 
+# ---------------------------------------------------------------- database backup keys
+# A line of the backup recipients file that age accepts as a recipient: an X25519 key (age1...) or an SSH public
+# key (ssh-ed25519 / ssh-rsa). Comments and anything else are not recipients.
+BACKUP_RECIPIENT_RE='^[[:space:]]*(age1[0-9a-z]+|ssh-ed25519[[:space:]]+[A-Za-z0-9+/]+=*|ssh-rsa[[:space:]]+[A-Za-z0-9+/]+=*)([[:space:]]|$)'
+
+# backup_recipients_usable <file> — the file exists and lists at least one recipient age can encrypt to.
+backup_recipients_usable() { [ -f "$1" ] && grep -qE "$BACKUP_RECIPIENT_RE" "$1"; }
+
+# ---------------------------------------------------------------- console two-step sign-in key (0052)
+# Without this key ctrlapi starts, answers /readyz and serves appliances, but refuses EVERY console sign-in. A
+# routine upgrade used to leave it to the installer, so a Central installed before 0052 came out of its upgrade with
+# nobody able to sign in. Both central-install.sh and central-deploy.sh now ensure and check it before ctrlapi
+# depends on it.
+
+# mfa_key_path — the key file ctrlapi reads: CTRLAPI_OPERATOR_MFA_KEY in ctrlapi.env, or the default.
+mfa_key_path() { envfile_get "$CTRLAPI_ENV_PATH" CTRLAPI_OPERATOR_MFA_KEY 2>/dev/null || printf '%s' "$SC_ETC/operator-mfa.key"; }
+
+# ensure_mfa_key <ctrlapi-binary> <key-path> — create the key with that binary when there is none (0600 root).
+# NEVER replaces an existing key: every operator's authenticator is sealed under it. Returns non-zero on failure.
+ensure_mfa_key() {
+  local bin="$1" key="$2"
+  if [ -s "$key" ]; then
+    say "console two-step sign-in key exists — kept ($key)"
+  elif [ -e "$key" ]; then
+    warn "$key exists but is empty — not replacing it (restore the real key file from the export bundle)"; return 1
+  else
+    run "$bin" gen-mfa-key --out "$key" || return 1
+    say "console two-step sign-in key created ($key)"
+  fi
+  [ "$DRY_RUN" = 1 ] && return 0
+  chown root:root "$key" && chmod 0600 "$key"
+}
+
+# check_mfa_key <ctrlapi-binary> <key-path> — that binary loads the key and, when operators have set up an
+# authenticator, opens at least one with it (`ctrlapi check-mfa-key`), so a wrong key is caught as well as a
+# missing one. Reads the database from ctrlapi.env.
+check_mfa_key() {
+  local bin="$1" key="$2"
+  if [ "$DRY_RUN" = 1 ]; then say "DRY-RUN would run: $bin check-mfa-key --key $key"; return 0; fi
+  CTRLAPI_DB_URL="$(envfile_get "$CTRLAPI_ENV_PATH" CTRLAPI_DB_URL || true)" "$bin" check-mfa-key --key "$key"
+}
+
 # Start a unit without blocking on it: on these hosts `systemctl restart` of a unit that refuses to start can
 # wait forever, so stop / reset-failed / start --no-block and then poll for the real readiness signal.
 unit_restart_noblock() {

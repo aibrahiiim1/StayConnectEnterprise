@@ -450,3 +450,60 @@ func SetPendingEnrol(ctx context.Context, db *pgxpool.Pool, tok string, enrol bo
 func DropPending(ctx context.Context, db *pgxpool.Pool, tok string) {
 	_, _ = db.Exec(ctx, `DELETE FROM operator_signin_pending WHERE token_hash = $1`, pendingHash(tok))
 }
+
+// ----- is this the right key? -------------------------------------------------------------------------------------
+
+// ErrMFAWrongKey means the key opens none of the confirmed authenticators: they were sealed under another key.
+var ErrMFAWrongKey = errors.New("the two-step sign-in key opens none of the confirmed authenticators")
+
+// CheckKey proves the key against the database before a release starts using it (`ctrlapi check-mfa-key`, run by
+// central-deploy.sh before it switches releases). With no confirmed authenticator there is nothing to prove and
+// it succeeds. Otherwise at least one must open under this key, or ErrMFAWrongKey: a key that opens none would
+// refuse every operator who has set up the app. opened and unreadable count the authenticators that did and did
+// not open (some can be legitimately unreadable, e.g. after a restore without the key, until they are reset).
+// A database without the 0052 table has no authenticators.
+func (s *MFA) CheckKey(ctx context.Context) (opened, unreadable int, err error) {
+	if err := s.ready(); err != nil {
+		return 0, 0, err
+	}
+	rows, err := s.DB.Query(ctx, `SELECT operator_id::text, key_id, nonce, ciphertext FROM operator_mfa WHERE confirmed_at IS NOT NULL`)
+	if err != nil {
+		var pg *pgconn.PgError
+		if errors.As(err, &pg) && pg.Code == "42P01" { // undefined_table: before migration 0052
+			return 0, 0, nil
+		}
+		return 0, 0, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, keyID string
+		var nonce, ct []byte
+		if err := rows.Scan(&id, &keyID, &nonce, &ct); err != nil {
+			return 0, 0, err
+		}
+		if keyID != s.keyID || len(nonce) != s.aead.NonceSize() {
+			unreadable++
+			continue
+		}
+		if _, err := s.aead.Open(nil, nonce, ct, s.aad(id)); err != nil {
+			unreadable++
+			continue
+		}
+		opened++
+	}
+	if err := rows.Err(); err != nil {
+		return 0, 0, err
+	}
+	if opened == 0 && unreadable > 0 {
+		return 0, unreadable, ErrMFAWrongKey
+	}
+	return opened, unreadable, nil
+}
+
+// KeyID is the short identifier of the key every sealed authenticator records (operator_mfa.key_id).
+func (s *MFA) KeyID() string {
+	if s == nil {
+		return ""
+	}
+	return s.keyID
+}
