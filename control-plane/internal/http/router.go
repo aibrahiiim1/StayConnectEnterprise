@@ -148,7 +148,7 @@ func NewRouter(d Deps) http.Handler {
 	})
 
 	base := &api.Base{DB: d.DB, Redis: d.Redis, AssignKey: d.AssignKey, CA: d.CA,
-		ClientValid: 90 * 24 * time.Hour, Lic: d.Licensing, PortalTLS: d.PortalTLS}
+		ClientValid: 90 * 24 * time.Hour, Lic: d.Licensing, PortalTLS: d.PortalTLS, MFA: d.MFA}
 	if d.ApplianceBase == "" {
 		slog.Warn("offline activation packages are DISABLED: CTRLAPI_APPLIANCE_BASE is not set. Set it to " +
 			"the appliance-facing HTTPS endpoint (a stable FQDN, not an IP) that appliances dial, then restart.")

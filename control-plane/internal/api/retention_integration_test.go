@@ -62,8 +62,8 @@ func TestRetentionAppliesCentralPeriods(t *testing.T) {
         (NULL,'settings_changed','someone@central.test','{"contact_email":{"from":"a@central.test","to":"b@central.test"},"zone_name":{"from":"x","to":"y"}}',`+ago("3 years")+`)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.pool.Exec(f.ctx, `INSERT INTO operator_signin_throttle (key_hash, failures, window_started_at, last_failure_at)
-        VALUES (repeat('a',64), 2, `+ago("3 days")+`, `+ago("3 days")+`), (repeat('b',64), 1, now(), now())`); err != nil {
+	if _, err := f.pool.Exec(f.ctx, `INSERT INTO operator_signin_throttle (key_hash, name_hash, failures, window_started_at, last_failure_at)
+        VALUES (repeat('a',64), repeat('c',64), 2, `+ago("3 days")+`, `+ago("3 days")+`), (repeat('b',64), repeat('c',64), 1, now(), now())`); err != nil {
 		t.Fatal(err)
 	}
 

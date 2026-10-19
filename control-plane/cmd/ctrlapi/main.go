@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/stayconnect/enterprise/control-plane/internal/api"
@@ -58,11 +59,13 @@ func main() {
 			err = runGenMFAKey(os.Args[2:])
 		case "reset-mfa":
 			err = runResetMFA(os.Args[2:])
+		case "unlock-signin":
+			err = runUnlockSignin(os.Args[2:])
 		case "serve", "":
 			goto serve
 		default:
 			fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", os.Args[1])
-			fmt.Fprintf(os.Stderr, "usage: ctrlapi [serve | seed-admin | gen-vendor-key | gen-assignment-key | gen-registry-key | assignment-key verify-only|revoke | gen-mfa-key | reset-mfa]\n")
+			fmt.Fprintf(os.Stderr, "usage: ctrlapi [serve | seed-admin | gen-vendor-key | gen-assignment-key | gen-registry-key | assignment-key verify-only|revoke | gen-mfa-key | reset-mfa | unlock-signin]\n")
 			os.Exit(2)
 		}
 		if err != nil {
@@ -600,4 +603,58 @@ func runResetMFA(args []string) error {
 		"reason": strings.TrimSpace(*reason), "had_authenticator": had, "via": "command line"})
 	slog.Info("two-step sign-in reset; a new authenticator is set up at the next sign-in", "id", id, "had_authenticator", had)
 	return nil
+}
+
+// runUnlockSignin lifts every wrong-password lock on one sign-in name, from every address, from Central's own
+// command line (0056, Product-Owner decision D-R1): the way back in for an administrator locked out when nobody
+// is left to reset them in the console. The name need not have an account -- locks on unknown names are kept
+// exactly like real ones -- so it is cleared either way. Audited as user.signin_unlocked.
+//
+// The lock rows are keyed by an HMAC under the two-step sign-in key, so the key is read as ctrlapi reads it
+// (CTRLAPI_OPERATOR_MFA_KEY); without one, the plain-hash names a keyless ctrlapi writes are cleared instead.
+func runUnlockSignin(args []string) error {
+	fs := flag.NewFlagSet("unlock-signin", flag.ExitOnError)
+	email := fs.String("email", "", "the sign-in name (email) to unlock")
+	reason := fs.String("reason", "", "why (recorded in the audit log)")
+	_ = fs.Parse(args)
+	if strings.TrimSpace(*email) == "" || len(strings.TrimSpace(*reason)) < 4 {
+		return fmt.Errorf("--email and --reason (at least 4 characters) are required")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	pool, err := db.Open(ctx, cfg.DBURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	var mfa *auth.MFA
+	keyPath := envOrDefault("CTRLAPI_OPERATOR_MFA_KEY", defaultMFAKeyPath)
+	if raw, kerr := auth.LoadMFAKeyFile(keyPath); kerr != nil {
+		slog.Warn("two-step sign-in key unreadable: clearing the locks a keyless ctrlapi writes", "path", keyPath, "err", kerr)
+	} else if mfa, err = auth.NewMFA(pool, raw); err != nil {
+		return err
+	}
+	id, n, err := unlockSignin(ctx, pool, mfa, *email, *reason)
+	if err != nil {
+		return err
+	}
+	slog.Info("sign-in locks cleared", "id", id, "cleared", n)
+	return nil
+}
+
+// unlockSignin clears every lock on email and audits it. The audit row names the account by its id and never
+// carries the email; for a name with no account it names no account.
+func unlockSignin(ctx context.Context, pool *pgxpool.Pool, mfa *auth.MFA, email, reason string) (id string, n int64, err error) {
+	n, err = auth.ClearSigninLocks(ctx, pool, mfa.SigninName(email))
+	if err != nil {
+		return "", 0, err
+	}
+	_ = pool.QueryRow(ctx, `SELECT id::text FROM operators WHERE lower(email) = lower($1)`, strings.TrimSpace(email)).Scan(&id)
+	audit.System(ctx, pool, "user.signin_unlocked", "operator", id, map[string]any{
+		"reason": strings.TrimSpace(reason), "locks_cleared": n, "via": "command line"})
+	return id, n, nil
 }

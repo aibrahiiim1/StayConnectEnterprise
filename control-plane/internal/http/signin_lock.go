@@ -1,8 +1,10 @@
 package http
 
-// THE SIGN-IN LOCKOUT AT THE HANDLERS (Central migration 0053; auth/signin_throttle.go). A locked sign-in name is
-// refused before its password is checked, at sign-in and at the password confirmation alike, and the refusal
-// looks the same whether or not the name has an account.
+// THE SIGN-IN LOCKOUT AT THE HANDLERS (Central migrations 0053, 0056; auth/signin_throttle.go). A sign-in name
+// locked at the caller's address is refused before its password is checked, at sign-in and at the password
+// confirmation alike, and the refusal looks the same whether or not the name has an account. The address is
+// clientip.From: the TCP peer, or Caddy's X-Real-IP when Caddy on loopback relayed the request -- the same
+// address the per-address request limit counts.
 
 import (
 	"log/slog"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/stayconnect/enterprise/control-plane/internal/api"
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
+	"github.com/stayconnect/enterprise/control-plane/internal/clientip"
 )
 
 func refuseLocked(w http.ResponseWriter, r *http.Request, until time.Time) {
@@ -31,7 +34,7 @@ func (d authDeps) signinLocked(w http.ResponseWriter, r *http.Request, email, op
 	if d.DB == nil || email == "" {
 		return false
 	}
-	until, err := auth.SigninLockedUntil(r.Context(), d.DB, d.MFA.SigninName(email))
+	until, err := auth.SigninLockedUntil(r.Context(), d.DB, d.MFA.SigninKey(email, clientip.From(r)))
 	if err != nil {
 		slog.Warn("sign-in lockout could not be read", "err", err)
 		return false
@@ -49,7 +52,7 @@ func (d authDeps) signinFailed(w http.ResponseWriter, r *http.Request, email, op
 	if d.DB == nil || email == "" {
 		return false
 	}
-	until, err := auth.SigninFailed(r.Context(), d.DB, d.MFA.SigninName(email))
+	until, err := auth.SigninFailed(r.Context(), d.DB, d.MFA.SigninKey(email, clientip.From(r)), d.MFA.SigninName(email))
 	if err != nil {
 		slog.Warn("sign-in failure could not be counted", "err", err)
 		return false
@@ -66,7 +69,7 @@ func (d authDeps) signinSucceeded(r *http.Request, email string) {
 	if d.DB == nil || email == "" {
 		return
 	}
-	if err := auth.SigninSucceeded(r.Context(), d.DB, d.MFA.SigninName(email)); err != nil {
+	if err := auth.SigninSucceeded(r.Context(), d.DB, d.MFA.SigninKey(email, clientip.From(r))); err != nil {
 		slog.Warn("sign-in failures could not be cleared", "err", err)
 	}
 }

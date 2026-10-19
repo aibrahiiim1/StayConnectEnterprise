@@ -462,7 +462,9 @@ func (b *Base) customerUserMFAReset(w http.ResponseWriter, r *http.Request) {
 
 // resetUserMFA removes a colleague's authenticator and recovery codes (0052, GDPR plan C10): their sessions end
 // and they set up a new authenticator at their next sign-in. Never one's own -- a stolen session plus the
-// password must not be enough to remove the second factor -- and with a reason, audited.
+// password must not be enough to remove the second factor -- and with a reason, audited. It also lifts every
+// wrong-password lock on their account, from every address (0056, decision D-R1), so a colleague locked out
+// can be let back in from the console.
 func (b *Base) resetUserMFA(w http.ResponseWriter, r *http.Request, customerID, id string) {
 	var in struct {
 		Reason string `json:"reason"`
@@ -497,6 +499,10 @@ func (b *Base) resetUserMFA(w http.ResponseWriter, r *http.Request, customerID, 
 	if err == nil {
 		err = auth.EndOperatorSessions(ctx, tx, id)
 	}
+	var unlocked int64
+	if err == nil {
+		unlocked, err = auth.ClearSigninLocks(ctx, tx, b.MFA.SigninName(cur[0].Email))
+	}
 	if err == nil {
 		err = tx.Commit(ctx)
 	}
@@ -505,7 +511,8 @@ func (b *Base) resetUserMFA(w http.ResponseWriter, r *http.Request, customerID, 
 		return
 	}
 	audit.Op(r.Context(), b.DB, r, "user.mfa_reset", "operator", id, map[string]any{
-		"reason": strings.TrimSpace(in.Reason), "had_authenticator": had, "sessions_ended": true})
+		"reason": strings.TrimSpace(in.Reason), "had_authenticator": had, "sessions_ended": true,
+		"signin_locks_cleared": unlocked})
 	WriteJSON(w, http.StatusOK, map[string]any{"removed": had})
 }
 

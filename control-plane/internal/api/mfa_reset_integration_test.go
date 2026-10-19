@@ -32,6 +32,16 @@ func TestAnAdministratorResetsAColleaguesTwoStepSignIn(t *testing.T) {
 	if _, err := f.pool.Exec(f.ctx, `UPDATE operator_mfa SET confirmed_at = now() WHERE operator_id = $1`, colleague); err != nil {
 		t.Fatal(err)
 	}
+	// The colleague is also locked out by wrong passwords from two addresses (0056); someone else is locked too.
+	f.base.MFA = mfa
+	for _, addr := range []string{"203.0.113.1", "203.0.113.2"} {
+		if _, err := auth.SigninFailed(f.ctx, f.pool, mfa.SigninKey("colleague@central.test", addr), mfa.SigninName("colleague@central.test")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := auth.SigninFailed(f.ctx, f.pool, mfa.SigninKey("other@central.test", "203.0.113.1"), mfa.SigninName("other@central.test")); err != nil {
+		t.Fatal(err)
+	}
 	if rec := f.operatorCall(f.base.listTeam, http.MethodGet, "", nil); !containsEnrolled(t, rec.Body.Bytes(), colleague) {
 		t.Fatalf("the Team list does not show the colleague's authenticator: %s", rec.Body.String())
 	}
@@ -53,8 +63,16 @@ func TestAnAdministratorResetsAColleaguesTwoStepSignIn(t *testing.T) {
 	if n := f.count(`SELECT count(*) FROM operators WHERE id = $1 AND sessions_not_before IS NOT NULL`, colleague); n != 1 {
 		t.Fatal("the colleague's sessions were not ended")
 	}
-	if n := f.count(`SELECT count(*) FROM audit_log WHERE action='user.mfa_reset' AND target_id=$1 AND payload->>'reason'='lost their phone'`, colleague); n != 1 {
-		t.Fatal("the reset was not audited with its reason")
+	if n := f.count(`SELECT count(*) FROM audit_log WHERE action='user.mfa_reset' AND target_id=$1 AND payload->>'reason'='lost their phone'
+	                 AND payload->>'signin_locks_cleared' = '2'`, colleague); n != 1 {
+		t.Fatal("the reset was not audited with its reason and the locks it cleared")
+	}
+	// The reset lifted the colleague's sign-in locks from every address, and nobody else's.
+	if n := f.count(`SELECT count(*) FROM operator_signin_throttle WHERE name_hash = $1`, mfa.SigninName("colleague@central.test")); n != 0 {
+		t.Fatalf("%d of the colleague's sign-in locks survived the reset", n)
+	}
+	if n := f.count(`SELECT count(*) FROM operator_signin_throttle WHERE name_hash = $1`, mfa.SigninName("other@central.test")); n != 1 {
+		t.Fatal("the reset cleared someone else's sign-in lock")
 	}
 }
 
