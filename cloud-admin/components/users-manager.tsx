@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { KeyRound, Plus, Smartphone, UserCheck, UserMinus, UserPen, Users } from "lucide-react";
+import { Download, KeyRound, Mail, Plus, Smartphone, UserCheck, UserMinus, UserPen, Users } from "lucide-react";
 import { api, itemsOf, withStepUp, type CentralUser, type Items } from "@/lib/api";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,17 @@ import { roleLabel } from "@/lib/permissions";
 import { ago, userStatusInfo } from "@/lib/status";
 
 const MIN_PASSWORD = 10;
+
+function saveJSON(doc: unknown, name: string) {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
 /** A user's roles, whether the server sends names or `{role}` rows. */
 export function roleNames(u: { roles?: unknown }): string[] {
@@ -35,6 +46,7 @@ export function UsersManager({
   canManage,
   meId,
   canResetPassword,
+  canExportData = false,
   noun = "user",
 }: {
   base: string;
@@ -43,6 +55,8 @@ export function UsersManager({
   meId: string;
   /** The Team has a password-reset route; a customer's users do not (§6). */
   canResetPassword: boolean;
+  /** Downloading one person's data (GDPR Art. 15/20, audit B5) is the platform's: Team management only. */
+  canExportData?: boolean;
   noun?: string;
 }) {
   const toast = useToast();
@@ -66,6 +80,8 @@ export function UsersManager({
     | { kind: "role"; u: CentralUser }
     | { kind: "password"; u: CentralUser }
     | { kind: "mfa"; u: CentralUser }
+    | { kind: "email"; u: CentralUser }
+    | { kind: "export"; u: CentralUser }
     | { kind: "disable"; u: CentralUser }
     | { kind: "remove"; u: CentralUser }
     | null
@@ -79,7 +95,7 @@ export function UsersManager({
     setDErr(null);
     setMfaReason("");
     setForm({
-      email: "",
+      email: d.kind === "email" ? d.u.email : "",
       name: "",
       password: "",
       role: d.kind === "role" ? roleNames(d.u)[0] ?? roles[0] : roles[roles.length - 1],
@@ -166,10 +182,20 @@ export function UsersManager({
                             <span className="sr-only"> of {u.email}</span>
                           </Button>
                         )}
+                        <Button size="sm" variant="ghost" onClick={() => open({ kind: "email", u })}>
+                          <Mail /> <span className="hidden sm:inline">Email</span>
+                          <span className="sr-only"> of {u.email}</span>
+                        </Button>
                         {u.two_step_enrolled && (
                           <Button size="sm" variant="ghost" onClick={() => open({ kind: "mfa", u })}>
                             <Smartphone /> <span className="hidden sm:inline">Reset two-step</span>
                             <span className="sr-only"> for {u.email}</span>
+                          </Button>
+                        )}
+                        {canExportData && (
+                          <Button size="sm" variant="ghost" onClick={() => open({ kind: "export", u })}>
+                            <Download /> <span className="hidden sm:inline">Data</span>
+                            <span className="sr-only"> of {u.email}</span>
                           </Button>
                         )}
                         {u.status === "disabled" ? (
@@ -253,6 +279,55 @@ export function UsersManager({
           <Select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
             {roles.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
           </Select>
+        </Field>
+      </DialogForm>
+
+      <DialogForm
+        open={dialog?.kind === "email"}
+        onOpenChange={(v) => { if (!v) setDialog(null); }}
+        title="Correct the email"
+        description="They sign in with the new address from now on, and are signed out. The history then shows the corrected address."
+        size="sm"
+        submitLabel="Save email"
+        busyLabel="Saving…"
+        busy={busy}
+        error={dErr}
+        disabled={!form.email.trim().includes("@")}
+        onSubmit={() => {
+          if (dialog?.kind !== "email") return;
+          const u = dialog.u;
+          return run(() => api.patch(`${base}/${u.id}`, { email: form.email.trim() }), "Email corrected", form.email.trim());
+        }}
+      >
+        <Field label="Email" required>
+          <Input type="email" autoComplete="off" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+        </Field>
+      </DialogForm>
+
+      <DialogForm
+        open={dialog?.kind === "export"}
+        onOpenChange={(v) => { if (!v) setDialog(null); }}
+        title="Download this person's data"
+        description={dialog?.kind === "export"
+          ? `Everything Central holds about ${dialog.u.email}, as a file to hand to them when they ask. The download is recorded.`
+          : undefined}
+        size="sm"
+        submitLabel="Download"
+        busyLabel="Preparing…"
+        busy={busy}
+        error={dErr}
+        disabled={mfaReason.trim().length < 4}
+        onSubmit={() => {
+          if (dialog?.kind !== "export") return;
+          const u = dialog.u;
+          return run(async () => {
+            const doc = await api.post<unknown>(`/cloud/v1/users/${u.id}/data-export`, { reason: mfaReason.trim() });
+            saveJSON(doc, `central-user-${u.id.slice(0, 8)}.json`);
+          }, "Data downloaded", u.email);
+        }}
+      >
+        <Field label="Reason" required hint="Recorded with the download, for example: their written request of 19 October.">
+          <Input value={mfaReason} maxLength={500} onChange={(e) => setMfaReason(e.target.value)} />
         </Field>
       </DialogForm>
 

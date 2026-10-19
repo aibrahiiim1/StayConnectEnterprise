@@ -168,6 +168,7 @@ function CustomerView({ id }: { id: string }) {
                 canManage={can["users.manage"]}
                 meId={me.operator_id}
                 canResetPassword={false}
+                canExportData={can["team.manage"]}
               />
             </Card>
           )}

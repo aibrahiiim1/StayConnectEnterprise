@@ -37,6 +37,7 @@ export default function TeamPage() {
           canManage={can["team.manage"]}
           meId={me.operator_id}
           canResetPassword
+          canExportData={can["team.manage"]}
           noun="team member"
         />
       </Card>

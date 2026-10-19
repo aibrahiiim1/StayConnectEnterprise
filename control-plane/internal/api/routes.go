@@ -94,6 +94,8 @@ func (b *Base) CloudRoutes(off *OfflineBase) http.Handler {
 	tm.Delete("/team/{id}", b.deleteTeam)
 	tm.Post("/team/{id}/password", b.teamPassword)
 	tm.Post("/team/{id}/mfa-reset", b.teamMFAReset)
+	// One user's data, Team member or customer user, for the platform to hand over (GDPR audit B5).
+	tm.Post("/users/{id}/data-export", b.userDataExport)
 	r.With(perm(auth.PermFleetView)).Get("/backup-health", b.BackupHealthHandler)
 	r.With(perm(auth.PermFleetView)).Get("/settings/security", b.getSecuritySettings)
 	tm.Patch("/settings/security", b.patchSecuritySettings)

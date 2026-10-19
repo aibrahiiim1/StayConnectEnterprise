@@ -104,7 +104,10 @@ You can ask us:
 - to stop using it, where we rely on our legitimate interest.
 
 Write to [[privacy contact email]]. We answer within one month. If your account belongs to a customer, you can
-also ask your organisation's administrator, who can correct or disable it.
+also ask your organisation's administrator, who can correct your email or disable your account.
+
+When your account is removed, or anonymised after it has been disabled for the set period, your email is
+replaced in our records by "a removed user". What was done, and when, stays.
 
 You can complain to the **Information Commissioner's Office** (ico.org.uk). If you are in the EU, you can also
 complain to the data protection authority in your country.
