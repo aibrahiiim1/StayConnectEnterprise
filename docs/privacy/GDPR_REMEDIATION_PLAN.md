@@ -214,8 +214,24 @@ lease file while a device is connected and leave it within about two hours.
 - The Central notice and record are corrected: the Central-wide certificate contact, conditional backup
   encryption, and who in a customer can see accounts.
 
-**A4: open (D-A4).** A cap per network on failed room sign-ins, with an alert, fits the earlier ruling against
-per-room and per-address throttles. It waits for the Product Owner.
+**A4 (D-A4, Product Owner 2026-10-19: "A, but also allow staff to confirm genuine customers"), migration 0136.**
+
+- **The pause.** Wrong room sign-ins are also counted per guest network, whichever devices they come from. At
+  `network_max_failures` within `network_window_seconds`, Room sign-in pauses on that network for
+  `network_pause_seconds`. The defaults are 30, 600 s and 900 s: settings under Sign-in methods, with a reason
+  and the password, kept in their own append-only history.
+- **What it does not change.** Other methods and networks are unaffected. Refusals during a pause are not
+  counted, and the burst a pause answered does not start the next one.
+- **What staff can do.** Staff see the pause on Sign-in methods and Guest sign-in attempts, and can:
+  - **confirm a genuine guest's device**, picked from the devices that tried, by the room they typed. The device
+    may try again, and its own device restriction ends.
+  - **end the pause.**
+
+  Both need a reason and are audited. Neither creates access.
+- **Privacy.** A confirmation holds the device MAC and is removed a day after its pause ends (scd's minute sweep).
+  Ended pauses are removed after 30 days.
+- **How it is built.** The per-device rule (0068) is unchanged. The new state lives in its own tables and definer
+  functions, with grants in `deploy/gatep/svc-signin-network-pause-grants.sql`.
 
 ### D-SSH, appliance SSH: **to decide before launch** (Product Owner, 2026-10-19)
 

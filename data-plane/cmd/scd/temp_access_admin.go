@@ -84,6 +84,10 @@ func (s *server) pruneOTPEscrow(ctx context.Context) {
 	// A code's device binding (0110) is pruned when the next code is issued, so a site where nobody asks for a
 	// code kept every device MAC it ever bound. Swept here too, on the same one-day rule (GDPR plan C1 gap).
 	_, _ = s.db.Exec(ctx, `DELETE FROM iam_v2.otp_device_bindings WHERE issued_at < now() - interval '1 day'`)
+	// Devices staff confirmed during a network pause (0136): their MAC goes a day after the pause ends.
+	if _, err := s.db.Exec(ctx, `SELECT iam_v2.guest_signin_network_prune()`); err != nil {
+		slog.Warn("network pause: prune failed", "err", err)
+	}
 	if _, err := s.db.Exec(ctx, `DELETE FROM iam_v2.otp_code_escrow e
 	     WHERE e.expires_at <= now()
 	        OR NOT EXISTS (SELECT 1 FROM public.auth_otps o WHERE o.id = e.challenge_id

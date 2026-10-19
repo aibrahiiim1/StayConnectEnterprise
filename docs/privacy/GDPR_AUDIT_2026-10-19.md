@@ -53,21 +53,24 @@ The gaps fall into four groups:
 | A1 | **Fixed** (`internal/reqlog`, Caddy log filters) |
 | A2 | **Fixed** (`internal/reqlog`) |
 | A3 | **Fixed:** isolation on for new networks, and a warning while HTTPS is not active, as the Product Owner chose |
-| A4 | **Open:** needs a Product-Owner decision (below) |
+| A4 | **Fixed** (migration 0136): a network pause with staff confirmation, as the Product Owner chose (below) |
 | A5 | **Fixed:** a built-in notice and a warning |
 | A6 | **Fixed by retention** (migration 0135); dropping the table is still the Product Owner's decision |
 | A7 | **Documented** |
 | A8 | **Fixed** (0054 extended, HMAC counter key, notice and record corrected) |
 
-**A4, why it is open.** The room sign-in limit per device replaced a per-room and per-address throttle by an
-earlier Product-Owner ruling, recorded in `cmd/scd/phase3_auth.go`:
+**A4, how it was decided.** The device limit replaced a per-room and per-address throttle by an earlier
+Product-Owner ruling (`cmd/scd/phase3_auth.go`). The Product Owner chose a per-network pause, with staff able to
+confirm genuine guests (2026-10-19):
 
-- a per-room limit lets an attacker lock a real guest out of their own room;
-- an address is shared behind NAT.
+- **The pause.** 30 wrong room sign-ins on one network within 10 minutes, from any devices, pause Room sign-in
+  there for 15 minutes. These are settings.
+- **What staff see.** Hotel Admin shows the pause on Sign-in methods and Guest sign-in attempts.
+- **What staff can do:**
+  - let a genuine guest's device try again, picked by the room it typed;
+  - end a false-alarm pause.
 
-Re-adding either would reverse that ruling. An option that fits it: a per-network cap on the total number of
-failed room sign-ins, which raises an operational alert and slows all room sign-ins on that network while an
-attack lasts. Its cost is that honest guests wait during an attack.
+  Both need a reason and are audited. Neither signs anyone in.
 
 **A1. Guest search terms are written to the request logs. ✔ confirmed**
 

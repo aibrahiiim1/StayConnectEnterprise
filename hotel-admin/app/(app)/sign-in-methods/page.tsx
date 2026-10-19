@@ -27,8 +27,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, ListResp, Whoami } from "@/lib/api";
 import type { PortalHTTPSDoc } from "@/lib/portal-https";
+import { typedSignInOn } from "@/lib/sign-in-methods";
 import { canRead, canWrite } from "@/lib/roles";
 import { GuestSignInProtectionCard } from "@/components/guest-signin-protection";
+import { NetworkPauseSettingsCard, NetworkPausesNotice } from "@/components/guest-signin-network-pause";
 import { CodeRequestsCard } from "@/components/code-requests";
 import { EmailAccountsSettingsCard } from "@/components/email-accounts-settings";
 import { roomSignInImpaired, useRoomSignInReadiness } from "@/components/room-sign-in-readiness";
@@ -88,12 +90,6 @@ type SocialProvider = { provider: string; enabled: boolean };
 // the choice of methods stays in one place and the credential choice in another, with no duplicated setting.
 
 const SOCIAL_LABELS: Record<string, string> = { google: "Google", apple: "Apple", facebook: "Facebook", microsoft: "Microsoft" };
-
-/** Whether any method on which the client types a secret (room and name, password, code) is switched on. */
-export function typedSignInOn(cfg: AuthMethods): boolean {
-  return !!(cfg.voucher?.enabled || cfg.guest_account?.enabled || cfg.pms?.enabled || cfg.email_account?.enabled ||
-    cfg.sms?.enabled || cfg.whatsapp?.enabled);
-}
 
 export default function SignInMethodsPage() {
   const toast = useToast();
@@ -261,6 +257,11 @@ export default function SignInMethodsPage() {
         <ReadOnlyNotice>Your role can see which sign-in methods are offered but not change them.</ReadOnlyNotice>
       )}
       <ErrorBanner err={err} className="mb-0" />
+
+      {/* A running network pause is shown where staff manage sign-in (GDPR audit A4). */}
+      {hospitality && roles !== null && canRead("guest-signin-restrictions", roles) && (
+        <NetworkPausesNotice canAct={canWrite("guest-signin-restrictions", roles)} />
+      )}
 
       {httpsActive === false && typedSignInOn(cfg) && (
         <Callout tone="warning" title="Sign-ins are not encrypted yet">
@@ -475,6 +476,7 @@ export default function SignInMethodsPage() {
       {/* Sign-in protection counts wrong ROOM details (it is enforced on Room sign-in only), so it belongs to
           Hospitality and is neither shown nor asked for on a site without it. */}
       {hospitality && <GuestSignInProtectionCard canWrite={mayChangeProtection} />}
+      {hospitality && <NetworkPauseSettingsCard canWrite={mayChangeProtection} />}
     </PageShell>
   );
 }

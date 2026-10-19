@@ -25,6 +25,7 @@ import {
 } from "@/lib/api";
 import { canRead, canWrite } from "@/lib/roles";
 import { ActiveRestrictions } from "@/components/guest-signin-restrictions";
+import { NetworkPausesNotice } from "@/components/guest-signin-network-pause";
 import { cn, formatDate, formatRelative } from "@/lib/utils";
 import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
 import { Card, CardBody } from "@/components/ui/card";
@@ -414,6 +415,7 @@ export default function GuestSignInAttemptsPage() {
       />
 
       <ErrorBanner err={openErr ?? err} />
+      {maySeeRestrictions && <NetworkPausesNotice canAct={mayRelease} />}
 
       {maySeeRestrictions ? (
         <Tabs value={tab} onValueChange={(v) => setTab(v as "attempts" | "restrictions")}>

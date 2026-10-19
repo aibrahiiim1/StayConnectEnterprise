@@ -176,3 +176,38 @@ func TestIntegration_Protection_TheRestrictionFollowsTheDeviceNotTheRoom(t *test
 		t.Fatal("a second device was refused for the first device's behaviour")
 	}
 }
+
+// THE NETWORK PAUSE (migration 0136, GDPR audit A4). Changing the MAC defeats the device rule, so many wrong
+// room sign-ins on one network pause room sign-in there for every device: correct details are refused, before
+// the evidence is looked at, like a device restriction. A device staff confirm as a genuine guest gets through.
+func TestIntegration_Protection_NetworkPauseRefusesUntilStaffConfirmTheDevice(t *testing.T) {
+	f := newAuthFixture(t)
+	defer f.startEnforcementOwner(t)()
+	soleOccupant(t, f)
+	ctx := context.Background()
+
+	var pause string
+	if err := f.pool.QueryRow(ctx, `INSERT INTO iam_v2.guest_signin_network_pauses
+		(tenant_id, site_id, guest_network_id, guest_network_name, expires_at, failure_count)
+		VALUES ($1,$2,$3::uuid,'test',now() + interval '15 minutes',30) RETURNING id::text`,
+		f.tenant, f.site, f.network).Scan(&pause); err != nil {
+		t.Fatal(err)
+	}
+
+	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "", newRequestUUID(20)))
+	if res.Outcome == outcomeVerified || res.FailureClass != "RATE_LIMITED" || res.RetryAfterSeconds <= 0 {
+		t.Fatalf("during a network pause correct details = %+v, want RATE_LIMITED with a wait", res)
+	}
+	if a := lastAttempt(t, f); a.Result != "RATE_LIMITED" || a.MatchedField != "" {
+		t.Fatalf("the paused submission was recorded as %+v", a)
+	}
+
+	if _, err := f.pool.Exec(ctx, `SELECT iam_v2.guest_signin_confirm_device($1::uuid,$2::uuid,$3::uuid,$4::macaddr,'staff@hotel.test','guest at reception')`,
+		f.tenant, f.site, pause, f.net.mac); err != nil {
+		t.Fatal(err)
+	}
+	_, res = post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "", newRequestUUID(21)))
+	if res.Outcome != outcomeVerified {
+		t.Fatalf("a confirmed guest with correct details was refused: %+v", res)
+	}
+}

@@ -338,6 +338,8 @@ GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_acctd;
 \ir svc-backup-keys-grants.sql
 -- Admin Console authenticator codes and session limits (0132).
 \ir svc-operator-mfa-grants.sql
+-- Many wrong room sign-ins pause room sign-in on that network; staff confirm a guest's device (0136).
+\ir svc-signin-network-pause-grants.sql
 
 -- EXECUTE on the CANONICAL audited, versioned publication boundary. This is the only function the product
 -- calls to change checkout grace policy: it requires an active operator as actor, a bounded machine reason

@@ -81,6 +81,13 @@ implementation of every row in the table above:
   keeps the expiry it was given, and points at the Release action for the case where that is not what the
   operator wants.
 
+The network pause (migration 0136) follows the same pattern next to it:
+
+* **Its settings.** *Many wrong room sign-ins on one network*: `network_max_failures` (30, 10–1000),
+  `network_window_seconds` (600, 60–3600) and `network_pause_seconds` (900, 60–3600). They are kept in
+  `iam_v2.site_guest_signin_network_policy`, with its own append-only change history.
+* **Changing them** needs a reason and the password, and is audited as `guest_signin_network_policy.update`.
+
 ## Existing settings that already follow it
 
 * Sign-in methods (`auth_methods`) — which methods the portal offers.

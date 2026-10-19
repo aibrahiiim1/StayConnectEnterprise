@@ -79,6 +79,10 @@ The annex has three parts:
   a guest is limited to the site administrator and IT manager roles, needs the password and a reason, and is
   logged.
 - **Guest sign-in** is throttled, and one-time codes expire after 10 minutes and allow 5 tries.
+- **Room sign-in guessing is limited** per device (5 wrong in 60 seconds wait 60 seconds), and per network: by
+  default 30 wrong room sign-ins on one network within 10 minutes, from any devices, pause Room sign-in there for
+  15 minutes. Staff can let a confirmed guest's device try again, or end a false alarm, with a reason, audited.
+  All of these are Controller settings.
 
 ### Protection of data during transmission
 
