@@ -30,6 +30,7 @@ appliance at the hotel, and the hotel's own privacy notice covers it.
 | **The audit log** | What you did in Central and when, with your IP address and browser. A failed sign-in to an existing account is recorded against that account; for a name that has no account, only the attempt and its IP address are recorded, not what was typed | To protect Central, investigate misuse, and show who made each change | Legitimate interest: security and accountability (Art. 6(1)(f)) |
 | **Wrong-password counting** | A one-way hash of the name you typed and how many wrong passwords were tried, to lock the account for a while after repeated failures. It never holds the email address itself | To stop password guessing | Legitimate interest: security (Art. 6(1)(f)) |
 | **Your name in appliance history and alerts** | When you activate, retire or replace an appliance, or handle a security alert, the history records your email and IP address | To keep a reliable history of each appliance and licence | Legitimate interest: security and accountability (Art. 6(1)(f)) |
+| **The web server's access log** | The time, the page or service asked for (without anything after `?`), the answer, and your IP address. Not your email address, what you typed or your browser's headers | To keep Central running and find faults and attacks | Legitimate interest: security (Art. 6(1)(f)) |
 | **Certificate contact** *(only if you are the one we name)* | One contact email for all of Central, registered with Let's Encrypt for the guest-portal certificates, normally one of ours. A change to it is recorded in the history with the old and new address | To obtain and renew the certificates | Legitimate interest in running the service (Art. 6(1)(f)) |
 
 You must give an email address and set a password and an authenticator to have an account. Without them we
@@ -64,7 +65,7 @@ by itself and decides nothing else about you.
 
 ## How long we keep it
 
-The main periods are settings in Central (System → Team → Data retention); the session limits, the five-minute sign-in step and the two-day counter are fixed. These are the defaults:
+The main periods are settings in Central (System → Team → Data retention); the session limits, the five-minute sign-in step, the two-day counter and the 14-day access log are fixed. These are the defaults:
 
 | What | How long |
 |---|---|
@@ -72,6 +73,7 @@ The main periods are settings in Central (System → Team → Data retention); t
 | Your account, after it is disabled | 24 months. Then your email, name, password and authenticator are removed for good |
 | Your sign-in session | Ends after 30 minutes without activity, and 12 hours after you signed in at most. A half-finished sign-in ends after 5 minutes |
 | The audit log | 24 months |
+| The web server's access log | 14 days |
 | Wrong-password counts | Removed within an hour once 2 days have passed without a wrong password |
 | Your name and IP address in appliance history, appliance moves, certificate requests and alerts | 24 months. The history itself is kept 6 years without them |
 | Backups of Central's database | The newest 7 nightly backups, encrypted once a key holder is registered. Data removed from Central stays in a backup until that backup is replaced |

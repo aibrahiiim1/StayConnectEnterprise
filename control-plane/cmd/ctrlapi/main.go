@@ -520,7 +520,7 @@ func runSeedAdmin(args []string) error {
 		return err
 	}
 
-	slog.Info("seeded platform admin", "email", *email, "id", id)
+	slog.Info("seeded platform admin", "id", id) // the id, not the email: the journal is outside retention (GDPR audit C6)
 	return nil
 }
 
@@ -598,6 +598,6 @@ func runResetMFA(args []string) error {
 	}
 	audit.System(ctx, pool, "user.mfa_reset", "operator", id, map[string]any{
 		"reason": strings.TrimSpace(*reason), "had_authenticator": had, "via": "command line"})
-	slog.Info("two-step sign-in reset; a new authenticator is set up at the next sign-in", "email", *email, "had_authenticator", had)
+	slog.Info("two-step sign-in reset; a new authenticator is set up at the next sign-in", "id", id, "had_authenticator", had)
 	return nil
 }

@@ -666,6 +666,20 @@ else
 fi
 # Log file first, owned by caddy: `caddy validate` as root would otherwise create it root-owned.
 [ -f /var/log/caddy/central.log ] || run install -o caddy -g caddy -m 0640 /dev/null /var/log/caddy/central.log
+# The access log holds client IP addresses: rolled daily, kept 14 days (GDPR audit 2026-10-19, C6). copytruncate keeps
+# the file Caddy has open, with its owner.
+write_file /etc/logrotate.d/stayconnect-caddy-central 0644 <<'EOF'
+/var/log/caddy/central.log {
+    daily
+    rotate 14
+    maxage 14
+    copytruncate
+    compress
+    delaycompress
+    missingok
+    notifempty
+}
+EOF
 run caddy validate --config "$CADDYFILE_PATH" --adapter caddyfile
 unit_restart_noblock stayconnect-caddy
 
