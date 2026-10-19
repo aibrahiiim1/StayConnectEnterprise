@@ -25,7 +25,7 @@ func TestIntegration_DataRetention_TheSetting(t *testing.T) {
 		t.Fatalf("default = %d %v", st, body)
 	}
 	want := map[string]float64{"pms_stay_days": 30, "client_activity_days": 365, "inactive_identity_days": 365,
-		"expired_record_days": 7, "audit_log_days": 730, "sign_in_attempt_days": 30}
+		"expired_record_days": 7, "audit_log_days": 730, "sign_in_attempt_days": 30, "log_days": 14}
 	for k, v := range want {
 		if set[k] != v {
 			t.Fatalf("default %s = %v, want %v (Product-Owner decision D-C1)", k, set[k], v)
@@ -33,12 +33,14 @@ func TestIntegration_DataRetention_TheSetting(t *testing.T) {
 	}
 	good := func() map[string]any {
 		return map[string]any{"pms_stay_days": 60, "client_activity_days": 180, "inactive_identity_days": 400,
-			"expired_record_days": 3, "audit_log_days": 365, "sign_in_attempt_days": 14}
+			"expired_record_days": 3, "audit_log_days": 365, "sign_in_attempt_days": 14, "log_days": 365}
 	}
 	for name, mutate := range map[string]func(map[string]any){
 		"pms too short":      func(m map[string]any) { m["pms_stay_days"] = 6 },
 		"audit too short":    func(m map[string]any) { m["audit_log_days"] = 89 },
 		"attempts too long":  func(m map[string]any) { m["sign_in_attempt_days"] = 366 },
+		"logs too long":      func(m map[string]any) { m["log_days"] = 731 },
+		"logs zero":          func(m map[string]any) { m["log_days"] = 0 },
 		"one missing":        func(m map[string]any) { delete(m, "client_activity_days") },
 		"an unknown setting": func(m map[string]any) { m["forever_days"] = 30 },
 	} {
@@ -61,7 +63,7 @@ func TestIntegration_DataRetention_TheSetting(t *testing.T) {
 	st, body = f.do(t, "GET", "/data-retention/", nil)
 	set, _ = body["settings"].(map[string]any)
 	ch, _ := body["changes"].([]any)
-	if st != 200 || set["pms_stay_days"] != float64(60) || set["sign_in_attempt_days"] != float64(14) || len(ch) != 1 {
+	if st != 200 || set["pms_stay_days"] != float64(60) || set["sign_in_attempt_days"] != float64(14) || set["log_days"] != float64(365) || len(ch) != 1 {
 		t.Fatalf("after the change = %v", body)
 	}
 	var audited int
@@ -301,7 +303,7 @@ func TestIntegration_DataRetention_AnonymisesOnlyWhatOutlivedTheRetention(t *tes
 func TestIntegration_DataRetention_SignInAttemptsFollowTheSiteSetting(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
-	if _, err := f.pool.Exec(ctx, `SELECT iam_v2.data_retention_set($1,$2,30,365,365,7,730,7,'test','short attempts')`, f.tenant, f.site); err != nil {
+	if _, err := f.pool.Exec(ctx, `SELECT iam_v2.data_retention_set($1,$2,30,365,365,7,730,7,14,'test','short attempts')`, f.tenant, f.site); err != nil {
 		t.Fatal(err)
 	}
 	other := newAPI(t) // default 30 days

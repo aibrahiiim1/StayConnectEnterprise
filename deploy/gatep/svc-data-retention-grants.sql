@@ -21,6 +21,11 @@ BEGIN
   GRANT EXECUTE ON FUNCTION public.run_data_retention_public(uuid,uuid,integer) TO svc_scd;
 
   GRANT EXECUTE ON FUNCTION iam_v2.data_retention_get(uuid,uuid) TO svc_edged;
-  GRANT EXECUTE ON FUNCTION iam_v2.data_retention_set(uuid,uuid,integer,integer,integer,integer,integer,integer,text,text) TO svc_edged;
+  -- Migration 0134 (GDPR plan F5) added the system-log period, so the setter has one more argument.
+  IF to_regprocedure('iam_v2.data_retention_set(uuid,uuid,integer,integer,integer,integer,integer,integer,integer,text,text)') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION iam_v2.data_retention_set(uuid,uuid,integer,integer,integer,integer,integer,integer,integer,text,text) TO svc_edged;
+  ELSE
+    GRANT EXECUTE ON FUNCTION iam_v2.data_retention_set(uuid,uuid,integer,integer,integer,integer,integer,integer,text,text) TO svc_edged;
+  END IF;
   GRANT SELECT ON iam_v2.data_retention_changes, iam_v2.data_retention_runs TO svc_edged;
 END $g$;

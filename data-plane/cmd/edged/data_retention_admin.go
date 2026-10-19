@@ -1,6 +1,6 @@
 package main
 
-// GUEST-DATA RETENTION (migration 0127; GDPR remediation plan C1 and F6; Product-Owner decisions D-C1, D-C1a, D-C3;
+// GUEST-DATA RETENTION (migrations 0127 and 0134; GDPR remediation plan C1, F5 and F6; Product-Owner decisions D-C1, D-C1a, D-C3;
 // docs/OPERATIONAL_SETTINGS_POLICY.md).
 //
 //	GET /edge/v1/data-retention/   the six periods, their bounds and defaults, the change log and recent runs
@@ -36,6 +36,9 @@ var dataRetentionBounds = []retentionBound{
 	{"expired_record_days", 1, 365, "days after the record expired"},
 	{"audit_log_days", 90, 3650, "days"},
 	{"sign_in_attempt_days", 7, 365, "days (attempts are deleted, not anonymised)"},
+	// System logs (0134, GDPR plan F5, D-F5): 14 days by default; up to two years where a hotel's law asks for
+	// connection logs to be kept longer. scd removes them (cmd/scd/log_retention.go).
+	{"log_days", 1, 730, "days (system logs are deleted)"},
 }
 
 func (s *server) dataRetentionRoutes() http.Handler {
@@ -46,7 +49,7 @@ func (s *server) dataRetentionRoutes() http.Handler {
 }
 
 const dataRetentionCols = `pms_stay_days, client_activity_days, inactive_identity_days, expired_record_days,
-	audit_log_days, sign_in_attempt_days`
+	audit_log_days, sign_in_attempt_days, log_days`
 
 func scanRetention(row interface{ Scan(...any) error }, extra ...any) (map[string]int, error) {
 	v := make([]int, len(dataRetentionBounds))
@@ -182,7 +185,7 @@ func (s *server) setDataRetention(w http.ResponseWriter, r *http.Request) {
 	args := append([]any{s.tenantID, s.siteID}, values...)
 	args = append(args, actor, reason)
 	var version int64
-	if err := s.db.QueryRow(ctx, `SELECT iam_v2.data_retention_set($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10)`,
+	if err := s.db.QueryRow(ctx, `SELECT iam_v2.data_retention_set($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
 		args...).Scan(&version); err != nil {
 		if isUndefinedObject(err) {
 			jsonErr(w, http.StatusServiceUnavailable, "not_available", "this appliance's database does not have data retention yet")

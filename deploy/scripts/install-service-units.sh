@@ -405,6 +405,22 @@ elif [ -d "$SRC/tmpfiles" ]; then
   systemd-tmpfiles --create >/dev/null 2>&1 || say "NOTE: systemd-tmpfiles --create reported a problem"
 fi
 
+# ---- 3d. JOURNALD: ARCHIVE DAILY, SO THE SYSTEM-LOG PERIOD CAN BE APPLIED ---
+#
+# scd vacuums the journal to the site's system-log period (GDPR plan F5). Vacuuming removes archived files only,
+# so journald is told to archive at least daily. Restarted only when the file changed.
+if [ "$SKIP_SYSTEMD" = "1" ]; then
+  say "SC_SKIP_SYSTEMD=1: not installing the journald retention drop-in"
+elif [ -f "$SRC/journald/stayconnect-retention.conf" ]; then
+  jd=/etc/systemd/journald.conf.d
+  if ! cmp -s "$SRC/journald/stayconnect-retention.conf" "$jd/stayconnect-retention.conf" 2>/dev/null; then
+    mkdir -p "$jd"
+    install -m 0644 "$SRC/journald/stayconnect-retention.conf" "$jd/stayconnect-retention.conf"       || die "cannot install $jd/stayconnect-retention.conf"
+    systemctl restart systemd-journald >/dev/null 2>&1 || say "NOTE: systemd-journald did not restart; the drop-in applies at the next boot"
+    say "updated journald.conf.d/stayconnect-retention.conf"
+  fi
+fi
+
 # ---- 4. units --------------------------------------------------------------
 changed=0
 for u in "$UNITSRC"/stayconnect-*.service "$UNITSRC"/stayconnect-*.timer; do

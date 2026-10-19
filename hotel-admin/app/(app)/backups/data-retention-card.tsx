@@ -18,18 +18,19 @@ import { useToast } from "@/components/ui/toast";
 import { formatDate } from "@/lib/utils";
 
 type Key = "pms_stay_days" | "client_activity_days" | "inactive_identity_days" | "expired_record_days"
-  | "audit_log_days" | "sign_in_attempt_days";
+  | "audit_log_days" | "sign_in_attempt_days" | "log_days";
 type Bound = { min: number; max: number; default: number; unit: string };
 type Run = { ran_at: string; category: string; rows_anonymised: number };
 type Resp = { settings: Record<Key, number>; bounds: Record<Key, Bound>; runs?: Run[] };
 
 export const RETENTION_ROWS: { key: Key; label: string; what: string }[] = [
-  { key: "pms_stay_days", label: "Hotel stay data", what: "Guest names, date of birth, room and reservation from the PMS, counted from checkout." },
+  { key: "pms_stay_days", label: "Hotel stay data", what: "Guest names, room and reservation from the PMS, counted from checkout." },
   { key: "client_activity_days", label: "Devices and sessions", what: "MAC and IP addresses of devices and their sessions, counted from when the device was last seen." },
   { key: "inactive_identity_days", label: "Inactive guest identities", what: "Email addresses, phone numbers, social sign-ins and client accounts nobody has used for this long." },
   { key: "expired_record_days", label: "Expired one-time records", what: "Verification codes, sign-in links and similar records, counted from when they expired." },
   { key: "audit_log_days", label: "Audit log details", what: "Addresses and guest details inside audit entries. What happened, when and which staff member did it are kept." },
   { key: "sign_in_attempt_days", label: "Sign-in attempts", what: "What guests typed when signing in. These are deleted, not anonymised." },
+  { key: "log_days", label: "System logs", what: "The appliance's technical logs, which contain device addresses and sign-in names. They are deleted. Keep them longer only if your country's law requires connection logs to be kept." },
 ];
 
 export function DataRetentionCard({ writable }: { writable: boolean }) {

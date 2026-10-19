@@ -18,10 +18,11 @@ const bounds = {
   expired_record_days: { min: 1, max: 365, default: 7, unit: "days" },
   audit_log_days: { min: 90, max: 3650, default: 730, unit: "days" },
   sign_in_attempt_days: { min: 7, max: 365, default: 30, unit: "days" },
+  log_days: { min: 1, max: 730, default: 14, unit: "days" },
 };
 let settings: Record<string, number>;
 beforeEach(() => {
-  settings = { pms_stay_days: 30, client_activity_days: 365, inactive_identity_days: 365, expired_record_days: 7, audit_log_days: 730, sign_in_attempt_days: 30 };
+  settings = { pms_stay_days: 30, client_activity_days: 365, inactive_identity_days: 365, expired_record_days: 7, audit_log_days: 730, sign_in_attempt_days: 30, log_days: 14 };
   get.mockReset(); put.mockReset();
   get.mockImplementation((path: string) => path === "/data-retention/"
     ? Promise.resolve({ settings: { ...settings }, bounds, runs: [] })
@@ -58,7 +59,7 @@ describe("Guest data retention", () => {
     expect(save.disabled).toBe(false);
     fireEvent.click(save);
     await waitFor(() => expect(put).toHaveBeenCalledWith("/data-retention/", {
-      settings: { pms_stay_days: 60, client_activity_days: 365, inactive_identity_days: 365, expired_record_days: 7, audit_log_days: 730, sign_in_attempt_days: 30 },
+      settings: { pms_stay_days: 60, client_activity_days: 365, inactive_identity_days: 365, expired_record_days: 7, audit_log_days: 730, sign_in_attempt_days: 30, log_days: 14 },
       reason: "hotel policy", password: "pw",
     }));
     await screen.findByText("60 days");

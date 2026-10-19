@@ -1226,6 +1226,8 @@ func main() {
 	// GUEST-DATA RETENTION (data_retention.go, migration 0127): hourly anonymisation of what has outlived the
 	// site's retention settings.
 	go s.dataRetentionLoop(rootCtx)
+	// SYSTEM-LOG RETENTION (log_retention.go, migration 0134): the appliance's logs follow the site's log period.
+	go s.logRetentionLoop(rootCtx)
 
 	// Signed hello against ctrlapi — on boot AND periodically. Besides smoke-
 	// testing signed-auth, this provides ORPHAN RECOVERY: if Central no longer
