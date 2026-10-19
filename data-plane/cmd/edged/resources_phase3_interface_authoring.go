@@ -30,6 +30,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -202,6 +204,9 @@ type authorRevisionReq struct {
 	MaxAuthCacheAgeSeconds int64  `json:"max_auth_cache_age_seconds"`
 	FinancialBaseCurrency  string `json:"financial_base_currency"`
 	FinancialCurrencyExp   *int   `json:"financial_base_currency_exponent"`
+	// TLS on the FIAS link (GDPR plan C8), off unless asked for; the fingerprint pins a self-signed certificate.
+	TLSEnabled    bool   `json:"tls_enabled"`
+	TLSCertSHA256 string `json:"tls_cert_sha256"`
 	// ProviderConfig carries the connector's settings keyed by the field keys GET /pms-providers publishes.
 	// Absent or empty for protel-fias means EXACTLY the validation and stored config this endpoint always
 	// produced. For protel-fias, when present, its keys are the top-level field names above and override them
@@ -549,6 +554,10 @@ func applyFIASProviderConfig(in *authorRevisionReq) *pmsprovider.ValidationError
 			in.CompleteSyncMS = v.(int64)
 		case "max_auth_cache_age_seconds":
 			in.MaxAuthCacheAgeSeconds = v.(int64)
+		case "tls_enabled":
+			in.TLSEnabled = v.(bool)
+		case "tls_cert_sha256":
+			in.TLSCertSHA256 = v.(string)
 		case "financial_base_currency":
 			in.FinancialBaseCurrency = v.(string)
 		case "financial_base_currency_exponent":
@@ -678,6 +687,15 @@ func validateRevisionConfig(in *authorRevisionReq) (map[string]any, error) {
 		return nil, fmt.Errorf("max_auth_cache_age_seconds must be between 0 and 604800 seconds (7 days); " +
 			"0 or omitted means the default complete-sync bound applies")
 	}
+	pin := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(in.TLSCertSHA256), ":", ""))
+	if pin != "" {
+		if !in.TLSEnabled {
+			return nil, fmt.Errorf("tls_cert_sha256 is set but tls_enabled is off: turn encryption on, or clear the fingerprint")
+		}
+		if b, err := hex.DecodeString(pin); err != nil || len(b) != sha256.Size {
+			return nil, fmt.Errorf("tls_cert_sha256 must be the 64-hex-digit SHA-256 fingerprint of the PMS certificate")
+		}
+	}
 	resync := in.ResyncSupported != nil && *in.ResyncSupported
 	// The shape pgRepo.LoadInterface projects, key for key. Anything else an operator sent is dropped rather
 	// than stored: the config is read with ->> on named keys, so an unknown key is silently inert, and inert
@@ -702,6 +720,14 @@ func validateRevisionConfig(in *authorRevisionReq) (map[string]any, error) {
 	// time — but an absent key reads as "not configured" to an operator, and "0" reads as a setting.
 	if in.MaxAuthCacheAgeSeconds > 0 {
 		cfg["max_auth_cache_age_seconds"] = in.MaxAuthCacheAgeSeconds
+	}
+	// Absent unless on, so every revision authored before C8 reads exactly as it did.
+	if in.TLSEnabled {
+		tlsCfg := map[string]any{"enabled": true}
+		if pin != "" {
+			tlsCfg["cert_sha256"] = pin
+		}
+		cfg["tls"] = tlsCfg
 	}
 	return cfg, nil
 }

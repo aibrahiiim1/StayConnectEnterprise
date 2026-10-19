@@ -108,6 +108,11 @@ func NewFIASDialWithRelay(dialer Dialer, keys AdapterKeys, now func() time.Time,
 		if err != nil {
 			return nil, coded(CodeDialFailed, err)
 		}
+		if p.Rev.TLS {
+			if conn, err = fiasTLS(ctx, conn, p.Rev); err != nil {
+				return nil, coded(CodeDialFailed, err)
+			}
+		}
 		return &fiasAdapter{
 			g:     &guardedConn{c: conn, writeTimeout: p.Rev.WriteTimeout},
 			br:    bufio.NewReader(conn),

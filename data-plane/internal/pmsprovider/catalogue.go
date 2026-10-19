@@ -45,6 +45,17 @@ func protelFIAS() Provider {
 			{Key: "endpoint", Label: "PMS address", Type: FieldHostPort, Required: true,
 				Placeholder: "pms.example.local:5010",
 				Help:        "The host and port of the Protel FIAS interface, as host:port."},
+			// GDPR plan C8: the guest list crosses the hotel network, so it can be encrypted. Off by default:
+			// many FIAS interfaces speak plain TCP only, and turning it on is the hotel's decision.
+			{Key: "tls_enabled", Label: "Encrypt the connection (TLS)", Type: FieldBool, Default: false,
+				Help: "Turn on only if the Protel FIAS interface is set up for TLS. When on, the appliance never " +
+					"falls back to an unencrypted connection: if TLS fails, the link stays down."},
+			{Key: "tls_cert_sha256", Label: "PMS certificate fingerprint (SHA-256)", Type: FieldString,
+				Pattern:     `^([0-9A-Fa-f]{2}:?){31}[0-9A-Fa-f]{2}$`,
+				Placeholder: "AB:CD:…",
+				Help: "Needed when the PMS certificate is self-signed or issued by the hotel's own authority: the " +
+					"appliance then accepts that certificate only. Leave empty for a certificate from a public " +
+					"authority whose name matches the PMS address."},
 			sourceTimezoneField(),
 			ms("dial_timeout_ms", "Connect timeout", 5000, "How long to wait for the TCP connection to open."),
 			ms("read_timeout_ms", "Read timeout", 15000, "How long a single read may take."),

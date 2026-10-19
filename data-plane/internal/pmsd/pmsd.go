@@ -89,6 +89,10 @@ type Revision struct {
 	// ProviderConfig is the revision's config.provider object (raw JSON), carried only by REST connectors.
 	// Empty for protel-fias, whose configuration is entirely the typed fields above.
 	ProviderConfig []byte
+	// TLS wraps the FIAS socket in TLS (GDPR plan C8). TLSCertSHA256, when set, pins the PMS certificate by its
+	// SHA-256 fingerprint (lower-case hex) instead of verifying it against the system's authorities.
+	TLS           bool
+	TLSCertSHA256 string
 }
 
 // Credential modes. Protel FIAS is a no-auth transport → NONE (no Secret Generation is fabricated,
