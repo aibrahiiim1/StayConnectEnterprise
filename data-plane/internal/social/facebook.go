@@ -4,14 +4,14 @@ package social
 //
 // Flow:
 //   1. AuthorizeURL builds https://www.facebook.com/v19.0/dialog/oauth with
-//      our app id as client_id, redirect_uri, scope "email public_profile",
+//      our app id as client_id, redirect_uri, scope "email",
 //      state and response_type=code.
 //   2. Facebook redirects back to our callback with ?code=...&state=...
 //   3. Exchange POSTs the code to
 //      https://graph.facebook.com/v19.0/oauth/access_token (as a form, so the
 //      app secret never appears in a URL that a proxy or access log could
 //      keep) and receives a user access token.
-//   4. We GET https://graph.facebook.com/v19.0/me?fields=id,name,email,picture
+//   4. We GET https://graph.facebook.com/v19.0/me?fields=id,email
 //      with the token as a Bearer credential and
 //      appsecret_proof = hex(HMAC-SHA256(key=app secret, msg=access token)).
 //      The proof makes Graph refuse the call unless it comes from the holder
@@ -51,7 +51,8 @@ const (
 	defaultFacebookAuthBase = "https://www.facebook.com/v19.0/dialog/oauth"
 	defaultFacebookTokenURL = "https://graph.facebook.com/v19.0/oauth/access_token"
 	defaultFacebookMeURL    = "https://graph.facebook.com/v19.0/me"
-	defaultFacebookScope    = "email public_profile"
+	// email only (GDPR plan C9). Facebook grants public_profile to every app anyway; it is not asked for.
+	defaultFacebookScope = "email"
 )
 
 type Facebook struct {
@@ -130,7 +131,7 @@ func (f *Facebook) Exchange(ctx context.Context, x ExchangeRequest) (*UserInfo, 
 		return nil, err
 	}
 	q := u.Query()
-	q.Set("fields", "id,name,email,picture")
+	q.Set("fields", "id,email") // name and picture are not kept, so not fetched (GDPR plan C9)
 	q.Set("appsecret_proof", appSecretProof(tk.AccessToken, f.ClientSecret))
 	u.RawQuery = q.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)

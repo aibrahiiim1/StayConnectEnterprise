@@ -66,7 +66,7 @@ func TestGoogleAuthorizeURL(t *testing.T) {
 	for k, want := range map[string]string{
 		"client_id": "cid", "redirect_uri": "https://wifi.hotel.example/auth/social/callback",
 		"response_type": "code", "state": "state-abc",
-		"scope": "openid email profile", "prompt": "select_account",
+		"scope": "openid email", "prompt": "select_account",
 		"nonce": testNonce, "code_challenge_method": "S256",
 		// RFC 7636 Appendix B: the challenge of testVerifier.
 		"code_challenge": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",

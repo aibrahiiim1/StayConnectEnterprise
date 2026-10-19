@@ -14,7 +14,7 @@ WHO IS RESPONSIBLE
 
 WHAT WE RECORD
 - Your device's network addresses (MAC and IP address), when you connect and disconnect, and how much data each session uses.
-- What you sign in with: [[delete the ways you do not offer]] your room number and the detail asked for with it (checked against your reservation); a voucher code; an account name; an email address and password; a phone number; or the Google, Apple, Facebook or Microsoft account you choose, from which we receive your name and email address.
+- What you sign in with: [[delete the ways you do not offer]] your room number and the detail asked for with it (checked against your reservation); a voucher code; an account name; an email address and password; a phone number; or the Google, Apple, Facebook or Microsoft account you choose, from which we keep only your email address and your account id with that company.
 - [[Only if you offer room sign-in:]] To check room sign-ins, a copy of the current reservations from our reservation system: name, room, reservation number and dates of stay.
 - Sign-in attempts, including failed ones, to protect the network against misuse.
 - If you buy internet access: the package, the price and the payment reference. Card details are handled by the payment provider, not by us.

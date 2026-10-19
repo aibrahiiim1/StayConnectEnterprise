@@ -90,7 +90,7 @@ func TestAppleAuthorizeURL(t *testing.T) {
 	for k, want := range map[string]string{
 		"client_id": "com.hotel.wifi", "redirect_uri": "https://portal/auth/social/callback",
 		"response_type": "code", "response_mode": "form_post", "state": "state-abc",
-		"scope": "name email", "nonce": testNonce,
+		"scope": "email", "nonce": testNonce,
 	} {
 		if q.Get(k) != want {
 			t.Errorf("query[%s] = %q, want %q", k, q.Get(k), want)

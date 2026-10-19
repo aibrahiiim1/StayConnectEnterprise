@@ -21,6 +21,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api, ListResp, Whoami, SocialOAuthProvider } from "@/lib/api";
 import { PROVIDER_CONSOLE_HELP, PROVIDER_LABELS, PortalCallbackURL, keepAvailable, offeredWords } from "@/lib/portal-https";
+import { DEFAULT_SCOPES, extraScopes } from "@/lib/social-scopes";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody } from "@/components/ui/card";
@@ -324,9 +325,19 @@ export default function SocialProvidersPage() {
               placeholder={mode === "edit" ? "Unchanged" : ""}
             />
           </Field>
-          <Field label="Scopes" hint="Space separated.">
-            <Input value={f.scopes} onChange={(e) => set("scopes", e.target.value)} placeholder="openid email profile" />
+          <Field label="Scopes" hint="Leave empty to ask only for what sign-in needs. Space separated.">
+            <Input value={f.scopes} onChange={(e) => set("scopes", e.target.value)} placeholder={DEFAULT_SCOPES[f.provider] ?? ""} />
           </Field>
+          {extraScopes(f.provider, f.scopes).length > 0 && (
+            <div className="sm:col-span-2">
+            <Callout tone="warning" title="This asks guests for more than sign-in needs">
+              Guests will be asked to share {extraScopes(f.provider, f.scopes).map((x) => `"${x}"`).join(", ")} as
+              well as their email. Sign-in keeps only the email and the account id, so this data is not used. Under
+              data-protection law your hotel must have a reason to collect it and tell guests in its privacy notice.
+              You can still save.
+            </Callout>
+            </div>
+          )}
           {f.provider === "microsoft" && (
             <Field label="Directory (tenant)" hint="Leave empty for common (any Microsoft account).">
               <Input value={f.tenant} onChange={(e) => set("tenant", e.target.value)} placeholder="common" />

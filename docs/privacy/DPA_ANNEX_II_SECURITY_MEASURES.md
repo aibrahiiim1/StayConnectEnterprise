@@ -116,7 +116,9 @@ The annex has three parts:
 ### Data minimisation, quality and limited retention
 
 - Social sign-in keeps only the provider's subject id, the verified email and, for business accounts, the
-  provider's organisation identifiers. Name and picture are discarded.
+  provider's organisation identifiers. Google, Facebook and Apple are asked for the email only; Microsoft also for
+  the profile, which some personal accounts need to give their email. Hotel Admin warns when a hotel asks a
+  provider for more.
 - PMS integrations exclude documents and addresses.
 - Every guest-data category has a retention period the Controller sets (Annex I). Retention runs hourly.
 
