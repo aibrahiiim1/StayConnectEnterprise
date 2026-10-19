@@ -8,7 +8,7 @@ import (
 
 func TestScrubContactsRemovesRecipientsButKeepsTheProvidersWords(t *testing.T) {
 	cases := map[string]string{
-		"smtp: RCPT TO: 550 5.1.1 <maria.okonkwo@example.com>: Recipient address rejected": "smtp: RCPT TO: 550 5.1.1 <[email]>: Recipient address rejected",
+		"smtp: RCPT TO: 550 5.1.1 <maria.okonkwo@example.com>: Recipient address rejected":    "smtp: RCPT TO: 550 5.1.1 <[email]>: Recipient address rejected",
 		"twilio: 400 code 21211: The 'To' number +44 7700 900123 is not a valid phone number": "twilio: 400 code 21211: The 'To' number [phone] is not a valid phone number",
 		"sendgrid: 401 unauthorized": "sendgrid: 401 unauthorized",
 	}

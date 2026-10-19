@@ -174,4 +174,6 @@ func TestSMTPNoneRefusesAPublicServerAtConnect(t *testing.T) {
 
 type publicConn struct{ net.Conn }
 
-func (publicConn) RemoteAddr() net.Addr { return &net.TCPAddr{IP: net.ParseIP("203.0.113.9"), Port: 25} }
+func (publicConn) RemoteAddr() net.Addr {
+	return &net.TCPAddr{IP: net.ParseIP("203.0.113.9"), Port: 25}
+}
