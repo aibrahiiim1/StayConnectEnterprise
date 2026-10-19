@@ -182,3 +182,32 @@ func TestIntegration_AnExistingClientsCodeIsNeverShown(t *testing.T) {
 		}
 	}
 }
+
+// A code's device binding older than a day is removed by the minute sweep, not only when the next code is sent,
+// so a site where nobody asks for a code does not keep every device MAC it bound (GDPR plan C1 gap).
+func TestIntegration_OldDeviceBindingsAreSweptWithoutANewCode(t *testing.T) {
+	s, pool := codeAdminFixture(t)
+	ctx := context.Background()
+	var old, fresh string
+	if err := pool.QueryRow(ctx, `INSERT INTO iam_v2.otp_device_bindings (challenge_id, tenant_id, device_mac, issued_at)
+	     VALUES (gen_random_uuid(), $1::uuid, '02:00:00:00:b1:01', now() - interval '2 days') RETURNING challenge_id::text`, s.tenID).Scan(&old); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO iam_v2.otp_device_bindings (challenge_id, tenant_id, device_mac)
+	     VALUES (gen_random_uuid(), $1::uuid, '02:00:00:00:b1:02') RETURNING challenge_id::text`, s.tenID).Scan(&fresh); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM iam_v2.otp_device_bindings WHERE challenge_id = ANY($1::uuid[])`, []string{old, fresh})
+	})
+	s.pruneOTPEscrow(ctx)
+	var n int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM iam_v2.otp_device_bindings WHERE challenge_id = $1::uuid`, old).Scan(&n)
+	if n != 0 {
+		t.Fatal("a two-day-old device binding survived the sweep")
+	}
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM iam_v2.otp_device_bindings WHERE challenge_id = $1::uuid`, fresh).Scan(&n)
+	if n != 1 {
+		t.Fatal("a live device binding was swept")
+	}
+}

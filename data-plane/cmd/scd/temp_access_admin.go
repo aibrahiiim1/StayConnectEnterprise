@@ -81,6 +81,9 @@ func (s *server) pruneOTPEscrow(ctx context.Context) {
 		return
 	}
 	_, _ = s.db.Exec(ctx, `DELETE FROM iam_v2.otp_code_reveals WHERE revealed_at < now() - interval '1 day'`)
+	// A code's device binding (0110) is pruned when the next code is issued, so a site where nobody asks for a
+	// code kept every device MAC it ever bound. Swept here too, on the same one-day rule (GDPR plan C1 gap).
+	_, _ = s.db.Exec(ctx, `DELETE FROM iam_v2.otp_device_bindings WHERE issued_at < now() - interval '1 day'`)
 	if _, err := s.db.Exec(ctx, `DELETE FROM iam_v2.otp_code_escrow e
 	     WHERE e.expires_at <= now()
 	        OR NOT EXISTS (SELECT 1 FROM public.auth_otps o WHERE o.id = e.challenge_id
