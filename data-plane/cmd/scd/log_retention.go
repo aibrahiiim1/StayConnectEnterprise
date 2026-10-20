@@ -27,6 +27,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgconn"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -80,7 +81,10 @@ func (s *server) logRetentionLoop(ctx context.Context) {
 	}
 }
 
-// logRetentionDays is the site's setting, or the default when it cannot be read.
+// logRetentionDays is the site's setting. It returns 0 -- "do nothing this hour" -- when the setting exists but
+// could not be read: a database restart at the tick must never fall back to the default and delete logs a hotel
+// chose to keep longer. The default applies only where there is no setting to read (no site yet, or a database
+// that predates the setting).
 func (s *server) logRetentionDays(ctx context.Context) int {
 	if s.db == nil || s.tenID == "" || s.siteID == "" {
 		return logRetentionDefaultDays
@@ -88,14 +92,20 @@ func (s *server) logRetentionDays(ctx context.Context) int {
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	var days int
-	if err := s.db.QueryRow(cctx, `SELECT log_days FROM iam_v2.data_retention_get($1::uuid,$2::uuid)`,
-		s.tenID, s.siteID).Scan(&days); err != nil || days < 1 {
-		if ctx.Err() == nil {
-			slog.Warn("log retention: the setting could not be read; using the default", "days", logRetentionDefaultDays, "err", err)
-		}
+	err := s.db.QueryRow(cctx, `SELECT log_days FROM iam_v2.data_retention_get($1::uuid,$2::uuid)`,
+		s.tenID, s.siteID).Scan(&days)
+	if err == nil && days >= 1 {
+		return days
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && (pgErr.Code == "42883" || pgErr.Code == "3F000") {
+		slog.Warn("log retention: this database predates the setting; using the default", "days", logRetentionDefaultDays)
 		return logRetentionDefaultDays
 	}
-	return days
+	if ctx.Err() == nil {
+		slog.Warn("log retention: the setting could not be read, so nothing is deleted this hour", "err", err)
+	}
+	return 0
 }
 
 // cutName matches the copies this job makes (<name>.<YYYYMMDD>), the numbered ones Kea makes itself
@@ -103,6 +113,9 @@ func (s *server) logRetentionDays(ctx context.Context) int {
 var cutName = regexp.MustCompile(`\.(\d{8}|\d+)(\.gz)?$|-\d{4}-\d{2}-\d{2}T[\d.-]+\.log(\.gz)?$`)
 
 func (j *logRetention) run(ctx context.Context, days int) {
+	if days < 1 {
+		return
+	}
 	now := j.now()
 	cutoff := now.Add(-time.Duration(days) * 24 * time.Hour)
 	if err := j.journal(ctx, days); err != nil && ctx.Err() == nil {

@@ -42,6 +42,20 @@
 {
 	admin off
 	auto_https disable_redirects
+	# The default logger takes what no site logger does: errors such as a 502 while an upstream restarts. Those lines
+	# embed the whole request (address, URI with its query, every header -- among them the X-*-Search fields that
+	# carry staff searches). It gets the same filter as the access logs (GDPR final audit).
+	log {
+		output stderr
+		format filter {
+			wrap json
+			fields {
+				request>headers delete
+				resp_headers>Location delete
+				request>uri regexp "[?].*$|[0-9A-Fa-f]{2}(?:(?:[:-]|%3[Aa])[0-9A-Fa-f]{2}){5}" "[redacted]"
+			}
+		}
+	}
 	__CENTRAL_GLOBAL_EXTRA__
 }
 __CENTRAL_SITE_ADDRESSES__ {

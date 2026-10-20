@@ -37,6 +37,9 @@ services:
     image: timescale/timescaledb:2.16.1-pg16
     container_name: sc-central-pg
     restart: unless-stopped
+    # A failed statement is logged without its text or its values (a unique violation names the key, which can be a
+    # staff email): the same two settings as the appliance's infra.yml (GDPR final audit).
+    command: ["postgres", "-c", "log_min_error_statement=panic", "-c", "log_error_verbosity=terse"]
     environment:
       POSTGRES_USER: stayconnect
       POSTGRES_DB: stayconnect
@@ -76,7 +79,10 @@ services:
         umask 077
         printf 'requirepass "%s"\n' "$$(tr -d '\r\n' < /run/secrets/redis_password)" > /tmp/redis-auth.conf
         chown redis:redis /tmp/redis-auth.conf
-        exec docker-entrypoint.sh redis-server /tmp/redis-auth.conf --appendonly yes --loglevel warning
+        # NO PERSISTENCE (GDPR final audit): Redis holds staff sessions (email, name, roles) and sign-in counters. A
+        # file would keep an expired or signed-out session's payload after the staff account is anonymised. A restart
+        # signs everyone out and resets the counters, which is the price of keeping no copy.
+        exec docker-entrypoint.sh redis-server /tmp/redis-auth.conf --appendonly no --save "" --loglevel warning
     ports:
       - "127.0.0.1:6379:6379"
     volumes:

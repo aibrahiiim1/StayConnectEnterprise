@@ -134,3 +134,26 @@ func TestLogRetention_NeverFollowsALink(t *testing.T) {
 		}
 	}
 }
+
+// A setting that could not be read must never delete anything: a hotel that kept logs for a year would lose them
+// to a database restart at the hourly tick.
+func TestLogRetention_AnUnreadableSettingDeletesNothing(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
+	old := filepath.Join(dir, "portal.log.20250101")
+	if err := os.WriteFile(old, []byte("kept\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	at := now.Add(-300 * 24 * time.Hour)
+	_ = os.Chtimes(old, at, at)
+	vacuumed := -1
+	j := &logRetention{dirs: []string{dir}, stamp: filepath.Join(dir, "state", "last-cut"),
+		journal: func(_ context.Context, days int) error { vacuumed = days; return nil }, now: func() time.Time { return now }}
+	j.run(context.Background(), 0) // what logRetentionDays returns when the setting exists but cannot be read
+	if _, err := os.Stat(old); err != nil {
+		t.Fatalf("an old log was deleted although the setting could not be read: %v", err)
+	}
+	if vacuumed != -1 {
+		t.Fatalf("the journal was vacuumed to %d days although the setting could not be read", vacuumed)
+	}
+}
