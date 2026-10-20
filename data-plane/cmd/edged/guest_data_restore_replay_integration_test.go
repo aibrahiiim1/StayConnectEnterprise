@@ -25,6 +25,11 @@ func replayJournal(t *testing.T, f *apiFixture) map[string]any {
 	if err := f.pool.QueryRow(ctx, `SELECT public.erasure_journal_export($1::uuid,$2::uuid)::text`, f.tenant, f.site).Scan(&journal); err != nil {
 		t.Fatalf("export the journal: %v", err)
 	}
+	// The restored database has not heard of these erasures: they were made after its backup.
+	asstWithoutTriggers(t, f, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `DELETE FROM iam_v2.erasure_journal WHERE tenant_id=$1::uuid`, f.tenant)
+		return err
+	})
 	var out string
 	if err := f.pool.QueryRow(ctx, `SELECT public.erasure_journal_replay($1::jsonb)::text`, journal).Scan(&out); err != nil {
 		t.Fatalf("replay the journal: %v", err)
@@ -71,7 +76,7 @@ func TestIntegration_RestoreReplay_AnErasedAccountStaysErasedAfterARestore(t *te
 	}
 
 	res := replayJournal(t, f)
-	if res["reapplied"].(float64) < 1 {
+	if res["reapplied"].(float64) < 1 || res["already_known"].(float64) != 0 {
 		t.Fatalf("nothing was replayed: %v", res)
 	}
 	for name, q := range map[string]string{
@@ -91,7 +96,14 @@ func TestIntegration_RestoreReplay_AnErasedAccountStaysErasedAfterARestore(t *te
 	if got := gdStr(t, f, `SELECT count(*)::text FROM iam_v2.guest_data_erasures WHERE tenant_id=$1`, f.tenant); got != before {
 		t.Errorf("the replay added erasure register rows: %s -> %s", before, got)
 	}
-	replayJournal(t, f)
+	// A second replay of the same file finds every entry known and does nothing.
+	var journal, out string
+	if err := f.pool.QueryRow(ctx, `SELECT public.erasure_journal_export($1::uuid,$2::uuid)::text`, f.tenant, f.site).Scan(&journal); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.pool.QueryRow(ctx, `SELECT public.erasure_journal_replay($1::jsonb)::text`, journal).Scan(&out); err != nil || !strings.Contains(out, `"reapplied": 0`) {
+		t.Errorf("a second replay was not a no-op: %v %s", err, out)
+	}
 	if got := gdStr(t, f, `SELECT count(*)::text FROM iam_v2.erasure_journal WHERE tenant_id=$1`, f.tenant); got != "1" {
 		t.Errorf("the journal grew on replay: %s", got)
 	}

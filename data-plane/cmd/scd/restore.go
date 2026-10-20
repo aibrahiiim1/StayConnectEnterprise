@@ -438,6 +438,15 @@ func (s *server) runRestore(ctx context.Context, name, identity string, rec *ver
 		ok("key_holders", detail)
 	}
 
+	// ---- 3c. what was erased is on record outside the database before it is replaced (erasure_journal.go) ------
+	if ok2, detail := journalSyncFromLive(ctx, pgDatabase, erasureJournalFile()); !ok2 {
+		dropStaging()
+		fail("erasures", detail)
+		return
+	} else {
+		ok("erasures", detail)
+	}
+
 	// ---- 4. the swap: rename aside, rename in ----------------------------------------------------------
 	//
 	// Connections must be gone first or the rename is refused. The dependent services are stopped rather
@@ -528,6 +537,17 @@ func (s *server) runRestore(ctx context.Context, name, identity string, rec *ver
 		return
 	}
 	ok("integrity", detail)
+
+	// ---- 6a. erasures made since the backup are applied again (erasure_journal.go) ----------------------------
+	// The restored database brought back every guest erased since the backup, names and all. The file next to the
+	// backups knows what was erased: it is replayed now, before the appliance serves again. A failure does not undo the
+	// restore -- it is reported on this screen and in the log, and tried again every hour.
+	if detail, problem := journalReplayInto(ctx, pgDatabase, erasureJournalFile()); problem {
+		slog.Error("restore: erasures could not all be applied again", "detail", detail)
+		steps = append(steps, restoreStep{Step: "erasures_reapplied", OK: false, Detail: detail})
+	} else {
+		ok("erasures_reapplied", detail)
+	}
 
 	// ---- 6b. keep exactly ONE database aside -----------------------------------------------------------
 	//

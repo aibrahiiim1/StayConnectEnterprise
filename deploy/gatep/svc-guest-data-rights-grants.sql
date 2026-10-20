@@ -54,3 +54,18 @@ BEGIN
     GRANT UPDATE (client_ip, client_mac, user_agent) ON public.social_oauth_states TO iam_v2_owner;
   END IF;
 END $g$;
+
+-- Migration 0147 (an erasure survives a restore; nothing identifying is left behind): scd copies the erasure journal to
+-- a file next to the backups and replays it after a restore and every hour. Nothing else is granted: the journal table
+-- and the scrub registry have no grant to a runtime role.
+DO $g$
+BEGIN
+  IF to_regprocedure('public.erasure_journal_replay(jsonb)') IS NULL THEN
+    RAISE NOTICE 'migration 0147 is not applied; erasure journal grants skipped';
+    RETURN;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_scd') THEN
+    GRANT EXECUTE ON FUNCTION public.erasure_journal_export(uuid,uuid) TO svc_scd;
+    GRANT EXECUTE ON FUNCTION public.erasure_journal_replay(jsonb) TO svc_scd;
+  END IF;
+END $g$;

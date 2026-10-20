@@ -14,7 +14,8 @@ export function exportDescription(kind: string | undefined): string {
 export function eraseConsequences(kind: string | undefined): string[] {
   const common = [
     "Names, email addresses, phone numbers, room and reservation numbers, MAC and IP addresses are replaced or cleared. This cannot be undone.",
-    "Totals, reports and financial records stay, without anything that identifies the guest.",
+    "Totals and reports stay. Financial records (room charges, payments) are kept for the legal period and still carry the PMS guest number, posting numbers, payment-provider references, amounts and dates: the guest is told so.",
+    "Dates are kept as months and times as days on an anonymised reservation. A static address reservation (Network → DHCP) is yours to remove where it lives.",
     "Refused while the guest is in-house, has internet access running, or has a device online.",
   ];
   if (kind === "stay" || kind === "stay_guest") {

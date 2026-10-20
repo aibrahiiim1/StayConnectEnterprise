@@ -72,6 +72,7 @@ var guestDataReads = map[string]guestRead{
 	"/edge/v1/usage/sources":                       {targetType: "usage_sources", searchHeaders: []string{usageSearchHeader}, searchQuery: []string{"q"}},
 	"/edge/v1/guest-data-rights/search":            {targetType: "guest_data", searchHeaders: []string{guestDataSearchHeader}, searchQuery: []string{"q"}},
 	"/edge/v1/guest-data-rights/assisted/{id}":     {targetType: "assisted_guest_request", idParams: []string{"id"}},
+	"/edge/v1/guest-data-rights/register":          {targetType: "guest_data_requests"},
 	"/edge/v1/network/dhcp/leases":                 {targetType: "dhcp_leases", searchHeaders: []string{dhcpSearchHeader}},
 }
 

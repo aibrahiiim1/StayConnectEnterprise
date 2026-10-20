@@ -223,7 +223,7 @@ BEGIN
                         WHERE sg.stay_id = x.id
                           AND (lower(COALESCE(sg.display_name, '')) LIKE pat OR lower(COALESCE(sg.last_name_norm, '')) LIKE pat
                                OR lower(COALESCE(sg.first_name_norm, '')) LIKE pat)))
-  ) r ORDER BY 6 DESC NULLS LAST LIMIT 50;
+  ) r ORDER BY 6 DESC NULLS LAST LIMIT 51;
 END $function$;
 
 CREATE OR REPLACE FUNCTION iam_v2.guest_data_identifiers(p_tenant uuid, p_site uuid, p_kind text, p_id uuid)
@@ -911,7 +911,7 @@ CREATE OR REPLACE FUNCTION public.guest_data_erase_core(p_tenant uuid, p_site uu
 AS $function$
 DECLARE v_ids text[]; v_vals text[]; v_strong text[]; v_names text[]; v_weak text[]; v_macs text[]; v_pats text[];
         v_since timestamptz; n_codes integer; n_oauth integer; n_audit integer; v_ref text; v_res jsonb;
-        a uuid[]; p uuid[]; s uuid[]; d uuid[]; gr uuid[];
+        a uuid[]; p uuid[]; s uuid[]; d uuid[]; gr uuid[]; n_dhcp integer;
 BEGIN
   -- What identifies the guest, read BEFORE anything is anonymised.
   SELECT COALESCE(array_agg(o_value) FILTER (WHERE o_kind = 'strong'), '{}'),
@@ -952,7 +952,7 @@ BEGIN
   -- The one-time codes are anonymised LAST: the person's verification records and code bindings are tied to them by
   -- the address the code went to, and the erasure below reads that address (0145). Counted now, changed after.
   SELECT count(*) INTO n_codes FROM auth_otps o WHERE o.tenant_id = p_tenant AND lower(o.destination) = ANY (v_vals);
-  UPDATE social_oauth_states x SET client_ip = NULL, client_mac = NULL, user_agent = NULL
+  UPDATE social_oauth_states x SET client_ip = NULL, client_mac = NULL, user_agent = NULL, code_verifier = NULL, nonce = NULL
    WHERE x.tenant_id = p_tenant AND x.client_mac::text = ANY (v_macs);
   GET DIAGNOSTICS n_oauth = ROW_COUNT;
 
@@ -999,6 +999,12 @@ BEGIN
                                 '_erasure_ref', v_ref, '_replay', p_replay));
   UPDATE auth_otps o SET destination = 'anonymised', ip = NULL, user_agent = NULL
    WHERE o.tenant_id = p_tenant AND lower(o.destination) = ANY (v_vals);
+  -- A static address reservation (Network -> DHCP) is staff-managed infrastructure and is not touched here; it is reported,
+  -- so that staff remove it where it lives.
+  SELECT count(*) INTO n_dhcp FROM public.dhcp_reservations r WHERE lower(r.mac::text) = ANY (v_macs);
+  IF n_dhcp > 0 THEN
+    v_res := jsonb_set(v_res, '{counts,dhcp_reservations_kept}', to_jsonb(n_dhcp));
+  END IF;
   RETURN v_res;
 END $function$;
 
@@ -1090,7 +1096,7 @@ BEGIN
   UPDATE guest_signin_device_passes x SET device_mac = anonymised_mac()
    WHERE x.id = ANY (p_ids) AND x.tenant_id = p_tenant AND x.site_id = p_site;
   GET DIAGNOSTICS n_pass = ROW_COUNT;
-  UPDATE public.social_oauth_states x SET client_ip = NULL, client_mac = NULL, user_agent = NULL
+  UPDATE public.social_oauth_states x SET client_ip = NULL, client_mac = NULL, user_agent = NULL, code_verifier = NULL, nonce = NULL
    WHERE md5(x.state)::uuid = ANY (o_ids) AND x.tenant_id = p_tenant AND x.client_mac = ANY (q.macs);
   GET DIAGNOSTICS n_redirect = ROW_COUNT;
   -- A device whose every record is inside the request and selected is anonymised like an exclusive device (its
@@ -1170,7 +1176,7 @@ BEGIN
   UPDATE guest_signin_device_passes x SET device_mac = anonymised_mac()
    WHERE x.id = ANY (p_pass) AND x.tenant_id = p_tenant AND x.device_mac::text NOT LIKE '03:%';
   GET DIAGNOSTICS k = ROW_COUNT; n := n + k;
-  UPDATE public.social_oauth_states x SET client_ip = NULL, client_mac = NULL, user_agent = NULL
+  UPDATE public.social_oauth_states x SET client_ip = NULL, client_mac = NULL, user_agent = NULL, code_verifier = NULL, nonce = NULL
    WHERE md5(x.state)::uuid = ANY (o_ids) AND x.tenant_id = p_tenant AND num_nonnulls(x.client_ip, x.client_mac, x.user_agent) > 0;
   GET DIAGNOSTICS k = ROW_COUNT; n := n + k;
   FOREACH v_id IN ARRAY d_ids LOOP
@@ -1193,52 +1199,50 @@ CREATE OR REPLACE FUNCTION public.erasure_journal_export(p_tenant uuid, p_site u
     FROM iam_v2.erasure_journal j WHERE j.tenant_id = p_tenant AND j.site_id = p_site
 $$;
 
--- Replays a journal (this database's own, or one carried from a file) onto the database as it is now. Entries the
--- database does not have are added; every entry is then erased again where the record still carries what it
--- carried -- which is what a restore of an older backup brings back. An entry whose record no longer exists
--- (created after the backup) is skipped; an entry that cannot be applied is reported, never silently dropped.
+-- Replays a journal carried from outside the database (the file scd keeps next to the backups) onto the database as it is
+-- now. An entry the database does not have is exactly an erasure it does not know of -- one made after the backup this
+-- database was restored from -- so only those are applied, and each is recorded only once it has been applied: an entry
+-- that cannot be applied is reported and tried again at the next call, never silently dropped. An entry whose record no
+-- longer exists (created after the backup) is recorded and skipped. Idempotent and cheap: a database that has every entry
+-- does nothing.
 CREATE OR REPLACE FUNCTION public.erasure_journal_replay(p_journal jsonb) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'public', 'pg_temp'
     AS $function$
-DECLARE e record; g record; v_added integer := 0; v_reapplied integer := 0; v_gone integer := 0; v_failed jsonb := '[]'::jsonb;
-        v_res jsonb; v_changed integer := 0; k integer;
+DECLARE e record; v_reapplied integer := 0; v_gone integer := 0; v_known integer := 0; v_failed jsonb := '[]'::jsonb;
+        v_res jsonb; v_changed integer := 0;
 BEGIN
   IF jsonb_typeof(p_journal) IS DISTINCT FROM 'array' THEN
     RAISE EXCEPTION 'a journal is a list of entries' USING ERRCODE = 'invalid_parameter_value';
   END IF;
-  INSERT INTO iam_v2.erasure_journal (id, tenant_id, site_id, erasure_ref, kind, subject_id, detail, erased_at)
-    SELECT x.id, x.tenant_id, x.site_id, x.erasure_ref, x.kind, x.subject_id, x.detail, COALESCE(x.erased_at, now())
-      FROM jsonb_to_recordset(p_journal) AS x(id uuid, tenant_id uuid, site_id uuid, erasure_ref text, kind text, subject_id uuid, detail text, erased_at timestamptz)
-    ON CONFLICT DO NOTHING;
-  GET DIAGNOSTICS v_added = ROW_COUNT;
-  FOR e IN SELECT j.* FROM iam_v2.erasure_journal j
-            WHERE j.kind <> 'assisted_record'
-              AND j.id IN (SELECT x.id FROM jsonb_to_recordset(p_journal) AS x(id uuid))
-            ORDER BY j.erased_at, j.id LOOP
+  SELECT count(*) INTO v_known FROM jsonb_to_recordset(p_journal) AS x(id uuid)
+   WHERE EXISTS (SELECT 1 FROM iam_v2.erasure_journal j WHERE j.id = x.id);
+  FOR e IN SELECT x.* FROM jsonb_to_recordset(p_journal)
+             AS x(id uuid, tenant_id uuid, site_id uuid, erasure_ref text, kind text, subject_id uuid, detail text, erased_at timestamptz)
+            WHERE NOT EXISTS (SELECT 1 FROM iam_v2.erasure_journal j WHERE j.id = x.id)
+            ORDER BY x.erased_at, x.id LOOP
     BEGIN
-      v_res := public.guest_data_erase_core(e.tenant_id, e.site_id, e.kind, e.subject_id, 'restore', 'erasure replayed after a restore', true, e.erasure_ref);
+      IF e.kind = 'assisted_record' THEN
+        v_res := iam_v2.assisted_apply_records(e.tenant_id, e.site_id, ARRAY[e.detail], ARRAY[e.subject_id]);
+        v_changed := v_changed + COALESCE((v_res ->> 'rows_changed')::integer, 0);
+      ELSE
+        v_res := public.guest_data_erase_core(e.tenant_id, e.site_id, e.kind, e.subject_id, 'restore', 'erasure replayed after a restore', true, e.erasure_ref);
+      END IF;
+      INSERT INTO iam_v2.erasure_journal (id, tenant_id, site_id, erasure_ref, kind, subject_id, detail, erased_at)
+      VALUES (e.id, e.tenant_id, e.site_id, e.erasure_ref, e.kind, e.subject_id, e.detail, COALESCE(e.erased_at, now()))
+      ON CONFLICT DO NOTHING;
       v_reapplied := v_reapplied + 1;
     EXCEPTION
-      WHEN no_data_found THEN v_gone := v_gone + 1;
+      WHEN no_data_found THEN
+        INSERT INTO iam_v2.erasure_journal (id, tenant_id, site_id, erasure_ref, kind, subject_id, detail, erased_at)
+        VALUES (e.id, e.tenant_id, e.site_id, e.erasure_ref, e.kind, e.subject_id, e.detail, COALESCE(e.erased_at, now()))
+        ON CONFLICT DO NOTHING;
+        v_gone := v_gone + 1;
       WHEN OTHERS THEN
         v_failed := v_failed || jsonb_build_array(jsonb_build_object('erasure_ref', e.erasure_ref, 'kind', e.kind, 'error', SQLERRM));
     END;
   END LOOP;
-  FOR g IN SELECT j.tenant_id, j.site_id, array_agg(j.detail) AS kinds, array_agg(j.subject_id) AS ids
-             FROM iam_v2.erasure_journal j
-            WHERE j.kind = 'assisted_record' AND j.id IN (SELECT x.id FROM jsonb_to_recordset(p_journal) AS x(id uuid))
-            GROUP BY j.tenant_id, j.site_id LOOP
-    BEGIN
-      v_res := iam_v2.assisted_apply_records(g.tenant_id, g.site_id, g.kinds, g.ids);
-      k := (v_res ->> 'rows_changed')::integer;
-      v_changed := v_changed + k;
-      v_reapplied := v_reapplied + cardinality(g.ids);
-    EXCEPTION WHEN OTHERS THEN
-      v_failed := v_failed || jsonb_build_array(jsonb_build_object('erasure_ref', 'assisted', 'kind', 'assisted_record', 'error', SQLERRM));
-    END;
-  END LOOP;
-  RETURN jsonb_build_object('entries', jsonb_array_length(p_journal), 'added', v_added, 'reapplied', v_reapplied,
+  RETURN jsonb_build_object('entries', jsonb_array_length(p_journal), 'already_known', v_known, 'reapplied', v_reapplied,
                             'records_gone', v_gone, 'assisted_rows_changed', v_changed, 'failed', v_failed);
 END $function$;
 COMMENT ON FUNCTION public.erasure_journal_replay(jsonb) IS
@@ -1655,7 +1659,11 @@ BEGIN
   PERFORM set_config('public.staff_retention', '', true);
 
   -- An assisted guest data request left open for 30 days is cancelled and scrubbed (0146).
-  n_assisted := iam_v2.expire_assisted_requests(p_tenant, p_site);
+  BEGIN
+    n_assisted := iam_v2.expire_assisted_requests(p_tenant, p_site);
+  EXCEPTION WHEN OTHERS THEN
+    n_assisted := 0;   -- reported by the next run; the staff accounts above are already anonymised
+  END;
 
   RETURN jsonb_build_object('staff_accounts_anonymised', n_ops, 'audit_entries', n_audit,
                             'staff_addresses_cleared', n_net + n_https, 'assisted_requests_expired', n_assisted,
@@ -2079,6 +2087,7 @@ BEGIN
        AND EXISTS (SELECT 1 FROM stay_guests g2 JOIN stay_guests g1 ON g1.external_guest_id = g2.external_guest_id AND g1.pms_interface_id = g2.pms_interface_id
                     WHERE g2.stay_id = st2.id AND g2.external_guest_id IS NOT NULL
                       AND (g1.stay_id = ANY (s) OR g1.id = ANY (gr)))),
+    'static_address_reservations_kept', (SELECT count(*) FROM public.dhcp_reservations r WHERE r.mac = ANY (macs)),
     'kept_by_law', jsonb_build_object(
         'what', 'Room charges, payments and the PMS posting records of this guest are kept for the legal period for financial records, and are given above.',
         'what_they_still_carry', 'The PMS guest number on each posting, the posting numbers, the payment provider references, the amounts and the dates.',
@@ -2170,6 +2179,224 @@ BEGIN
      WHERE pv.id IN (SELECT ac.privacy_notice_version_id FROM iam_v2.auth_contexts ac WHERE ac.id = ANY (v_ctx))));
 END $function$;
 
+-- The record of the notice shown says the built-in notice when the hotel has none
+CREATE OR REPLACE FUNCTION public.privacy_notice_in_force(p_tenant uuid) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+DECLARE b jsonb; d jsonb; v_text text; v_url text; v_terms text; v_fp text; v_id uuid;
+        c_builtin constant text := '[built-in notice] This Wi-Fi is provided by the hotel, which is responsible for your personal data on it. To give you internet access and keep the network secure, it records your device''s network addresses, when you connect and how much data you use, and what you sign in with. These records are deleted or made anonymous after a set time. Ask at reception for the hotel''s full privacy notice, or to see, correct or delete your data. (Shown in the guest''s language.)';
+BEGIN
+  SELECT t.branding INTO b FROM public.tenants t WHERE t.id = p_tenant;
+  IF NOT FOUND THEN
+    RETURN NULL;
+  END IF;
+  d := CASE WHEN jsonb_typeof(b) = 'object' AND b ? 'design' THEN b -> 'design' ELSE b END;
+  IF jsonb_typeof(d) = 'object' THEN
+    v_text  := NULLIF(CASE WHEN jsonb_typeof(d -> 'privacy_text') = 'string' THEN d ->> 'privacy_text' END, '');
+    v_url   := NULLIF(CASE WHEN jsonb_typeof(d -> 'privacy_url') = 'string' THEN d ->> 'privacy_url' END, '');
+    v_terms := NULLIF(CASE WHEN jsonb_typeof(d -> 'terms_url') = 'string' THEN d ->> 'terms_url' END, '');
+  END IF;
+  -- With no notice of its own the portal shows its short built-in one (privacy.default): that is what the guest was shown,
+  -- and what is recorded -- not "nothing".
+  IF v_text IS NULL THEN
+    v_text := c_builtin;
+  END IF;
+  v_fp := encode(sha256(convert_to(jsonb_build_array(v_text, v_url, v_terms)::text, 'UTF8')), 'hex');
+
+  INSERT INTO public.privacy_notice_versions (tenant_id, fingerprint, privacy_text, privacy_url, terms_url)
+  VALUES (p_tenant, v_fp, v_text, v_url, v_terms)
+  ON CONFLICT ON CONSTRAINT pnv_one_per_content DO NOTHING
+  RETURNING id INTO v_id;
+  IF v_id IS NULL THEN
+    SELECT x.id INTO v_id FROM public.privacy_notice_versions x WHERE x.tenant_id = p_tenant AND x.fingerprint = v_fp;
+  END IF;
+  RETURN v_id;
+END $$;
+
+-- ---------------------------------------------------------------------------------------------------------
+-- 6. The request register: every request a guest or visitor made, when it is due, and how it was answered.
+-- ---------------------------------------------------------------------------------------------------------
+-- The law gives the hotel one month to answer (Art. 12(3)), extendable by two more for a complex or numerous request, and
+-- requires a refusal to say why and that the person may complain. The product did the work of a request (find, export,
+-- erase) but kept no record of the request itself: when it was received, when it is due, how the person was verified,
+-- whether it was answered or refused and on what ground. This is that record. It holds a reference to the requester only
+-- while the request is open; answering it removes that and the free text, and keeps the dates, the ground and the references
+-- of the export, erasure or assisted request that carried it out. It is a record the staff keep; it decides nothing.
+CREATE TABLE IF NOT EXISTS iam_v2.guest_data_request_register (
+  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  ref                 text NOT NULL CONSTRAINT gdrr_ref CHECK (ref ~ '^RQ-[0-9A-F]{8}$'),
+  tenant_id           uuid NOT NULL,
+  site_id             uuid NOT NULL,
+  kind                text NOT NULL CONSTRAINT gdrr_kind CHECK (kind IN ('ACCESS', 'ERASURE', 'OTHER')),
+  received_at         date NOT NULL,
+  due_at              date NOT NULL,
+  extended_until      date,
+  extension_reason    text,
+  requester_ref       text NOT NULL CONSTRAINT gdrr_requester CHECK (length(btrim(requester_ref)) BETWEEN 2 AND 120),
+  verification_method text CONSTRAINT gdrr_method CHECK (verification_method IS NULL OR verification_method IN
+                        ('ID_CHECKED_IN_PERSON', 'ACCOUNT_CONTROL_SHOWN', 'CALLBACK_TO_KNOWN_CONTACT', 'OTHER_DOCUMENTED')),
+  status              text NOT NULL DEFAULT 'OPEN' CONSTRAINT gdrr_status
+                        CHECK (status IN ('OPEN', 'ANSWERED', 'PARTLY_REFUSED', 'REFUSED', 'WITHDRAWN')),
+  outcome_code        text CONSTRAINT gdrr_outcome CHECK (outcome_code IS NULL OR outcome_code IN
+                        ('NONE', 'LEGAL_RETENTION', 'NOT_IDENTIFIED', 'SHARED_ACCESS', 'THIRD_PARTY_RIGHTS', 'MANIFESTLY_UNFOUNDED', 'OTHER')),
+  outcome_note        text CONSTRAINT gdrr_note CHECK (outcome_note IS NULL OR length(outcome_note) <= 500),
+  erasure_ref         text CONSTRAINT gdrr_er CHECK (erasure_ref IS NULL OR erasure_ref ~ '^ER-[0-9A-F]{12}$'),
+  assisted_ref        text CONSTRAINT gdrr_ar CHECK (assisted_ref IS NULL OR assisted_ref ~ '^AR-[0-9A-F]{10}$'),
+  created_by          text NOT NULL,
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  answered_by         text,
+  answered_at         timestamptz,
+  CONSTRAINT gdrr_unique UNIQUE (ref),
+  CONSTRAINT gdrr_due CHECK (due_at >= received_at AND (extended_until IS NULL OR extended_until >= due_at)),
+  CONSTRAINT gdrr_closed CHECK ((status = 'OPEN') = (answered_at IS NULL) AND (answered_at IS NULL) = (answered_by IS NULL)
+                                AND ((status = 'OPEN') OR outcome_code IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS gdrr_site ON iam_v2.guest_data_request_register (tenant_id, site_id, status, due_at);
+COMMENT ON TABLE iam_v2.guest_data_request_register IS
+  'A request made under the data-protection rules, its deadline and how it was answered (0147). The requester reference and '
+  'the note are removed when it is answered; nothing here decides anything.';
+
+CREATE OR REPLACE FUNCTION iam_v2.request_register_guard() RETURNS trigger
+    LANGUAGE plpgsql SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'a request in the register is never deleted' USING ERRCODE = 'restrict_violation';
+  END IF;
+  IF OLD.status <> 'OPEN' THEN
+    RAISE EXCEPTION 'an answered request does not change' USING ERRCODE = 'restrict_violation';
+  END IF;
+  IF (NEW.id, NEW.ref, NEW.tenant_id, NEW.site_id, NEW.kind, NEW.received_at, NEW.due_at, NEW.created_by, NEW.created_at)
+     IS DISTINCT FROM (OLD.id, OLD.ref, OLD.tenant_id, OLD.site_id, OLD.kind, OLD.received_at, OLD.due_at, OLD.created_by, OLD.created_at) THEN
+    RAISE EXCEPTION 'what was received, and when, cannot be edited' USING ERRCODE = 'restrict_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS request_register_guard ON iam_v2.guest_data_request_register;
+CREATE TRIGGER request_register_guard BEFORE UPDATE OR DELETE ON iam_v2.guest_data_request_register
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.request_register_guard();
+
+CREATE OR REPLACE FUNCTION iam_v2.request_register_open(p_tenant uuid, p_site uuid, p_actor text, p_kind text, p_received date,
+                                                          p_requester text, p_method text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_ref text := 'RQ-' || upper(encode(public.gen_random_bytes(4), 'hex')); v_id uuid; v_due date;
+BEGIN
+  IF p_actor IS NULL OR length(btrim(p_actor)) NOT BETWEEN 1 AND 200 THEN
+    RAISE EXCEPTION 'an operator is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_received IS NULL OR p_received > current_date OR p_received < current_date - 366 THEN
+    RAISE EXCEPTION 'the request was received on a day up to a year ago, and not in the future' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_requester IS NULL OR length(btrim(p_requester)) NOT BETWEEN 2 AND 120 THEN
+    RAISE EXCEPTION 'say who is asking (2-120 characters)' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  v_due := (p_received + interval '1 month')::date;
+  INSERT INTO guest_data_request_register (ref, tenant_id, site_id, kind, received_at, due_at, requester_ref, verification_method, created_by)
+  VALUES (v_ref, p_tenant, p_site, p_kind, p_received, v_due, btrim(p_requester), NULLIF(p_method, ''), btrim(p_actor))
+  RETURNING id INTO v_id;
+  RETURN jsonb_build_object('id', v_id, 'ref', v_ref, 'due_at', v_due);
+END $$;
+
+-- A complex or numerous request may take two more months, once, with the person told within the first month (Art. 12(3)).
+CREATE OR REPLACE FUNCTION iam_v2.request_register_extend(p_tenant uuid, p_site uuid, p_id uuid, p_actor text, p_reason text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE q record;
+BEGIN
+  IF p_reason IS NULL OR length(btrim(p_reason)) NOT BETWEEN 4 AND 500 THEN
+    RAISE EXCEPTION 'say why the request needs longer (4-500 characters)' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  SELECT * INTO q FROM guest_data_request_register x WHERE x.id = p_id AND x.tenant_id = p_tenant AND x.site_id = p_site FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'request not found' USING ERRCODE = 'no_data_found'; END IF;
+  IF q.status <> 'OPEN' OR q.extended_until IS NOT NULL OR current_date > q.due_at THEN
+    RAISE EXCEPTION 'register_refused' USING ERRCODE = 'object_in_use', DETAIL = 'not_extendable';
+  END IF;
+  UPDATE guest_data_request_register SET extended_until = (received_at + interval '3 months')::date,
+         extension_reason = btrim(p_reason) WHERE id = p_id;
+  RETURN jsonb_build_object('id', p_id, 'due_at', (q.received_at + interval '3 months')::date);
+END $$;
+
+-- Answering closes the request and removes the requester reference and the note; it returns them once, as the hotel's
+-- own file of the request.
+CREATE OR REPLACE FUNCTION iam_v2.request_register_answer(p_tenant uuid, p_site uuid, p_id uuid, p_actor text, p_status text,
+        p_outcome text, p_note text, p_erasure_ref text, p_assisted_ref text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE q record;
+BEGIN
+  IF p_actor IS NULL OR length(btrim(p_actor)) NOT BETWEEN 1 AND 200 THEN
+    RAISE EXCEPTION 'an operator is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_status IS NULL OR p_status NOT IN ('ANSWERED', 'PARTLY_REFUSED', 'REFUSED', 'WITHDRAWN') THEN
+    RAISE EXCEPTION 'the outcome is answered, partly refused, refused or withdrawn' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  -- A refusal, or a part-refusal, names its ground: the person is told it, and told they may complain (Art. 12(4)).
+  IF p_status IN ('PARTLY_REFUSED', 'REFUSED') AND COALESCE(p_outcome, 'NONE') = 'NONE' THEN
+    RAISE EXCEPTION 'a refusal names its ground' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_note IS NOT NULL AND length(p_note) > 500 THEN
+    RAISE EXCEPTION 'the note is at most 500 characters' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  SELECT * INTO q FROM guest_data_request_register x WHERE x.id = p_id AND x.tenant_id = p_tenant AND x.site_id = p_site FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'request not found' USING ERRCODE = 'no_data_found'; END IF;
+  IF q.status <> 'OPEN' THEN
+    RAISE EXCEPTION 'register_refused' USING ERRCODE = 'object_in_use', DETAIL = 'closed';
+  END IF;
+  UPDATE guest_data_request_register
+     SET status = p_status, outcome_code = COALESCE(NULLIF(p_outcome, ''), 'NONE'), answered_by = btrim(p_actor), answered_at = now(),
+         erasure_ref = NULLIF(p_erasure_ref, ''), assisted_ref = NULLIF(p_assisted_ref, ''),
+         requester_ref = '[removed]', outcome_note = NULL
+   WHERE id = p_id;
+  RETURN jsonb_build_object('reference', q.ref, 'kind', q.kind, 'requester', q.requester_ref, 'received_at', q.received_at,
+                            'due_at', COALESCE(q.extended_until, q.due_at), 'answered_at', now(), 'status', p_status,
+                            'outcome', COALESCE(NULLIF(p_outcome, ''), 'NONE'), 'note', p_note,
+                            'verification_method', q.verification_method, 'erasure_ref', NULLIF(p_erasure_ref, ''),
+                            'assisted_ref', NULLIF(p_assisted_ref, ''), 'answered_in_time', current_date <= COALESCE(q.extended_until, q.due_at));
+END $$;
+
+CREATE OR REPLACE FUNCTION iam_v2.request_register_list(p_tenant uuid, p_site uuid) RETURNS jsonb
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE(jsonb_agg(jsonb_build_object(
+      'id', x.id, 'ref', x.ref, 'kind', x.kind, 'received_at', x.received_at, 'due_at', COALESCE(x.extended_until, x.due_at),
+      'extended', x.extended_until IS NOT NULL, 'extension_reason', CASE WHEN x.status = 'OPEN' THEN x.extension_reason END,
+      'requester', x.requester_ref, 'verification_method', x.verification_method, 'status', x.status, 'outcome', x.outcome_code,
+      'erasure_ref', x.erasure_ref, 'assisted_ref', x.assisted_ref, 'created_by', x.created_by, 'answered_by', x.answered_by,
+      'answered_at', x.answered_at,
+      'days_left', CASE WHEN x.status = 'OPEN' THEN COALESCE(x.extended_until, x.due_at) - current_date END,
+      'overdue', x.status = 'OPEN' AND current_date > COALESCE(x.extended_until, x.due_at))
+      ORDER BY (x.status = 'OPEN') DESC, COALESCE(x.extended_until, x.due_at), x.received_at DESC), '[]'::jsonb)
+    FROM (SELECT * FROM guest_data_request_register r WHERE r.tenant_id = p_tenant AND r.site_id = p_site
+           ORDER BY (r.status = 'OPEN') DESC, r.received_at DESC LIMIT 300) x
+$$;
+
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES
+  ('iam_v2.guest_data_request_register', 'created_by', 'label', NULL, false, NULL),
+  ('iam_v2.guest_data_request_register', 'answered_by', 'label', NULL, false, NULL)
+ON CONFLICT (table_name, column_name) DO NOTHING;
+DO $inst$
+DECLARE t record; trg record; def text;
+BEGIN
+  FOR t IN SELECT DISTINCT x.table_name FROM iam_v2.scrub_registry x WHERE x.table_name = 'iam_v2.guest_data_request_register' LOOP
+    FOR trg IN SELECT g.oid, g.tgname FROM pg_trigger g
+                WHERE g.tgrelid = to_regclass(t.table_name) AND NOT g.tgisinternal AND g.tgconstraint = 0
+                  AND (g.tgtype & 2) = 2 AND (g.tgtype & 24) <> 0 AND g.tgname <> 'zz_scrub_guard' LOOP
+      def := pg_get_triggerdef(trg.oid);
+      IF def LIKE '%iam_v2.scrub%' THEN CONTINUE; END IF;
+      EXECUTE format('DROP TRIGGER %I ON %s', trg.tgname, t.table_name);
+      EXECUTE replace(def, ' EXECUTE FUNCTION', ' WHEN (current_setting(''iam_v2.scrub'', true) IS DISTINCT FROM ''on'') EXECUTE FUNCTION');
+    END LOOP;
+    EXECUTE format('DROP TRIGGER IF EXISTS zz_scrub_guard ON %s', t.table_name);
+    EXECUTE format('CREATE TRIGGER zz_scrub_guard BEFORE UPDATE OR DELETE ON %s FOR EACH ROW WHEN (current_setting(''iam_v2.scrub'', true) = ''on'') EXECUTE FUNCTION iam_v2.scrub_guard()', t.table_name);
+  END LOOP;
+END $inst$;
+
 -- ---------------------------------------------------------------------------------------------------------
 -- N. Ownership and least privilege (mirrored in deploy/gatep/svc-guest-data-rights-grants.sql).
 -- ---------------------------------------------------------------------------------------------------------
@@ -2178,7 +2405,10 @@ REVOKE ALL ON FUNCTION iam_v2.is_anon_token(text), iam_v2.assisted_apply_records
   iam_v2.scrub_staff_label(text,text), iam_v2.scrub_registry_notes(uuid,uuid,timestamptz,integer,text), public.scrub_staff_label_public(text,text),
   public.guest_data_erase_core(uuid,uuid,text,uuid,text,text,boolean,text),
   public.erasure_journal_export(uuid,uuid), public.erasure_journal_replay(jsonb) FROM PUBLIC;
-REVOKE ALL ON iam_v2.erasure_journal, iam_v2.scrub_registry FROM PUBLIC;
+REVOKE ALL ON iam_v2.erasure_journal, iam_v2.scrub_registry, iam_v2.guest_data_request_register FROM PUBLIC;
+REVOKE ALL ON FUNCTION iam_v2.request_register_guard(), iam_v2.request_register_open(uuid,uuid,text,text,date,text,text),
+  iam_v2.request_register_extend(uuid,uuid,uuid,text,text),
+  iam_v2.request_register_answer(uuid,uuid,uuid,text,text,text,text,text,text), iam_v2.request_register_list(uuid,uuid) FROM PUBLIC;
 DO $own$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'iam_v2_owner') THEN
@@ -2192,6 +2422,23 @@ BEGIN
     EXECUTE 'ALTER FUNCTION iam_v2.scrub_guard() OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.scrub_staff_label(text,text) OWNER TO iam_v2_owner';
     EXECUTE 'ALTER FUNCTION iam_v2.scrub_registry_notes(uuid,uuid,timestamptz,integer,text) OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER TABLE iam_v2.guest_data_request_register OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER FUNCTION iam_v2.request_register_guard() OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER FUNCTION iam_v2.request_register_open(uuid,uuid,text,text,date,text,text) OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER FUNCTION iam_v2.request_register_extend(uuid,uuid,uuid,text,text) OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER FUNCTION iam_v2.request_register_answer(uuid,uuid,uuid,text,text,text,text,text,text) OWNER TO iam_v2_owner';
+    EXECUTE 'ALTER FUNCTION iam_v2.request_register_list(uuid,uuid) OWNER TO iam_v2_owner';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'iam_v2_owner') THEN
+    EXECUTE 'GRANT SELECT (code_verifier, nonce) ON public.social_oauth_states TO iam_v2_owner';
+    EXECUTE 'GRANT UPDATE (code_verifier, nonce) ON public.social_oauth_states TO iam_v2_owner';
+    EXECUTE 'GRANT SELECT ON public.dhcp_reservations TO iam_v2_owner';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_edged') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION iam_v2.request_register_open(uuid,uuid,text,text,date,text,text) TO svc_edged';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION iam_v2.request_register_extend(uuid,uuid,uuid,text,text) TO svc_edged';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION iam_v2.request_register_answer(uuid,uuid,uuid,text,text,text,text,text,text) TO svc_edged';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION iam_v2.request_register_list(uuid,uuid) TO svc_edged';
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_scd') THEN
     EXECUTE 'GRANT EXECUTE ON FUNCTION public.erasure_journal_export(uuid,uuid) TO svc_scd';

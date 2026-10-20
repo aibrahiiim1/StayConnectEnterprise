@@ -41,6 +41,7 @@ func (s *server) guestDataRightsRoutes() http.Handler {
 	r.Post("/export", s.exportGuestData)
 	r.Post("/erase", s.eraseGuestData)
 	s.assistedRoutes(r)
+	s.registerRoutes(r)
 	return r
 }
 
@@ -92,7 +93,12 @@ func (s *server) searchGuestData(w http.ResponseWriter, r *http.Request) {
 		guestDataDBError(w, rows.Err(), "the search failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"matches": out})
+	// The search returns at most 50 records (the database asks for 51 to know whether there are more).
+	truncated := len(out) > 50
+	if truncated {
+		out = out[:50]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"matches": out, "truncated": truncated})
 }
 
 func (s *server) listGuestDataErasures(w http.ResponseWriter, r *http.Request) {
@@ -103,7 +109,7 @@ func (s *server) listGuestDataErasures(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	rows, err := s.db.Query(ctx, `SELECT erasure_ref, subject_kind, erased_by, erase_reason, counts, erased_at
-	     FROM iam_v2.guest_data_erasures WHERE tenant_id=$1 AND site_id=$2 ORDER BY erased_at DESC LIMIT 50`,
+	     FROM iam_v2.guest_data_erasures WHERE tenant_id=$1 AND site_id=$2 ORDER BY erased_at DESC LIMIT 201`,
 		s.tenantID, s.siteID)
 	if err != nil {
 		guestDataDBError(w, err, "the erasures could not be read")
@@ -131,7 +137,13 @@ func (s *server) listGuestDataErasures(w http.ResponseWriter, r *http.Request) {
 		guestDataDBError(w, rows.Err(), "the erasures could not be read")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"erasures": out})
+	// The register shows the newest 200; the page says so, so an older reference is looked for elsewhere (the export of the
+	// database, or the activity log) and not believed missing.
+	truncated := len(out) > 200
+	if truncated {
+		out = out[:200]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"erasures": out, "truncated": truncated})
 }
 
 type guestDataRequest struct {
@@ -179,6 +191,8 @@ func (s *server) exportGuestData(w http.ResponseWriter, r *http.Request) {
 	// THE REASON NAMES NOBODY (0144): it is kept in the activity log, which erasure does not remove.
 	if _, err := s.db.Exec(ctx, `SELECT public.guest_data_reason_check($1::uuid,$2::uuid,$3,$4::uuid,$5)`,
 		s.tenantID, s.siteID, in.Kind, in.ID, in.Reason); err != nil && !isUndefinedObject(err) {
+		// Recorded without the reason: it is the very thing that was refused.
+		s.audit(r, "guest_data.export_refused", in.Kind, in.ID, map[string]any{"why": assistedWhy(err)})
 		if !writeGuestDataLive(w, err) {
 			guestDataDBError(w, err, "the export failed")
 		}
@@ -227,6 +241,7 @@ func (s *server) eraseGuestData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
+		s.audit(r, "guest_data.erase_failed", in.Kind, in.ID, map[string]any{"why": assistedWhy(err)})
 		guestDataDBError(w, err, "the erasure failed")
 		return
 	}

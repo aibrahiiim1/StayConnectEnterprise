@@ -71,11 +71,12 @@ func TestIntegration_PrivacyNotice_EverySignInIsStampedAndExported(t *testing.T)
 		t.Fatalf("the same notice became a second version: %v vs %v", v2b, v2)
 	}
 
-	// No notice at all is recorded as such, not left blank.
+	// With no notice of the hotel's own, the portal shows its short built-in one (privacy.default): that is what is
+	// recorded -- not "nothing shown".
 	setNotice(map[string]any{"hotel_name": "Hotel"})
 	_, v0 := signIn(nil)
-	if v0 == nil || text(*v0) != "<none>" {
-		t.Fatalf("a sign-in with no notice in force was not recorded as such: %v", v0)
+	if v0 == nil || !strings.HasPrefix(text(*v0), "[built-in notice]") {
+		t.Fatalf("a sign-in with no notice of the hotel's own was not recorded as the built-in notice: %v", v0)
 	}
 
 	// The stamp is a record: it cannot be changed, and versions cannot be edited or removed.
