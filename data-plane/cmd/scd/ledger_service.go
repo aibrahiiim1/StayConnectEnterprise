@@ -878,6 +878,10 @@ func (s *server) ledgerCheckpoint(ctx context.Context) error {
 
 // runLedger is the hourly job: reconcile, then the daily heartbeat.
 func (s *server) runLedger(ctx context.Context) {
+	// Never while a restore is swapping databases: the restore reconciles the ledger itself, in order, at the right moments.
+	if restoreInFlight.Load() || readMaintenance().Active {
+		return
+	}
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	st := s.ledgerReconcile(cctx)

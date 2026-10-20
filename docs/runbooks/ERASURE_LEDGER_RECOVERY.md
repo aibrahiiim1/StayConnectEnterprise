@@ -66,6 +66,12 @@ and **the secondary storage** (same disk, share, server or bucket, with its cred
 1. Install and enrol the new appliance as usual (it starts with an empty database and its own new, empty ledger).
 2. Copy the backup files (`db-….sql.gz.age`, and the `.meta.json` and `etc-….tgz.age` beside it) into `/opt/stayconnect/backups/db/` and
    verify the backup on the Backups screen (it asks for a key holder's key).
+2b. **Configuration and keys.** The restored database holds credentials sealed with the *old* appliance's keys (the secondary-storage
+   login, provider secrets). Follow the *Full appliance rebuild* procedure in [BACKUP_AND_RESTORE.md](../BACKUP_AND_RESTORE.md) for the
+   configuration archive (`etc-<stamp>.tgz.age`, opened with a key holder's key: `scd backup-crypt decrypt -i <key-file> <file> - | tar xzf -`).
+   Identity and licence are bound to the hardware, so the licence follows its own rebinding rules. If the sealing keys are not restored, the
+   appliance cannot open the saved secondary-storage login and asks you to enter it again; other sealed secrets (providers, email) must be
+   re-entered too. The ledger itself is unaffected: it holds no secret.
 3. Backups → Erasure ledger → *Set up the secondary storage* with the **same** location and credentials. The new appliance sees the old
    appliance's ledger there; because its own ledger has nothing in it yet, it keeps the old one instead of overwriting it.
 4. Restore the backup (paste the key holder's key). The restore verifies the secondary copy (one verified, complete copy is enough: the

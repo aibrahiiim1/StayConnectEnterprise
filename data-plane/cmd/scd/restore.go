@@ -565,6 +565,17 @@ func (s *server) runRestore(ctx context.Context, name, identity string, rec *ver
 		ok("ledger_synced", "both copies of the erasure ledger are in step with the restored database")
 	}
 
+	// ---- 6a2. retention is applied to the restored data NOW, not at the next hourly run --------------------------------
+	// A backup carries every record the hotel's retention periods had already anonymised since it was taken. The retention run
+	// (and the staff and note runs) put that right; running them before the appliance serves again means no expired identifier is
+	// visible for the hour it would otherwise take.
+	{
+		rctx, rcancel := context.WithTimeout(ctx, 10*time.Minute)
+		s.runDataRetention(rctx)
+		rcancel()
+		ok("retention_reapplied", "the retention periods were applied to the restored data before it was served")
+	}
+
 	// ---- 6b. keep exactly ONE database aside -----------------------------------------------------------
 	//
 	// The database just replaced is kept so a restore can be undone, which is the point. But nothing removed
