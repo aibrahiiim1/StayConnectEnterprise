@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, BACKGROUND_HEADER } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { Card, CardBody, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
@@ -25,6 +25,7 @@ import { useToast } from "@/components/ui/toast";
 import { errMsg, formatDate } from "@/lib/utils";
 import { UserSearch, Download, Eraser, Search } from "lucide-react";
 import { LIVE_REASONS, eraseConsequences, exportDescription } from "@/lib/guest-data-words";
+import { ledgerHeadline, type LedgerStatus } from "@/lib/ledger-words";
 
 type Kind = "account" | "principal" | "stay" | "stay_guest";
 type Match = {
@@ -61,6 +62,7 @@ export default function GuestDataPage() {
   const [matches, setMatches] = useState<Match[] | null>(null);
   const [matchesCut, setMatchesCut] = useState(false);
   const [erasuresCut, setErasuresCut] = useState(false);
+  const [ledger, setLedger] = useState<LedgerStatus | null>(null);
   const [searching, setSearching] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [erasures, setErasures] = useState<Erasure[] | null>(null);
@@ -79,6 +81,13 @@ export default function GuestDataPage() {
     } catch { setErasures([]); }
   }, []);
   useEffect(() => { void loadErasures(); }, [loadErasures]);
+  // Erasure needs both copies of the erasure ledger (Backups). Say so before the request, not after it is refused. A role that
+  // cannot read Backups simply sees no banner; the refusal itself still explains.
+  useEffect(() => {
+    void (async () => {
+      try { setLedger(await api.get<LedgerStatus>("/backups/ledger", { [BACKGROUND_HEADER]: "1" })); } catch { /* no banner */ }
+    })();
+  }, []);
 
   async function search(e?: React.FormEvent) {
     e?.preventDefault();
@@ -145,6 +154,13 @@ export default function GuestDataPage() {
         review the exact records, and only records established as theirs can be handed over or anonymised. Keep track of
         each request and its deadline in the <Link className="underline" href="/guest-data/register">request register</Link>.
       </Callout>
+
+      {ledger?.state && ledger.erasure_available === false && (
+        <Callout tone="warning" title="Erasure is paused">
+          {ledgerHeadline(ledger).detail}{" "}
+          <Link className="underline" href="/backups">Open Backups</Link>. Exporting a guest&rsquo;s data still works, and guest internet access is not affected.
+        </Callout>
+      )}
 
       {done && (
         <Callout tone="success">

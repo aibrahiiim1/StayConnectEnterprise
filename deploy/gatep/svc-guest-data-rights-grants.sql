@@ -80,3 +80,33 @@ BEGIN
     GRANT SELECT ON public.dhcp_reservations TO iam_v2_owner;
   END IF;
 END $g$;
+
+-- Migration 0148 (the erasure ledger is kept in two places and a restore reapplies it): edged confirms the entries an erasure
+-- appended; scd reconciles the ledger, applies it to a restored database, appends the daily checkpoint and keeps the secondary
+-- storage setting. Nothing reads the ledger tables directly: only these functions.
+DO $g$
+BEGIN
+  IF to_regprocedure('public.ledger_apply(jsonb,boolean)') IS NULL THEN
+    RAISE NOTICE 'migration 0148 is not applied; erasure ledger grants skipped';
+    RETURN;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_edged') THEN
+    GRANT EXECUTE ON FUNCTION iam_v2.ledger_pending() TO svc_edged;
+    GRANT EXECUTE ON FUNCTION iam_v2.ledger_confirm(text[]) TO svc_edged;
+    GRANT EXECUTE ON FUNCTION iam_v2.ledger_head() TO svc_edged;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_scd') THEN
+    GRANT EXECUTE ON FUNCTION iam_v2.ledger_append(uuid,uuid,text,jsonb) TO svc_scd;
+    GRANT EXECUTE ON FUNCTION iam_v2.ledger_pending() TO svc_scd;
+    GRANT EXECUTE ON FUNCTION iam_v2.ledger_confirm(text[]) TO svc_scd;
+    GRANT EXECUTE ON FUNCTION iam_v2.ledger_head() TO svc_scd;
+    GRANT EXECUTE ON FUNCTION iam_v2.ledger_export(bigint) TO svc_scd;
+    GRANT EXECUTE ON FUNCTION iam_v2.ledger_verify() TO svc_scd;
+    GRANT EXECUTE ON FUNCTION public.ledger_apply(jsonb,boolean) TO svc_scd;
+    GRANT EXECUTE ON FUNCTION public.ledger_destination_get() TO svc_scd;
+    GRANT EXECUTE ON FUNCTION public.ledger_destination_secret() TO svc_scd;
+    GRANT EXECUTE ON FUNCTION public.ledger_destination_set(text,jsonb,bytea,bytea,text,integer,text) TO svc_scd;
+    GRANT EXECUTE ON FUNCTION public.ledger_destination_note(boolean,text) TO svc_scd;
+  END IF;
+END $g$;
+

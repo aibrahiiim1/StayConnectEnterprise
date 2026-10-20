@@ -398,6 +398,7 @@ var dailyState struct {
 	mu      sync.Mutex
 	lastErr string
 	lastTry time.Time
+	running bool
 }
 
 func dailyBackupHour() int {
@@ -473,7 +474,7 @@ func (s *server) runDailyBackupIfDue(ctx context.Context) {
 func (s *server) dailyBackupStatus(w http.ResponseWriter, r *http.Request) {
 	metas := listDailyMetas()
 	dailyState.mu.Lock()
-	lastErr, lastTry := dailyState.lastErr, dailyState.lastTry
+	lastErr, lastTry, running := dailyState.lastErr, dailyState.lastTry, dailyState.running
 	dailyState.mu.Unlock()
 	keyHolders := false
 	if keys, err := s.backupRecipientKeys(r.Context()); err == nil && len(keys) > 0 {
@@ -500,23 +501,35 @@ func (s *server) dailyBackupStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"state": state, "message": msg, "keep": readKeepDB(), "hour": dailyBackupHour(), "key_holders": keyHolders,
-		"backups": metas, "problems": probs, "last_error": lastErr, "last_attempt": lastTry,
+		"backups": metas, "problems": probs, "last_error": lastErr, "last_attempt": lastTry, "running": running,
 	})
 }
 
-// dailyBackupRunNow serves POST /v1/backup/daily/run: a daily-style backup on request (also what the tests use).
+// dailyBackupRunNow serves POST /v1/backup/daily/run: a daily-style backup on request. It starts the backup and returns; the
+// Backups screen shows the outcome (a backup takes minutes, and no HTTP request should be waiting for it).
 func (s *server) dailyBackupRunNow(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Hour)
-	defer cancel()
-	meta, err := s.dailyBackup(ctx)
-	if err != nil {
-		code := http.StatusInternalServerError
-		if errors.Is(err, errNoBackupKeyHolder) {
-			code = http.StatusConflict
-		}
-		writeJSON(w, code, map[string]any{"error": "backup_failed", "message": err.Error()})
+	dailyState.mu.Lock()
+	if dailyState.running {
+		dailyState.mu.Unlock()
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "already_running", "message": "a backup is already running"})
 		return
 	}
-	writeJSON(w, http.StatusOK, meta)
+	dailyState.running = true
+	dailyState.mu.Unlock()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
+		defer cancel()
+		_, err := s.dailyBackup(ctx)
+		dailyState.mu.Lock()
+		dailyState.running = false
+		dailyState.lastTry = time.Now()
+		if err != nil {
+			dailyState.lastErr = err.Error()
+			slog.Error("backup on request failed", "err", err)
+		} else {
+			dailyState.lastErr = ""
+		}
+		dailyState.mu.Unlock()
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]any{"started": true})
 }
-

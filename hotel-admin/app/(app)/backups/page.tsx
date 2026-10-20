@@ -38,6 +38,7 @@ import { formatBytes } from "@/lib/bytes";
 import { AccountingRetentionCard } from "./accounting-retention-card";
 import { DataRetentionCard } from "./data-retention-card";
 import { BackupKeyInput, BackupKeysCard } from "./backup-keys-card";
+import { DailyBackupCard, LedgerCard } from "./ledger-card";
 import { submitDownload } from "@/lib/backup-download";
 import {
   Archive, ShieldCheck, Download, RotateCcw, AlertTriangle, CheckCircle2, Loader2, HardDrive, ChevronRight,
@@ -272,6 +273,8 @@ export default function BackupsPage() {
 
       {/* ---- encryption to the hotel's own keys (GDPR plan C5) --------------------------------------- */}
       <BackupKeysCard writable={writable} />
+      <LedgerCard writable={writable} />
+      <DailyBackupCard writable={writable} />
 
       {/* ---- the outcome of the last restore, if there was one --------------------------------------- */}
       {lastRestore && <LastRestoreCard result={lastRestore} />}

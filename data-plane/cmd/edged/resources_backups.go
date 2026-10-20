@@ -73,6 +73,14 @@ func (s *server) backupsRoutes() http.Handler {
 	r.Post("/artifacts/{name}/restore", s.restoreDatabaseBackup)
 	r.Get("/maintenance", s.backupMaintenance)
 	r.Get("/last-restore", s.lastRestoreResult)
+	// THE ERASURE LEDGER AND THE DAILY BACKUP (ledger_admin.go).
+	r.Get("/ledger", s.ledgerStatusGet)
+	r.Post("/ledger/destination/probe", s.ledgerDestinationProbe)
+	r.Post("/ledger/destination/test", s.ledgerDestinationTest)
+	r.Put("/ledger/destination", s.ledgerDestinationSave)
+	r.Post("/ledger/recover", s.ledgerRecover)
+	r.Get("/daily", s.dailyBackupGet)
+	r.Post("/daily/run", s.dailyBackupRun)
 	return r
 }
 
