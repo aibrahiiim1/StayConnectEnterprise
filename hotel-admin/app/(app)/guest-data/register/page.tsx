@@ -48,6 +48,8 @@ export default function RequestRegisterPage() {
   const [requester, setRequester] = useState("");
   const [method, setMethod] = useState("ID_CHECKED_IN_PERSON");
 
+  const [extending, setExtending] = useState<Row | null>(null);
+  const [extReason, setExtReason] = useState("");
   const [answering, setAnswering] = useState<Row | null>(null);
   const [status, setStatus] = useState("ANSWERED");
   const [outcome, setOutcome] = useState("NONE");
@@ -80,15 +82,16 @@ export default function RequestRegisterPage() {
     } catch (e2) { setErr(errMsg(e2)); } finally { setBusy(false); }
   }
 
-  async function extend(r: Row) {
-    const reason = window.prompt("Why does this request need two more months? (do not name the guest)");
-    if (!reason) return;
+  async function extend(e: React.FormEvent) {
+    e.preventDefault();
+    if (!extending) return;
     setBusy(true); setErr(null);
     try {
-      await api.post(`/guest-data-rights/register/${r.id}/extend`, { reason });
+      await api.post(`/guest-data-rights/register/${extending.id}/extend`, { reason: extReason.trim() });
       toast.success("Extended", "Tell the person within the first month, and why.");
+      setExtending(null); setExtReason("");
       await load();
-    } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
+    } catch (e2) { setErr(errMsg(e2)); } finally { setBusy(false); }
   }
 
   async function answer(e: React.FormEvent) {
@@ -162,6 +165,24 @@ export default function RequestRegisterPage() {
         </CardBody>
       </Card>
 
+      {extending && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Extend request {extending.ref}</CardTitle>
+            <CardDescription>Two more months, once, for a complex or numerous request. Tell the person within the first month. Do not name the guest or give an address or number.</CardDescription>
+          </CardHeader>
+          <CardBody>
+            <form className="grid gap-3" onSubmit={extend}>
+              <Field label="Why it needs longer"><Input autoFocus value={extReason} maxLength={500} onChange={(e) => setExtReason(e.target.value)} /></Field>
+              <div className="flex gap-2">
+                <Button type="submit" variant="primary" disabled={busy || extReason.trim().length < 4}>Extend</Button>
+                <Button type="button" variant="outline" onClick={() => { setExtending(null); setExtReason(""); }}>Cancel</Button>
+              </div>
+            </form>
+          </CardBody>
+        </Card>
+      )}
+
       {answering && (
         <Card>
           <CardHeader>
@@ -227,9 +248,9 @@ export default function RequestRegisterPage() {
                         {r.status === "OPEN" && (
                           <>
                             {!r.extended && !r.overdue && (
-                              <Button size="sm" variant="outline" disabled={busy} aria-label={`Extend request ${r.ref}`} onClick={() => void extend(r)}>Extend</Button>
+                              <Button size="sm" variant="outline" disabled={busy} aria-label={`Extend request ${r.ref}`} onClick={() => { setErr(null); setAnswering(null); setExtending(r); }}>Extend</Button>
                             )}{" "}
-                            <Button size="sm" variant="outline" aria-label={`Close request ${r.ref}`} onClick={() => { setErr(null); setFile(null); resetAnswer(); setAnswering(r); }}>Close</Button>
+                            <Button size="sm" variant="outline" aria-label={`Close request ${r.ref}`} onClick={() => { setErr(null); setFile(null); setExtending(null); resetAnswer(); setAnswering(r); }}>Close</Button>
                           </>
                         )}
                       </TD>
