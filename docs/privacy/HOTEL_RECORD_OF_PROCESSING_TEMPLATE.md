@@ -79,6 +79,7 @@ Tick each feature you use. 🔍 The page that shows it is in brackets.
 
 - [ ] Backups are copied off the appliance as well. Where to: ✏️
 - [ ] Backups stay on the appliance only
+- [ ] The erasure ledger's secondary storage (required) is kept at: ✏️ (a disk or share on site / an SFTP server / an S3-compatible bucket, and who looks after it)
 
 ### Step 3: How long you keep things
 

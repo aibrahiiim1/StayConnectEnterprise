@@ -238,13 +238,15 @@ number, and the payment provider's references) are kept for the period tax and a
 and the erasure tell the person this, with the ground, so that the hotel's answer can name it (register outcome
 *Kept because the law requires it*). Nothing else identifying is kept on purpose.
 
-**A restore does not bring an erased person back.** An erasure is written, as record kind and id only (no personal
-data), to a journal in the database (`iam_v2.erasure_journal`) and copied by `scd` to a file next to the backups. After
-a restore `scd` replays the journal on the restored database: an erasure the backup predates is applied again, and an
-entry whose record no longer exists is recorded and skipped. The same reconciliation runs every hour, so a database
-restored by hand is brought into line too. Before a restore replaces the live database, the live journal is copied to
-the file first. A database restored from before the migration that adds the journal waits for that migration, then is
-reconciled. Procedure and checks: [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md).
+**A restore does not bring an erased person back.** Every erasure, and every closed data-protection request, is an entry in the
+**erasure ledger** ([privacy/ERASURE_LEDGER.md](privacy/ERASURE_LEDGER.md), migration 0148): an append-only, hash-chained record of
+kinds, ids, references, dates and codes, never of guest data. It is written in the same transaction as the erasure and made durable in
+**two independent copies outside the database** (a file on the appliance, and a secondary storage the hotel sets up: an external disk or
+share, an SFTP server or an S3-compatible bucket) **before the erasure is reported as done**; if either cannot be written, nothing was
+erased. After a restore from an older backup the ledger is verified (one complete, trustworthy copy is enough) and applied to the
+restored data **before it is served**: guests are erased again, answered requests are closed again, the erasure reference the guest was
+given exists again. Procedure and checks: [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md); storage failures and replacing an appliance:
+[runbooks/ERASURE_LEDGER_RECOVERY.md](runbooks/ERASURE_LEDGER_RECOVERY.md).
 
 **What a restore leaves aside is bounded.** The database a restore replaces is kept so the restore can be undone; it
 still holds the data erased since, so it is removed after `SET_ASIDE_DAYS` (default 14, Hotel Admin → Backups). An
@@ -261,3 +263,8 @@ protected by their guards, enforcement state, the external receipt that C35 awai
 rather than leaving them behind or removing them unsafely. The financial record of the departing customer is exported to
 the compliance archive first, encrypted to the backup key holders (a `.json.age` file next to the backups; unencrypted,
 mode 0600, with a log warning, only when no key holder exists yet).
+
+**The erasure ledger is the departing customer's.** The purge, in the same transaction, starts a **new ledger** (new identity, one
+first entry) and deletes the secondary-storage setting and its sealed credentials; afterwards scd deletes the old ledger file. The
+previous customer keeps their own secondary copy. The new customer must set up their own secondary storage before their first erasure
+(erasure is refused until they do); nothing of the old customer's ledger or storage is ever written by the new customer's erasures.

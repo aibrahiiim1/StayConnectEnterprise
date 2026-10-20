@@ -125,7 +125,7 @@ addresses on it could be read.
 
 **OneGate already:** encrypts every backup to your own key holders, so the appliance cannot read its own backups
 and neither can we; keeps backups 30 days; logs every backup download; reminds you every 6 months to test that a
-key holder can still restore one.
+key holder can still restore one; takes one encrypted backup a night, proves it restores, and keeps the newest seven.
 
 **Yours:**
 
@@ -163,6 +163,24 @@ every sign-in page, before the guest does anything; records which version each g
       `[[...]]` left.
 - [ ] It names the code-sending, sign-in and payment companies you use.
 - [ ] It mentions that deleted data can remain in backups for up to 30 days, or longer in a backup you pin or when no newer backups are made.
+
+**Result:** [ ] Low ⭐  [ ] Medium  [ ] High
+
+### R6a. A guest you erased comes back when a backup is restored
+
+*Could happen if:* the appliance is restored from a backup taken before the erasure.
+
+**OneGate already:** records every erasure and every answered request in an erasure ledger kept in two independent places before the
+erasure is reported as done, and applies it to the restored data before it is served again. If either place cannot be written, the
+erasure is refused rather than reported. The ledger holds no guest data.
+
+**Yours:**
+
+- [ ] The **secondary storage** for the erasure ledger is set up and the Backups screen shows *Both copies are in step* 🔍 *(Backups → Erasure ledger)*.
+      *Until then, erasure requests are refused.*
+- [ ] That storage is yours, is not on the appliance's own disk, and someone is responsible for keeping it connected.
+- [ ] A backup key holder's key is kept safe: it opens the secondary copy when the appliance itself has to be rebuilt.
+- [ ] After a disaster you follow the replacement runbook and do not skip the ledger check.
 
 **Result:** [ ] Low ⭐  [ ] Medium  [ ] High
 

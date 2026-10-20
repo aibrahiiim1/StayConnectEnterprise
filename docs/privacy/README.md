@@ -4,6 +4,7 @@
 |---|---|---|
 | [GDPR_REMEDIATION_PLAN.md](GDPR_REMEDIATION_PLAN.md) | The remediation plan and the Product Owner's decisions | Working document |
 | [ASSISTED_GUEST_DATA_REQUESTS.md](ASSISTED_GUEST_DATA_REQUESTS.md) | How staff hand over or anonymise the internet-usage records of one person's device when no automatic rule can say they are theirs (migration 0146): the workflow, the classes, what it never does, the limits | Authoritative for the assisted workflow |
+| [ERASURE_LEDGER.md](ERASURE_LEDGER.md) | The erasure ledger: what is recorded, the two copies kept outside the database (one the hotel sets up, mandatory), how an erasure is committed to both before it is reported, how a restore verifies and reapplies it, the daily backup, and the limits (migration 0148) | Authoritative for the ledger |
 | [DPA_TEMPLATE.md](DPA_TEMPLATE.md) | Our standard Data Processing Agreement with hotels (Art. 28), with Annex I (description of the processing) | Draft (F3) |
 | [DPA_ANNEX_II_SECURITY_MEASURES.md](DPA_ANNEX_II_SECURITY_MEASURES.md) | Annex II: technical and organisational measures (Art. 32) | Draft (F3) |
 | [DPA_ANNEX_III_SUBPROCESSORS.md](DPA_ANNEX_III_SUBPROCESSORS.md) | Annex III: our sub-processors, and the hotel's own providers | Draft (F3) |

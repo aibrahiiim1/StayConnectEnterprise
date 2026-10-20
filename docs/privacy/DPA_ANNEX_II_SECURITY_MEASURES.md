@@ -59,7 +59,14 @@ The annex has three parts:
 
 ### Restoring availability and access in a timely manner
 
-- Nightly encrypted backups of the database and the configuration, with retention limits.
+- A **daily encrypted backup** of the database and of the configuration and keys, taken on the Appliance, each proven restorable
+  when it is taken (loaded into a scratch database), checked against its checksum every day, with the newest seven kept (a
+  Controller setting). It is never taken unencrypted.
+- The **erasure ledger**: every erasure and every closed data-protection request is recorded in an append-only, hash-chained ledger
+  (no guest data in it) that is written in the same transaction and made durable in **two independent copies** outside the database
+  (on the Appliance and in a secondary storage the Controller sets up) before the erasure is reported as done. After a restore it is
+  applied to the restored data before it is served, so an erased guest is not brought back. One verified, complete copy is enough.
+- Nightly encrypted backups of the database and the configuration (the financial restore path), with retention limits.
 - A restore-test reminder, every 6 months by default (a Controller setting), proving a key holder can still
   open a backup.
 - Documented restore and clean-install procedures.
@@ -166,8 +173,10 @@ The Software is designed to be operated by the Controller. These matters stay wi
    addresses or turns it off, and removes any login given for a support session once the session ends.
 3. **Backup keys:** register at least one key holder at set-up. Backups stay unencrypted until the first holder is
    confirmed. The Controller also stores keys safely and runs the restore test when reminded.
-4. **Off-site copies:** backups are kept on the Appliance. Copying them elsewhere, if wanted, is the Controller's
-   choice.
+4. **The secondary storage of the erasure ledger** is required and is the Controller's own (an external disk or share, an SFTP
+   server, or an S3-compatible bucket it owns, with its own folder). The Controller keeps it available and its credentials safe.
+   **Off-site copies of backups:** backups are kept on the Appliance; copying them elsewhere is the Controller's choice, and is what
+   makes a replacement Appliance possible after a disaster.
 5. **Retention settings** and the **privacy notice** shown to guests (Art. 13).
 6. **Its own providers** (email, SMS, WhatsApp, social sign-in, payment, PMS) and their agreements.
 7. **Disk encryption:** the Software does not encrypt the Appliance's disk. **[[Revisit after D-C11.]]**
