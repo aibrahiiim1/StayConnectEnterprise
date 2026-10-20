@@ -22,4 +22,11 @@ BEGIN
   IF to_regprocedure('public.guest_data_reason_check(uuid,uuid,text,uuid,text)') IS NOT NULL THEN
     GRANT EXECUTE ON FUNCTION public.guest_data_reason_check(uuid,uuid,text,uuid,text) TO svc_edged;
   END IF;
+  -- Migration 0145: the guest scope (iam_v2_owner's definer) reads which one-time codes went to the person's own
+  -- addresses, to tie a verification access or a code binding to a person by the address, not the device. Three
+  -- columns, for that role only.
+  IF to_regclass('public.auth_otps') IS NOT NULL AND to_regprocedure('iam_v2.device_exclusive_to(uuid,uuid[],uuid[],uuid[],uuid[])') IS NOT NULL
+     AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'iam_v2_owner') THEN
+    GRANT SELECT (id, tenant_id, destination) ON public.auth_otps TO iam_v2_owner;
+  END IF;
 END $g$;
