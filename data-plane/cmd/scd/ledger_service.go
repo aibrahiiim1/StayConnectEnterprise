@@ -374,6 +374,14 @@ func (s *server) ledgerReconcile(ctx context.Context) ledgerStatus {
 			local = rt.store.ReadLocal()
 		}
 	}
+	// A file that holds nothing but the first entry of ANOTHER ledger (a replacement appliance's own new ledger, left over after
+	// the database was restored from the appliance it replaces) says nothing about erasures: the database is the truth.
+	if local.Present && local.Parse.Err == nil && len(local.Parse.Entries) == 1 && local.Parse.LedgerID() != head.Ledger {
+		if !healLocal("it held only the first entry of another ledger") {
+			st.State, st.Message = "attention", "the erasure ledger on the appliance could not be rebuilt"
+			return finish()
+		}
+	}
 	le := local.Parse.Entries
 	n := min(len(le), len(dbE))
 	for i := 0; i < n; i++ {
@@ -445,6 +453,10 @@ func (s *server) ledgerReconcile(ctx context.Context) ledgerStatus {
 		case err != nil:
 			st.External.Error = err.Error()
 			problem("the secondary storage could not be read: %v", err)
+		case found && info != nil && info.Ledger != local.Parse.LedgerID() && lseq == 1 && info.Seq > 1:
+			st.State, st.Message = "recovery_needed", fmt.Sprintf("this storage holds the erasure ledger of an earlier appliance (%d entries): restore its backup to continue it, or recover from it", info.Seq)
+			st.External.Reachable, st.External.Entries, st.External.Encrypted = true, int(info.Seq), info.Encrypted
+			problem("the secondary storage holds an earlier appliance's ledger")
 		case found && info != nil && info.Ledger == local.Parse.LedgerID() && info.Seq > lseq:
 			st.State, st.Message = "recovery_needed", fmt.Sprintf("the secondary storage holds erasures newer than this appliance's (up to entry %d, this appliance has %d): recover from it", info.Seq, lseq)
 			st.External.Reachable, st.External.Entries, st.External.Encrypted = true, int(info.Seq), info.Encrypted
@@ -766,6 +778,7 @@ func (s *server) ledgerRecoverFromExternal(ctx context.Context, identityText str
 	if local.Intact() {
 		copies = append(copies, local)
 	}
+	copies, wit = settleFreshLedgers(copies, wit)
 	v := ledger.Assess(copies, wit)
 	if v.Best == nil || (!v.Complete && !(head.Seq == 1 && ext.Intact())) || v.Conflict {
 		return "", errors.New(strings.Join(v.Reasons, "; "))
@@ -889,4 +902,24 @@ func (s *server) ledgerLoop(ctx context.Context) {
 		case <-t.C:
 		}
 	}
+}
+
+// ledgerForgetPrevious removes the previous customer's ledger from the appliance after a reassignment: the primary file (and any
+// copy set aside), the secondary-storage setting, the cached status. The next reconciliation builds the new ledger's files.
+func (s *server) ledgerForgetPrevious() {
+	rt := &s.ledgerRT
+	if rt.store == nil {
+		return
+	}
+	rt.store.SetDest(nil)
+	_ = os.Remove(rt.store.LocalPath)
+	if m, _ := filepath.Glob(rt.store.LocalPath + ".*"); len(m) > 0 {
+		for _, f := range m {
+			_ = os.Remove(f)
+		}
+	}
+	rt.mu.Lock()
+	rt.status = ledgerStatus{}
+	rt.destErr = ""
+	rt.mu.Unlock()
 }

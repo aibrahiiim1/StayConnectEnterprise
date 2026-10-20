@@ -541,3 +541,45 @@ func TestDrill_ABackupOlderThanTheLedgerIsRefusedWhenErasuresExist(t *testing.T)
 	}
 }
 
+// A REPLACEMENT APPLIANCE: it has a new, empty ledger of its own; the old appliance's own file is gone; the secondary storage holds
+// the old ledger. One verified copy (the secondary) is enough, and a restore of the old backup applies every erasure made since.
+func TestDrill_ReplacementApplianceRestoresFromTheSecondaryCopyAlone(t *testing.T) {
+	d := newDrill(t)
+	d.seedAccount("a")
+	d.seedAccount("b")
+	backup := d.takeBackup()
+	ref := d.erase("a")
+	oldHead := d.str(`SELECT (iam_v2.ledger_head() ->> 'seq')`)
+	oldID := d.str(`SELECT (iam_v2.ledger_head() ->> 'ledger')`)
+	// the new appliance: its own ledger (and no storage setting, no file); the same storage is then set up on it
+	if _, err := d.live().Exec(context.Background(), `SELECT public.ledger_reset()`); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(d.local); err != nil {
+		t.Fatal(err)
+	}
+	d.setDestination(d.ext)
+	st := d.s.ledgerReconcile(context.Background())
+	if st.State != "recovery_needed" || st.ErasureAvailable {
+		t.Fatalf("a new appliance that finds an earlier appliance's ledger must say recovery is needed: %+v", st)
+	}
+	res := d.restore(backup, d.identity())
+	if res["ok"] != true {
+		t.Fatalf("the replacement restore failed: %v", res)
+	}
+	if !d.erased("a") || d.erased("b") {
+		t.Errorf("after the replacement restore a=%q b=%q", d.username("a"), d.username("b"))
+	}
+	if got := d.str(`SELECT count(*)::text FROM iam_v2.guest_data_erasures WHERE erasure_ref=$1`, ref); got != "1" {
+		t.Errorf("the erasure proof %s did not come back", ref)
+	}
+	if got := d.str(`SELECT (iam_v2.ledger_head() ->> 'ledger')`); got != oldID {
+		t.Errorf("the appliance did not take over the old ledger: %s, want %s", got, oldID)
+	}
+	if got := d.str(`SELECT (iam_v2.ledger_head() ->> 'seq')`); got != oldHead {
+		t.Errorf("ledger head %s, want %s", got, oldHead)
+	}
+	if st := d.s.ledgerReconcile(context.Background()); st.State != "ok" {
+		t.Errorf("both copies are not in step after the replacement restore: %+v", st)
+	}
+}

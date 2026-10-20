@@ -416,3 +416,44 @@ func TestIntegrationLedger_CheckpointIsWrittenAtMostOnceADay(t *testing.T) {
 		t.Fatalf("status = %+v", st)
 	}
 }
+
+// Moving the appliance to another customer starts a new ledger and forgets the previous secondary storage and the local file.
+func TestIntegrationLedger_ReassignmentStartsANewLedgerAndForgetsTheStorage(t *testing.T) {
+	r := newLedgerRig(t)
+	r.reconcile()
+	r.appendCheckpoint()
+	var oldID string
+	if err := r.pool.QueryRow(context.Background(), `SELECT ledger_id::text FROM iam_v2.ledger_meta`).Scan(&oldID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.pool.Exec(context.Background(), `SELECT public.ledger_reset()`); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	r.s.ledgerForgetPrevious()
+	var newID string
+	var n int
+	if err := r.pool.QueryRow(context.Background(), `SELECT (SELECT ledger_id::text FROM iam_v2.ledger_meta), (SELECT count(*) FROM iam_v2.erasure_ledger)`).Scan(&newID, &n); err != nil {
+		t.Fatal(err)
+	}
+	if newID == oldID || n != 1 {
+		t.Fatalf("a new ledger was not started: id %s -> %s, %d entries", oldID, newID, n)
+	}
+	var dests int
+	_ = r.pool.QueryRow(context.Background(), `SELECT count(*) FROM public.ledger_destination`).Scan(&dests)
+	if dests != 0 {
+		t.Fatal("the previous customer's storage setting was kept")
+	}
+	if _, err := os.Stat(r.local); err == nil {
+		t.Fatal("the previous customer's local ledger file was kept")
+	}
+	if r.s.ledgerRT.store.Destination() != nil {
+		t.Fatal("the previous storage is still in use")
+	}
+	st := r.reconcile()
+	if st.State != "not_configured" || st.ErasureAvailable {
+		t.Fatalf("a new customer must set up their own storage first: %+v", st)
+	}
+	if p := ledger.ParseChain(readBytes(t, r.local)); !p.Intact || len(p.Entries) != 1 || p.LedgerID() != newID {
+		t.Fatalf("the new ledger's file = %+v", p)
+	}
+}

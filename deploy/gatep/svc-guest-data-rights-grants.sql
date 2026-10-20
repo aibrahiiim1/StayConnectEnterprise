@@ -55,18 +55,16 @@ BEGIN
   END IF;
 END $g$;
 
--- Migration 0147 (an erasure survives a restore; nothing identifying is left behind): scd copies the erasure journal to
--- a file next to the backups and replays it after a restore and every hour. Nothing else is granted: the journal table
--- and the scrub registry have no grant to a runtime role.
+-- Migration 0147 (nothing identifying is left behind): the request register and the columns the scrub reaches. (Its journal export
+-- and replay were replaced by the erasure ledger in 0148, so they are granted to nobody.) The journal table and the scrub
+-- registry have no grant to a runtime role.
 DO $g$
 BEGIN
-  IF to_regprocedure('public.erasure_journal_replay(jsonb)') IS NULL THEN
-    RAISE NOTICE 'migration 0147 is not applied; erasure journal grants skipped';
+  IF to_regprocedure('iam_v2.request_register_open(uuid,uuid,text,text,date,text,text)') IS NULL THEN
+    RAISE NOTICE 'migration 0147 is not applied; its grants skipped';
     RETURN;
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_scd') THEN
-    GRANT EXECUTE ON FUNCTION public.erasure_journal_export(uuid,uuid) TO svc_scd;
-    GRANT EXECUTE ON FUNCTION public.erasure_journal_replay(jsonb) TO svc_scd;
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_edged') THEN
     GRANT EXECUTE ON FUNCTION iam_v2.request_register_open(uuid,uuid,text,text,date,text,text) TO svc_edged;
@@ -103,6 +101,7 @@ BEGIN
     GRANT EXECUTE ON FUNCTION iam_v2.ledger_export(bigint) TO svc_scd;
     GRANT EXECUTE ON FUNCTION iam_v2.ledger_verify() TO svc_scd;
     GRANT EXECUTE ON FUNCTION public.ledger_apply(jsonb,boolean) TO svc_scd;
+    GRANT EXECUTE ON FUNCTION public.ledger_reset() TO svc_scd;
     GRANT EXECUTE ON FUNCTION public.ledger_destination_get() TO svc_scd;
     GRANT EXECUTE ON FUNCTION public.ledger_destination_secret() TO svc_scd;
     GRANT EXECUTE ON FUNCTION public.ledger_destination_set(text,jsonb,bytea,bytea,text,integer,text) TO svc_scd;

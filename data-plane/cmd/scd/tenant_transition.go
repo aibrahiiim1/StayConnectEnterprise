@@ -199,6 +199,19 @@ func (s *server) reconcileTenantOwnership(ctx context.Context) error {
 		purged["tenants"] = n
 	}
 
+	// THE ERASURE LEDGER AND ITS SECONDARY STORAGE BELONG TO THE CUSTOMER WHO IS LEAVING. The new customer starts a new ledger and
+	// sets up a storage of their own; the old setting (and its credentials) is forgotten, the old customer keeps their copy.
+	var hasReset bool
+	if err := tx.QueryRow(ctx, `SELECT to_regprocedure('public.ledger_reset()') IS NOT NULL`).Scan(&hasReset); err != nil {
+		return fmt.Errorf("check for the erasure ledger: %w", err)
+	}
+	if hasReset {
+		if _, err := tx.Exec(ctx, `SELECT public.ledger_reset()`); err != nil {
+			return fmt.Errorf("start a new erasure ledger: %w", err)
+		}
+		purged["erasure_ledger_reset"] = 1
+	}
+
 	// Controlled failure injection for acceptance testing: fail AFTER the deletes
 	// but BEFORE commit, so the deferred Rollback proves no partial purge is ever
 	// committed and the caller holds the appliance fail-closed. Off unless the env
@@ -225,6 +238,9 @@ func (s *server) reconcileTenantOwnership(ctx context.Context) error {
 		return fmt.Errorf("commit purge: %w", err)
 	}
 	slog.Warn("tenant-transition: secure purge complete", "current_tenant", s.tenID, "purged", purged)
+	if purged["erasure_ledger_reset"] > 0 {
+		s.ledgerForgetPrevious()
+	}
 
 	// Clear stale RUNTIME guest authorization: the kernel nftables set persists
 	// across an scd restart, so a device authorized under the previous tenant could

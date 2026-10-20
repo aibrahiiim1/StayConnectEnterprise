@@ -51,8 +51,16 @@ type ledgerHeadInfo struct {
 // psqlLedgerHead reads the ledger head of a database through psql. A database without the ledger (a backup older than the
 // migration) answers Has=false.
 func psqlLedgerHead(ctx context.Context, db string) (ledgerHeadInfo, error) {
-	out, err := execPsql(ctx, db, `SELECT CASE WHEN to_regprocedure('iam_v2.ledger_head()') IS NULL THEN ''
-	  ELSE iam_v2.ledger_head()::text || '|' || iam_v2.ledger_verify()::text END`)
+	// Two statements, not one CASE: PostgreSQL resolves every function a statement names when it parses it, so a single
+	// statement naming iam_v2.ledger_head() fails on a backup older than the ledger instead of answering "no ledger".
+	has, err := execPsql(ctx, db, `SELECT to_regprocedure('iam_v2.ledger_head()') IS NOT NULL AND to_regprocedure('iam_v2.ledger_verify()') IS NOT NULL`)
+	if err != nil {
+		return ledgerHeadInfo{}, err
+	}
+	if strings.TrimSpace(has) != "t" {
+		return ledgerHeadInfo{}, nil
+	}
+	out, err := execPsql(ctx, db, `SELECT iam_v2.ledger_head()::text || '|' || iam_v2.ledger_verify()::text`)
 	if err != nil {
 		return ledgerHeadInfo{}, err
 	}
@@ -162,7 +170,8 @@ func (s *server) restoreLedgerApply(ctx context.Context, staging, identityText s
 	// from a different ledger is dropped when this database holds nothing yet: a replacement appliance restoring the old one's data.
 	local := rt.store.ReadLocal()
 	ext := rt.store.ReadExternal(ctx, ident)
-	v := ledger.Assess([]ledger.Copy{local, ext}, wit)
+	copies, wit := settleFreshLedgers([]ledger.Copy{local, ext}, wit)
+	v := ledger.Assess(copies, wit)
 	reasons := strings.Join(v.Reasons, "; ")
 	if v.Conflict {
 		return "the erasure ledger contradicts itself, so the restore was not attempted: " + reasons, false
@@ -269,4 +278,36 @@ func (s *server) ledgerReconcileAfterRestore(ctx context.Context) string {
 		}
 		return "the erasure ledger is not yet in step in both places: it is retried every hour"
 	}
+}
+
+// settleFreshLedgers sets aside what a brand-new appliance says about a ledger it has never had. A replacement appliance starts
+// with its own ledger holding only its first entry; the ledger of the appliance it replaces is somewhere else, and is the real
+// one. A copy or a witness that holds nothing but a first entry of a DIFFERENT ledger says nothing about erasures, so it is
+// ignored rather than treated as a contradiction. (A first entry cannot hide an erasure.) Only a longer intact ledger can
+// make another one "fresh".
+func settleFreshLedgers(copies []ledger.Copy, wit []ledger.Witness) ([]ledger.Copy, []ledger.Witness) {
+	id, longest := "", 1
+	for _, c := range copies {
+		if c.Intact() && len(c.Parse.Entries) > longest {
+			id, longest = c.Parse.LedgerID(), len(c.Parse.Entries)
+		}
+	}
+	if id == "" {
+		return copies, wit
+	}
+	out := make([]ledger.Copy, len(copies))
+	for i, c := range copies {
+		out[i] = c
+		if c.Intact() && len(c.Parse.Entries) == 1 && c.Parse.LedgerID() != id {
+			out[i] = ledger.Copy{Name: c.Name}
+		}
+	}
+	var w []ledger.Witness
+	for _, x := range wit {
+		if x.Seq <= 1 && x.Ledger != "" && x.Ledger != id {
+			continue
+		}
+		w = append(w, x)
+	}
+	return out, w
 }

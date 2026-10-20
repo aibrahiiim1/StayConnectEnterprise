@@ -76,6 +76,29 @@ decrypted copy once the restore is done.
 On-demand database backups are also kept no longer than `DB_BACKUP_DAYS` (default 30), on top of the count
 limit `KEEP_DB`; the newest is always kept.
 
+### The daily backup (GDPR final mission; scd `daily_backup.go`)
+
+Besides the nightly `pg_dump -Fc` set below (kept for the financial restore path), the appliance takes **one restorable daily
+backup** that the Backups screen can restore:
+
+- **When:** at or after `DAILY_BACKUP_HOUR` (default 02:00, appliance clock), when the newest is more than 20 hours old. *Take a backup
+  now* does the same on request.
+- **What:** the database (`db-<stamp>.sql.gz.age`) and `/etc/stayconnect` -- identity, licence, service environment, the seal keys, the
+  generated network revisions -- **without** the financial restore marker (`etc-<stamp>.tgz.age`). Both are encrypted to the backup key
+  holders **as they are written**; nothing plain touches the disk.
+- **Never without a key holder.** A daily backup is always encrypted: with no holder it is not taken, and the Backups screen says why
+  (the nightly set above still follows its own rule).
+- **Proven restorable when it is taken.** The same SQL stream that is being encrypted is loaded into a scratch database, which must accept
+  it without one error and hold the appliance's tables and an intact erasure ledger. A backup that fails any of that is discarded.
+- **What is recorded:** a plain note `db-<stamp>.meta.json` -- the SHA-256 of what is stored (database and configuration), the number of
+  tables, and **the ledger head the backup contains**, which a restore uses to tell whether a copy of the erasure ledger is complete.
+  The backup is also marked verified, so the Backups screen can restore it.
+- **Rotation:** the newest `KEEP_DB` (default **7**) daily backups are kept; older sets (dump, configuration archive, note, marker) are
+  removed only after a newer one verified. Manual backups and the restore safety dumps are never touched by it, and the existing sweep
+  still applies `DB_BACKUP_DAYS` to dumps.
+- **Silent corruption:** each day every kept file is checked against the digest in its note; a mismatch is shown on the Backups screen
+  while other days remain.
+
 ### How
 
 `deploy/scripts/stayconnect-site-backup.sh` is the supported backup script. It runs nightly from
@@ -352,35 +375,39 @@ Run quarterly, and once as part of pilot acceptance:
 Record every drill in the cloud audit log (`backup.drill` action) and, for
 site drills, as a `manual` row in `backup_records`.
 
-### After a restore: erasures made since the backup (migration 0147)
+### After a restore: the erasure ledger (migration 0148)
 
-A restore brings back exactly what the backup held, so a guest erased after the backup would be back. That does not
-happen: every erasure is recorded, as record kind and id only (no personal data), in `iam_v2.erasure_journal` and
-copied by `scd` to `erasure-journal.jsonl` in the backup folder (`/opt/stayconnect/backups/db/`), outside the database.
+A restore brings back exactly what the backup held, so a guest erased after the backup would be back, and a request answered after it
+would be open again. The **erasure ledger** prevents that ([privacy/ERASURE_LEDGER.md](privacy/ERASURE_LEDGER.md)): every erasure and
+every closed request is recorded in the database, in a file on the appliance (`/var/lib/stayconnect/ledger/erasure-ledger.jsonl`) and
+in the secondary storage the hotel set up, and the restore reapplies it **to the staging database before the swap**.
 
-What the restore does by itself, in order, each step shown on the restore result:
+What the restore does by itself, each step shown on the restore result:
 
-1. **erasures** (before the swap): the live database's journal is merged into the file. A restore that cannot do this
-   does not start, because replacing the database first would lose the only record of those erasures.
-2. **erasures_reapplied** (after the integrity checks): every entry the restored database does not know is applied
-   again and recorded only once it has succeeded. An entry whose record does not exist in the restored database
-   (created after the backup) is recorded and skipped. An entry that fails is reported and tried again at every hourly
-   run; it is never dropped.
+1. **ledger_prepare** -- the live database's own ledger entries are made durable in the file first. A restore that cannot do this does
+   not start.
+2. **ledger_storage** -- the secondary-storage setting of *this appliance* is carried across the swap.
+3. **ledger** -- the copies are read and verified; **one verified, complete copy is enough** (the other need not be online). The ledger
+   inside the backup, the live database and the ledger head recorded in the note of every backup on the appliance are the witnesses.
+   If no copy can be trusted, the copies contradict each other, a copy was cut short, or the backup is older than the ledger while
+   erasures exist, **the restore stops with nothing replaced** and says why. An encrypted secondary copy needs a backup key holder's key
+   (the same key as the backup, pasted into the restore dialog).
+4. The entries after the backup are applied to the staging data: guests are erased again, answered requests are closed again, the erasure
+   reference the guest was given exists again with its counts.
+5. After the swap, **ledger_synced** -- the missing copy is rebuilt and the two copies are brought into step. If the secondary storage
+   is unreachable the restore still succeeds and the step says so; it is retried hourly.
 
-`scd` runs the same reconciliation every hour, so a database restored by hand, or one restored from before the
-journal existed (it waits for the migration, then catches up), is brought into line without anyone remembering to.
-The journal file holds no personal data but is still part of the site's records: keep it with the backups, and copy it
-off the box with them.
+**Check after any restore:** Backups → Erasure ledger shows *Both copies are in step*; the restore result lists `ledger` and
+`ledger_synced`. **Replacement appliance:** [runbooks/ERASURE_LEDGER_RECOVERY.md](runbooks/ERASURE_LEDGER_RECOVERY.md).
 
-**Check after any restore:** Hotel Admin → Guest data requests shows the erasures; the restore result lists
-`erasures_reapplied` with the number applied. A failed entry is in the `scd` log as *an erasure could not be applied
-again*.
+**What stays open after a restore:** a request that was still *open* at the backup comes back open (the ledger records answers, not the
+requests, because they hold who asked); close it again. Assisted requests expire after 30 days anyway.
 
-**Open assisted requests** closed since the backup are open again with their addresses; cancel those no longer needed.
+**The database set aside.** The database a restore replaces is kept so the restore can be undone. It still holds data erased since, so
+`scd` removes it after `SET_ASIDE_DAYS` (default 14; Hotel Admin → Backups → Retention). Undo a restore within that time or not at all.
+Interrupted writes leave `*.partial` files, removed after a day.
 
-**The database set aside.** The database a restore replaces is kept so the restore can be undone. It still holds data
-erased since, so `scd` removes it after `SET_ASIDE_DAYS` (default 14; Hotel Admin → Backups → Retention). Undo a restore
-within that time or not at all. Interrupted writes leave `*.partial` files, removed after a day.
-
-**Drill (add to the quarterly site restore):** erase a test guest, restore a backup taken before that erasure, and confirm
-the guest is anonymised again after the restore result reports `erasures_reapplied` OK.
+**Drill (quarterly, and after any change to restore or the ledger):** `scripts/ledger-restore-drill.sh` runs the real restore against a
+disposable database: both copies, the secondary unplugged, the secondary alone, forked copies, nothing trustworthy, an interrupted write,
+a copy cut short, and a backup older than the ledger. On the appliance itself, erase a test guest, restore a backup taken before it, and
+confirm the guest is anonymised again after the restore result reports `ledger` OK.

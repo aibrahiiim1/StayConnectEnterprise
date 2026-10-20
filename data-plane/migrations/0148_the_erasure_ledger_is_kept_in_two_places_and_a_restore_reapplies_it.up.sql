@@ -41,16 +41,23 @@ CREATE OR REPLACE FUNCTION iam_v2.ledger_guard() RETURNS trigger
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
 BEGIN
-  IF TG_OP = 'UPDATE' AND OLD.confirmed = false AND NEW.confirmed = true
-     AND (NEW.seq, NEW.ledger_id, NEW.tenant_id, NEW.site_id, NEW.kind, NEW.at_us, NEW.body, NEW.prev_hash, NEW.hash)
-         IS NOT DISTINCT FROM (OLD.seq, OLD.ledger_id, OLD.tenant_id, OLD.site_id, OLD.kind, OLD.at_us, OLD.body, OLD.prev_hash, OLD.hash) THEN
-    RETURN NEW;
+  IF TG_TABLE_NAME = 'ledger_meta' THEN
+    IF TG_OP = 'UPDATE' AND current_setting('iam_v2.ledger_adopt', true) = 'on' THEN
+      RETURN NEW;
+    END IF;
+    RAISE EXCEPTION 'the erasure ledger is append-only: % refused', TG_OP USING ERRCODE = 'restrict_violation';
   END IF;
-  IF TG_TABLE_NAME = 'ledger_meta' AND TG_OP = 'UPDATE' AND current_setting('iam_v2.ledger_adopt', true) = 'on' THEN
-    RETURN NEW;
-  END IF;
-  IF TG_TABLE_NAME = 'erasure_ledger' AND TG_OP = 'DELETE' AND current_setting('iam_v2.ledger_adopt', true) = 'on' THEN
-    RETURN OLD;
+  -- NESTED, not AND-ed: OLD and NEW do not exist for a TRUNCATE, and SQL does not promise to stop at the first false operand.
+  IF TG_OP = 'UPDATE' THEN
+    IF OLD.confirmed = false AND NEW.confirmed = true
+       AND (NEW.seq, NEW.ledger_id, NEW.tenant_id, NEW.site_id, NEW.kind, NEW.at_us, NEW.body, NEW.prev_hash, NEW.hash)
+           IS NOT DISTINCT FROM (OLD.seq, OLD.ledger_id, OLD.tenant_id, OLD.site_id, OLD.kind, OLD.at_us, OLD.body, OLD.prev_hash, OLD.hash) THEN
+      RETURN NEW;
+    END IF;
+  ELSIF TG_OP = 'DELETE' THEN
+    IF current_setting('iam_v2.ledger_adopt', true) = 'on' THEN
+      RETURN OLD;
+    END IF;
   END IF;
   RAISE EXCEPTION 'the erasure ledger is append-only: % refused', TG_OP USING ERRCODE = 'restrict_violation';
 END $$;
@@ -531,6 +538,34 @@ CREATE OR REPLACE FUNCTION public.ledger_destination_note(p_ok boolean, p_error 
          last_error_at = CASE WHEN p_ok THEN NULL ELSE now() END
 $$;
 
+-- ---------------------------------------------------------------------------------------------------------
+-- Moving an appliance to another customer starts a NEW ledger and forgets the previous secondary storage: both belong to the
+-- customer who is leaving. Called by scd inside the tenant-transition purge transaction.
+-- ---------------------------------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.ledger_reset() RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $function$
+DECLARE v_id uuid := gen_random_uuid(); v_us bigint := (extract(epoch from clock_timestamp()) * 1000000)::bigint;
+        c_nil constant uuid := '00000000-0000-0000-0000-000000000000'; c_body constant text := '{"note": "ledger created"}';
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('stayconnect-erasure-ledger'));
+  PERFORM set_config('iam_v2.ledger_adopt', 'on', true);
+  DELETE FROM iam_v2.erasure_ledger;
+  UPDATE iam_v2.ledger_meta SET ledger_id = v_id, created_at = now();
+  INSERT INTO iam_v2.erasure_ledger (seq, ledger_id, tenant_id, site_id, kind, at_us, body, prev_hash, hash, confirmed)
+  VALUES (1, v_id, c_nil, c_nil, 'genesis', v_us, c_body, repeat('0', 64),
+          iam_v2.ledger_hash(v_id, 1, repeat('0', 64), 'genesis', c_nil, c_nil, v_us, c_body), true);
+  DELETE FROM public.ledger_destination;
+  PERFORM set_config('iam_v2.ledger_adopt', '', true);
+  RETURN jsonb_build_object('ledger', v_id);
+END $function$;
+
+-- The 0147 journal and its replay are replaced by the ledger. The table stays (the per-record index of what was erased, which the
+-- ledger replay refills); its export and replay functions go, so there is exactly one way to replay an erasure.
+DROP FUNCTION IF EXISTS public.erasure_journal_replay(jsonb);
+DROP FUNCTION IF EXISTS public.erasure_journal_export(uuid, uuid);
+
 
 -- ---------------------------------------------------------------------------------------------------------
 -- Ownership and grants. The ledger tables are readable by nobody but the owner; the runtime roles reach them only through
@@ -542,7 +577,7 @@ REVOKE ALL ON FUNCTION iam_v2.ledger_guard(), iam_v2.ledger_hash(uuid,bigint,tex
   iam_v2.ledger_confirm(text[]), iam_v2.ledger_head(), iam_v2.ledger_export(bigint), iam_v2.ledger_verify(),
   iam_v2.ledger_append_erasure(uuid,uuid,text), iam_v2.ledger_replay_erase(uuid,uuid,jsonb),
   iam_v2.ledger_replay_answer(uuid,uuid,jsonb), iam_v2.ledger_replay_assisted_closed(uuid,uuid,jsonb),
-  public.ledger_apply(jsonb,boolean), public.ledger_destination_get(), public.ledger_destination_secret(),
+  public.ledger_apply(jsonb,boolean), public.ledger_reset(), public.ledger_destination_get(), public.ledger_destination_secret(),
   public.ledger_destination_set(text,jsonb,bytea,bytea,text,integer,text), public.ledger_destination_note(boolean,text) FROM PUBLIC;
 
 -- The three replay helpers are NOT given to iam_v2_owner: they call the public erasure functions, which only the migration
@@ -576,6 +611,7 @@ BEGIN
     EXECUTE 'GRANT EXECUTE ON FUNCTION iam_v2.ledger_export(bigint) TO svc_scd';
     EXECUTE 'GRANT EXECUTE ON FUNCTION iam_v2.ledger_verify() TO svc_scd';
     EXECUTE 'GRANT EXECUTE ON FUNCTION public.ledger_apply(jsonb,boolean) TO svc_scd';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.ledger_reset() TO svc_scd';
     EXECUTE 'GRANT EXECUTE ON FUNCTION public.ledger_destination_get() TO svc_scd';
     EXECUTE 'GRANT EXECUTE ON FUNCTION public.ledger_destination_secret() TO svc_scd';
     EXECUTE 'GRANT EXECUTE ON FUNCTION public.ledger_destination_set(text,jsonb,bytea,bytea,text,integer,text) TO svc_scd';

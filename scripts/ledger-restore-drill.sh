@@ -13,7 +13,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib-fullschema-testdb.sh
 . "$ROOT/scripts/lib-fullschema-testdb.sh"
-PORT="${DRILL_PORT:-55530}"
+PORT="${DRILL_PORT:-55580}"
 RUN="${1:-TestDrill_}"
 
 docker rm -f stayconnect-pg >/dev/null 2>&1 || true

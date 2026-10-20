@@ -100,6 +100,11 @@ func (d *S3Dest) request(ctx context.Context, method, name string, body []byte) 
 	if name == "" || strings.ContainsAny(name, `/\`) {
 		return nil, fmt.Errorf("ledger: bad object name %q", name)
 	}
+	return d.signed(ctx, method, name, body)
+}
+
+// signed sends one SigV4-signed request; an empty name addresses the bucket itself (used by tests to create one).
+func (d *S3Dest) signed(ctx context.Context, method, name string, body []byte) (*http.Response, error) {
 	u, pathStyle, err := d.base()
 	if err != nil {
 		return nil, err
@@ -108,6 +113,9 @@ func (d *S3Dest) request(ctx context.Context, method, name string, body []byte) 
 	uriPath := "/" + d.key(name)
 	if pathStyle {
 		uriPath = "/" + d.Bucket + "/" + d.key(name)
+		if name == "" {
+			uriPath = "/" + d.Bucket
+		}
 	}
 	reqURL.Path = ""
 	reqURL.RawPath = ""
