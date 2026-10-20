@@ -233,8 +233,12 @@ func (s *server) eraseGuestData(w http.ResponseWriter, r *http.Request) {
 		Ref    string         `json:"erasure_ref"`
 		Counts map[string]any `json:"counts"`
 	}
-	err := s.db.QueryRow(ctx, `SELECT public.guest_data_erase($1::uuid,$2::uuid,$3,$4::uuid,$5,$6)`,
-		s.tenantID, s.siteID, in.Kind, in.ID, actor, in.Reason).Scan(&res)
+	err := s.ledgerQuery(ctx, &res, `SELECT public.guest_data_erase($1::uuid,$2::uuid,$3,$4::uuid,$5,$6)`,
+		s.tenantID, s.siteID, in.Kind, in.ID, actor, in.Reason)
+	if err != nil && writeLedgerRefusal(w, err) {
+		s.audit(r, "guest_data.erase_failed", in.Kind, in.ID, map[string]any{"why": "ledger"})
+		return
+	}
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "55006" {
 		s.audit(r, "guest_data.erase_refused", in.Kind, in.ID, map[string]any{"live": strings.Split(pgErr.Detail, ",")})

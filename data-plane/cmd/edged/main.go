@@ -82,8 +82,10 @@ type server struct {
 	// dbDefaultPassword warns while the database accepts its default superuser password (GDPR audit C5).
 	dbDefaultPassword *defaultDBPasswordCheck
 	scd               *scdClient
-	netd              *netdClient
-	sessions          *sessionStore
+	// ledgerC commits every erasure to both copies of the erasure ledger before it is reported (ledger_commit.go).
+	ledgerC  ledgerClient
+	netd     *netdClient
+	sessions *sessionStore
 	// pending holds the "password accepted, code not yet entered" sign-ins; mfa is the authenticator service
 	// (operator_mfa.go, 0132).
 	pending  pendingSignins
@@ -230,6 +232,7 @@ func main() {
 		modCache:          &moduleCache{},
 	}
 	s.mfa = scdMFA{scd: s.scd, db: pool}
+	s.ledgerC = &scdLedger{c: s.scd}
 
 	// Phase 2 DARK Hotel-Admin commerce. Config from env (all flags default OFF); nil repository while the
 	// master flag is OFF (zero Phase-2 SQL). Fail closed if the master flag is set without a wired repo

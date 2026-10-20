@@ -147,8 +147,11 @@ func (s *server) answerRegister(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	var doc []byte
-	if err := s.db.QueryRow(ctx, `SELECT iam_v2.request_register_answer($1::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7,$8,$9)::text`,
-		s.tenantID, s.siteID, id, actor, in.Status, in.Outcome, in.Note, in.ErasureRef, in.AssistedRef).Scan(&doc); err != nil {
+	if err := s.ledgerQuery(ctx, &doc, `SELECT iam_v2.request_register_answer($1::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7,$8,$9)::text`,
+		s.tenantID, s.siteID, id, actor, in.Status, in.Outcome, in.Note, in.ErasureRef, in.AssistedRef); err != nil {
+		if writeLedgerRefusal(w, err) {
+			return
+		}
 		registerDBError(w, err, "the request could not be closed")
 		return
 	}

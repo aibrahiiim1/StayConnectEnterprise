@@ -42,6 +42,15 @@ var nightlyBackupDir = "/var/backups/stayconnect"
 // backupRecipients returns the keys to encrypt to, or nil when the hotel has not set encryption up (or the
 // database predates 0129). Any other failure is an error: the caller must not write plaintext instead.
 func (s *server) backupRecipients(ctx context.Context) ([]age.Recipient, error) {
+	keys, err := s.backupRecipientKeys(ctx)
+	if err != nil || len(keys) == 0 {
+		return nil, err
+	}
+	return backupcrypt.ParseRecipients(keys)
+}
+
+// backupRecipientKeys is the public keys of the confirmed backup key holders, or nil when none is set up.
+func (s *server) backupRecipientKeys(ctx context.Context) ([]string, error) {
 	if s.db == nil {
 		return nil, errors.New("the database is not reachable, so the backup keys could not be read")
 	}
@@ -71,10 +80,7 @@ func (s *server) backupRecipients(ctx context.Context) ([]age.Recipient, error) 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("the backup keys could not be read: %w", err)
 	}
-	if len(keys) == 0 {
-		return nil, nil
-	}
-	return backupcrypt.ParseRecipients(keys)
+	return keys, nil
 }
 
 // writeDump streams pg_dump through gzip -- and age, when recipients are given -- into dest.

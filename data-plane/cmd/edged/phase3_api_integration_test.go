@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/stayconnect/enterprise/data-plane/internal/ledger"
 )
 
 // Real HTTP + real PostgreSQL 16 contract tests for the Phase-3 Hotel-Admin mutations. These exist because a
@@ -116,6 +117,9 @@ type apiFixture struct {
 	sessTok  string
 	// mfa stands in for scd's authenticator service (operator_mfa_fake_test.go).
 	mfa *fakeMFA
+	// ledger is the erasure ledger the fixture's erasures are committed to (ledger_fixture_integration_test.go).
+	ledger  *ledger.Store
+	ledgerC *storeLedger
 }
 
 // newAPI builds the REAL Phase-3 routes with the real auth middleware, backed by a disposable database and a
@@ -197,6 +201,9 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 	s := &server{db: p, sessions: newSessionStore(2 * time.Hour), tenantID: f.tenant, siteID: f.site}
 	f.mfa = newFakeMFA(p)
 	s.mfa = f.mfa
+	f.ledger = sharedLedger(t, p)
+	f.ledgerC = &storeLedger{st: f.ledger}
+	s.ledgerC = f.ledgerC
 	// The commerce repository, wired exactly as main.go wires it. Publishing a checkout-grace policy derives
 	// the service plan and package revisions that express it, so this is not optional plumbing: without it the
 	// route these tests exercise would answer 503 and every assertion below would be about a fixture gap

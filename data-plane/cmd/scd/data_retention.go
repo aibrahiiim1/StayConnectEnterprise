@@ -70,7 +70,7 @@ func (s *server) runDataRetention(ctx context.Context) {
 		}
 	}
 	s.runStaffRetention(ctx)
-	s.runErasureJournal(ctx)
+	s.runLedger(ctx)
 	s.runLeftovers(ctx)
 }
 

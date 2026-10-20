@@ -386,6 +386,14 @@ func (s *server) runRestore(ctx context.Context, name, identity string, rec *ver
 	}
 	ok("privileges", fmt.Sprintf("%d ownership and access rules captured from the live database", len(privileges)))
 
+	// ---- 0b. every erasure the live database knows is durable outside it before anything is replaced ------------
+	if detail, good := s.restoreLedgerPrepare(ctx); !good {
+		fail("ledger_prepare", detail)
+		return
+	} else {
+		ok("ledger_prepare", detail)
+	}
+
 	// ---- 1. a safety dump of the CURRENT state, before anything is touched ------------------------------
 	safety, err := s.dumpTo(ctx, "db-safety-"+stamp+".sql.gz")
 	if err != nil {
@@ -438,13 +446,23 @@ func (s *server) runRestore(ctx context.Context, name, identity string, rec *ver
 		ok("key_holders", detail)
 	}
 
-	// ---- 3c. what was erased is on record outside the database before it is replaced (erasure_journal.go) ------
-	if ok2, detail := journalSyncFromLive(ctx, pgDatabase, erasureJournalFile()); !ok2 {
+	// ---- 3c. the erasure ledger is verified and applied to the STAGING database, before the swap -------------------
+	// Everything the hotel already told a guest was erased is erased again, and every request it had closed is closed again,
+	// in the restored data, BEFORE that data is the live data. One verified, complete copy of the ledger is enough
+	// (ledger_restore.go); if none can be trusted the restore stops here with nothing replaced.
+	if detail, good := s.carryLedgerDestination(ctx, staging); !good {
 		dropStaging()
-		fail("erasures", detail)
+		fail("ledger_storage", detail)
 		return
 	} else {
-		ok("erasures", detail)
+		ok("ledger_storage", detail)
+	}
+	if detail, good := s.restoreLedgerApply(ctx, staging, identity); !good {
+		dropStaging()
+		fail("ledger", detail)
+		return
+	} else {
+		ok("ledger", detail)
 	}
 
 	// ---- 4. the swap: rename aside, rename in ----------------------------------------------------------
@@ -538,15 +556,13 @@ func (s *server) runRestore(ctx context.Context, name, identity string, rec *ver
 	}
 	ok("integrity", detail)
 
-	// ---- 6a. erasures made since the backup are applied again (erasure_journal.go) ----------------------------
-	// The restored database brought back every guest erased since the backup, names and all. The file next to the
-	// backups knows what was erased: it is replayed now, before the appliance serves again. A failure does not undo the
-	// restore -- it is reported on this screen and in the log, and tried again every hour.
-	if detail, problem := journalReplayInto(ctx, pgDatabase, erasureJournalFile()); problem {
-		slog.Error("restore: erasures could not all be applied again", "detail", detail)
-		steps = append(steps, restoreStep{Step: "erasures_reapplied", OK: false, Detail: detail})
+	// ---- 6a. the missing copies of the ledger are rebuilt and synchronised ------------------------------------------
+	// The restored database now holds the whole ledger. The primary copy on the appliance and the secondary storage are
+	// brought into step with it; an unreachable secondary does not undo the restore, it is reported and retried every hour.
+	if st := s.ledgerReconcileAfterRestore(ctx); st != "" {
+		steps = append(steps, restoreStep{Step: "ledger_synced", OK: false, Detail: st})
 	} else {
-		ok("erasures_reapplied", detail)
+		ok("ledger_synced", "both copies of the erasure ledger are in step with the restored database")
 	}
 
 	// ---- 6b. keep exactly ONE database aside -----------------------------------------------------------

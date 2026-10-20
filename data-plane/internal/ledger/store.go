@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"filippo.io/age"
@@ -32,6 +33,11 @@ var (
 	ErrConflict = errors.New("the entry does not continue the erasure ledger")
 	// ErrLocalDamaged: the copy on the appliance is damaged and must be healed before anything is added.
 	ErrLocalDamaged = errors.New("the erasure ledger on the appliance is damaged")
+	// ErrExternalAhead: the secondary storage holds erasures this appliance does not have (for example after the appliance's
+	// own copy was lost). Overwriting it would destroy them, so nothing is written until it has been recovered from.
+	ErrExternalAhead = errors.New("the secondary storage holds newer erasures than this appliance")
+	// ErrExternalFork: the two copies disagree about an entry they both have.
+	ErrExternalFork = errors.New("the secondary storage and this appliance disagree about an erasure")
 )
 
 // ExternalError is a failure of the secondary storage (not of the appliance), so a caller can tell the administrator which
@@ -87,11 +93,51 @@ type Config struct {
 // what makes "append, then replicate" one step.
 type Store struct {
 	Config
-	mu sync.Mutex
+	mu   sync.Mutex
+	dest atomic.Pointer[destBox]
 }
 
+type destBox struct{ d Destination }
+
 // NewStore returns a Store for cfg.
-func NewStore(cfg Config) *Store { return &Store{Config: cfg} }
+func NewStore(cfg Config) *Store {
+	s := &Store{Config: cfg}
+	if cfg.Dest != nil {
+		s.dest.Store(&destBox{cfg.Dest})
+	}
+	return s
+}
+
+// SetDest replaces the secondary storage (nil removes it). Safe while other calls are in flight.
+func (s *Store) SetDest(d Destination) {
+	if d == nil {
+		s.dest.Store(nil)
+		return
+	}
+	s.dest.Store(&destBox{d})
+}
+
+// Destination is the secondary storage, or nil when it is not set up.
+func (s *Store) Destination() Destination { return s.getDest() }
+
+func (s *Store) getDest() Destination {
+	if b := s.dest.Load(); b != nil {
+		return b.d
+	}
+	return nil
+}
+
+// CipherFingerprint identifies who the secondary copy is being encrypted to now ("" when it is not encrypted).
+func (s *Store) CipherFingerprint(ctx context.Context) (string, error) {
+	if s.Cipher == nil {
+		return "", nil
+	}
+	c, err := s.Cipher(ctx)
+	if err != nil || c == nil || len(c.Recipients) == 0 {
+		return "", err
+	}
+	return c.Fingerprint, nil
+}
 
 func (s *Store) now() time.Time {
 	if s.Now != nil {
@@ -124,7 +170,7 @@ func (s *Store) ReadLocal() Copy {
 func (s *Store) Commit(ctx context.Context, entries []Entry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.Dest == nil {
+	if s.getDest() == nil {
 		return ErrNotConfigured
 	}
 	if len(entries) == 0 {
@@ -172,7 +218,7 @@ func (s *Store) Commit(ctx context.Context, entries []Entry) error {
 		}
 	}
 	// The secondary copy: always pushed, even when nothing was fresh, so a retry also repairs a copy that fell behind.
-	if err := s.pushExternalLocked(ctx); err != nil {
+	if err := s.pushExternalLocked(ctx, false); err != nil {
 		if len(fresh) > 0 {
 			if terr := os.Truncate(s.LocalPath, size); terr != nil {
 				return &ExternalError{fmt.Errorf("%w (and the ledger on the appliance could not be put back: %v)", err, terr)}
@@ -210,8 +256,8 @@ func (s *Store) Abort(ctx context.Context, entries []Entry) error {
 	if err := os.Truncate(s.LocalPath, int64(len(keep))); err != nil {
 		return &LocalError{err}
 	}
-	if s.Dest != nil {
-		_ = s.pushExternalLocked(ctx) // best effort: the next reconciliation repairs it
+	if s.getDest() != nil {
+		_ = s.pushExternalLocked(ctx, true) // these were our own entries: take them back from the secondary too (best effort)
 	}
 	return nil
 }
@@ -267,13 +313,28 @@ func syncDir(dir string) {
 func (s *Store) PushExternal(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.Dest == nil {
+	if s.getDest() == nil {
 		return ErrNotConfigured
 	}
-	return s.pushExternalLocked(ctx)
+	return s.pushExternalLocked(ctx, false)
 }
 
-func (s *Store) pushExternalLocked(ctx context.Context) error {
+// ForceExternal replaces the secondary copy with the primary one even if the secondary looks newer. It exists for the one
+// case where that is right: the primary has just been rebuilt from a verified copy of the secondary.
+func (s *Store) ForceExternal(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.getDest() == nil {
+		return ErrNotConfigured
+	}
+	return s.pushExternalLocked(ctx, true)
+}
+
+func (s *Store) pushExternalLocked(ctx context.Context, force bool) error {
+	d := s.getDest()
+	if d == nil {
+		return ErrNotConfigured
+	}
 	plain, err := os.ReadFile(s.LocalPath)
 	if err != nil {
 		return fmt.Errorf("the ledger on the appliance could not be read: %w", err)
@@ -286,6 +347,21 @@ func (s *Store) pushExternalLocked(ctx context.Context) error {
 		plain = plain[:p.ValidBytes]
 	}
 	seq, hash := p.Head()
+	if !force {
+		// NEVER OVERWRITE WHAT IS AHEAD. The note kept beside the copy says how far it reached; if it is further than this
+		// appliance's own ledger, the difference exists nowhere else, and replacing it would erase the erasures.
+		if prev, _, found, err := s.readExternalHeadFrom(ctx, d); err == nil && found && prev != nil {
+			if prev.Ledger == p.LedgerID() && prev.Seq > seq {
+				return ErrExternalAhead
+			}
+			if prev.Ledger == p.LedgerID() && prev.Seq == seq && prev.Hash != hash {
+				return ErrExternalFork
+			}
+			if prev.Ledger != p.LedgerID() && prev.Seq > 0 {
+				return fmt.Errorf("%w: it belongs to a different ledger", ErrExternalFork)
+			}
+		}
+	}
 	obj := plain
 	name := ExternalObject
 	info := HeadInfo{Ledger: p.LedgerID(), Seq: seq, Hash: hash, Entries: len(p.Entries), PlainSHA256: sum(plain), UpdatedAt: s.now().UTC().Format(time.RFC3339)}
@@ -311,10 +387,10 @@ func (s *Store) pushExternalLocked(ctx context.Context) error {
 		}
 	}
 	info.Object, info.ObjectSHA256 = name, sum(obj)
-	if err := s.Dest.Put(ctx, name, obj); err != nil {
+	if err := d.Put(ctx, name, obj); err != nil {
 		return err
 	}
-	back, err := s.Dest.Get(ctx, name)
+	back, err := d.Get(ctx, name)
 	if err != nil {
 		return fmt.Errorf("what was written cannot be read back: %w", err)
 	}
@@ -322,10 +398,10 @@ func (s *Store) pushExternalLocked(ctx context.Context) error {
 		return errors.New("what was read back from the secondary storage is not what was written")
 	}
 	hb, _ := json.Marshal(info)
-	if err := s.Dest.Put(ctx, ExternalHead, hb); err != nil {
+	if err := d.Put(ctx, ExternalHead, hb); err != nil {
 		return err
 	}
-	if hback, err := s.Dest.Get(ctx, ExternalHead); err != nil || !bytes.Equal(hback, hb) {
+	if hback, err := d.Get(ctx, ExternalHead); err != nil || !bytes.Equal(hback, hb) {
 		return errors.New("the note describing the secondary copy could not be read back")
 	}
 	// A copy kept under the other name (plain after encrypted, or the reverse) would be a second, stale truth.
@@ -333,7 +409,7 @@ func (s *Store) pushExternalLocked(ctx context.Context) error {
 	if name == ExternalObject {
 		other = ExternalObject + backupcrypt.Suffix
 	}
-	_ = s.Dest.Remove(ctx, other)
+	_ = d.Remove(ctx, other)
 	return nil
 }
 
@@ -342,10 +418,14 @@ func sum(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:
 // ReadExternalHead returns the note kept with the secondary copy and whether the object it names still matches it.
 // found is false when the storage holds no ledger at all.
 func (s *Store) ReadExternalHead(ctx context.Context) (info *HeadInfo, objectOK bool, found bool, err error) {
-	if s.Dest == nil {
+	return s.readExternalHeadFrom(ctx, s.getDest())
+}
+
+func (s *Store) readExternalHeadFrom(ctx context.Context, d Destination) (info *HeadInfo, objectOK bool, found bool, err error) {
+	if d == nil {
 		return nil, false, false, ErrNotConfigured
 	}
-	hb, err := s.Dest.Get(ctx, ExternalHead)
+	hb, err := d.Get(ctx, ExternalHead)
 	if errors.Is(err, ErrNotFound) {
 		return nil, false, false, nil
 	}
@@ -356,7 +436,7 @@ func (s *Store) ReadExternalHead(ctx context.Context) (info *HeadInfo, objectOK 
 	if err := json.Unmarshal(hb, &h); err != nil || h.Object == "" {
 		return nil, false, true, errors.New("the note describing the secondary copy is unreadable")
 	}
-	obj, err := s.Dest.Get(ctx, h.Object)
+	obj, err := d.Get(ctx, h.Object)
 	if errors.Is(err, ErrNotFound) {
 		return &h, false, true, nil
 	}
@@ -370,11 +450,12 @@ func (s *Store) ReadExternalHead(ctx context.Context) (info *HeadInfo, objectOK 
 // it the copy can only be described by its note, not verified, and the returned Copy says so in Reach.
 func (s *Store) ReadExternal(ctx context.Context, identity age.Identity) Copy {
 	c := Copy{Name: "external"}
-	if s.Dest == nil {
+	d := s.getDest()
+	if d == nil {
 		c.Reach = ErrNotConfigured
 		return c
 	}
-	info, _, found, err := s.ReadExternalHead(ctx)
+	info, _, found, err := s.readExternalHeadFrom(ctx, d)
 	if err != nil {
 		c.Reach = err
 		return c
@@ -382,7 +463,7 @@ func (s *Store) ReadExternal(ctx context.Context, identity age.Identity) Copy {
 	if !found {
 		return c
 	}
-	obj, err := s.Dest.Get(ctx, info.Object)
+	obj, err := d.Get(ctx, info.Object)
 	if errors.Is(err, ErrNotFound) {
 		return c
 	}

@@ -93,6 +93,7 @@ func TestIntegration_SecondReview_AReplayedAssistedErasureCleansTheActivityLog(t
 	r := seedAsstRoom(t, f, "SR4", asstMACs("3c:22:fb:f4:00", 2), "10.96.2")
 	id, ref := asstOpen(t, f, asstDefaults("ERASURE", r.macs[:1], r.anchor()))
 	rv := asstReviewOf(t, f, id)
+	base := ledgerSeq(t, f)
 	if st, raw := asstAct(f, t, "erase", id, rv, ref, rv.selectable()); st != 200 {
 		t.Fatalf("erase = %d %s", st, raw)
 	}
@@ -105,7 +106,7 @@ func TestIntegration_SecondReview_AReplayedAssistedErasureCleansTheActivityLog(t
 			VALUES (now(),$1::uuid,'operator','op@x','device.block','device',$2,jsonb_build_object('mac',$2::text))`, f.tenant, mac)
 		return err
 	})
-	replayJournal(t, f)
+	replayLedger(t, f, base)
 	if got := gdStr(t, f, `SELECT count(*)::text FROM public.audit_log WHERE tenant_id=$1 AND (target_id=$2 OR payload::text ILIKE '%'||$2||'%')`, f.tenant, mac); got != "0" {
 		t.Errorf("the device address is still in the activity log after the replay: %s rows", got)
 	}

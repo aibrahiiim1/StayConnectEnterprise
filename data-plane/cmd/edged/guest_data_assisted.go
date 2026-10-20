@@ -327,8 +327,12 @@ func (s *server) eraseAssisted(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), guestDataEraseTimeout)
 	defer cancel()
 	var doc []byte
-	if err := s.db.QueryRow(ctx, `SELECT public.assisted_request_erase($1::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7,$8::jsonb)::text`,
-		s.tenantID, s.siteID, id, actor, in.Reason, in.Confirm, in.Signature, string(selected)).Scan(&doc); err != nil {
+	if err := s.ledgerQuery(ctx, &doc, `SELECT public.assisted_request_erase($1::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7,$8::jsonb)::text`,
+		s.tenantID, s.siteID, id, actor, in.Reason, in.Confirm, in.Signature, string(selected)); err != nil {
+		if writeLedgerRefusal(w, err) {
+			s.audit(r, "guest_data.assisted_erase_refused", "assisted_guest_request", id, map[string]any{"why": "ledger"})
+			return
+		}
 		s.audit(r, "guest_data.assisted_erase_refused", "assisted_guest_request", id, map[string]any{"why": assistedWhy(err)})
 		assistedDBError(w, err, "the erasure failed")
 		return
@@ -380,8 +384,11 @@ func (s *server) closeAssisted(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	var doc []byte
-	if err := s.db.QueryRow(ctx, `SELECT public.assisted_request_close($1::uuid,$2::uuid,$3::uuid,$4,$5,$6)::text`,
-		s.tenantID, s.siteID, id, actor, in.Outcome, in.Reason).Scan(&doc); err != nil {
+	if err := s.ledgerQuery(ctx, &doc, `SELECT public.assisted_request_close($1::uuid,$2::uuid,$3::uuid,$4,$5,$6)::text`,
+		s.tenantID, s.siteID, id, actor, in.Outcome, in.Reason); err != nil {
+		if writeLedgerRefusal(w, err) {
+			return
+		}
 		assistedDBError(w, err, "the request could not be closed")
 		return
 	}

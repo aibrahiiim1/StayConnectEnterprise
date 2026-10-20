@@ -273,6 +273,8 @@ type server struct {
 	// otpEscrowKey seals the staff-readable copy of a live code (temp_access_admin.go); same local key file,
 	// its own domain.
 	otpEscrowKey sealbox.Key
+	// ledgerRT is the erasure ledger's runtime: the primary copy, the secondary storage, the last reconciliation (ledger_service.go).
+	ledgerRT ledgerRuntime
 	// operatorMFA seals the Admin Console operators' authenticator secrets and MACs their recovery codes
 	// (operator_mfa.go, 0132).
 	operatorMFA operatorMFAKeys
@@ -888,6 +890,7 @@ func main() {
 	s.initOpenAccess(c.SecretsDir)
 	s.initClientResume(c.SecretsDir)
 	s.initNotifyKey(c.SecretsDir)
+	s.ledgerInit(c.SecretsDir)
 	s.initOperatorMFAKey(c.SecretsDir)
 	s.portalTLS = s.initPortalTLS(c, ident != nil && talksToCentral)
 	s.socialPortal = s.portalTLS
@@ -1011,6 +1014,14 @@ func main() {
 	r.Get("/v1/admin/pms/{name}/health", s.pmsAdminHealth)
 	r.Get("/v1/tenant/auth-methods", s.tenantAuthMethods)
 	r.Get("/v1/tenant/branding", s.tenantBranding)
+	// THE ERASURE LEDGER (ledger_service.go): edged commits every erasure through here before it tells anyone it is done.
+	r.Get("/v1/ledger/status", s.ledgerStatusGet)
+	r.Post("/v1/ledger/prepare", s.ledgerPrepare)
+	r.Post("/v1/ledger/commit", s.ledgerCommit)
+	r.Post("/v1/ledger/abort", s.ledgerAbort)
+	r.Put("/v1/ledger/destination", s.ledgerDestinationPut)
+	r.Post("/v1/ledger/destination/probe", s.ledgerDestinationProbe)
+	r.Post("/v1/ledger/recover", s.ledgerRecover)
 	r.Post("/v1/backup/run", s.backupRun)
 	r.Post("/v1/backup/verify", s.backupVerify)
 	r.Post("/v1/backup/key-test", s.backupKeyTest)

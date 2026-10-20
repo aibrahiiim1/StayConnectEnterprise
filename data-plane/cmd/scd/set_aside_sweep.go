@@ -114,7 +114,7 @@ func (s *server) runLeftovers(ctx context.Context) {
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	s.sweepSetAside(cctx)
-	for _, dir := range []string{nightlyBackupDir, filepath.Join(nightlyBackupDir, "backups", "db"), complianceArchiveDir, filepath.Dir(erasureJournalFile())} {
+	for _, dir := range []string{nightlyBackupDir, filepath.Join(nightlyBackupDir, "backups", "db"), complianceArchiveDir, filepath.Dir(ledgerLocalPath)} {
 		sweepPartials(dir, time.Now(), 24*time.Hour)
 	}
 }

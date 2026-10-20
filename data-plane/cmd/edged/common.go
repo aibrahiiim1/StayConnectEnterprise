@@ -139,6 +139,14 @@ func newSCDClient(socket string) *scdClient {
 var longSCDPaths = map[string]time.Duration{
 	"/v1/backup/run":    20 * time.Minute,
 	"/v1/backup/verify": 25 * time.Minute,
+	// The erasure ledger: a commit writes two copies and reads both back; recovery and a first copy can take longer.
+	"/v1/ledger/prepare":           60 * time.Second,
+	"/v1/ledger/commit":            2 * time.Minute,
+	"/v1/ledger/abort":             90 * time.Second,
+	"/v1/ledger/status":            40 * time.Second,
+	"/v1/ledger/destination":       4 * time.Minute,
+	"/v1/ledger/destination/probe": 45 * time.Second,
+	"/v1/ledger/recover":           6 * time.Minute,
 }
 
 func (c *scdClient) call(ctx context.Context, method, path string, body any) (int, []byte, error) {
