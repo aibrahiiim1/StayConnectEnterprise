@@ -351,3 +351,10 @@ Run quarterly, and once as part of pilot acceptance:
 
 Record every drill in the cloud audit log (`backup.drill` action) and, for
 site drills, as a `manual` row in `backup_records`.
+
+### After a restore: erasures made since the backup
+
+A restore brings back exactly what the backup held. Records anonymised after that backup (an automatic erasure, an
+assisted request, a retention run) are back as they were, and an assisted request closed since is open again with its
+addresses. Check the erasure register for erasures dated after the backup and repeat them; open assisted requests
+that are no longer needed should be cancelled. The retention run anonymises what is past its period on its next run.

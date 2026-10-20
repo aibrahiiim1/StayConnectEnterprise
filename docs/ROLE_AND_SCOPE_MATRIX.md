@@ -106,8 +106,9 @@ other role that reads backups sees the list and cannot download. Until 2026-10-1
 guest: look the guest up, download everything held about them as a JSON file that staff hand over after checking
 the guest's identity, or erase them (anonymise, decision D-C3). What a request covers follows whose record it is
 (decision D-R5, [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md) section 8): a reservation's own data, or one person's own
-account, identity and exclusive devices, never the access several people share. A request about shared access is
-the hotel's to handle by hand, outside the product. **site_admin and the IT manager only**; every
+account, identity and exclusive devices, never the access several people share. A staff-supervised *assisted
+request* (same key) can hand over or anonymise the records the database establishes as the requester's, never another
+person's; the rest is the hotel's to handle by hand, outside the product. **site_admin and the IT manager only**; every
 export and erasure asks for the operator's password and a reason and is audited by record id or erasure
 reference, never by name or address. Erasure is refused while the guest's stay is open in the PMS, their access
 is live or a device is online. There is no guest self-service.

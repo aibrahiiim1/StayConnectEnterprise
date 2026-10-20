@@ -119,8 +119,11 @@ a request about a client account or sign-in identity covers that person's own da
 The PMS may name only the reservation holder while several people use the room, so the internet access used
 through a room's credentials, a voucher or a staff-issued account, and any device also used with someone else, is
 shared and cannot be attributed to one person. The Software never exports or erases it for one person and tells the
-requester only that such records exist. A request about it is for the Controller to decide and answer, by hand and
-under its own legal responsibility, within the time the law allows; the Software anonymises these records when the
+requester only that such records exist. A staff-supervised *assisted request* lets the Controller's staff hand
+over or anonymise the records the Software can establish as the requester's (the Controller's staff verify the
+requester and make the statements; the Software never infers identity from a device address, and never discloses or
+changes another person's records); everything else is for the Controller to decide and answer, by hand and under its
+own legal responsibility, within the time the law allows. The Software anonymises these records when the
 Controller's retention period ends, and the end of a retention period is not a response to a request. When other
 guests share a stay, one guest's export holds only their own details, and erasing one guest leaves the others. Retention settings limit how long data is kept. The Processor
 gives further reasonable assistance on request. A request the Processor receives directly from a data subject

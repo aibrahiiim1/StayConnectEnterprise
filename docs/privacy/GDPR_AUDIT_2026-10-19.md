@@ -486,13 +486,15 @@ people are still online on. 0145 rolls back and forward cleanly.
 
 **Residual risks (recorded, not hidden).**
 
-- **Shared-access requests are the hotel's manual and legal responsibility.** The system never discloses or erases
-  shared data automatically, and it gives the hotel no tool to attribute or erase individual shared records. It
+- **Shared-access requests are the hotel's manual and legal responsibility, helped by the assisted request (section
+  G).** The system never discloses or erases shared data automatically; staff can have it release only the records
+  the database establishes as the requester's. For everything else it gives the hotel no tool. It
   anonymises them when the retention period ends (default 12 months for sessions and devices, 30 days for sign-in
   attempts), but **retention expiry is not a response to a rights request**: a request about shared access must be
   answered within one month whatever the retention setting. What the hotel does, and what the system does, is set
   out in [DATA_OWNERSHIP.md](../DATA_OWNERSHIP.md) section 8 ("Automatic handling, and the hotel's own
-  responsibility"). Whether to build a controlled manual path is an open product decision (plan section 4).
+  responsibility"). Whether to add four-eyes approval or extend the assisted request to vouchers is an open product
+  decision (plan section 4).
 - Staff-issued accounts keep their devices out of the person's request even when only one person uses them.
 - A device is shared as soon as any other record touches it, so a guest's own phone used once with the room's
   credentials is never attributed to them. This errs toward leaving data, never toward changing another person's.
@@ -543,3 +545,92 @@ PMSs, and an ambiguous namesake.
   - sessions hold no IP;
   - 0054 covers what it claims within its tables.
 - **Most document numbers are right:** about 60 of 75 checked claims were correct.
+
+---
+
+## G. Assisted guest data requests: 2026-10-20
+
+**The gap.** After section F the product refused, correctly, to treat a MAC address, a room number, a reservation
+credential or a shared device as proof of who someone is. A person who used only the room's credentials was left
+with no way to receive, or have anonymised, the usage of their own phone, and the hotel with no controlled way to
+act on a request it could verify.
+
+**What was built (appliance migration 0146, edged `guest_data_assisted.go`, Hotel Admin Guest data requests →
+Assisted request).** A staff-supervised request: verify the requester and record how; state the reservation, guest or
+account the records are said to belong to, one to five device addresses and a range of at most 366 days; make the
+statements (identity verified, device shown, sole use, private address confirmed); review the classification of every
+record; select; confirm. Design, classes, operations and limits:
+[ASSISTED_GUEST_DATA_REQUESTS.md](ASSISTED_GUEST_DATA_REQUESTS.md).
+
+| Control | How it holds |
+|---|---|
+| A MAC address, room or shared device is not proof | a request needs a named reservation, guest or account (a device address alone is refused); the database classifies, the page does not |
+| No other person's data | an address that **any** other reservation, voucher, account or person has used (a session, an authorisation, even a released one, a slot action, a sign-in, a remembered device, a verified address, a guest the PMS matched) is CONFLICTING for everything the room gave it; vouchers and open access are SHARED; nothing in either class can be selected, exported or changed |
+| Exact records reviewed | the review shows each record, its class, the reason and what it would disclose; selection by record id; a device only with every record it carries; the signature covers the content |
+| Nothing moves under the review | confirmation locks the request, the address and the devices, recomputes the review, and compares its signature; a change refuses with *changed* |
+| Least privilege | the existing `guest-data-rights` key (site_admin, IT manager); `svc_edged` has no table privilege, only the definer functions |
+| Re-authentication, reason, audit | password, a reason that names nobody and carries no address/email/phone (checked **before** it is logged), the request reference typed; `assisted_*` entries in the activity log; the hand-over is recorded before it is prepared |
+| Ambiguity untouched | a record that straddles the range, is live, is under a day old (erasure), has no owner, or is keyed only by an address nothing ties to the stated context is left as it is |
+| Active service preserved | only ended sessions' addresses and MAC-keyed event records change; entitlements, quotas, accounting, PMS and financial records are never written; a sign-in pass in force is not erased |
+| Site and PMS isolation | every function is scoped by tenant and site; anchors from two PMS interfaces are two requests; a room move follows the stay links |
+| Personal data does not outlive the request | addresses, the requester's reference, the evidence note and the links to the person's records are removed when the request closes or after 30 days |
+| Reversible | `0146.down.sql` cancels and scrubs open requests and drops the functions; the request tables stay as proof |
+
+**Independent review (2026-10-20).** An adversarial reviewer who was given the code and the goal, not these
+conclusions, built each situation in a rolled-back transaction against a factory-clean schema. It confirmed five
+defects to fix and two to weigh, each now closed with a regression test in
+`guest_data_assisted_review_integration_test.go` (or the existing files):
+
+| # | Found | Now |
+|---|---|---|
+| H1 | an attempt the PMS matched to another named guest of the stay was claimable | the matched guest must be one of the stated guests; otherwise it and the address are another person's |
+| H2 | an address with two device rows was judged by whichever row was read first, so another reservation's device row could be handed over | the answer is about the address, over every row it has |
+| H3 | an authorisation that was released, a slot action or a guest release left the address claimable and its staff actions in the detail | all three count as use by another access; the device detail no longer carries staff actions |
+| H4 | an erasure removed a sign-in pass still in force | a pass is live while its pause lasts |
+| H5 | a reason that the check refused was already in the activity log | the check runs first; a refused path logs the code, never the text |
+| H6 | one valid anchor unlocked any clean address (a failed attempt or restriction with nothing tying it to the context) | such a record is unverifiable unless something on the address ties it to the stated context |
+| H7 | opening and reviewing need no password | kept deliberately: the same two roles see the same records in Sessions and Usage; each is audited; the password guards disclosure and change |
+
+A **second, fresh review** (same method, different focus: stay links, what an erasure leaves behind, locks, privileges,
+the handlers, the console, the down migration, the documentation) confirmed eight more, all closed with tests:
+
+| # | Found | Now |
+|---|---|---|
+| S1 | a stay link into a reservation that names two guests made another guest's phone claimable | the room of a reservation that names more than one guest is SHARED, however it is reached |
+| S2 | an account registered on an anonymised device kept the address | cleared with the device |
+| S3 | the activity-log cleaning missed searches typed in other spellings or in part | every search is read in search mode, and every spelling of the address is matched |
+| S4 | the down migration left the links and handed-over ids on the requests it cancelled | it removes them |
+| S5 | a review was shown before it was recorded | recorded first, refused if it cannot be |
+| S6 | no limit on a request body | 512 KB on every route |
+| S7 | a guard refusal (SQLSTATE 23001) was a 500 | a 409 |
+| S8 | a reason could carry an address in several spellings, or an IP address | refused in colon, dash, dot, space, grouped and plain forms, and IPv4; a date and time still pass |
+
+It also raised four concerns, resolved as follows: the closed request kept the anchors and the ids of what was
+handed over (now removed); two requests on an address with no device row could both run (an advisory lock per
+address now serialises them); the signature did not cover content (it does); a malformed spelling of an address could
+reach the cast (spellings are normalised and refused otherwise). `code_device_binding` and `sign_in_redirect` are
+matched by tenant because their tables have no site column; one appliance serves one site.
+
+**Verified.** The edged integration suites `guest_data_assisted_integration_test.go`,
+`guest_data_assisted_adversarial_integration_test.go` and `guest_data_assisted_review_integration_test.go`
+(against a database built like a factory-clean appliance): a claimed phone in a shared room handed over alone while
+the other occupants' phones, sessions and the reservation are absent from the file; the statements gate everything
+shared; a private address needs its own confirmation; an erasure clears exactly the selected phone and leaves the
+other occupants, the reservation, the holder, the room's entitlement and its counters as they were, and removes the
+address from the activity log; an address also used under another reservation, with a voucher, or with another
+person's remembered device, verified address or account is never selectable; a returning guest states both
+reservations; a room move across PMS interfaces keeps one context and two interfaces without a link are refused; a
+staff-issued credential is claimed phone by phone; a record that straddles the range, is recent or is live is not
+erased; a record that appears or changes after the review stops the action; concurrent erasures run once; roles,
+malformed input, a reason that names the guest, another site, expiry, the table guards; and the whole ACCESS and
+ERASURE flow run as `svc_edged` through the definer functions. The Hotel Admin suites
+`guest-data-assisted-page.test.tsx` and `guest-data-assisted-words.test.ts` cover the console and keep its words in
+step with the database's reason codes. 0146 applies, rolls back and applies again cleanly.
+
+**Residual risks (recorded, not hidden).** See ASSISTED_GUEST_DATA_REQUESTS.md section 9; the first is that *sole
+use* of a device is the member of staff's statement, which the database can contradict (another access or person on
+the address) but never prove. Also: a partly processed device keeps its identity row; one-time codes, accounts and
+sign-in identities themselves are the automatic request's; a restore from an older backup brings anonymised records
+back; DHCP reservations, PMS connection attempts and one-time-code traces are not rewritten; a session admitted at the instant a device is anonymised can keep the real address until the next request; no four-eyes approval; the 30-day expiry and the record bounds are fixed limits; the privilege path of the
+definer functions was proven on a database with the production roles (owner `iam_v2_owner`, runtime `svc_edged`), not
+on a Gate-P dry run of an appliance, because nothing was deployed.

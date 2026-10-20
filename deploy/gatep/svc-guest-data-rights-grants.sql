@@ -30,3 +30,27 @@ BEGIN
     GRANT SELECT (id, tenant_id, destination) ON public.auth_otps TO iam_v2_owner;
   END IF;
 END $g$;
+
+-- Migration 0146 (assisted guest data requests): edged runs the workflow through definer functions only; no table
+-- privilege is added. iam_v2_owner (the definer) reads and clears the address of a social sign-in redirect, which is
+-- a public table: the columns it needs, no more. Guarded like the rest.
+DO $g$
+BEGIN
+  IF to_regprocedure('public.assisted_request_erase(uuid,uuid,uuid,text,text,text,text,jsonb)') IS NULL THEN
+    RAISE NOTICE 'migration 0146 is not applied; assisted guest data request grants skipped';
+    RETURN;
+  END IF;
+  GRANT EXECUTE ON FUNCTION iam_v2.assisted_request_get(uuid,uuid,uuid) TO svc_edged;
+  GRANT EXECUTE ON FUNCTION iam_v2.assisted_request_list(uuid,uuid) TO svc_edged;
+  GRANT EXECUTE ON FUNCTION iam_v2.assisted_request_review_json(uuid,uuid,uuid) TO svc_edged;
+  GRANT EXECUTE ON FUNCTION public.assisted_reason_check(uuid,uuid,jsonb,text) TO svc_edged;
+  GRANT EXECUTE ON FUNCTION public.assisted_request_reason_check(uuid,uuid,uuid,text) TO svc_edged;
+  GRANT EXECUTE ON FUNCTION public.assisted_request_open(uuid,uuid,text,text,text[],timestamptz,timestamptz,jsonb,text,text,text,boolean,boolean,boolean,boolean,text) TO svc_edged;
+  GRANT EXECUTE ON FUNCTION public.assisted_request_close(uuid,uuid,uuid,text,text,text) TO svc_edged;
+  GRANT EXECUTE ON FUNCTION public.assisted_request_export(uuid,uuid,uuid,text,text,text,text,jsonb) TO svc_edged;
+  GRANT EXECUTE ON FUNCTION public.assisted_request_erase(uuid,uuid,uuid,text,text,text,text,jsonb) TO svc_edged;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'iam_v2_owner') THEN
+    GRANT SELECT (tenant_id, state, client_ip, client_mac, user_agent, provider, created_at, consumed_at) ON public.social_oauth_states TO iam_v2_owner;
+    GRANT UPDATE (client_ip, client_mac, user_agent) ON public.social_oauth_states TO iam_v2_owner;
+  END IF;
+END $g$;

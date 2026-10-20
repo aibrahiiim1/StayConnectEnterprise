@@ -9,6 +9,7 @@
 // reports and totals keep working) and is refused while the guest is still staying or online.
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { Card, CardBody, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -129,6 +130,13 @@ export default function GuestDataPage() {
         Check the guest&rsquo;s identity before you hand over an export or erase anything. Do not write the
         guest&rsquo;s name, address, phone, room or reservation in the reason: the reason is kept after the guest is
         erased, so a reason that names them is refused.
+      </Callout>
+
+      <Callout tone="neutral" title="Records no rule can attribute to one person">
+        The internet access used through a room, a voucher or a staff-issued account, and a device used with someone else,
+        is shared: it is never exported or erased here. If a guest asks for the usage of their own phone, open an{" "}
+        <Link className="underline" href="/guest-data/assisted">assisted request</Link>: you verify the requester,
+        review the exact records, and only records established as theirs can be handed over or anonymised.
       </Callout>
 
       {done && (

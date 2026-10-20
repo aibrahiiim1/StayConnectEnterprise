@@ -144,7 +144,7 @@ Hotel Admin *Guest data request* (export or erasure) reaches only the class its 
 |---|---|---|---|
 | **PMS reservation data** | the stay, its guest rows, PMS messages, folio (room charges), post-stay access | a *stay* or *stay guest* request: the guest the PMS names | an account or identity request |
 | **Individual data** | a client account the guest registered themselves, an OTP/social identity with its remembered devices, their own entitlements and purchases, and the devices **only they** used | an *account* or *identity* request: the person who registered or verified it | a stay request |
-| **Shared access** | access used through a room (stay) credential, a voucher, an anonymous subject or a staff-issued account, and any device with a link to anyone else | no automatic request: the system never discloses or changes it, counts it, and lets its liveness block an erasure. A request about it is the hotel's to handle by hand (below) | every automatic request |
+| **Shared access** | access used through a room (stay) credential, a voucher, an anonymous subject or a staff-issued account, and any device with a link to anyone else | no automatic request: the system never discloses or changes it, counts it, and lets its liveness block an erasure. A request about it is handled through an **assisted request** (below), where staff verify the requester and the database releases only the records established as theirs; the rest is the hotel's to handle by hand | every automatic request |
 
 **A device is one person's only when** something that person did binds it to them (a remembered-device tick, the
 self-registration made on it, or authentication of their own identity or self-registered account on it) **and**
@@ -180,7 +180,7 @@ legal advice.
 | | The system does | The hotel does |
 |---|---|---|
 | **Data attributable to one person**: the reservation's own data for the guest the PMS names; an account or identity the person registered, their own access and purchases, and the devices only they used | finds it, exports it and anonymises it on a staff request, with the operator's password and a reason, audited, leaving a reference to give the person | checks who is asking, hands the export over, and answers within one month (GDPR Art. 12(3)) |
-| **Shared access**: room, voucher, anonymous or staff-issued-account access, and any device with another link | nothing. It never discloses it and never changes it, and it tells the requester only that such records exist (counts, no content) | decides by hand, under its own legal responsibility, what it can lawfully disclose or erase and to whom, and answers the requester |
+| **Shared access**: room, voucher, anonymous or staff-issued-account access, and any device with another link | nothing by itself. It never discloses it and never changes it automatically, and it tells the requester only that such records exist (counts, no content). Under an **assisted request** a member of staff can have it release the records the database establishes as the requester's (below) | verifies the requester, runs the assisted request where it fits, and decides by hand, under its own legal responsibility, what it can lawfully disclose or erase for everything the assisted request leaves untouched; answers the requester |
 | **Retention** | anonymises shared records when the hotel's retention period ends | does not count that as an answer: a request is answered within one month whatever the retention setting says |
 
 **Retention expiry is not a response to a rights request.** The retention period limits how long data is kept
@@ -199,6 +199,25 @@ response.
 4. Decide, with legal advice, what to disclose or erase, and record the decision and its reason.
 5. Answer within one month, or say why not and that the requester may complain to the authority (Art. 12(3)-(4)).
 
-The product gives the hotel no tool to attribute or erase individual shared records, and none should be improvised
-(no direct database edits). Hotel Admin's usage and session screens can be read to find what a decision concerns.
-Whether to build a controlled manual path for this is a product decision that has not been taken (plan section 4).
+### The assisted request (migration 0146)
+
+For the part of a shared-access request the product *can* settle safely, Hotel Admin has an **assisted guest data
+request** (Guest data requests → Assisted request; runbook and design in
+[privacy/ASSISTED_GUEST_DATA_REQUESTS.md](privacy/ASSISTED_GUEST_DATA_REQUESTS.md)). It is never automatic and it does
+not change the rules above: a member of staff verifies the requester, writes down how, names the reservation, guest or
+account the records are said to belong to, the device address(es) and a range, and states that the device was shown
+and that the requester alone used it. The database then classifies every record of those addresses in the range:
+
+- **attributable** (their own account, identity, one-time code or exclusive device) and **claimable** (the stated
+  one-guest reservation's or staff-issued account's access, on an address that no other reservation, voucher, account or person
+  has ever used, with the statements made) can be selected;
+- **shared** (a voucher, open access, statements missing), **conflicting** (the address was also used by another
+  access or person) and **unverifiable** (not entirely inside the range, or nothing ties it to the stated context)
+  can not.
+
+Only the selection is handed over or has its addresses cleared, after the operator's password, a reason that names
+nobody, the request reference and an unchanged review signature. Entitlements, quotas, accounting, PMS and financial
+records and running sessions are never touched. What it can not settle stays the hotel's manual and legal
+responsibility exactly as above, and the end of a retention period is still not a response to a request. The
+product still gives the hotel no tool to attribute or erase shared records directly, and none should be improvised
+(no direct database edits).

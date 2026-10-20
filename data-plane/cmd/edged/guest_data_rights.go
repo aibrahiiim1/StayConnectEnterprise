@@ -40,6 +40,7 @@ func (s *server) guestDataRightsRoutes() http.Handler {
 	r.Get("/erasures", s.listGuestDataErasures)
 	r.Post("/export", s.exportGuestData)
 	r.Post("/erase", s.eraseGuestData)
+	s.assistedRoutes(r)
 	return r
 }
 

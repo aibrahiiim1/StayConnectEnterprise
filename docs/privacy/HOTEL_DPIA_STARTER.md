@@ -222,8 +222,8 @@ off by default.* Cloud PMS links (Apaleo, Mews, Opera Cloud) are always encrypte
 **OneGate already:** finds one guest's records across the system, exports them as a file, and deletes them by
 making them anonymous (🔍 *Guest data requests*). Each request is logged with a reference to give the guest.
 When guests share a room, each is handled on their own. The internet access used through a room's credentials is
-shared by everyone in the room, so OneGate does not export or erase it for one guest: a request about it is yours to
-answer by hand (see below). The retention period ending is not an answer to such a request.
+shared by everyone in the room, so OneGate does not export or erase it for one guest on its own: you handle a request about it
+with the *Assisted request* or by hand (see below). The retention period ending is not an answer to such a request.
 
 **Yours:**
 
@@ -232,7 +232,9 @@ answer by hand (see below). The retention period ending is not an answer to such
 - [ ] Someone knows what to do when a request concerns **shared** internet access (a room's use, a voucher, a device
       used with others): check who is asking, ask what ties the records to them, weigh the other people who used
       them, decide with legal advice, and answer within one month. **Waiting for the retention period is not an
-      answer.** OneGate gives no tool for this; the steps are in the OneGate data-ownership notes.
+      answer.** OneGate's *Assisted request* (in Guest data requests) does the part it can prove: you verify who is asking and
+      state what you saw, review the exact records, and hand over or anonymise only those the system establishes as
+      theirs. Everything it leaves untouched is yours to answer by hand; the steps are in the OneGate data-ownership notes.
 - [ ] Requests are answered within one month.
 
 **Result:** [ ] Low ⭐  [ ] Medium  [ ] High

@@ -378,6 +378,9 @@ The product is still in development: there is no paying customer and no live hot
   data and the devices only they used; the room's access, vouchers, staff-issued accounts and any device with a
   foreign link are shared and untouched (their liveness still blocks an erasure). A PMS guest number counts only
   within its PMS interface. Details and the residual risks: audit section F.
+- **Assisted request (D-R6, migration 0146).** Built on the Product Owner's instruction of 2026-10-20: a
+  staff-supervised path for the records the automatic rules leave alone, with the controls listed in
+  [ASSISTED_GUEST_DATA_REQUESTS.md](ASSISTED_GUEST_DATA_REQUESTS.md). It adds no automatic disclosure or erasure.
 - **Automatic and manual.** The product handles automatically only what it can attribute to one person. It never
   discloses or erases shared data on its own, and **retention expiry is not a response to an individual rights
   request**: a request about shared access is the hotel's manual and legal responsibility, answered within one
@@ -388,10 +391,15 @@ The product is still in development: there is no paying customer and no live hot
 - **D-C11** (disk encryption): needs more information first.
 - **D-F2** (breach contact), **D-F3** (legal reviewer).
 - **D-SSH** (appliance SSH before launch).
-- **Shared-access requests (D-R5 follow-up):** whether to provide a controlled manual path (attributing records with
-  the requester's help and producing a vetted extract) is a product decision not yet taken. Until then the hotel
-  handles such a request by hand, outside the product, and the legal reviewer (D-F3) confirms the steps in
-  DATA_OWNERSHIP.md section 8.
+- **Shared-access requests (D-R5 follow-up):** the controlled path now exists (D-R6, the assisted request). What
+  it leaves untouched (vouchers, open access, conflicts, records outside a range) stays the hotel's manual and
+  legal responsibility; the legal reviewer (D-F3) confirms the steps in DATA_OWNERSHIP.md section 8 and the
+  statements the assisted request asks staff to make.
+- **Assisted request, product decisions not taken:** (1) whether a second person must approve before a hand-over or
+  anonymisation (four eyes); (2) whether to extend it to vouchers, which are bearer credentials and are always shared
+  today; (3) whether the 30-day expiry and the 2,000-record and 366-day bounds should become hotel settings;
+  (4) whether the hotel's request file should be kept in the product longer than the request is open (it keeps no
+  address, note or link to a person once closed).
 - **Room sign-in network pause (A4) follow-up:** a single device changing its address can keep re-arming the pause
   every 15 minutes, and staff confirmations do not carry over to the next pause. Carrying confirmations over, or
   alerting staff to repeated pauses, is a product decision not yet taken; the pause works as decided.

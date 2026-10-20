@@ -88,9 +88,10 @@ func (s *server) runStaffRetention(ctx context.Context) {
 		}
 		return
 	}
-	if out["staff_accounts_anonymised"]+out["audit_entries"]+out["staff_addresses_cleared"] > 0 {
+	if out["staff_accounts_anonymised"]+out["audit_entries"]+out["staff_addresses_cleared"]+out["assisted_requests_expired"] > 0 {
 		slog.Info("staff data anonymised by retention", "accounts", out["staff_accounts_anonymised"],
-			"audit_entries", out["audit_entries"], "addresses", out["staff_addresses_cleared"])
+			"audit_entries", out["audit_entries"], "addresses", out["staff_addresses_cleared"],
+			"assisted_requests_expired", out["assisted_requests_expired"])
 	}
 }
 

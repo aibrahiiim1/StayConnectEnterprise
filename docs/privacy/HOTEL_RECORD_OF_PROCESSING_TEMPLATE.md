@@ -135,7 +135,7 @@ Leave out any row that depends on a feature you did not tick in Step 2.
 | 5 | **Keeping the network secure** | Legitimate interest (Art. 6(1)(f)) in stopping misuse; legal obligation (Art. 6(1)(c)) if you ticked "Yes" in Step 4 | Guests and anyone who tries to sign in | Sign-in attempts, including failed ones (the room typed, device addresses; what was typed with it is stored sealed). System logs with device addresses and sign-in names |
 | 6 | **Staff accounts and the activity log** | Legitimate interest (Art. 6(1)(f)) in security and accountability; for employees, also the employment contract | Hotel staff who use Hotel Admin | Email, name, password (hashed), authenticator secret (sealed), role, sign-ins. Log of what each staff member did, including **when they opened a guest's record or searched guest data** (opening the same record again within 10 minutes is recorded once), with time, IP address and browser |
 | 7 | **Showing the privacy notice** | Legal obligation (Art. 6(1)(c)) to inform guests (Art. 13), and to be able to show they were told | Guests who sign in | Which version of your privacy notice was shown at each sign-in, and when |
-| 8 | **Answering guest requests** (copy, deletion, correction) | Legal obligation (Art. 6(1)(c)) | Guests who ask | The request, a reference, and who handled it |
+| 8 | **Answering guest requests** (copy, deletion, correction) | Legal obligation (Art. 6(1)(c)) | Guests who ask | The request, a reference, and who handled it. For an *assisted request*, while it is open (at most 30 days): the requester's name or reference, how they were verified, a note of the evidence, and the device addresses concerned. Closing it removes them and the link to the guest's records; what stays is who, when, how it was verified, and how many records |
 | 9 | **Backups** | Legitimate interest (Art. 6(1)(f)) in recovering from a fault | Everyone above | A full copy of the database, encrypted to your own key holders |
 
 **Special categories** (health, religion and the like, Art. 9) and **criminal records** (Art. 10): none. OneGate
@@ -205,8 +205,9 @@ Some protections are yours to switch on or look after. Tick each one you have do
       or it runs on a network only the hotel uses.
 - [ ] Your **privacy notice** is completed and published 🔍 *(Portal settings → Content → Privacy notice)*.
 - [ ] Someone knows how to answer a guest request 🔍 *(Guest data requests)*: find the guest, send a copy, or
-      delete. A request about **shared** internet access (a room's use, a device used with others) is answered by
-      hand, not by the tool, and not by waiting for the retention period.
+      delete. A request about **shared** internet access (a room's use, a device used with others) uses the
+      *Assisted request* for what the tool can establish as the requester's, is answered by hand for the rest, and is
+      never answered by waiting for the retention period.
 
 ---
 
