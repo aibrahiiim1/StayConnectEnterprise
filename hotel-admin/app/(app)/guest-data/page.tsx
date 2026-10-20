@@ -59,6 +59,8 @@ export default function GuestDataPage() {
   const toast = useToast();
   const [q, setQ] = useState("");
   const [matches, setMatches] = useState<Match[] | null>(null);
+  const [matchesCut, setMatchesCut] = useState(false);
+  const [erasuresCut, setErasuresCut] = useState(false);
   const [searching, setSearching] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [erasures, setErasures] = useState<Erasure[] | null>(null);
@@ -71,8 +73,9 @@ export default function GuestDataPage() {
 
   const loadErasures = useCallback(async () => {
     try {
-      const r = await api.get<{ erasures: Erasure[] }>("/guest-data-rights/erasures");
+      const r = await api.get<{ erasures: Erasure[]; truncated?: boolean }>("/guest-data-rights/erasures");
       setErasures(r.erasures ?? []);
+      setErasuresCut(r.truncated === true);
     } catch { setErasures([]); }
   }, []);
   useEffect(() => { void loadErasures(); }, [loadErasures]);
@@ -83,8 +86,9 @@ export default function GuestDataPage() {
     if (term.length < 2) return;
     setSearching(true); setErr(null);
     try {
-      const r = await api.get<{ matches: Match[] }>("/guest-data-rights/search", { "X-Guest-Data-Search": encodeURIComponent(term) });
+      const r = await api.get<{ matches: Match[]; truncated?: boolean }>("/guest-data-rights/search", { "X-Guest-Data-Search": encodeURIComponent(term) });
       setMatches(r.matches ?? []);
+      setMatchesCut(r.truncated === true);
     } catch (e) { setErr(errMsg(e)); } finally { setSearching(false); }
   }
 
@@ -136,7 +140,8 @@ export default function GuestDataPage() {
         The internet access used through a room, a voucher or a staff-issued account, and a device used with someone else,
         is shared: it is never exported or erased here. If a guest asks for the usage of their own phone, open an{" "}
         <Link className="underline" href="/guest-data/assisted">assisted request</Link>: you verify the requester,
-        review the exact records, and only records established as theirs can be handed over or anonymised.
+        review the exact records, and only records established as theirs can be handed over or anonymised. Keep track of
+        each request and its deadline in the <Link className="underline" href="/guest-data/register">request register</Link>.
       </Callout>
 
       {done && (
@@ -161,6 +166,12 @@ export default function GuestDataPage() {
           </form>
           <ErrorBanner err={err} />
           <ResultsCount count={matches?.length} noun="record" />
+          {matchesCut && (
+            <Callout tone="warning">
+              Only the first 50 records are shown. Search for something more specific (the full email, the phone number or the
+              reservation number) so the guest&rsquo;s own records are listed.
+            </Callout>
+          )}
           {matches !== null && matches.length === 0 && (
             <EmptyState title="No guest found" hint="Records already erased or anonymised by retention are not shown." />
           )}
@@ -206,6 +217,7 @@ export default function GuestDataPage() {
           <CardDescription>Every erasure on this site. They hold no guest data.</CardDescription>
         </CardHeader>
         <CardBody>
+          {erasuresCut && <Callout tone="neutral">Only the 200 most recent erasures are shown. Older ones are kept.</Callout>}
           {erasures !== null && erasures.length === 0 && <EmptyState title="No guest has been erased" />}
           {erasures !== null && erasures.length > 0 && (
             <div className="overflow-x-auto">
