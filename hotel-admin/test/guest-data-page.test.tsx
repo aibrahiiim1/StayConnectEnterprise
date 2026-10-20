@@ -75,7 +75,7 @@ describe("Guest data requests", () => {
     fillDialog(dialog, "ERASE");
     fireEvent.click(go);
     await within(dialog).findByText(/the PMS still shows this stay as reserved or in-house/);
-    expect(within(dialog).getByText(/devices is online right now/)).toBeTruthy();
+    expect(within(dialog).getByText(/device is online right now on this record/)).toBeTruthy();
   });
 
   it("shows the erasure reference to give the guest", async () => {

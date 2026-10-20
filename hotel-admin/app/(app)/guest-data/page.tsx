@@ -23,6 +23,7 @@ import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { useToast } from "@/components/ui/toast";
 import { errMsg, formatDate } from "@/lib/utils";
 import { UserSearch, Download, Eraser, Search } from "lucide-react";
+import { LIVE_REASONS, eraseConsequences, exportDescription } from "@/lib/guest-data-words";
 
 type Kind = "account" | "principal" | "stay" | "stay_guest";
 type Match = {
@@ -41,17 +42,6 @@ const KIND_LABELS: Record<Kind, string> = {
 };
 
 // Why an erasure was refused, in the words a front office understands.
-const LIVE_REASONS: Record<string, string> = {
-  co_guests: "other guests are named on this stay; search again and choose the guest who asked, so the others are left alone",
-  pms_open: "the PMS still shows this stay as reserved or in-house and its departure date has not passed; the PMS would copy the guest straight back",
-  pms_pending: "a PMS message about this stay has not been processed yet; try again once it has (see PMS activity)",
-  access_live: "the guest's internet access has not ended yet",
-  online: "one of the guest's devices is online right now",
-  signin_restricted: "one of the guest's devices is under a sign-in restriction; release it on Guest sign-in attempts first",
-  other_site: "this guest identity was also used at another site, so it cannot be erased here",
-  busy: "the guest's records changed while this ran; try again",
-};
-
 function saveJSON(doc: unknown) {
   const blob = new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -233,7 +223,7 @@ export default function GuestDataPage() {
         open={exporting !== null}
         onOpenChange={(v) => { if (!v) { setExporting(null); setActionErr(null); } }}
         title="Export this guest’s data?"
-        description="Downloads everything held about this guest as one file: accounts, sign-in methods, stays, internet access, devices, sessions and sign-in attempts. When other guests share the stay, the file holds only this guest’s details, without the room’s shared internet access."
+        description={exportDescription(exporting?.kind)}
         confirmLabel="Download export"
         busy={busy}
         error={actionErr}
@@ -253,13 +243,7 @@ export default function GuestDataPage() {
         busy={busy}
         error={actionErr}
         confirmText="ERASE"
-        consequences={[
-          "Names, email addresses, phone numbers, room and reservation numbers, MAC and IP addresses are replaced or cleared. This cannot be undone.",
-          "Linked records go too: the stay a client account belongs to, and the portal identities that signed in on it.",
-          "Other guests on the same stay are left alone: only this guest’s name and PMS guest number are removed from it.",
-          "Totals, reports and financial records stay, without anything that identifies the guest.",
-          "Refused while the guest is in-house, has internet access running, or has a device online.",
-        ]}
+        consequences={eraseConsequences(erasing?.kind)}
         requireReason
         reasonMinLength={4}
         reasonPlaceholder="e.g. written erasure request received at reception"
