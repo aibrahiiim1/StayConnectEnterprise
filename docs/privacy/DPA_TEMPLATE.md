@@ -114,10 +114,13 @@ liable to the Controller for the performance of each Sub-processor's obligations
 
 7.1 **Data subject rights (Art. 28(3)(e)).** The Software lets the Controller answer requests itself: Hotel Admin's
 *Guest data requests* finds one guest's records, exports them as a machine-readable file (access and
-portability), and erases them by anonymisation. When other guests share the stay, one guest's export holds only
-their own details, and erasing one guest leaves the others; the room's shared internet access, devices and
-sessions cannot be told apart per guest, so they are neither exported to nor erased for one guest (they follow
-the retention periods). Retention settings limit how long data is kept. The Processor
+portability), and erases them by anonymisation. A request about a reservation covers the reservation's own data;
+a request about a client account or sign-in identity covers that person's own data and the devices only they used.
+The PMS may name only the reservation holder while several people use the room, so the internet access used
+through a room's credentials, a voucher or a staff-issued account, and any device also used with someone else, is
+shared and cannot be attributed to one person: it is neither exported nor erased for one person, and follows the
+retention periods. When other guests share a stay, one guest's export holds only their own details, and erasing
+one guest leaves the others. Retention settings limit how long data is kept. The Processor
 gives further reasonable assistance on request. A request the Processor receives directly from a data subject
 is passed to the Controller without undue delay and is not answered by the Processor.
 

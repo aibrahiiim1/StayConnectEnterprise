@@ -435,10 +435,76 @@ factory-clean appliance (or a migrated Central). Nothing is deployed.
   confirmations over are an open product decision (plan §4, Still open).
 - Enrolling an authenticator at first sign-in needs only the password; an administrator-issued code is an open
   decision.
-- An account anchor still takes in the stay the account belongs to, as D-C4 defines "this guest"; if that account
-  belongs to an unnamed room-mate, the named guest's stay data is in scope. Recorded as a residual risk.
+- ~~An account anchor still takes in the stay the account belongs to.~~ Resolved by section F (migration 0145,
+  decision D-R5): an account request no longer reaches its linked reservation, and a stay request no longer reaches
+  the room's access.
 - Upgrade note: `POST /auth/mfa/recovery-codes` (Hotel Admin) now needs `code`, and so does scd's route; edged and
   scd deploy together. Migrations must run before the services (0136 and 0144 are read by scd and edged).
+
+---
+
+## F. Ownership and isolation of guest data: 2026-10-21
+
+**The defect.** The earlier scope treated a stay's internet access as the named guest's. A PMS may name only the
+reservation holder while several people use the room and its credentials, so one named guest is not one occupant. A
+request about the holder therefore reached every device and session under the room's access, and a client account
+linked to a stay pulled the stay's reservation data into the account holder's request. The Product Owner decided
+(D-R5) that room credentials prove eligibility, not identity, and that no individual request may expose or change
+another person's data.
+
+**The fix (appliance migration 0145, with the console wording).** The model is in
+[DATA_OWNERSHIP.md](../DATA_OWNERSHIP.md) section 8: PMS reservation data, individual data and shared access, and a
+device that is a person's only when their own act binds it and nothing else touches it.
+
+| Item | Before | Now |
+|---|---|---|
+| F1 | A stay request exported and anonymised the devices, sessions, purchases, payments and sign-in records of the room's access | none of it: the export counts it (`not_included`), the erasure leaves it, its liveness still blocks the erasure |
+| F2 | An account request added the stay the account is linked to | the link is a reference only (`linked_to_a_reservation`); the reservation is reached only by a stay request |
+| F3 | A device used under a person's own access was theirs | theirs only if bound by their own act and touched by nobody else; a phone also used with the room's credentials, or by a second account, is shared and counted |
+| F4 | A staff-issued account's devices were attributed to it | never: the credential may be shared by a party |
+| F5 | MAC-keyed records (restrictions, grants, bindings, redirects) followed any device | only the person's exclusive devices |
+| F6 | The same PMS guest number matched across PMS interfaces | within one interface only; across interfaces only a unique full name, otherwise refused |
+| F7 | Attempts to enter a room were erased with the holder, including who typed them | what was typed goes; the typist's address and device stay |
+| F8 | A MAC search offered the reservation of the room whose credentials used the device | accounts and identities only |
+| F9 | The folio's PMS guest number could reach an account holder's export | shown only to a request about the reservation |
+| F10 | The activity log was matched by the ids of shared devices and entitlements | shared records are nobody's identifier; their entries are not rewritten |
+| F11 | Erasing a guest rewrote any activity entry containing the room number, a first or last name alone, or a display name (a "VLAN 101", a "Smith family request") | three tiers: a strong identifier (address, username, reservation number, device address) is erased wherever it appears; a full name only in entries about the guest and in what staff typed on the guest-data screens; a room number or a name part only in a staff search. Nothing else is rewritten |
+| F12 | A PMS message that never resolved to a stay was tied to a reservation by its number alone, across PMS interfaces | the same interface only: a number from another interface is another reservation's, not exported and not anonymised |
+| F13 | A staff-issued account's sign-in attempts, purchases and payments were its holder's | they belong to a credential that may be shared: only its usage totals are exported; a self-registered account's own are the holder's |
+| F14 | A namesake without a PMS number slipped past the ambiguous-guest refusal | any second row on one stay that could be the guest, by number or by name, is refused |
+| F15 | A device where someone else proved an address, or signed in with an access that is not theirs, still counted as exclusive; verification records and code bindings followed the device | such a device is shared; verification records and code bindings are tied to a person by the address their one-time code went to (their own codes), whatever device it happened on |
+| F16 | A surname alone removed a relative's entry from a PMS message; a reservation with one named guest exported the sharers listed in its messages | a surname alone counts only when nobody else on the stay or among the sharers has it, in both directions; only the guest's own sharer entry is exported |
+| F17 | One guest's erasure could hand another guest's waiting PMS message to the give-up | only a message that never resolved to a stay is ever given up here |
+| F18 | A staff "let this device try again" pass kept the device address | exclusive devices only: exported and anonymised with the device |
+
+**Verified** by `guest_data_ownership_integration_test.go` against a database built like a factory-clean appliance:
+a room with a holder and three occupants (export and erasure of the holder leave all three devices, sessions and
+addresses), an account linked to a stay and the stay (either request, either order), an identity with a remembered
+device and a device shared with the room, a staff-issued account, two accounts on one tablet, a room move across two
+PMSs, the same guest number on two PMS interfaces, a room attempt, the activity log, a MAC search, and a reservation
+people are still online on. 0145 rolls back and forward cleanly.
+
+**Residual risks (recorded, not hidden).**
+
+- Data in the shared class is not erasable on request; it is anonymised when the retention period ends (default 12
+  months for sessions and devices, 30 days for sign-in attempts). A hotel that must answer such a request sooner has
+  no tool for it: the access cannot be tied to a person.
+- Staff-issued accounts keep their devices out of the person's request even when only one person uses them.
+- A device is shared as soon as any other record touches it, so a guest's own phone used once with the room's
+  credentials is never attributed to them. This errs toward leaving data, never toward changing another person's.
+- A person who used only the room's credentials has no data of their own to export beyond what the room shares.
+- A PMS message that never resolved to a stay and names a shared reservation may keep an erased guest's name until
+  the retention run anonymises it: it is also another guest's message, and a waiting one cannot be edited.
+- Verification records and code bindings follow the address a one-time code went to. A person who used another
+  person's address is attributed that address's records, as the code proves.
+
+**Independent review of this change (2026-10-21).** An adversarial review of migration 0145 built each situation
+above in a rolled-back transaction against a factory-clean schema. It found three High (F11, F12, F17), three
+Medium (F13, F14, F15) and several Low items (F16, F18 and the console wording), all fixed, each with a regression
+test in `guest_data_ownership_review_integration_test.go`. Nothing it tried to break the guarantee with held after
+the fixes: a multi-occupant room, a linked account, an account created on a roommate's phone, a staff-issued
+account, a device linked to both an account and the room, two accounts on one tablet, a room move across two
+PMSs, and an ambiguous namesake.
 
 ---
 

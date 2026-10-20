@@ -132,3 +132,41 @@ read them ([API_DEPRECATIONS.md](API_DEPRECATIONS.md)). The `legacy_archive`
 schema, which on the live Central still held an older archived copy of
 guest/session/voucher/accounting history, was dropped with everything in it by
 migration 0047 (Product-Owner authorized, 2026-09-27).
+
+## 8. Whose data a guest request can reach (decision D-R5, migration 0145)
+
+A PMS may name only the reservation holder while several people use the same room and its credentials. A room
+number, a reservation credential, a MAC address or a shared internet access identifies nobody, and one PMS guest
+row is never taken to mean one occupant. Guest data on the appliance therefore falls into three classes, and a
+Hotel Admin *Guest data request* (export or erasure) reaches only the class its anchor owns:
+
+| Class | What it is | Reached by | Never reached by |
+|---|---|---|---|
+| **PMS reservation data** | the stay, its guest rows, PMS messages, folio (room charges), post-stay access | a *stay* or *stay guest* request: the guest the PMS names | an account or identity request |
+| **Individual data** | a client account the guest registered themselves, an OTP/social identity with its remembered devices, their own entitlements and purchases, and the devices **only they** used | an *account* or *identity* request: the person who registered or verified it | a stay request |
+| **Shared access** | access used through a room (stay) credential, a voucher, an anonymous subject or a staff-issued account, and any device with a link to anyone else | no request: it is counted, its liveness still blocks an erasure, and it is anonymised when retention ends (0127) | every request |
+
+**A device is one person's only when** something that person did binds it to them (a remembered-device tick, the
+self-registration made on it, or authentication of their own identity or self-registered account on it) **and**
+nothing else touches it: no other entitlement, session, credential, sign-in or account. One foreign link makes it
+shared. A person's own phone that was also used with the room's credentials is shared, because the MAC address
+does not say who held it. The same rule decides which MAC-keyed records (sign-in restrictions, verification
+grants, code bindings, sign-in redirects) a request can reach. A search by MAC address offers accounts and
+identities, never a reservation.
+
+A PMS guest number identifies a person only **within one PMS interface**. Across interfaces (a transfer between two
+PMSs) only a unique full name can tie a guest, and an ambiguous name is refused, never guessed (D-R4). Staff-issued
+accounts may be handed to a whole party, so their devices are never attributed to one person.
+
+Some records carry no person but name a one-time code: a verification access and a code-device binding. They are
+tied to a person by **the address the code went to** (an identity's email or phone, a self-registered account's
+email), whatever device it happened on, and the same codes decide whether a device is shared: a verification on it
+for anyone else's address, or a sign-in with an access that is not theirs, makes it shared.
+
+A staff-issued account's own record and its usage totals are reachable by a request about that account; what
+other people typed or paid through it (sign-in attempts, purchases, payments, sign-ins) is not attributed to its
+holder, because the credential may be shared by a party.
+
+Attempts to enter a reservation's room credentials are the typist's, not the holder's: erasing the reservation
+removes what was typed (the holder's name, the room) and keeps who typed it. The export tells the requester that
+shared records exist (`not_included`: counts only) without listing them.

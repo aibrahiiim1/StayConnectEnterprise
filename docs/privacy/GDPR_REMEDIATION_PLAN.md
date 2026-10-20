@@ -365,6 +365,20 @@ The product is still in development: there is no paying customer and no live hot
   has that name. Two rows of one stay are always two guests. Otherwise the request is refused as ambiguous and
   staff choose the guest row. Built: 0144.
 
+### D-R5, shared room credentials (Product Owner, 2026-10-21): **room credentials prove eligibility, not identity**
+
+- The PMS may provide only the primary reservation holder's name while several occupants use the same room number
+  and reservation credentials. One PMS guest record is never taken to mean one occupant, and a person is never
+  identified solely through a room number, reservation credential, MAC address or shared internet access.
+- An individual export or anonymisation must never expose or alter another person's data. PMS reservation data is
+  kept separate from individually attributable internet-account data. Ambiguous ownership is handled safely: left
+  alone and counted, never guessed.
+- **Built (migration 0145, on `delivery/gdpr`):** the model is in [DATA_OWNERSHIP.md](../DATA_OWNERSHIP.md) section 8.
+  A stay request reaches the reservation's own data only; an account or identity request reaches the person's own
+  data and the devices only they used; the room's access, vouchers, staff-issued accounts and any device with a
+  foreign link are shared and untouched (their liveness still blocks an erasure). A PMS guest number counts only
+  within its PMS interface. Details and the residual risks: audit section F.
+
 ### Still open
 
 - **D-C11** (disk encryption): needs more information first.

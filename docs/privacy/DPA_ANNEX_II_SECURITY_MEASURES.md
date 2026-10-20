@@ -146,8 +146,11 @@ The annex has three parts:
 
 - **Guest data requests** in Hotel Admin find one guest's records across the system, export them as a
   machine-readable JSON file, or erase them by anonymisation. Erasure is refused while the stay, access or device
-  is still live, and leaves a reference to give the guest. A stay shared by several guests is handled one guest
-  at a time: the others' details are neither exported nor erased, nor is the room's shared access.
+  is still live, and leaves a reference to give the guest. Room credentials prove eligibility, not identity: a
+  request about a reservation covers the reservation's own data, a request about an account or sign-in identity
+  covers that person's own data and the devices only they used, and the access a room, voucher or staff-issued
+  account gives to several people is never exported or changed for one person. A stay shared by several guests is
+  handled one guest at a time: the others' details are neither exported nor erased.
 - **Privacy notice record:** every sign-in records which version of the Controller's privacy notice was in force,
   stored once per version and unchangeable.
 
