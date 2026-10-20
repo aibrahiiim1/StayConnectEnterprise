@@ -19,13 +19,13 @@ func TestRetentionDefaultsMatchTheSweepsOwn(t *testing.T) {
 	want := map[string]int{
 		"KEEP_BINARIES": 5, "KEEP_RELEASES": 5, "KEEP_DB": 7,
 		"KEEP_CONFIG": 3, "DISK_WARN": 80, "DISK_CRIT": 90,
-		"SITE_BACKUP_DAYS": 30, "SITE_BACKUP_KEEP": 7, "DB_BACKUP_DAYS": 30, "RESTORE_TEST_MONTHS": 6, "SET_ASIDE_DAYS": 14,
+		"SITE_BACKUP_DAYS": 30, "SITE_BACKUP_KEEP": 7, "DB_BACKUP_DAYS": 30, "RESTORE_TEST_MONTHS": 6, "SET_ASIDE_DAYS": 14, "DAILY_BACKUP_HOUR": 2,
 	}
 	for _, s := range retentionSchema {
 		if want[s.Key] != s.Default {
 			t.Errorf("%s defaults to %d here and %d in stayconnect-backup-cleanup", s.Key, s.Default, want[s.Key])
 		}
-		if s.Min < 1 || s.Max <= s.Min {
+		if s.Min < 0 || s.Max <= s.Min {
 			t.Errorf("%s has nonsensical bounds %d..%d", s.Key, s.Min, s.Max)
 		}
 		if s.Unit == "" || s.Explains == "" {

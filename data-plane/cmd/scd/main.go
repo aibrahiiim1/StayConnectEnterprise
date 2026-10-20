@@ -1023,6 +1023,8 @@ func main() {
 	r.Post("/v1/ledger/destination/probe", s.ledgerDestinationProbe)
 	r.Post("/v1/ledger/recover", s.ledgerRecover)
 	r.Post("/v1/backup/run", s.backupRun)
+	r.Get("/v1/backup/daily", s.dailyBackupStatus)
+	r.Post("/v1/backup/daily/run", s.dailyBackupRunNow)
 	r.Post("/v1/backup/verify", s.backupVerify)
 	r.Post("/v1/backup/key-test", s.backupKeyTest)
 	// THE DESTRUCTIVE ONE. edged performs the password step-up, the permission check and the audit record
@@ -1239,6 +1241,8 @@ func main() {
 	// GUEST-DATA RETENTION (data_retention.go, migration 0127): hourly anonymisation of what has outlived the
 	// site's retention settings.
 	go s.dataRetentionLoop(rootCtx)
+	go s.ledgerLoop(rootCtx)
+	go s.dailyBackupLoop(rootCtx)
 	// SYSTEM-LOG RETENTION (log_retention.go, migration 0134): the appliance's logs follow the site's log period.
 	go s.logRetentionLoop(rootCtx)
 

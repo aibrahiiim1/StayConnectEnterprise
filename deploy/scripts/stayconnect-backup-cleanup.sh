@@ -20,6 +20,7 @@ CONF="${SC_CLEANUP_CONF:-/etc/stayconnect/backup-retention.conf}"   # overridabl
 : "${KEEP_RELEASES:=5}"      # per UI app (cloud-admin / hotel-admin), on top of current+previous
 : "${KEEP_DB:=7}"            # DB dumps, newest always kept regardless
 : "${DB_BACKUP_DAYS:=30}"     # appliance DB dumps older than this are removed too (the newest is still kept)
+: "${DAILY_BACKUP_HOUR:=2}"     # read by scd, which takes the daily backup (this script does not)
 : "${SET_ASIDE_DAYS:=14}"    # read by scd, which drops the database a restore set aside (this script does not touch databases)
 : "${KEEP_CONFIG:=3}"        # config *.bak* files
 : "${DISK_WARN:=80}"         # % used -> warn

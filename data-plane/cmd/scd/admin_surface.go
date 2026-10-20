@@ -113,6 +113,8 @@ var adminPrefixes = []string{
 	"/v1/voucher-key-generations",
 	"/v1/admin/",
 	"/v1/backup/",
+	// The erasure ledger (ledger_service.go): edged commits every erasure through it; never a guest route.
+	"/v1/ledger/",
 	"/v1/license/",
 	"/v1/hotel-admin-cert/",
 	"/v1/maintenance",

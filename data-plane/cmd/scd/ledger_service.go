@@ -49,6 +49,9 @@ var ledgerLocalPath = "/var/lib/stayconnect/ledger/erasure-ledger.jsonl"
 // ledgerOwnPlaces are where the appliance keeps its own data; the secondary storage must be on none of those disks.
 var ledgerOwnPlaces = []string{"/opt/stayconnect", "/var/lib/stayconnect", "/var/backups/stayconnect", "/var/lib/docker"}
 
+// ledgerIndependence is the check a folder must pass to be a second copy; tests replace it (they have no external disk).
+var ledgerIndependence = func() func(string) error { return ledger.ProductionIndependence(ledgerOwnPlaces) }
+
 const (
 	ledgerSecretDomain = "ledger-destination-secret:v1"
 	ledgerLockSQL      = `SELECT pg_advisory_xact_lock(hashtext('stayconnect-erasure-ledger'))`
@@ -158,7 +161,7 @@ func buildLedgerDestination(c ledgerDestConfig, sec ledgerDestSecret) (ledger.De
 		if strings.TrimSpace(c.Path) == "" {
 			return nil, errors.New("the folder is required")
 		}
-		return &ledger.DirDest{Root: filepath.Clean(c.Path), Independent: ledger.ProductionIndependence(ledgerOwnPlaces)}, nil
+		return &ledger.DirDest{Root: filepath.Clean(c.Path), Independent: ledgerIndependence()}, nil
 	case "sftp":
 		if c.Host == "" || c.User == "" || c.Dir == "" {
 			return nil, errors.New("the server, the user name and the folder are required")
@@ -267,7 +270,9 @@ func (s *server) ledgerReconcile(ctx context.Context) ledgerStatus {
 	rt.reconcileMu.Lock()
 	defer rt.reconcileMu.Unlock()
 	st := ledgerStatus{Checked: time.Now().UTC()}
-	st.Local.Path = ledgerLocalPath
+	if rt.store != nil {
+		st.Local.Path = rt.store.LocalPath
+	}
 	finish := func() ledgerStatus {
 		rt.mu.Lock()
 		rt.status = st
@@ -342,7 +347,7 @@ func (s *server) ledgerReconcile(ctx context.Context) ledgerStatus {
 	}
 	healLocal := func(why string) bool {
 		if local.Present {
-			_ = os.Rename(ledgerLocalPath, ledgerLocalPath+".damaged-"+time.Now().UTC().Format("20060102T150405Z"))
+			_ = os.Rename(rt.store.LocalPath, rt.store.LocalPath+".damaged-"+time.Now().UTC().Format("20060102T150405Z"))
 		}
 		if err := rt.store.RewriteLocal(dbE); err != nil {
 			problem("the copy on the appliance could not be rebuilt: %v", err)
@@ -365,7 +370,7 @@ func (s *server) ledgerReconcile(ctx context.Context) ledgerStatus {
 		}
 	}
 	if local.Parse.Torn {
-		if err := os.Truncate(ledgerLocalPath, int64(local.Parse.ValidBytes)); err == nil {
+		if err := os.Truncate(rt.store.LocalPath, int64(local.Parse.ValidBytes)); err == nil {
 			local = rt.store.ReadLocal()
 		}
 	}
@@ -430,7 +435,7 @@ func (s *server) ledgerReconcile(ctx context.Context) ledgerStatus {
 		st.State, st.Message = "not_configured", "set up the secondary storage for the erasure ledger: erasure requests are refused until it is"
 	default:
 		st.External.Configured, st.External.Kind, st.External.Describe = true, dest.Kind(), dest.Describe()
-		localBytes, _ := os.ReadFile(ledgerLocalPath)
+		localBytes, _ := os.ReadFile(rt.store.LocalPath)
 		lseq, lhash := local.Parse.Head()
 		cur, _ := rt.store.CipherFingerprint(ctx)
 		info, objOK, found, err := rt.store.ReadExternalHead(ctx)
@@ -863,5 +868,25 @@ func (s *server) runLedger(ctx context.Context) {
 		slog.Warn("erasure ledger: the secondary storage is not set up; erasure requests are refused until it is")
 	default:
 		slog.Error("erasure ledger needs attention", "state", st.State, "message", st.Message, "problems", st.Problems)
+	}
+}
+
+// ledgerLoop runs the reconciliation shortly after start-up and then every hour. It does not depend on the appliance having a
+// site yet: the ledger exists from the first migration.
+func (s *server) ledgerLoop(ctx context.Context) {
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(45 * time.Second):
+	}
+	t := time.NewTicker(time.Hour)
+	defer t.Stop()
+	for {
+		s.runLedger(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
 	}
 }

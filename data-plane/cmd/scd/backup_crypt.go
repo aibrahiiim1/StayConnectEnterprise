@@ -85,6 +85,12 @@ func (s *server) backupRecipientKeys(ctx context.Context) ([]string, error) {
 
 // writeDump streams pg_dump through gzip -- and age, when recipients are given -- into dest.
 func writeDump(ctx context.Context, dest string, recipients []age.Recipient) error {
+	return writeDumpTee(ctx, dest, recipients, nil)
+}
+
+// writeDumpTee is writeDump that also hands the plain SQL to tee as it is produced (the daily backup loads it into a scratch
+// database to prove the backup can be restored, without ever writing the plain text to disk).
+func writeDumpTee(ctx context.Context, dest string, recipients []age.Recipient, tee io.Writer) error {
 	f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
@@ -99,7 +105,11 @@ func writeDump(ctx context.Context, dest string, recipients []age.Recipient) err
 	gz := gzip.NewWriter(sink)
 	cmd := exec.CommandContext(ctx, "docker", "exec", pgContainer, "pg_dump", "-U", pgUser, "-d", pgDatabase,
 		"--no-owner", "--no-privileges")
-	cmd.Stdout = gz
+	if tee != nil {
+		cmd.Stdout = io.MultiWriter(gz, tee)
+	} else {
+		cmd.Stdout = gz
+	}
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

@@ -60,6 +60,9 @@ var retentionSchema = []retentionSetting{
 	// database. The newest is still always kept.
 	{Key: "DB_BACKUP_DAYS", Label: "Database backups: keep for", Unit: "days", Default: 30, Min: 1, Max: 3650,
 		Explains: "Database backups older than this are removed by the nightly sweep, even within the number above. The newest is always kept."},
+	// THE DAILY BACKUP (GDPR final mission): when it is taken. It is encrypted and verified; how many are kept is KEEP_DB.
+	{Key: "DAILY_BACKUP_HOUR", Label: "Daily backup: hour of the day", Unit: "o'clock", Default: 2, Min: 0, Max: 23,
+		Explains: "The appliance takes its daily encrypted backup at or after this hour (the appliance's own clock). The number of daily backups kept is the database backups setting above."},
 	// THE DATABASE SET ASIDE BY A RESTORE (GDPR final mission). A restore keeps the database it replaced so the restore can
 	// be undone -- and that copy holds everything the restored one was cleaned of, including guests erased since. It is
 	// removed after this many days; undoing a restore is possible until then.
