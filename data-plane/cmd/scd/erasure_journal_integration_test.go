@@ -46,15 +46,19 @@ func TestIntegrationErasureJournalFileAndReplay(t *testing.T) {
 		t.Fatalf("a second sync added %d (%v)", again, err)
 	}
 
-	// The restored database lacks that entry and one more (the record of the second no longer exists): both are
-	// applied or skipped and then known. An entry that cannot be applied is reported and left unrecorded.
+	// The restored database lacks that entry and one more. Neither names a record that exists (the real-record replay is
+	// proved in edged's guest_data_restore_replay tests), so both are skipped as gone and then known. An entry that cannot be applied is reported and left unrecorded.
 	entries, _ := readJournalFile(path)
 	mk := func(id, at, ref, kind string) json.RawMessage {
 		b, _ := json.Marshal(journalEntry{ID: id, ErasedAt: at, TenantID: tenant, SiteID: site, Ref: ref, Kind: kind, SubjectID: "00000000-0000-4000-8000-0000000000cc"})
 		return b
 	}
-	gone := mk("00000000-0000-4000-8000-0000000000aa", "2026-10-03T00:00:00Z", "ER-0000000000AA", "account")
-	bad := mk("00000000-0000-4000-8000-0000000000bb", "2026-10-04T00:00:00Z", "ER-0000000000BB", "bogus")
+	var idA, idB string
+	if err := conn.QueryRow(ctx, `SELECT gen_random_uuid()::text, gen_random_uuid()::text`).Scan(&idA, &idB); err != nil {
+		t.Fatal(err)
+	}
+	gone := mk(idA, "2026-10-03T00:00:00Z", "ER-0000000000AA", "account")
+	bad := mk(idB, "2026-10-04T00:00:00Z", "ER-0000000000BB", "bogus")
 	merged, _ := mergeJournal(entries, []json.RawMessage{gone, bad})
 	_ = merged
 	if _, err := conn.Exec(ctx, `DELETE FROM iam_v2.erasure_journal WHERE id=$1::uuid`, known); err != nil {
@@ -77,11 +81,11 @@ func TestIntegrationErasureJournalFileAndReplay(t *testing.T) {
 	if err != nil || absent {
 		t.Fatalf("reconcile = %+v absent=%v %v", res, absent, err)
 	}
-	if res.Entries != 3 || res.Reapplied != 1 || res.RecordsGone != 2 && res.RecordsGone != 1 || len(res.Failed) != 1 || !strings.Contains(res.Failed[0].Ref, "BB") {
+	if res.Entries != 3 || res.Reapplied != 0 || res.RecordsGone != 2 || len(res.Failed) != 1 || !strings.Contains(res.Failed[0].Ref, "BB") {
 		t.Fatalf("reconcile result: %+v", res)
 	}
 	var n int
-	if err := conn.QueryRow(ctx, `SELECT count(*) FROM iam_v2.erasure_journal WHERE id IN ($1::uuid,'00000000-0000-4000-8000-0000000000aa','00000000-0000-4000-8000-0000000000bb')`, known).Scan(&n); err != nil || n != 2 {
+	if err := conn.QueryRow(ctx, `SELECT count(*) FROM iam_v2.erasure_journal WHERE id IN ($1::uuid,$2::uuid,$3::uuid)`, known, idA, idB).Scan(&n); err != nil || n != 2 {
 		t.Fatalf("known entries recorded: %d %v (the one that failed must not be)", n, err)
 	}
 	// Run again: the failed entry is tried again, nothing else happens.

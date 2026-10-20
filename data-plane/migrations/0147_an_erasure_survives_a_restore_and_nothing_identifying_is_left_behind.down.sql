@@ -1613,7 +1613,6 @@ DROP FUNCTION IF EXISTS iam_v2.request_register_list(uuid, uuid);
 DROP FUNCTION IF EXISTS iam_v2.request_register_answer(uuid, uuid, uuid, text, text, text, text, text, text);
 DROP FUNCTION IF EXISTS iam_v2.request_register_extend(uuid, uuid, uuid, text, text);
 DROP FUNCTION IF EXISTS iam_v2.request_register_open(uuid, uuid, text, text, date, text, text);
-DROP FUNCTION IF EXISTS iam_v2.request_register_guard();
 DROP FUNCTION IF EXISTS iam_v2.scrub_registry_notes(uuid, uuid, timestamptz, integer, text);
 DROP FUNCTION IF EXISTS public.scrub_staff_label_public(text, text);
 DROP FUNCTION IF EXISTS iam_v2.scrub_staff_label(text, text);

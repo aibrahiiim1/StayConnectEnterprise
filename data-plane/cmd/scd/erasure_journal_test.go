@@ -89,3 +89,24 @@ func indexOf(s, sub string) int {
 	}
 	return -1
 }
+
+// One damaged line must not block the journal for good: the file is set aside and rebuilt from the database.
+func TestMergeIntoFile_ADamagedFileIsSetAsideAndRebuilt(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, erasureJournalName)
+	if err := os.WriteFile(path, []byte("{not json\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e := json.RawMessage(`{"id":"00000000-0000-4000-8000-000000000001","erased_at":"2026-10-01T00:00:00Z","tenant_id":"t","site_id":"s","erasure_ref":"ER-000000000001","kind":"account","subject_id":"00000000-0000-4000-8000-000000000002"}`)
+	added, total, err := mergeIntoFile(path, []json.RawMessage{e}, true)
+	if err != nil || added != 1 || total != 1 {
+		t.Fatalf("merge = %d %d %v", added, total, err)
+	}
+	if got, err := readJournalFile(path); err != nil || len(got) != 1 {
+		t.Fatalf("rebuilt file: %d entries, %v", len(got), err)
+	}
+	matches, _ := filepath.Glob(path + ".corrupt-*")
+	if len(matches) != 1 {
+		t.Fatalf("the damaged file was not set aside: %v", matches)
+	}
+}

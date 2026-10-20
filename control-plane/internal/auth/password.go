@@ -120,16 +120,26 @@ func VerifyPassword(encoded, password string) error {
 }
 
 var (
-	decoyOnce sync.Once
+	decoyMu   sync.Mutex
 	decoyHash string
 )
 
 // SpendPasswordCheck does the work of checking a password that cannot match, so a sign-in for a name Central does not
 // know (or an account that cannot sign in) takes as long as a wrong password for a real one: the response time must not
-// say which names have an account. Errors are ignored; the caller answers "invalid credentials" either way.
-func SpendPasswordCheck(password string) {
-	decoyOnce.Do(func() { decoyHash, _ = HashPassword("decoy-" + time.Now().String()) })
-	if decoyHash != "" {
-		_ = VerifyPassword(decoyHash, password)
+// say which names have an account. It returns ErrBusy exactly when a real check would have, so the caller can answer the
+// same "busy" for both. The decoy hash is made on first use and made again if that failed.
+func SpendPasswordCheck(password string) error {
+	decoyMu.Lock()
+	if decoyHash == "" {
+		decoyHash, _ = HashPassword("decoy-" + time.Now().String())
 	}
+	h := decoyHash
+	decoyMu.Unlock()
+	if h == "" {
+		return nil
+	}
+	if err := VerifyPassword(h, password); errors.Is(err, ErrBusy) {
+		return err
+	}
+	return nil
 }

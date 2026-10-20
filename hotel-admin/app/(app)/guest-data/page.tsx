@@ -99,6 +99,7 @@ export default function GuestDataPage() {
       const doc = await api.post<unknown>("/guest-data-rights/export", { kind: exporting.kind, id: exporting.id, reason, password });
       saveJSON(doc);
       setExporting(null);
+      setMatches(null); setMatchesCut(false); setQ("");
       toast.success("Export downloaded", "Hand it to the guest only after checking who they are.");
     } catch (e) { setActionErr(errMsg(e)); } finally { setBusy(false); }
   }
@@ -111,7 +112,8 @@ export default function GuestDataPage() {
         "/guest-data-rights/erase", { kind: erasing.kind, id: erasing.id, reason, password });
       setErasing(null);
       setDone({ ref: r.erasure_ref, counts: r.counts });
-      setMatches((m) => m?.filter((x) => x.id !== erasing.id) ?? null);
+      // The rest of the list names the same person (and their records are now erased): nothing of it stays on screen.
+      setMatches(null); setMatchesCut(false); setQ("");
       await loadErasures();
     } catch (e) {
       if (e instanceof ApiError && e.code === "guest_data_live") {

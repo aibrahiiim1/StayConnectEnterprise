@@ -49,10 +49,28 @@ func (s *server) sweepSetAside(ctx context.Context) int {
 	if readMaintenance().Active {
 		return 0
 	}
-	out, err := execPsql(ctx, "postgres", "SELECT datname FROM pg_database WHERE datname LIKE '"+pgDatabase+`\_before\_%';`)
+	// Only when the live database is where it should be and no restore has left a staging database: after a restore that
+	// failed half way, the set-aside database may be the only copy of the data, and no age makes it disposable.
+	state, err := execPsql(ctx, "postgres", "SELECT datname FROM pg_database WHERE datname = '"+pgDatabase+`' OR datname LIKE 'restore\_%' OR datname LIKE '`+pgDatabase+`\_before\_%';`)
 	if err != nil {
 		return 0
 	}
+	names := strings.Fields(state)
+	live := false
+	for _, n := range names {
+		if n == pgDatabase {
+			live = true
+		}
+		if strings.HasPrefix(n, "restore_") {
+			slog.Warn("set-aside databases are kept: a restore staging database exists", "database", n)
+			return 0
+		}
+	}
+	if !live {
+		slog.Error("set-aside databases are kept: the live database is missing", "database", pgDatabase)
+		return 0
+	}
+	out := state
 	days, dropped := setAsideDays(), 0
 	for _, name := range strings.Fields(out) {
 		if !asideExpired(name, time.Now().UTC(), days) {

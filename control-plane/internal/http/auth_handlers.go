@@ -134,7 +134,10 @@ func (d authDeps) login(w http.ResponseWriter, r *http.Request) {
 	if err != nil || op.Status != "active" || op.PasswordHash == "" {
 		// Constant response for bad email vs bad password vs disabled; the audit row says which. The time is the same
 		// too: a password is checked against a decoy, so the response time does not tell which names have an account.
-		auth.SpendPasswordCheck(req.Password)
+		if errors.Is(auth.SpendPasswordCheck(req.Password), auth.ErrBusy) {
+			api.Fail(w, r, http.StatusServiceUnavailable, "busy", "Central is busy checking other sign-ins. Try again in a moment.")
+			return
+		}
 		reason, opID := "unknown email", ""
 		if err == nil {
 			opID = op.ID

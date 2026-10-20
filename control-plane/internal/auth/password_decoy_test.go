@@ -11,12 +11,12 @@ func TestSpendPasswordCheck_TakesAsLongAsARealCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	SpendPasswordCheck("warm up")
+	_ = SpendPasswordCheck("warm up")
 	t0 := time.Now()
 	_ = VerifyPassword(h, "wrong")
 	real := time.Since(t0)
 	t0 = time.Now()
-	SpendPasswordCheck("wrong")
+	_ = SpendPasswordCheck("wrong")
 	decoy := time.Since(t0)
 	if decoy < real/2 {
 		t.Fatalf("decoy %v is much faster than a real check %v", decoy, real)

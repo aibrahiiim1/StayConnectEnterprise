@@ -36,6 +36,7 @@ var guestDataKinds = map[string]bool{"account": true, "principal": true, "stay":
 
 func (s *server) guestDataRightsRoutes() http.Handler {
 	r := chi.NewRouter()
+	r.Use(assistedBodyLimit)
 	r.Get("/search", s.searchGuestData)
 	r.Get("/erasures", s.listGuestDataErasures)
 	r.Post("/export", s.exportGuestData)

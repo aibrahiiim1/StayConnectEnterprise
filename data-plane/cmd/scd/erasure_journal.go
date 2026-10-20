@@ -31,6 +31,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -133,11 +134,11 @@ func writeJournalFile(path string, entries []json.RawMessage) error {
 		buf.Write(e)
 		buf.WriteByte('\n')
 	}
-	tmp := path + ".partial"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	f, err := os.CreateTemp(filepath.Dir(path), erasureJournalName+".*.partial")
 	if err != nil {
 		return err
 	}
+	tmp := f.Name()
 	if _, err := f.Write(buf.Bytes()); err != nil {
 		f.Close()
 		_ = os.Remove(tmp)
@@ -152,13 +153,53 @@ func writeJournalFile(path string, entries []json.RawMessage) error {
 		_ = os.Remove(tmp)
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Chmod(tmp, 0o600); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if d, err := os.Open(filepath.Dir(path)); err == nil {
+		_ = d.Sync()
+		d.Close()
+	}
+	return nil
+}
+
+// journalMu serialises every change of the journal file: the hourly run and a restore are different code paths of one
+// process, and each reads the file, merges and writes it back -- two at once would lose what the loser merged.
+var journalMu sync.Mutex
+
+// mergeIntoFile adds incoming entries to the file and returns how many the file gained and how many it holds. A file that
+// cannot be read (a damaged line) is not lost and not trusted: it is set aside as <file>.corrupt-<time> for hand recovery
+// and the file is rebuilt from the database's own journal, so one bad line can never block a restore for good.
+func mergeIntoFile(path string, incoming []json.RawMessage, writeIfUnchanged bool) (added, total int, err error) {
+	journalMu.Lock()
+	defer journalMu.Unlock()
+	existing, rerr := readJournalFile(path)
+	if rerr != nil {
+		aside := path + ".corrupt-" + time.Now().UTC().Format("20060102T150405Z")
+		if os.Rename(path, aside) != nil {
+			return 0, 0, rerr
+		}
+		slog.Error("erasure journal file was damaged and has been set aside; it is rebuilt from the database", "file", aside, "err", rerr)
+		existing = nil
+	}
+	merged, added := mergeJournal(existing, incoming)
+	if added == 0 && !writeIfUnchanged {
+		if _, statErr := os.Stat(path); statErr == nil {
+			return 0, len(merged), nil
+		}
+	}
+	return added, len(merged), writeJournalFile(path, merged)
 }
 
 // journalMissing reports the errors that mean "this database has no journal yet" (it predates migration 0147).
 func journalMissing(err error) bool {
 	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && (pgErr.Code == "42883" || pgErr.Code == "42P01" || pgErr.Code == "3F000" || pgErr.Code == "42501")
+	return errors.As(err, &pgErr) && (pgErr.Code == "42883" || pgErr.Code == "42P01" || pgErr.Code == "3F000")
 }
 
 func parseEntries(doc string) ([]json.RawMessage, error) {
@@ -179,17 +220,8 @@ func syncErasureJournal(ctx context.Context, db journalRow, tenant, site, path s
 	if err != nil {
 		return 0, err
 	}
-	existing, err := readJournalFile(path)
-	if err != nil {
-		return 0, err
-	}
-	merged, added := mergeJournal(existing, incoming)
-	if added == 0 {
-		if _, statErr := os.Stat(path); statErr == nil {
-			return 0, nil
-		}
-	}
-	return added, writeJournalFile(path, merged)
+	added, _, err := mergeIntoFile(path, incoming, false)
+	return added, err
 }
 
 type replayResult struct {
@@ -287,15 +319,11 @@ func journalSyncFromLive(ctx context.Context, live, path string) (ok bool, detai
 	if err != nil {
 		return false, "the erasure journal could not be read, so nothing was replaced: " + err.Error()
 	}
-	existing, err := readJournalFile(path)
+	added, total, err := mergeIntoFile(path, incoming, true)
 	if err != nil {
-		return false, "the erasure journal file could not be read, so nothing was replaced: " + err.Error()
-	}
-	merged, added := mergeJournal(existing, incoming)
-	if err := writeJournalFile(path, merged); err != nil {
 		return false, "the erasure journal file could not be written, so nothing was replaced: " + err.Error()
 	}
-	return true, fmt.Sprintf("%d erasures are on record outside the database (%d new)", len(merged), added)
+	return true, fmt.Sprintf("%d erasures are on record outside the database (%d new)", total, added)
 }
 
 // journalReplayInto replays the file onto the database that is live after a restore.
@@ -316,7 +344,7 @@ func journalReplayInto(ctx context.Context, db, path string) (detail string, pro
 	}
 	out = strings.TrimSpace(out)
 	if out == "absent" {
-		return "the restored database predates the erasure journal: the erasures are applied again, from the file, as soon as the migrations are applied (within the hour)", false
+		return "the restored database predates the erasure journal: the erasures are applied again, from the file, at the first hourly run after the migrations are applied", false
 	}
 	var res replayResult
 	if err := json.Unmarshal([]byte(out), &res); err != nil {

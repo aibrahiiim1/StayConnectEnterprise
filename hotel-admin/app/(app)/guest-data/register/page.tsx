@@ -64,8 +64,13 @@ export default function RequestRegisterPage() {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
+  function resetAnswer() {
+    setAnswering(null); setNote(""); setErasureRef(""); setAssistedRef(""); setStatus("ANSWERED"); setOutcome("NONE");
+  }
+
   async function open(e: React.FormEvent) {
     e.preventDefault();
+    setFile(null);
     setBusy(true); setErr(null);
     try {
       await api.post("/guest-data-rights/register", { kind, received_at: received, requester: requester.trim(), verification_method: method });
@@ -95,7 +100,7 @@ export default function RequestRegisterPage() {
         status, outcome, note: note.trim(), erasure_ref: erasureRef.trim(), assisted_ref: assistedRef.trim(),
       });
       setFile(r);
-      setAnswering(null); setNote(""); setErasureRef(""); setAssistedRef(""); setStatus("ANSWERED"); setOutcome("NONE");
+      resetAnswer();
       await load();
     } catch (e2) { setErr(errMsg(e2)); } finally { setBusy(false); }
   }
@@ -182,7 +187,7 @@ export default function RequestRegisterPage() {
               </Field>
               <div className="flex gap-2 sm:col-span-2">
                 <Button type="submit" variant="primary" disabled={busy || (refusal && outcome === "NONE")}>Close request</Button>
-                <Button type="button" variant="outline" onClick={() => setAnswering(null)}>Cancel</Button>
+                <Button type="button" variant="outline" onClick={resetAnswer}>Cancel</Button>
               </div>
             </form>
           </CardBody>
@@ -224,7 +229,7 @@ export default function RequestRegisterPage() {
                             {!r.extended && !r.overdue && (
                               <Button size="sm" variant="outline" disabled={busy} aria-label={`Extend request ${r.ref}`} onClick={() => void extend(r)}>Extend</Button>
                             )}{" "}
-                            <Button size="sm" variant="outline" aria-label={`Close request ${r.ref}`} onClick={() => { setErr(null); setAnswering(r); }}>Close</Button>
+                            <Button size="sm" variant="outline" aria-label={`Close request ${r.ref}`} onClick={() => { setErr(null); setFile(null); resetAnswer(); setAnswering(r); }}>Close</Button>
                           </>
                         )}
                       </TD>
