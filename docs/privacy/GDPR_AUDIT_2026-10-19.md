@@ -663,6 +663,31 @@ production roles; fixed with a regression test; the migration applied, rolled ba
 | H-17 | Central: an unknown sign-in name answered faster than a wrong password | a decoy password check makes the time the same |
 | H-18 | no record of when a request was received, when it is due, or on what ground it was refused | the request register (Hotel Admin → Guest data requests → Request register) |
 
+**Independent review of 0147 (two further adversarial reviewers, one on the SQL, one on the scd, edged, console and Central code).**
+All confirmed defects are fixed with a regression test (`guest_data_second_review_integration_test.go`,
+`erasure_journal_test.go`, `set_aside_sweep_test.go`):
+
+| # | Found | Now |
+|---|---|---|
+| R-1 | retention and erasure failed for an open stay that has occupancy evidence, and so stopped the whole retention run | times are coarsened only on a finished stay |
+| R-2 | a replayed assisted erasure left the device address in the activity log | one function cleans it for the request and for the replay, naming rows by table and position |
+| R-3 | the staff-label scrub failed on tables another role owns, so a departed operator was never anonymised | the scrub guard also admits a superuser (who could switch the trigger off anyway) |
+| R-4 | staff text on a stay's room access (slot actions, adjustments, device actions) survived the stay's erasure | scrubbed with the stay |
+| R-5 | a co-occupant row holding only a PMS guest number was exported to and erased with the named guest | such a row counts as a guest |
+| R-6 | the register kept the extension reason after the answer, and accepted an email in it | removed on answer; an address or a long number is refused |
+| R-7 | register dates used the server day | they use the site's day |
+| R-8 | two writers could corrupt the journal file; a damaged line blocked every restore; "permission denied" read as "not migrated" | one lock, a unique temp file and a directory sync; a damaged file is set aside and rebuilt from the database; permission denied is an error |
+| R-9 | the set-aside sweep could drop the only copy of the data after a restore that failed half way | it keeps everything while a staging database exists or the live database is missing |
+| R-10 | Central: the decoy check answered 401 where a real check answered 503 under load | both answer busy |
+| R-11 | search, export and erase accepted an unbounded body; the console kept the other matches of an erased guest on screen | 512 KB limit on every route; the list is cleared after an export or erasure |
+
+**Open, recorded:** a request closed after a backup comes back open after a restore, with the requester reference it had
+removed (the journal records erasures, not register answers or assisted closes; close it again; assisted requests also
+expire after 30 days); a restore does not recreate the erasure proof row (reference, counts) in the register of
+erasures, only the anonymisation; PMS connection attempts (`pms_attempts`) are cleaned by the retention run, not by an
+individual erasure; the journal file is copied hourly, so an erasure in the last hour before the loss of the disk is
+lost with it unless the file is copied off the box more often.
+
 **Verified.** Edged and scd integration suites against a factory-clean schema (see the delivery report for the run),
 `guest_data_restore_replay_integration_test.go` (erase, restore an older state, replay, same result; replay twice is a
 no-op; an unreadable entry is reported and retried), `guest_data_final_audit_integration_test.go`,

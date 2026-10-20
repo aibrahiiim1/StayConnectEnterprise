@@ -1609,6 +1609,52 @@ BEGIN
   RETURN v_id;
 END $$;
 
+-- restored from the previous definition
+CREATE OR REPLACE FUNCTION public.assisted_request_erase(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_reason text,
+                                                         p_confirm text, p_signature text, p_selected jsonb)
+    RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+DECLARE v jsonb; v_macs text[]; v_pats text[]; v_ref text; v_since timestamptz; n_audit integer := 0;
+BEGIN
+  PERFORM public.assisted_reason_check(p_tenant, p_site, iam_v2.assisted_request_anchors_json(p_tenant, p_site, p_request), p_reason);
+  v := iam_v2.assisted_request_erase_run(p_tenant, p_site, p_request, p_actor, p_reason, p_confirm, p_signature, p_selected);
+  v_ref := v ->> 'erasure_ref';
+  v_macs := ARRAY(SELECT jsonb_array_elements_text(v -> 'macs_cleared'));
+  -- Staff type an address in any spelling: colons, dashes, none, or three groups of four.
+  v_macs := ARRAY(SELECT DISTINCT x FROM unnest(v_macs) m
+                    CROSS JOIN LATERAL unnest(ARRAY[m, replace(m, ':', '-'), replace(m, ':', ''),
+                      substr(replace(m, ':', ''), 1, 4) || '.' || substr(replace(m, ':', ''), 5, 4) || '.' || substr(replace(m, ':', ''), 9, 4)]) x);
+  IF cardinality(v_macs) > 0 THEN
+    v_since := COALESCE((v ->> 'since')::timestamptz, '-infinity');
+    v_pats := ARRAY(SELECT '%' || replace(replace(replace(x, '\', '\\'), '%', '\%'), '_', '\_') || '%' FROM unnest(v_macs) x);
+    WITH cand AS MATERIALIZED (
+      SELECT l.ctid AS rid, l.payload AS old_payload, (lower(l.target_id) = ANY (v_macs)) AS about_it,
+             iam_v2.redact_guest_text(l.payload, v_macs, l.action = 'guest_data.searched') AS new_payload
+        FROM audit_log l
+       WHERE l.tenant_id = p_tenant AND l.ts >= v_since
+         AND (lower(l.target_id) = ANY (v_macs) OR l.action = 'guest_data.searched' OR lower(l.payload::text) LIKE ANY (v_pats)))
+    UPDATE audit_log l
+       SET payload = cand.new_payload || jsonb_build_object('erasure_ref', v_ref),
+           target_id = CASE WHEN cand.about_it THEN NULL ELSE l.target_id END
+      FROM cand
+     WHERE l.ctid = cand.rid AND (cand.about_it OR cand.new_payload IS DISTINCT FROM cand.old_payload);
+    GET DIAGNOSTICS n_audit = ROW_COUNT;
+  END IF;
+  RETURN (v - 'macs_cleared' - 'since') || jsonb_build_object('activity_log_entries_cleaned', n_audit);
+END $$;
+
+-- restored from the previous definition
+CREATE OR REPLACE FUNCTION iam_v2.stay_named_guests(p_stay uuid) RETURNS integer
+    LANGUAGE sql STABLE
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT count(*)::integer FROM iam_v2.stay_guests sg
+   WHERE sg.stay_id = p_stay AND num_nonnulls(sg.first_name_norm, sg.last_name_norm, sg.display_name) > 0;
+$$;
+
+DROP FUNCTION IF EXISTS public.audit_clean_macs(uuid, text[], text, timestamptz);
 DROP FUNCTION IF EXISTS iam_v2.request_register_list(uuid, uuid);
 DROP FUNCTION IF EXISTS iam_v2.request_register_answer(uuid, uuid, uuid, text, text, text, text, text, text);
 DROP FUNCTION IF EXISTS iam_v2.request_register_extend(uuid, uuid, uuid, text, text);
