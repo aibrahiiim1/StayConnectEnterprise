@@ -698,3 +698,45 @@ no-op; an unreadable entry is reported and retried), `guest_data_final_audit_int
 guest-facing notice, the DPA and its annexes, the DPIA and the record of processing are templates for the hotel and its
 legal reviewer (D-F3); none is legal sign-off. External dependencies unchanged: D-F2 (breach contact), D-F3,
 D-SSH, D-C11, and the external archival countersignature of the C35 receipt that no service in this product provides.
+
+## I. Backup, erasure ledger and restore closure: 2026-10-21 (migration 0148)
+
+**The gap.** Section H closed with a journal copied hourly to one file, and with three things open: a restore from an older backup
+could still bring an erased guest back if the file was lost or an hour behind; a request answered after the backup came back open with
+the requester it had removed; and the proof the guest was given (`ER-…`) did not come back. There was no second copy of the record that
+makes erasure survive, and no daily backup that could be trusted to restore.
+
+**What was built** (design and limits: [ERASURE_LEDGER.md](ERASURE_LEDGER.md); procedures: BACKUP_AND_RESTORE.md and
+[runbooks/ERASURE_LEDGER_RECOVERY.md](../runbooks/ERASURE_LEDGER_RECOVERY.md)):
+
+| Requirement | How it holds | Evidence |
+|---|---|---|
+| Two independent copies, both mandatory | database + primary file + a secondary storage the hotel sets up (mounted external disk or share, SFTP, S3-compatible); a folder is accepted only if the kernel's mount table and block-device tree show it is not on the appliance's disk | `internal/ledger` unit tests (independence over a sample mount table, LVM, partition, loopback NFS); real S3 (Scality CloudServer) and real OpenSSH SFTP (`scripts/ledger-destinations-compat.sh`) |
+| Not reported until both are durable | the ledger entry is written in the erasure's own transaction; before it commits, edged has scd append and fsync the primary copy, replace the secondary, and read both back; either failing rolls the erasure back | `TestIntegration_Ledger_ErasureFailsClosedWhenTheSecondaryStorageIsDown`, `…RefusedUntilSecondaryStorageIsSetUp`, store tests (a secondary failure takes the primary entry out again) |
+| Interrupted writes, storage failure, reconnection, corruption, concurrency, recovery | torn last line ignored and removed; atomic replace; hourly and per-request reconciliation heals a missing or damaged copy from the others, adopts a crash leftover, refuses to overwrite a copy that is ahead; one advisory lock serialises erasures | `TestIntegrationLedger_*` (as the real `svc_scd` role), `TestIntegration_Ledger_ConcurrentErasuresSerialise`, `TestCommit_*` |
+| Restore: either copy is enough | `ledger.Assess`: a copy is trusted only as an intact chain that reaches every independent witness (the ledger in the backup, the live database, the head in every backup note); one copy needs at least one witness; both online is never required | restore drill: both copies; secondary unplugged; secondary alone (and refused without a key holder's key); forked copies refused with the live data untouched; nothing trustworthy; interrupted write; a copy cut short; a backup older than the ledger; a **replacement appliance** |
+| Reapplied before the data is accessible | verified and applied **to the staging database before the swap**; retention reapplied right after the swap | drill: the erased guest is anonymised after a real restore of an older backup |
+| Closed requests not reopened; erasure proof recovered | `request_answered`, `assisted_closed` and the proof row are replayed | `TestIntegration_RestoreReplay_AnAnsweredRequestIsClosedAgain`, `…AClosedAssistedRequestDoesNotReopen`, the drill's proof-row assertion |
+| Missing copy rebuilt and synchronised | post-restore and hourly reconciliation; no file handling by hand | drill (the secondary returns and is rebuilt) |
+| Daily encrypted backup, 7 kept, verified restorable | database and `/etc/stayconnect` encrypted as written; the dump is loaded into a scratch database from the same stream; SHA-256 and ledger head recorded; newest N kept; daily digest check | `daily_backup_test.go` (rotation, stale notes, corruption, encrypted configuration archive without the financial marker) |
+| Simple administration | Backups → Erasure ledger (setup, test, host-key confirmation, status, recovery) and Daily backups; a banner on Guest data requests; a ledger problem never touches guest internet access | `ledger-card.test.tsx`, `LedgerAdmin` relay tests (password step-up; credentials never reach the log) |
+| Nothing to Central | no new message; the ledger, its copies and the storage credentials stay on the appliance and the hotel's own storage | by construction; DATA_OWNERSHIP.md |
+| Moving an appliance to another customer | `ledger_reset()` in the purge transaction: new ledger, previous storage setting forgotten, old file deleted | `…ReassignmentStartsANewLedgerAndForgetsTheStorage` |
+
+**Found while building it, and fixed** (each by a test that failed first): the ledger head could not be read from a backup older than
+the ledger (a single statement naming a missing function fails at parse time; found by the drill); the guard shared by both ledger tables
+read a column one of them lacks; replay helpers owned by the schema owner could not reach the public erasure functions; scd's status code
+read tables its runtime role has no right to (found by review; the privilege tests now run as the real `svc_edged` and `svc_scd`); a
+replacement appliance's own new ledger contradicted the old one (a first entry of another ledger is now set aside, a longer one never is).
+
+**Verified.** See the delivery report for the full run: appliance integration suites on a factory-clean schema (edged, scd, portald),
+the restore drill, the destination compatibility run, Hotel Admin `tsc` and the full vitest suite, Go build and vet, the grant-durability
+and migration-location validators, and the 0148 rollback drill (down, then up again, with data and a non-empty ledger).
+
+**Residual, stated plainly.** The chain proves integrity, not authorship (a party able to write the secondary storage and holding the
+public key-holder keys could forge a longer chain; the threat is failure, not a hostile storage administrator). A copy cut short is noticed
+only against a witness, so an erasure made after the newest backup and then lost from the only copy available is invisible; the two-copy
+commit exists to make that nearly impossible. Open requests (they hold who asked) are not in the ledger. An erasure interrupted in the
+last instant between the copies and the commit is completed at the next reconciliation, not rolled back. The legal status of the
+retention periods, the notice wording, the DPA and DPIA templates, and the external C35 receipt are not engineering and are not claimed.
+

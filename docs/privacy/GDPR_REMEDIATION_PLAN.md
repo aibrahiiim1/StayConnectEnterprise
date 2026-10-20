@@ -393,6 +393,15 @@ The product is still in development: there is no paying customer and no live hot
   and BACKUP_AND_RESTORE.md. Decisions taken as recommended, with no new Product-Owner decision: the appliance operator
   lockout is unchanged; a foreign guest record stops a customer move rather than being removed in SQL.
 
+- **Backup, ledger and restore closure (D-R8, migration 0148).** Product-Owner decisions of 2026-10-21: automatic daily encrypted
+  backups on the appliance with the newest seven kept and verified restorable; the erasure ledger kept in two copies, the **secondary
+  storage mandatory** (external disk or share, SFTP or customer-owned S3-compatible storage), an erasure not reported until both are
+  durable; a restore needs only **one** verified, complete copy and reapplies the ledger before the data is served; the missing copy
+  is rebuilt afterwards; nothing goes to Central. Built as described in [ERASURE_LEDGER.md](ERASURE_LEDGER.md); evidence in audit
+  section I. Engineering decisions taken within that approval: erasure is refused (not queued) while either copy cannot be written;
+  the secondary copy is encrypted to the backup key holders and never overwritten while it is ahead; the ledger starts again when an
+  appliance changes customer.
+
 ### Still open
 
 - **D-C11** (disk encryption): needs more information first.
