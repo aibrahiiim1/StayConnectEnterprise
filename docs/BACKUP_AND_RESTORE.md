@@ -352,9 +352,35 @@ Run quarterly, and once as part of pilot acceptance:
 Record every drill in the cloud audit log (`backup.drill` action) and, for
 site drills, as a `manual` row in `backup_records`.
 
-### After a restore: erasures made since the backup
+### After a restore: erasures made since the backup (migration 0147)
 
-A restore brings back exactly what the backup held. Records anonymised after that backup (an automatic erasure, an
-assisted request, a retention run) are back as they were, and an assisted request closed since is open again with its
-addresses. Check the erasure register for erasures dated after the backup and repeat them; open assisted requests
-that are no longer needed should be cancelled. The retention run anonymises what is past its period on its next run.
+A restore brings back exactly what the backup held, so a guest erased after the backup would be back. That does not
+happen: every erasure is recorded, as record kind and id only (no personal data), in `iam_v2.erasure_journal` and
+copied by `scd` to `erasure-journal.jsonl` in the backup folder (`/opt/stayconnect/backups/db/`), outside the database.
+
+What the restore does by itself, in order, each step shown on the restore result:
+
+1. **erasures** (before the swap): the live database's journal is merged into the file. A restore that cannot do this
+   does not start, because replacing the database first would lose the only record of those erasures.
+2. **erasures_reapplied** (after the integrity checks): every entry the restored database does not know is applied
+   again and recorded only once it has succeeded. An entry whose record does not exist in the restored database
+   (created after the backup) is recorded and skipped. An entry that fails is reported and tried again at every hourly
+   run; it is never dropped.
+
+`scd` runs the same reconciliation every hour, so a database restored by hand, or one restored from before the
+journal existed (it waits for the migration, then catches up), is brought into line without anyone remembering to.
+The journal file holds no personal data but is still part of the site's records: keep it with the backups, and copy it
+off the box with them.
+
+**Check after any restore:** Hotel Admin → Guest data requests shows the erasures; the restore result lists
+`erasures_reapplied` with the number applied. A failed entry is in the `scd` log as *an erasure could not be applied
+again*.
+
+**Open assisted requests** closed since the backup are open again with their addresses; cancel those no longer needed.
+
+**The database set aside.** The database a restore replaces is kept so the restore can be undone. It still holds data
+erased since, so `scd` removes it after `SET_ASIDE_DAYS` (default 14; Hotel Admin → Backups → Retention). Undo a restore
+within that time or not at all. Interrupted writes leave `*.partial` files, removed after a day.
+
+**Drill (add to the quarterly site restore):** erase a test guest, restore a backup taken before that erasure, and confirm
+the guest is anonymised again after the restore result reports `erasures_reapplied` OK.

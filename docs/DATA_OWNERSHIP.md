@@ -108,10 +108,11 @@ Consequences:
   Central is concerned. Optional providers the hotel enables (email, SMS,
   WhatsApp, social sign-in, payments) do receive the data they need to work;
   see [privacy/GDPR_REMEDIATION_PLAN.md](privacy/GDPR_REMEDIATION_PLAN.md).
-- Retention: only sign-in attempts (30 days), throttle and OTP rows, and
-  accounting detail (opt-in, unlimited by default) are purged automatically
-  today. Retention for the rest of the client data is planned work (GDPR plan
-  C1).
+- Retention: the guest and client records on the site are anonymised after the hotel's own retention
+  settings (Hotel Admin → Data retention), the activity log and staff accounts after theirs, and database
+  backups after the backup settings (`DB_BACKUP_DAYS`, `SITE_BACKUP_DAYS`). Financial records are kept for the
+  period the law requires and described in the guest-facing explanation below; the detail is in
+  [privacy/GDPR_REMEDIATION_PLAN.md](privacy/GDPR_REMEDIATION_PLAN.md).
 - Cloud support staff see only activation, connection and licence state; to
   diagnose a site they ask site staff to act in Admin Console.
 
@@ -221,3 +222,42 @@ records and running sessions are never touched. What it can not settle stays the
 responsibility exactly as above, and the end of a retention period is still not a response to a request. The
 product still gives the hotel no tool to attribute or erase shared records directly, and none should be improvised
 (no direct database edits).
+
+## 9. What an erasure leaves, and what survives a restore (migration 0147)
+
+**Anonymisation is not deletion, and it is complete or it is not claimed.** An erasure (automatic request or assisted
+request) anonymises through one set of primitives that retention uses too: names, emails, phones, reservation and guest
+numbers, device addresses, free text and the staff labels that name the person become random `anon-` tokens, and dates
+of an anonymised stay are coarsened (to the month, times to the day). The relationships that could re-identify a person
+are followed the same way: stays linked to one another are walked only while they belong to the same person, an account
+whose person is erased no longer makes a device "shared", and a phone number the person owned is released. The erasure
+reports what it anonymised and what it deliberately kept.
+
+**What is kept by law, and said so.** Financial records (the postings made to the hotel's PMS, with the PMS guest
+number, and the payment provider's references) are kept for the period tax and accounting law requires. The export
+and the erasure tell the person this, with the ground, so that the hotel's answer can name it (register outcome
+*Kept because the law requires it*). Nothing else identifying is kept on purpose.
+
+**A restore does not bring an erased person back.** An erasure is written, as record kind and id only (no personal
+data), to a journal in the database (`iam_v2.erasure_journal`) and copied by `scd` to a file next to the backups. After
+a restore `scd` replays the journal on the restored database: an erasure the backup predates is applied again, and an
+entry whose record no longer exists is recorded and skipped. The same reconciliation runs every hour, so a database
+restored by hand is brought into line too. Before a restore replaces the live database, the live journal is copied to
+the file first. A database restored from before the migration that adds the journal waits for that migration, then is
+reconciled. Procedure and checks: [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md).
+
+**What a restore leaves aside is bounded.** The database a restore replaces is kept so the restore can be undone; it
+still holds the data erased since, so it is removed after `SET_ASIDE_DAYS` (default 14, Hotel Admin → Backups). An
+interrupted write leaves a `*.partial` file, removed after a day.
+
+**Request register.** Hotel Admin → Guest data requests → Request register records each request, its due date (one
+month; two more once, with a reason), how the requester was verified, and how it was answered or why refused. Who asked
+is removed when the request is answered.
+
+## 10. Moving an appliance to another customer
+
+A cross-customer move purges the previous customer's local data. Records the purge cannot remove safely (guest records
+protected by their guards, enforcement state, the external receipt that C35 awaits) are **detected and the move stops**
+rather than leaving them behind or removing them unsafely. The financial record of the departing customer is exported to
+the compliance archive first, encrypted to the backup key holders (a `.json.age` file next to the backups; unencrypted,
+mode 0600, with a log warning, only when no key holder exists yet).

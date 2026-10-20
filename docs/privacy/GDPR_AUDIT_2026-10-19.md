@@ -630,7 +630,46 @@ step with the database's reason codes. 0146 applies, rolls back and applies agai
 **Residual risks (recorded, not hidden).** See ASSISTED_GUEST_DATA_REQUESTS.md section 9; the first is that *sole
 use* of a device is the member of staff's statement, which the database can contradict (another access or person on
 the address) but never prove. Also: a partly processed device keeps its identity row; one-time codes, accounts and
-sign-in identities themselves are the automatic request's; a restore from an older backup brings anonymised records
-back; DHCP reservations, PMS connection attempts and one-time-code traces are not rewritten; a session admitted at the instant a device is anonymised can keep the real address until the next request; no four-eyes approval; the 30-day expiry and the record bounds are fixed limits; the privilege path of the
+sign-in identities themselves are the automatic request's; a restore from an older backup brought anonymised records
+back (closed in section H, migration 0147); DHCP reservations, PMS connection attempts and one-time-code traces are not rewritten; a session admitted at the instant a device is anonymised can keep the real address until the next request; no four-eyes approval; the 30-day expiry and the record bounds are fixed limits; the privilege path of the
 definer functions was proven on a database with the production roles (owner `iam_v2_owner`, runtime `svc_edged`), not
 on a Gate-P dry run of an appliance, because nothing was deployed.
+
+## H. Closure audit: 2026-10-20 (migration 0147, Central 0052 to 0056 already in place)
+
+**Method.** Four independent read-only audits (schema-wide personal-data coverage, re-identification paths, the
+backup and restore path, and the Central and delivery side) and two adversarial reviews of the assisted request, each
+given the code and the goal and not these conclusions; every finding rebuilt against a factory-clean schema with the
+production roles; fixed with a regression test; the migration applied, rolled back with data in place and applied again.
+
+| # | Found | Now |
+|---|---|---|
+| H-1 | **A restore brought an erased person back** (and with them their identifiers) | erasures are journaled by record kind and id only, copied by `scd` to a file outside the database, replayed after every restore and every hour; a restore that cannot sync the journal does not start |
+| H-2 | the activity-log scrub used `ctid` to name a row, which is not unique across the chunks of a hypertable, so one erasure could rewrite another row | rows are named by `tableoid` and `ctid` |
+| H-3 | stay links could be walked from one guest into a different guest's stay | the walk stops where the person changes |
+| H-4 | an account erased with its person still made a device look shared, so the device kept its address | an erased account's links are not ownership |
+| H-5 | a phone number the person owned stayed claimed after the erasure | released |
+| H-6 | an `anon-` prefix could collide with a real value and be mistaken for already anonymised | the marker is exact (`anon-` and the generated hex) |
+| H-7 | names, phone numbers, free text, device labels and staff labels naming the person survived in places the primitives did not reach | one registry of the columns that may change during a scrub (`iam_v2.scrub_registry`), a trigger that admits only those, and a column coverage test over the whole schema |
+| H-8 | an anonymised stay kept its exact dates | month for dates, day for times |
+| H-9 | the export and the erasure did not say what is kept by law | financial identifiers are kept (tax and accounting law), and both say so with the ground |
+| H-10 | social sign-in kept a PKCE verifier and nonce after the erasure; a static address reservation was neither reported nor mentioned | both cleared; the reservation is reported for staff to remove where it lives |
+| H-11 | search and the erasure list were silently cut at 50 and 200 | both say so (`truncated`) and the console tells staff to narrow the search |
+| H-12 | the notice record said nothing when the portal showed its built-in notice | it records the built-in notice as shown |
+| H-13 | a cross-customer move could leave guest records the purge cannot remove | the move detects them and stops (fail closed) |
+| H-14 | a restore kept the database it replaced for ever | removed after `SET_ASIDE_DAYS` (default 14); `*.partial` files after a day |
+| H-15 | the compliance archive of a departing customer was plaintext | encrypted to the backup key holders (age) |
+| H-16 | an unreadable log-retention setting could be read as zero | does nothing instead |
+| H-17 | Central: an unknown sign-in name answered faster than a wrong password | a decoy password check makes the time the same |
+| H-18 | no record of when a request was received, when it is due, or on what ground it was refused | the request register (Hotel Admin → Guest data requests → Request register) |
+
+**Verified.** Edged and scd integration suites against a factory-clean schema (see the delivery report for the run),
+`guest_data_restore_replay_integration_test.go` (erase, restore an older state, replay, same result; replay twice is a
+no-op; an unreadable entry is reported and retried), `guest_data_final_audit_integration_test.go`,
+`guest_data_anonymisation_depth_integration_test.go`, `guest_data_register_integration_test.go`,
+`tenant_guest_records_integration_test.go`, Hotel Admin `guest-data-*.test.*`.
+
+**Not engineering, and not claimed.** The legal basis, the retention periods the hotel chooses, the wording of the
+guest-facing notice, the DPA and its annexes, the DPIA and the record of processing are templates for the hotel and its
+legal reviewer (D-F3); none is legal sign-off. External dependencies unchanged: D-F2 (breach contact), D-F3,
+D-SSH, D-C11, and the external archival countersignature of the C35 receipt that no service in this product provides.

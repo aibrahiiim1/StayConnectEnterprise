@@ -386,6 +386,13 @@ The product is still in development: there is no paying customer and no live hot
   request**: a request about shared access is the hotel's manual and legal responsibility, answered within one
   month (DATA_OWNERSHIP.md section 8, "Automatic handling, and the hotel's own responsibility").
 
+- **Closure (D-R7, migration 0147).** Product-Owner instruction of 2026-10-20 to close the GDPR work. Built: the erasure
+  journal and its replay after a restore, the scrub registry, depth of anonymisation, the request register, the
+  lawful-retention explanation, set-aside database expiry, encrypted compliance archive, fail-closed customer move,
+  Central sign-in timing. Details and the finding table: audit section H; operation: DATA_OWNERSHIP.md sections 9 and 10
+  and BACKUP_AND_RESTORE.md. Decisions taken as recommended, with no new Product-Owner decision: the appliance operator
+  lockout is unchanged; a foreign guest record stops a customer move rather than being removed in SQL.
+
 ### Still open
 
 - **D-C11** (disk encryption): needs more information first.
