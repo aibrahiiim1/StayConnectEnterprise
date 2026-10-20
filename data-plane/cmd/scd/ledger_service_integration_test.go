@@ -51,7 +51,18 @@ func newLedgerRig(t *testing.T) *ledgerRig {
 	if err := os.MkdirAll(r.ext, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	r.s = &server{db: pool}
+	// The server under test connects as the REAL runtime role when one is given (SCD_ROLE_TEST_DSN), so a statement that only a
+	// superuser may run fails here and not on an appliance.
+	srvPool := pool
+	if rd := os.Getenv("SCD_ROLE_TEST_DSN"); rd != "" {
+		rp, err := pgxpool.New(ctx, rd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(rp.Close)
+		srvPool = rp
+	}
+	r.s = &server{db: srvPool}
 	r.s.ledgerRT.store = ledger.NewStore(ledger.Config{LocalPath: r.local})
 	r.setDestination(r.ext)
 	return r

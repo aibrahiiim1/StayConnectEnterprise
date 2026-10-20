@@ -290,6 +290,8 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 				r.Use(s.resourcePermission("backups"))
 				r.Mount("/", s.backupKeysRoutes())
 			})
+			// The Backups surface itself, for the erasure ledger and the daily backup relays (ledger_admin.go).
+			mountResource(r, s, "backups", s.backupsRoutes)
 		})
 	})
 	f.srv = httptest.NewServer(r)

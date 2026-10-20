@@ -149,9 +149,9 @@ CREATE OR REPLACE FUNCTION iam_v2.ledger_head() RETURNS jsonb
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
-  SELECT jsonb_build_object('ledger', m.ledger_id, 'seq', COALESCE(h.seq, 0), 'hash', COALESCE(h.hash, ''),
+  SELECT jsonb_build_object('ledger', m.ledger_id, 'seq', COALESCE(h.seq, 0), 'hash', COALESCE(h.hash, ''), 'at_us', COALESCE(h.at_us, 0),
                             'unconfirmed', (SELECT count(*) FROM erasure_ledger u WHERE NOT u.confirmed))
-    FROM ledger_meta m LEFT JOIN LATERAL (SELECT l.seq, l.hash FROM erasure_ledger l WHERE l.confirmed ORDER BY l.seq DESC LIMIT 1) h ON true
+    FROM ledger_meta m LEFT JOIN LATERAL (SELECT l.seq, l.hash, l.at_us FROM erasure_ledger l WHERE l.confirmed ORDER BY l.seq DESC LIMIT 1) h ON true
 $$;
 
 CREATE OR REPLACE FUNCTION iam_v2.ledger_export(p_from bigint) RETURNS jsonb

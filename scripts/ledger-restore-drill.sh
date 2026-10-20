@@ -25,6 +25,8 @@ fi
 # the platform role may log in on an appliance; the disposable schema creates it NOLOGIN
 fullschema_psql stayconnect-pg postgres -q -c "ALTER ROLE stayconnect LOGIN" || exit 1
 
+fullschema_service_password stayconnect-pg stayconnect_site svc_scd scdpw >/dev/null
+export SCD_ROLE_TEST_DSN="postgres://svc_scd:scdpw@127.0.0.1:$PORT/stayconnect_site"
 export LEDGER_DRILL_DSN="postgres://postgres:postgres@127.0.0.1:$PORT/stayconnect_site"
 export PHASE3_TEST_DSN="$LEDGER_DRILL_DSN"
 cd "$ROOT/data-plane" || exit 1

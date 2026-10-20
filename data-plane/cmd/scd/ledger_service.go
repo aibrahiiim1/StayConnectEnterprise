@@ -491,9 +491,11 @@ func (s *server) ledgerReconcile(ctx context.Context) ledgerStatus {
 		if _, err := s.db.Exec(ctx, `SELECT public.ledger_destination_note($1, $2)`, ok, msg); err != nil {
 			slog.Debug("erasure ledger: destination note not saved", "err", err)
 		}
-		var last *time.Time
-		if err := s.db.QueryRow(ctx, `SELECT last_ok_at FROM public.ledger_destination`).Scan(&last); err == nil {
-			st.External.LastOK = last
+		var lastDoc string
+		if err := s.db.QueryRow(ctx, `SELECT COALESCE(public.ledger_destination_get() ->> 'last_ok_at', '')`).Scan(&lastDoc); err == nil && lastDoc != "" {
+			if t, err := time.Parse(time.RFC3339Nano, lastDoc); err == nil {
+				st.External.LastOK = &t
+			}
 		}
 	}
 	if st.State == "" {
@@ -665,7 +667,15 @@ func (s *server) ledgerDestinationPut(w http.ResponseWriter, r *http.Request) {
 	}
 	var ourID string
 	var ourEntries int64
-	_ = s.db.QueryRow(ctx, `SELECT m.ledger_id::text, (SELECT count(*) FROM iam_v2.erasure_ledger) FROM iam_v2.ledger_meta m`).Scan(&ourID, &ourEntries)
+	var hdoc []byte
+	if err := s.db.QueryRow(ctx, `SELECT iam_v2.ledger_head()::text`).Scan(&hdoc); err == nil {
+		var h struct {
+			Ledger string `json:"ledger"`
+			Seq    int64  `json:"seq"`
+		}
+		_ = json.Unmarshal(hdoc, &h)
+		ourID, ourEntries = h.Ledger, h.Seq
+	}
 	if found && info != nil && info.Ledger != ourID && ourEntries > 1 {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "belongs_to_another",
 			"message": "that storage already holds the erasure ledger of a different appliance. Use a folder, bucket or prefix of its own."})
@@ -834,8 +844,7 @@ func (s *server) ledgerCheckpoint(ctx context.Context) error {
 		return err
 	}
 	var recent bool
-	if err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT l.at_us > (extract(epoch from now() - interval '20 hours') * 1000000)::bigint
-	                                              FROM iam_v2.erasure_ledger l ORDER BY l.seq DESC LIMIT 1), false)`).Scan(&recent); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT COALESCE((iam_v2.ledger_head() ->> 'at_us')::bigint, 0) > (extract(epoch from now() - interval '20 hours') * 1000000)::bigint`).Scan(&recent); err != nil {
 		return err
 	}
 	if recent {

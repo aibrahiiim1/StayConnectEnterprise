@@ -82,7 +82,17 @@ func newDrill(t *testing.T) *drill {
 	  SELECT (SELECT tenant_id FROM si)::text, (SELECT id FROM si)::text`).Scan(&d.tenant, &d.site); err != nil {
 		t.Fatalf("seed tenant: %v", err)
 	}
-	d.s = &server{db: pool, tenID: d.tenant, siteID: d.site}
+	srvPool := pool
+	if rd := os.Getenv("SCD_ROLE_TEST_DSN"); rd != "" {
+		// scd connects as its real runtime role, so what only a superuser may do fails here and not on an appliance
+		rp, err := pgxpool.New(ctx, rd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(rp.Close)
+		srvPool = rp
+	}
+	d.s = &server{db: srvPool, tenID: d.tenant, siteID: d.site}
 	d.s.ledgerRT.store = ledger.NewStore(ledger.Config{LocalPath: d.local, Cipher: func(context.Context) (*ledger.Cipher, error) {
 		return &ledger.Cipher{Recipients: []age.Recipient{id.Recipient()}, Fingerprint: "drill"}, nil
 	}})

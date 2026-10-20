@@ -150,7 +150,7 @@ var longSCDPaths = map[string]time.Duration{
 }
 
 func (c *scdClient) call(ctx context.Context, method, path string, body any) (int, []byte, error) {
-	if d, ok := longSCDPaths[path]; ok {
+	if d, ok := longSCDPaths[strings.SplitN(path, "?", 2)[0]]; ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), d)
 		defer cancel()
