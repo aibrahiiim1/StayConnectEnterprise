@@ -327,7 +327,7 @@ END $$;
 -- An erasure: every record it anonymised is anonymised again from what the restored data says now, and the proof the guest
 -- was given (the reference, when, the counts) is put back. A record that no longer exists (created after the backup) is
 -- skipped: there is nothing to erase.
-CREATE OR REPLACE FUNCTION iam_v2.ledger_replay_erase(p_tenant uuid, p_site uuid, p_body jsonb) RETURNS void
+CREATE OR REPLACE FUNCTION public.ledger_replay_erase(p_tenant uuid, p_site uuid, p_body jsonb) RETURNS void
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'iam_v2', 'public', 'pg_temp'
     AS $$
@@ -362,7 +362,7 @@ END $$;
 
 -- A closed request: put back as closed, with the requester and the note gone. One created after the backup is recreated
 -- as closed.
-CREATE OR REPLACE FUNCTION iam_v2.ledger_replay_answer(p_tenant uuid, p_site uuid, p_body jsonb) RETURNS void
+CREATE OR REPLACE FUNCTION public.ledger_replay_answer(p_tenant uuid, p_site uuid, p_body jsonb) RETURNS void
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'iam_v2', 'public', 'pg_temp'
     AS $$
@@ -387,7 +387,7 @@ BEGIN
 END $$;
 
 -- A closed assisted request that the backup still has open: closed again, which removes its addresses and free text.
-CREATE OR REPLACE FUNCTION iam_v2.ledger_replay_assisted_closed(p_tenant uuid, p_site uuid, p_body jsonb) RETURNS void
+CREATE OR REPLACE FUNCTION public.ledger_replay_assisted_closed(p_tenant uuid, p_site uuid, p_body jsonb) RETURNS void
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'iam_v2', 'public', 'pg_temp'
     AS $$
@@ -452,11 +452,11 @@ BEGIN
     END IF;
     BEGIN
       IF e.kind = 'erase' THEN
-        PERFORM iam_v2.ledger_replay_erase(e.tenant, e.site, e.body::jsonb);
+        PERFORM public.ledger_replay_erase(e.tenant, e.site, e.body::jsonb);
       ELSIF e.kind = 'request_answered' THEN
-        PERFORM iam_v2.ledger_replay_answer(e.tenant, e.site, e.body::jsonb);
+        PERFORM public.ledger_replay_answer(e.tenant, e.site, e.body::jsonb);
       ELSIF e.kind = 'assisted_closed' THEN
-        PERFORM iam_v2.ledger_replay_assisted_closed(e.tenant, e.site, e.body::jsonb);
+        PERFORM public.ledger_replay_assisted_closed(e.tenant, e.site, e.body::jsonb);
       END IF;
       INSERT INTO iam_v2.erasure_ledger (seq, ledger_id, tenant_id, site_id, kind, at_us, body, prev_hash, hash, confirmed)
       VALUES (e.seq, e.ledger, e.tenant, e.site, e.kind, e.at_us, e.body, e.prev, e.hash, true);
@@ -575,8 +575,8 @@ REVOKE ALL ON iam_v2.ledger_meta, iam_v2.erasure_ledger, public.ledger_destinati
 REVOKE ALL ON FUNCTION iam_v2.ledger_guard(), iam_v2.ledger_hash(uuid,bigint,text,text,uuid,uuid,bigint,text),
   iam_v2.ledger_append(uuid,uuid,text,jsonb), iam_v2.ledger_row_json(iam_v2.erasure_ledger), iam_v2.ledger_pending(),
   iam_v2.ledger_confirm(text[]), iam_v2.ledger_head(), iam_v2.ledger_export(bigint), iam_v2.ledger_verify(),
-  iam_v2.ledger_append_erasure(uuid,uuid,text), iam_v2.ledger_replay_erase(uuid,uuid,jsonb),
-  iam_v2.ledger_replay_answer(uuid,uuid,jsonb), iam_v2.ledger_replay_assisted_closed(uuid,uuid,jsonb),
+  iam_v2.ledger_append_erasure(uuid,uuid,text), public.ledger_replay_erase(uuid,uuid,jsonb),
+  public.ledger_replay_answer(uuid,uuid,jsonb), public.ledger_replay_assisted_closed(uuid,uuid,jsonb),
   public.ledger_apply(jsonb,boolean), public.ledger_reset(), public.ledger_destination_get(), public.ledger_destination_secret(),
   public.ledger_destination_set(text,jsonb,bytea,bytea,text,integer,text), public.ledger_destination_note(boolean,text) FROM PUBLIC;
 

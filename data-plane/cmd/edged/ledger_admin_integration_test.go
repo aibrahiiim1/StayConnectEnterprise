@@ -281,7 +281,7 @@ func TestIntegration_Ledger_TheRuntimeRolesReachOnlyTheFunctions(t *testing.T) {
 		`SELECT iam_v2.ledger_append(gen_random_uuid(),gen_random_uuid(),'checkpoint','{}'::jsonb)`,
 		`SELECT public.ledger_apply('[]'::jsonb, false)`, `SELECT public.ledger_reset()`, `SELECT iam_v2.ledger_export(0)`, `SELECT iam_v2.ledger_verify()`,
 		`SELECT public.ledger_destination_get()`, `SELECT public.ledger_destination_secret()`,
-		`SELECT public.ledger_destination_set('dir','{}'::jsonb,NULL,NULL,NULL,NULL,'x')`, `SELECT iam_v2.ledger_replay_erase(gen_random_uuid(),gen_random_uuid(),'{}'::jsonb)`,
+		`SELECT public.ledger_destination_set('dir','{}'::jsonb,NULL,NULL,NULL,NULL,'x')`, `SELECT public.ledger_replay_erase(gen_random_uuid(),gen_random_uuid(),'{}'::jsonb)`,
 	} {
 		if _, err := ep.Exec(ctx, q); err == nil {
 			t.Errorf("svc_edged could run: %s", q)
@@ -294,7 +294,7 @@ func TestIntegration_Ledger_TheRuntimeRolesReachOnlyTheFunctions(t *testing.T) {
 	}
 	// svc_scd: the reconciliation, the replay and the setting; but the replay helpers and the transition reset are reached only
 	// through ledger_apply and the transition itself
-	for _, q := range []string{`SELECT iam_v2.ledger_replay_erase(gen_random_uuid(),gen_random_uuid(),'{}'::jsonb)`, `SELECT iam_v2.ledger_append_erasure(gen_random_uuid(),gen_random_uuid(),'ER-000000000000')`} {
+	for _, q := range []string{`SELECT public.ledger_replay_erase(gen_random_uuid(),gen_random_uuid(),'{}'::jsonb)`, `SELECT iam_v2.ledger_append_erasure(gen_random_uuid(),gen_random_uuid(),'ER-000000000000')`} {
 		if _, err := sp.Exec(ctx, q); err == nil {
 			t.Errorf("svc_scd could run: %s", q)
 		}

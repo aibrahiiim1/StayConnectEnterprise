@@ -133,7 +133,7 @@ func (d *drill) seedAccount(label string) {
 	email := fmt.Sprintf("drill-%s-%d-%d@example.com", label, time.Now().UnixNano(), d.stamp)
 	var id string
 	if err := d.live().QueryRow(context.Background(), `INSERT INTO iam_v2.guest_access_accounts (tenant_id, site_id, username, password_hash, display_name, notes, created_at, self_registered)
-		VALUES ($1,$2,$3,'$argon2id$fixture$not-a-real-hash','Drill Guest','room 101 guest', now() - interval '400 days', true) RETURNING id::text`,
+		VALUES ($1,$2,$3,'$argon2id$fixture$not-a-real-hash','Drill Guest','room 101 guest', now() - interval '1 day', true) RETURNING id::text`,
 		d.tenant, d.site, email).Scan(&id); err != nil {
 		d.t.Fatalf("seed account: %v", err)
 	}

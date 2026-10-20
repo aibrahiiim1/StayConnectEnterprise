@@ -170,9 +170,9 @@ DROP FUNCTION IF EXISTS public.ledger_destination_set(text,jsonb,bytea,bytea,tex
 DROP FUNCTION IF EXISTS public.ledger_destination_secret();
 DROP FUNCTION IF EXISTS public.ledger_destination_get();
 DROP FUNCTION IF EXISTS public.ledger_apply(jsonb,boolean);
-DROP FUNCTION IF EXISTS iam_v2.ledger_replay_assisted_closed(uuid,uuid,jsonb);
-DROP FUNCTION IF EXISTS iam_v2.ledger_replay_answer(uuid,uuid,jsonb);
-DROP FUNCTION IF EXISTS iam_v2.ledger_replay_erase(uuid,uuid,jsonb);
+DROP FUNCTION IF EXISTS public.ledger_replay_assisted_closed(uuid,uuid,jsonb);
+DROP FUNCTION IF EXISTS public.ledger_replay_answer(uuid,uuid,jsonb);
+DROP FUNCTION IF EXISTS public.ledger_replay_erase(uuid,uuid,jsonb);
 DROP FUNCTION IF EXISTS iam_v2.ledger_append_erasure(uuid,uuid,text);
 DROP FUNCTION IF EXISTS iam_v2.ledger_verify();
 DROP FUNCTION IF EXISTS iam_v2.ledger_export(bigint);
