@@ -205,7 +205,8 @@ Some protections are yours to switch on or look after. Tick each one you have do
       or it runs on a network only the hotel uses.
 - [ ] Your **privacy notice** is completed and published 🔍 *(Portal settings → Content → Privacy notice)*.
 - [ ] Someone knows how to answer a guest request 🔍 *(Guest data requests)*: find the guest, send a copy, or
-      delete.
+      delete. A request about **shared** internet access (a room's use, a device used with others) is answered by
+      hand, not by the tool, and not by waiting for the retention period.
 
 ---
 

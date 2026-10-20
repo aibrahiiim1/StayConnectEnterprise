@@ -365,7 +365,7 @@ The product is still in development: there is no paying customer and no live hot
   has that name. Two rows of one stay are always two guests. Otherwise the request is refused as ambiguous and
   staff choose the guest row. Built: 0144.
 
-### D-R5, shared room credentials (Product Owner, 2026-10-21): **room credentials prove eligibility, not identity**
+### D-R5, shared room credentials (Product Owner, 2026-10-20): **room credentials prove eligibility, not identity**
 
 - The PMS may provide only the primary reservation holder's name while several occupants use the same room number
   and reservation credentials. One PMS guest record is never taken to mean one occupant, and a person is never
@@ -378,12 +378,20 @@ The product is still in development: there is no paying customer and no live hot
   data and the devices only they used; the room's access, vouchers, staff-issued accounts and any device with a
   foreign link are shared and untouched (their liveness still blocks an erasure). A PMS guest number counts only
   within its PMS interface. Details and the residual risks: audit section F.
+- **Automatic and manual.** The product handles automatically only what it can attribute to one person. It never
+  discloses or erases shared data on its own, and **retention expiry is not a response to an individual rights
+  request**: a request about shared access is the hotel's manual and legal responsibility, answered within one
+  month (DATA_OWNERSHIP.md section 8, "Automatic handling, and the hotel's own responsibility").
 
 ### Still open
 
 - **D-C11** (disk encryption): needs more information first.
 - **D-F2** (breach contact), **D-F3** (legal reviewer).
 - **D-SSH** (appliance SSH before launch).
+- **Shared-access requests (D-R5 follow-up):** whether to provide a controlled manual path (attributing records with
+  the requester's help and producing a vetted extract) is a product decision not yet taken. Until then the hotel
+  handles such a request by hand, outside the product, and the legal reviewer (D-F3) confirms the steps in
+  DATA_OWNERSHIP.md section 8.
 - **Room sign-in network pause (A4) follow-up:** a single device changing its address can keep re-arming the pause
   every 15 minutes, and staff confirmations do not carry over to the next pause. Carrying confirmations over, or
   alerting staff to repeated pauses, is a product decision not yet taken; the pause works as decided.

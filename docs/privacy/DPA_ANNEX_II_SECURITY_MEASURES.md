@@ -149,7 +149,8 @@ The annex has three parts:
   is still live, and leaves a reference to give the guest. Room credentials prove eligibility, not identity: a
   request about a reservation covers the reservation's own data, a request about an account or sign-in identity
   covers that person's own data and the devices only they used, and the access a room, voucher or staff-issued
-  account gives to several people is never exported or changed for one person. A stay shared by several guests is
+  account gives to several people is never exported or changed for one person. A request about that shared access is
+  the Controller's to answer by hand; the end of a retention period is not a response to it. A stay shared by several guests is
   handled one guest at a time: the others' details are neither exported nor erased.
 - **Privacy notice record:** every sign-in records which version of the Controller's privacy notice was in force,
   stored once per version and unchangeable.

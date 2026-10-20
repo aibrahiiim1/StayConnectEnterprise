@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// The adversarial review of migration 0145 (2026-10-21) found these holes. Each test builds the exact situation
+// The adversarial review of migration 0145 (2026-10-20) found these holes. Each test builds the exact situation
 // the review described and proves it stays closed.
 
 // pmsEvent adds a PMS message on an interface. stay != "" makes it an applied message of that stay; otherwise it

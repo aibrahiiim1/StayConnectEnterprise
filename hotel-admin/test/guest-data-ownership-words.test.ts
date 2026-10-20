@@ -31,6 +31,16 @@ describe("what a guest-data request says it covers", () => {
     }
   });
 
+  it("shared access is the hotel's to handle by hand, and retention expiry is never offered as the answer", () => {
+    for (const kind of ["account", "principal", "stay", "stay_guest"]) {
+      expect(exportDescription(kind)).toMatch(/by hand/);
+      const text = eraseConsequences(kind).join(" ");
+      expect(text).toMatch(/by hand/);
+      expect(text).toMatch(/retention period (ending )?is not an answer/);
+      expect(text).not.toMatch(/follows? the retention period/);
+    }
+  });
+
   it("every erasure still warns it cannot be undone and is refused while the guest is live", () => {
     for (const kind of ["account", "principal", "stay", "stay_guest", undefined]) {
       const text = eraseConsequences(kind).join(" ");

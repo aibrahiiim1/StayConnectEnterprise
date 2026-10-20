@@ -443,7 +443,7 @@ factory-clean appliance (or a migrated Central). Nothing is deployed.
 
 ---
 
-## F. Ownership and isolation of guest data: 2026-10-21
+## F. Ownership and isolation of guest data: 2026-10-20
 
 **The defect.** The earlier scope treated a stay's internet access as the named guest's. A PMS may name only the
 reservation holder while several people use the room and its credentials, so one named guest is not one occupant. A
@@ -458,7 +458,7 @@ device that is a person's only when their own act binds it and nothing else touc
 
 | Item | Before | Now |
 |---|---|---|
-| F1 | A stay request exported and anonymised the devices, sessions, purchases, payments and sign-in records of the room's access | none of it: the export counts it (`not_included`), the erasure leaves it, its liveness still blocks the erasure |
+| F1 | A stay request exported and anonymised the devices, sessions, purchases, payments and sign-in records of the room's access | none of it: the export counts it (`not_included`), the erasure leaves it, its liveness still blocks the erasure. A request about it is the hotel's to handle by hand |
 | F2 | An account request added the stay the account is linked to | the link is a reference only (`linked_to_a_reservation`); the reservation is reached only by a stay request |
 | F3 | A device used under a person's own access was theirs | theirs only if bound by their own act and touched by nobody else; a phone also used with the room's credentials, or by a second account, is shared and counted |
 | F4 | A staff-issued account's devices were attributed to it | never: the credential may be shared by a party |
@@ -486,9 +486,13 @@ people are still online on. 0145 rolls back and forward cleanly.
 
 **Residual risks (recorded, not hidden).**
 
-- Data in the shared class is not erasable on request; it is anonymised when the retention period ends (default 12
-  months for sessions and devices, 30 days for sign-in attempts). A hotel that must answer such a request sooner has
-  no tool for it: the access cannot be tied to a person.
+- **Shared-access requests are the hotel's manual and legal responsibility.** The system never discloses or erases
+  shared data automatically, and it gives the hotel no tool to attribute or erase individual shared records. It
+  anonymises them when the retention period ends (default 12 months for sessions and devices, 30 days for sign-in
+  attempts), but **retention expiry is not a response to a rights request**: a request about shared access must be
+  answered within one month whatever the retention setting. What the hotel does, and what the system does, is set
+  out in [DATA_OWNERSHIP.md](../DATA_OWNERSHIP.md) section 8 ("Automatic handling, and the hotel's own
+  responsibility"). Whether to build a controlled manual path is an open product decision (plan section 4).
 - Staff-issued accounts keep their devices out of the person's request even when only one person uses them.
 - A device is shared as soon as any other record touches it, so a guest's own phone used once with the room's
   credentials is never attributed to them. This errs toward leaving data, never toward changing another person's.
@@ -498,7 +502,7 @@ people are still online on. 0145 rolls back and forward cleanly.
 - Verification records and code bindings follow the address a one-time code went to. A person who used another
   person's address is attributed that address's records, as the code proves.
 
-**Independent review of this change (2026-10-21).** An adversarial review of migration 0145 built each situation
+**Independent review of this change (2026-10-20).** An adversarial review of migration 0145 built each situation
 above in a rolled-back transaction against a factory-clean schema. It found three High (F11, F12, F17), three
 Medium (F13, F14, F15) and several Low items (F16, F18 and the console wording), all fixed, each with a regression
 test in `guest_data_ownership_review_integration_test.go`. Nothing it tried to break the guarantee with held after

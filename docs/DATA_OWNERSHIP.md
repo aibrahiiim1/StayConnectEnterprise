@@ -144,7 +144,7 @@ Hotel Admin *Guest data request* (export or erasure) reaches only the class its 
 |---|---|---|---|
 | **PMS reservation data** | the stay, its guest rows, PMS messages, folio (room charges), post-stay access | a *stay* or *stay guest* request: the guest the PMS names | an account or identity request |
 | **Individual data** | a client account the guest registered themselves, an OTP/social identity with its remembered devices, their own entitlements and purchases, and the devices **only they** used | an *account* or *identity* request: the person who registered or verified it | a stay request |
-| **Shared access** | access used through a room (stay) credential, a voucher, an anonymous subject or a staff-issued account, and any device with a link to anyone else | no request: it is counted, its liveness still blocks an erasure, and it is anonymised when retention ends (0127) | every request |
+| **Shared access** | access used through a room (stay) credential, a voucher, an anonymous subject or a staff-issued account, and any device with a link to anyone else | no automatic request: the system never discloses or changes it, counts it, and lets its liveness block an erasure. A request about it is the hotel's to handle by hand (below) | every automatic request |
 
 **A device is one person's only when** something that person did binds it to them (a remembered-device tick, the
 self-registration made on it, or authentication of their own identity or self-registered account on it) **and**
@@ -170,3 +170,35 @@ holder, because the credential may be shared by a party.
 Attempts to enter a reservation's room credentials are the typist's, not the holder's: erasing the reservation
 removes what was typed (the holder's name, the room) and keeps who typed it. The export tells the requester that
 shared records exist (`not_included`: counts only) without listing them.
+
+### Automatic handling, and the hotel's own responsibility
+
+The product handles by itself only what it can attribute to one person. Everything else is the hotel's manual and
+legal responsibility as the controller. These are engineering notes for the hotel's legal review (plan D-F3), not
+legal advice.
+
+| | The system does | The hotel does |
+|---|---|---|
+| **Data attributable to one person**: the reservation's own data for the guest the PMS names; an account or identity the person registered, their own access and purchases, and the devices only they used | finds it, exports it and anonymises it on a staff request, with the operator's password and a reason, audited, leaving a reference to give the person | checks who is asking, hands the export over, and answers within one month (GDPR Art. 12(3)) |
+| **Shared access**: room, voucher, anonymous or staff-issued-account access, and any device with another link | nothing. It never discloses it and never changes it, and it tells the requester only that such records exist (counts, no content) | decides by hand, under its own legal responsibility, what it can lawfully disclose or erase and to whom, and answers the requester |
+| **Retention** | anonymises shared records when the hotel's retention period ends | does not count that as an answer: a request is answered within one month whatever the retention setting says |
+
+**Retention expiry is not a response to a rights request.** The retention period limits how long data is kept
+(Art. 5(1)(e)). It does not answer an individual's request for access or erasure, which has its own deadline. A
+hotel that receives a request about shared access must respond to it; waiting for the records to age out is not a
+response.
+
+**What the hotel does with a request about shared access** (outside the product):
+
+1. Verify who is asking, as for any request.
+2. Ask the requester for the additional information that ties the records to them (for example the device they use
+   and the times), because a room number, a reservation credential or a MAC address alone does not (Art. 11(2),
+   12(6)).
+3. Weigh the rights and freedoms of the other people who used the same room or device, since disclosing shared
+   records can expose them (Art. 15(4)).
+4. Decide, with legal advice, what to disclose or erase, and record the decision and its reason.
+5. Answer within one month, or say why not and that the requester may complain to the authority (Art. 12(3)-(4)).
+
+The product gives the hotel no tool to attribute or erase individual shared records, and none should be improvised
+(no direct database edits). Hotel Admin's usage and session screens can be read to find what a decision concerns.
+Whether to build a controlled manual path for this is a product decision that has not been taken (plan section 4).

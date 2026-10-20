@@ -1,5 +1,5 @@
 -- 0145 -- A GUEST REQUEST NEVER REACHES SHARED ROOM ACCESS OR ANOTHER PERSON
--- (Product Owner decision D-R5, 2026-10-21: room credentials prove eligibility, not identity.)
+-- (Product Owner decision D-R5, 2026-10-20: room credentials prove eligibility, not identity.)
 --
 -- THE FACT THE EARLIER MIGRATIONS GOT WRONG. A PMS may name only the reservation holder while several people
 -- use the room and its credentials; one named guest on a stay is not one occupant. A room number, a reservation
@@ -689,8 +689,9 @@ BEGIN
   || CASE WHEN cardinality(room) > 0 OR n_dshared > 0 THEN jsonb_build_object('not_included', jsonb_build_object(
        'why', 'Internet access used through a room, voucher or staff-issued credential, and any device also used '
               || 'with someone else, is shared by several people. It cannot be attributed to one person, so it is '
-              || 'not included here and a request about one person never changes it. It is anonymised when the '
-              || 'hotel''s retention period ends.',
+              || 'not included here and this system never discloses or changes it for one person. The hotel '
+              || 'answers a request about it separately, by its own manual and legal process; the end of a '
+              || 'retention period is not an answer to such a request.',
        'room_access_records', cardinality(room), 'devices_seen_by_that_access', n_room_dev, 'shared_devices', n_dshared))
      ELSE '{}'::jsonb END;
 END $function$;

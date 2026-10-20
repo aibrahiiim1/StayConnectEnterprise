@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Migration 0145 (Product Owner decision D-R5, 2026-10-21): room credentials prove eligibility, not identity.
+// Migration 0145 (Product Owner decision D-R5, 2026-10-20): room credentials prove eligibility, not identity.
 // A PMS may name only the reservation holder while several people use the room and its credentials. These tests
 // build those situations and prove a request about one person never exports or changes another person's data.
 
