@@ -68,4 +68,15 @@ BEGIN
     GRANT EXECUTE ON FUNCTION public.erasure_journal_export(uuid,uuid) TO svc_scd;
     GRANT EXECUTE ON FUNCTION public.erasure_journal_replay(jsonb) TO svc_scd;
   END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_edged') THEN
+    GRANT EXECUTE ON FUNCTION iam_v2.request_register_open(uuid,uuid,text,text,date,text,text) TO svc_edged;
+    GRANT EXECUTE ON FUNCTION iam_v2.request_register_extend(uuid,uuid,uuid,text,text) TO svc_edged;
+    GRANT EXECUTE ON FUNCTION iam_v2.request_register_answer(uuid,uuid,uuid,text,text,text,text,text,text) TO svc_edged;
+    GRANT EXECUTE ON FUNCTION iam_v2.request_register_list(uuid,uuid) TO svc_edged;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'iam_v2_owner') THEN
+    GRANT SELECT (code_verifier, nonce) ON public.social_oauth_states TO iam_v2_owner;
+    GRANT UPDATE (code_verifier, nonce) ON public.social_oauth_states TO iam_v2_owner;
+    GRANT SELECT ON public.dhcp_reservations TO iam_v2_owner;
+  END IF;
 END $g$;
