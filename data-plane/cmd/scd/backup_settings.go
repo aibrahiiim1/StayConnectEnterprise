@@ -60,6 +60,11 @@ var retentionSchema = []retentionSetting{
 	// database. The newest is still always kept.
 	{Key: "DB_BACKUP_DAYS", Label: "Database backups: keep for", Unit: "days", Default: 30, Min: 1, Max: 3650,
 		Explains: "Database backups older than this are removed by the nightly sweep, even within the number above. The newest is always kept."},
+	// THE DATABASE SET ASIDE BY A RESTORE (GDPR final mission). A restore keeps the database it replaced so the restore can
+	// be undone -- and that copy holds everything the restored one was cleaned of, including guests erased since. It is
+	// removed after this many days; undoing a restore is possible until then.
+	{Key: "SET_ASIDE_DAYS", Label: "Database kept aside by a restore: keep for", Unit: "days", Default: 14, Min: 1, Max: 90,
+		Explains: "A restore keeps the database it replaced so it can be undone. That copy still holds data erased or anonymised since, so it is removed after this many days."},
 	{Key: "KEEP_CONFIG", Label: "Configuration backups", Unit: "copies", Default: 3, Min: 1, Max: 30,
 		Explains: "Saved copies of configuration files taken before a change."},
 	// THE NIGHTLY SITE BACKUPS (/var/backups/stayconnect, decision D-H). They were never removed: every night

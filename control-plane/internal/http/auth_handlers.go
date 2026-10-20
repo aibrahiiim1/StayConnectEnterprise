@@ -132,7 +132,9 @@ func (d authDeps) login(w http.ResponseWriter, r *http.Request) {
 
 	op, err := d.Repo.FindByEmail(r.Context(), req.Email)
 	if err != nil || op.Status != "active" || op.PasswordHash == "" {
-		// Constant response for bad email vs bad password vs disabled; the audit row says which.
+		// Constant response for bad email vs bad password vs disabled; the audit row says which. The time is the same
+		// too: a password is checked against a decoy, so the response time does not tell which names have an account.
+		auth.SpendPasswordCheck(req.Password)
 		reason, opID := "unknown email", ""
 		if err == nil {
 			opID = op.ID

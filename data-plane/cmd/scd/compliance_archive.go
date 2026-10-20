@@ -6,11 +6,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
 
+	"filippo.io/age"
 	"github.com/jackc/pgx/v5"
+	"github.com/stayconnect/enterprise/data-plane/internal/backupcrypt"
 )
 
 // C35 — the compliance archive that must exist before a cross-customer purge.
@@ -110,15 +114,31 @@ func (s *server) archiveTenantBeforePurge(ctx context.Context, departing string)
 	}
 	sum := sha256.Sum256(body)
 	digest := hex.EncodeToString(sum[:])
-	path := filepath.Join(dir, fmt.Sprintf("tenant-%s-%s.json", departing, digest[:12]))
+	// ENCRYPTED LIKE THE BACKUPS. The archive holds guest numbers and payment references; in the clear it would be the
+	// one unprotected copy of them on the appliance. It is encrypted to the same key holders as a database backup, so the
+	// same people can open it; the digest recorded is of the document itself, so it can be checked after decrypting.
+	// With no key holder set up it is written as before, mode 0600, and the log says so.
+	recipients, rerr := s.backupRecipients(ctx)
+	if rerr != nil {
+		return fmt.Errorf("compliance archive: %w", rerr)
+	}
+	name := fmt.Sprintf("tenant-%s-%s.json", departing, digest[:12])
+	if len(recipients) > 0 {
+		name += ".age"
+	} else {
+		slog.Warn("compliance archive written without encryption: no backup key holder is set up")
+	}
+	path := filepath.Join(dir, name)
 
 	// Write to a temporary file and rename, so a crash cannot leave a truncated artefact whose digest was
 	// already recorded as if it described a complete one.
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, body, 0o600); err != nil {
+	tmp := path + ".partial"
+	if err := writeArchiveFile(tmp, body, recipients); err != nil {
+		os.Remove(tmp)
 		return fmt.Errorf("write compliance archive: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
 		return fmt.Errorf("commit compliance archive: %w", err)
 	}
 
@@ -153,4 +173,26 @@ func (s *server) departingTenants(ctx context.Context) ([]string, error) {
 		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+// writeArchiveFile writes the document to path, encrypted to the recipients when there are any, and makes it durable.
+func writeArchiveFile(path string, body []byte, recipients []age.Recipient) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	var sink io.WriteCloser = nopCloser{f}
+	if len(recipients) > 0 {
+		if sink, err = backupcrypt.Encrypt(f, recipients); err != nil {
+			return err
+		}
+	}
+	if _, err := sink.Write(body); err != nil {
+		return err
+	}
+	if err := sink.Close(); err != nil {
+		return err
+	}
+	return f.Sync()
 }

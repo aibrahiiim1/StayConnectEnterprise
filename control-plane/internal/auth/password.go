@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/argon2"
@@ -116,4 +117,19 @@ func VerifyPassword(encoded, password string) error {
 		return ErrMismatch
 	}
 	return nil
+}
+
+var (
+	decoyOnce sync.Once
+	decoyHash string
+)
+
+// SpendPasswordCheck does the work of checking a password that cannot match, so a sign-in for a name Central does not
+// know (or an account that cannot sign in) takes as long as a wrong password for a real one: the response time must not
+// say which names have an account. Errors are ignored; the caller answers "invalid credentials" either way.
+func SpendPasswordCheck(password string) {
+	decoyOnce.Do(func() { decoyHash, _ = HashPassword("decoy-" + time.Now().String()) })
+	if decoyHash != "" {
+		_ = VerifyPassword(decoyHash, password)
+	}
 }

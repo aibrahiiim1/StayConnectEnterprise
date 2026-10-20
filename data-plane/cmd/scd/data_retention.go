@@ -71,6 +71,7 @@ func (s *server) runDataRetention(ctx context.Context) {
 	}
 	s.runStaffRetention(ctx)
 	s.runErasureJournal(ctx)
+	s.runLeftovers(ctx)
 }
 
 // runStaffRetention anonymises staff accounts disabled for longer than the appliance's setting and clears staff
