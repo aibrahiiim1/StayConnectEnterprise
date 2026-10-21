@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0126, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0149, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -268,6 +268,22 @@ END $$;
 
 
 --
+-- Name: accounting_retention_default(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.accounting_retention_default() RETURNS integer
+    LANGUAGE sql IMMUTABLE
+    AS $$ SELECT 365 $$;
+
+
+--
+-- Name: FUNCTION accounting_retention_default(); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.accounting_retention_default() IS 'The accounting-detail retention of a site that never chose one, in days (0131, GDPR plan C2, D-C2).';
+
+
+--
 -- Name: accounting_retention_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -275,7 +291,8 @@ CREATE FUNCTION iam_v2.accounting_retention_get(p_tenant uuid, p_site uuid) RETU
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
     AS $$
-  SELECT s.detail_retention_days, COALESCE(s.config_version, 0), s.updated_at, s.updated_by
+  SELECT CASE WHEN s.site_id IS NULL THEN iam_v2.accounting_retention_default() ELSE s.detail_retention_days END,
+         COALESCE(s.config_version, 0), s.updated_at, s.updated_by
     FROM (SELECT 1) one
     LEFT JOIN iam_v2.site_accounting_retention s ON s.tenant_id = p_tenant AND s.site_id = p_site;
 $$;
@@ -468,6 +485,264 @@ END $$;
 
 
 --
+-- Name: anonymise_device(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.anonymise_device(p_device uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_mac macaddr;
+BEGIN
+  PERFORM set_config('iam_v2.anonymise', 'retention', true);
+  -- An account the person registered on this device holds its address too: it goes with it, whichever of the
+  -- retention periods came first.
+  SELECT dv.mac INTO v_mac FROM iam_v2.devices dv WHERE dv.id = p_device AND dv.mac::text NOT LIKE '03:%';
+  IF v_mac IS NOT NULL THEN
+    UPDATE iam_v2.guest_access_accounts SET created_by_device_mac = NULL
+     WHERE tenant_id = (SELECT tenant_id FROM iam_v2.devices WHERE id = p_device) AND created_by_device_mac = v_mac;
+  END IF;
+  UPDATE iam_v2.devices SET mac = iam_v2.anonymised_mac(), last_ip = NULL,
+         first_seen = date_trunc('day', first_seen), last_seen = date_trunc('day', last_seen)
+   WHERE id = p_device AND mac::text NOT LIKE '03:%';
+  -- What staff typed or the guest did about this device, and the records keyed by its address that are over.
+  PERFORM set_config('iam_v2.scrub', 'on', true);
+  UPDATE iam_v2.device_slot_actions SET reason = 'Removed after the staff-notes period', detail = CASE WHEN detail IS NULL THEN NULL ELSE 'Removed after the staff-notes period' END
+   WHERE (device_id = p_device OR replacement_device_id = p_device) AND (reason <> 'Removed after the staff-notes period' OR (detail IS NOT NULL AND detail <> 'Removed after the staff-notes period'));
+  UPDATE iam_v2.guest_device_actions SET detail = 'Removed after the staff-notes period'
+   WHERE device_id = p_device AND detail IS NOT NULL AND detail <> 'Removed after the staff-notes period';
+  IF v_mac IS NOT NULL THEN
+    UPDATE iam_v2.guest_signin_restrictions SET device_mac = iam_v2.anonymised_mac(), last_submitted_room = NULL,
+           release_reason = CASE WHEN release_reason IS NULL THEN NULL ELSE 'Removed after the staff-notes period' END
+     WHERE device_mac = v_mac AND (released_at IS NOT NULL OR expires_at IS NULL OR expires_at < now());
+    UPDATE iam_v2.guest_signin_device_passes x SET device_mac = iam_v2.anonymised_mac(), reason = 'Removed after the staff-notes period'
+     WHERE x.device_mac = v_mac AND EXISTS (SELECT 1 FROM iam_v2.guest_signin_network_pauses p WHERE p.id = x.pause_id AND (p.ended_at IS NOT NULL OR p.expires_at < now()));
+    UPDATE iam_v2.verification_access_grants SET device_mac = iam_v2.anonymised_mac(), ip = '0.0.0.0'::inet,
+           destination_digest = encode(public.gen_random_bytes(32), 'hex')
+     WHERE device_mac = v_mac AND ended_at IS NOT NULL;
+    UPDATE iam_v2.otp_device_bindings SET device_mac = iam_v2.anonymised_mac() WHERE device_mac = v_mac;
+  END IF;
+  PERFORM set_config('iam_v2.scrub', '', true);
+  UPDATE iam_v2.sessions SET ip = NULL, mac = NULL
+   WHERE device_id = p_device AND ended IS NOT NULL AND (ip IS NOT NULL OR mac IS NOT NULL);
+END $$;
+
+
+--
+-- Name: anonymise_guest_account(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.anonymise_guest_account(p_account uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $_$
+BEGIN
+  PERFORM set_config('iam_v2.anonymise', 'retention', true);
+  UPDATE iam_v2.account_email_tokens
+     SET last_send_error = NULL, token_hmac = CASE WHEN token_hmac IS NOT NULL THEN public.gen_random_bytes(32) END,
+         superseded_at = CASE WHEN used_at IS NULL AND superseded_at IS NULL THEN now() ELSE superseded_at END
+   WHERE account_id = p_account;
+  UPDATE iam_v2.guest_access_accounts
+     SET username = iam_v2.anonymised_token() || '@anonymised.removed-' || left(replace(id::text, '-', ''), 8) || '.invalid',
+         display_name = NULL, notes = NULL, created_by_device_mac = NULL, enabled = false,
+         -- The link to the reservation, the password hash, the sign-in history and the dates of the account go with the name:
+         -- the reservation the account was made for would otherwise name the person a join away.
+         stay_id = NULL, password_hash = '$argon2id$v=19$m=65536,t=1,p=4$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', failed_attempts = 0, locked_until = NULL, last_login_at = NULL,
+         login_count = 0, created_at = date_trunc('month', created_at), email_verified_at = NULL, verification_deadline = NULL,
+         verification_reminder_sent_at = NULL, grace_until = NULL, valid_from = NULL, valid_until = NULL
+   WHERE id = p_account AND username NOT LIKE 'anon-%@anonymised.removed-%';
+  -- What staff typed about this account's access.
+  PERFORM set_config('iam_v2.scrub', 'on', true);
+  UPDATE iam_v2.entitlement_adjustments SET reason = 'Removed after the staff-notes period'
+   WHERE entitlement_id IN (SELECT e.id FROM iam_v2.entitlements e WHERE e.guest_account_id = p_account) AND reason <> 'Removed after the staff-notes period';
+  UPDATE iam_v2.device_slot_actions SET reason = 'Removed after the staff-notes period', detail = CASE WHEN detail IS NULL THEN NULL ELSE 'Removed after the staff-notes period' END
+   WHERE entitlement_id IN (SELECT e.id FROM iam_v2.entitlements e WHERE e.guest_account_id = p_account)
+     AND (reason <> 'Removed after the staff-notes period' OR (detail IS NOT NULL AND detail <> 'Removed after the staff-notes period'));
+  UPDATE iam_v2.guest_device_actions SET detail = 'Removed after the staff-notes period'
+   WHERE entitlement_id IN (SELECT e.id FROM iam_v2.entitlements e WHERE e.guest_account_id = p_account)
+     AND detail IS NOT NULL AND detail <> 'Removed after the staff-notes period';
+  PERFORM set_config('iam_v2.scrub', '', true);
+END $_$;
+
+
+--
+-- Name: anonymise_guest_principal(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.anonymise_guest_principal(p_principal uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+BEGIN
+  PERFORM set_config('iam_v2.anonymise', 'retention', true);
+  UPDATE iam_v2.guest_principals SET display_name = NULL WHERE id = p_principal AND display_name IS NOT NULL;
+  UPDATE iam_v2.guest_principal_identities SET factor_value_norm = iam_v2.anonymised_token(), attrs = '{}'::jsonb
+   WHERE guest_principal_id = p_principal AND NOT iam_v2.is_anon_token(factor_value_norm);
+  UPDATE iam_v2.guest_principal_identities SET verified_at = date_trunc('month', verified_at)
+   WHERE guest_principal_id = p_principal AND verified_at IS NOT NULL AND verified_at <> date_trunc('month', verified_at);
+  -- A remembered-device secret is revoked AND its value replaced: a revoked row must not keep a usable shape of it.
+  UPDATE iam_v2.principal_device_credentials
+     SET revoked_at = COALESCE(revoked_at, now()), secret_hmac = public.gen_random_bytes(32), last_used_at = NULL
+   WHERE guest_principal_id = p_principal AND (revoked_at IS NULL OR last_used_at IS NOT NULL);
+  PERFORM set_config('iam_v2.scrub', 'on', true);
+  UPDATE iam_v2.entitlement_adjustments SET reason = 'Removed after the staff-notes period'
+   WHERE entitlement_id IN (SELECT e.id FROM iam_v2.entitlements e WHERE e.guest_principal_id = p_principal) AND reason <> 'Removed after the staff-notes period';
+  UPDATE iam_v2.device_slot_actions SET reason = 'Removed after the staff-notes period', detail = CASE WHEN detail IS NULL THEN NULL ELSE 'Removed after the staff-notes period' END
+   WHERE entitlement_id IN (SELECT e.id FROM iam_v2.entitlements e WHERE e.guest_principal_id = p_principal)
+     AND (reason <> 'Removed after the staff-notes period' OR (detail IS NOT NULL AND detail <> 'Removed after the staff-notes period'));
+  UPDATE iam_v2.guest_device_actions SET detail = 'Removed after the staff-notes period'
+   WHERE entitlement_id IN (SELECT e.id FROM iam_v2.entitlements e WHERE e.guest_principal_id = p_principal)
+     AND detail IS NOT NULL AND detail <> 'Removed after the staff-notes period';
+  PERFORM set_config('iam_v2.scrub', '', true);
+END $$;
+
+
+--
+-- Name: anonymise_stay(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.anonymise_stay(p_stay uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $_$
+BEGIN
+  PERFORM set_config('iam_v2.anonymise', 'retention', true);
+  PERFORM iam_v2.begin_controlled_operation('stay');
+  UPDATE iam_v2.stays
+     SET external_reservation_id = iam_v2.anonymised_token(), external_stay_identity = iam_v2.anonymised_token(),
+         normalized_room_number = NULL, vip = NULL, travel_agent = NULL, rate_plan = NULL, room_type = NULL,
+         -- The dates stay as months and the times as days: enough for a report, not enough to find the booking in the PMS.
+         arrival = date_trunc('month', arrival)::date, departure = date_trunc('month', departure)::date,
+         -- (only on a finished stay: an open one is still governed by the occupancy-evidence rules)
+         effective_checkout_at = CASE WHEN status IN ('CHECKED_OUT', 'POST_STAY_ACTIVE', 'CANCELLED', 'NO_SHOW')
+                                      THEN date_trunc('day', effective_checkout_at) ELSE effective_checkout_at END,
+         occupancy_evidence_at = CASE WHEN status IN ('CHECKED_OUT', 'POST_STAY_ACTIVE', 'CANCELLED', 'NO_SHOW')
+                                      THEN date_trunc('day', occupancy_evidence_at) ELSE occupancy_evidence_at END,
+         occupancy_ingested_at = CASE WHEN status IN ('CHECKED_OUT', 'POST_STAY_ACTIVE', 'CANCELLED', 'NO_SHOW')
+                                      THEN date_trunc('day', occupancy_ingested_at) ELSE occupancy_ingested_at END
+   WHERE id = p_stay AND NOT iam_v2.is_anon_token(external_reservation_id);
+  -- What staff typed about the stay, and the post-stay secret.
+  PERFORM set_config('iam_v2.scrub', 'on', true);
+  UPDATE iam_v2.stay_posting_blocks SET note = CASE WHEN note IS NULL THEN NULL ELSE 'Removed after the staff-notes period' END,
+         cleared_reason = CASE WHEN cleared_reason IS NULL THEN NULL ELSE 'Removed after the staff-notes period' END
+   WHERE stay_id = p_stay AND ((note IS NOT NULL AND note <> 'Removed after the staff-notes period') OR (cleared_reason IS NOT NULL AND cleared_reason <> 'Removed after the staff-notes period'));
+  UPDATE iam_v2.pms_case_resolutions SET note = 'Removed after the staff-notes period', evidence_ref = CASE WHEN evidence_ref IS NULL THEN NULL ELSE 'Removed after the staff-notes period' END
+   WHERE stay_id = p_stay AND ((note IS NOT NULL AND note <> 'Removed after the staff-notes period') OR (evidence_ref IS NOT NULL AND evidence_ref <> 'Removed after the staff-notes period'));
+  UPDATE iam_v2.entitlement_transfers SET reason = 'Removed after the staff-notes period'
+   WHERE (from_stay_id = p_stay OR to_stay_id = p_stay) AND reason IS NOT NULL AND reason <> 'Removed after the staff-notes period';
+  UPDATE iam_v2.entitlement_adjustments SET reason = 'Removed after the staff-notes period'
+   WHERE entitlement_id IN (SELECT e.id FROM iam_v2.entitlements e WHERE e.stay_id = p_stay) AND reason <> 'Removed after the staff-notes period';
+  UPDATE iam_v2.device_slot_actions SET reason = 'Removed after the staff-notes period', detail = CASE WHEN detail IS NULL THEN NULL ELSE 'Removed after the staff-notes period' END
+   WHERE entitlement_id IN (SELECT e.id FROM iam_v2.entitlements e WHERE e.stay_id = p_stay)
+     AND (reason <> 'Removed after the staff-notes period' OR (detail IS NOT NULL AND detail <> 'Removed after the staff-notes period'));
+  UPDATE iam_v2.guest_device_actions SET detail = 'Removed after the staff-notes period'
+   WHERE entitlement_id IN (SELECT e.id FROM iam_v2.entitlements e WHERE e.stay_id = p_stay)
+     AND detail IS NOT NULL AND detail <> 'Removed after the staff-notes period';
+  UPDATE iam_v2.post_stay_profiles
+     SET pin_hash = '$argon2id$v=19$m=65536,t=1,p=4$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', revoke_reason = CASE WHEN revoke_reason IS NULL THEN NULL ELSE 'Removed after the staff-notes period' END
+   WHERE origin_stay_id = p_stay AND (pin_hash <> '$argon2id$v=19$m=65536,t=1,p=4$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' OR (revoke_reason IS NOT NULL AND revoke_reason <> 'Removed after the staff-notes period'));
+  PERFORM set_config('iam_v2.scrub', '', true);
+  UPDATE iam_v2.stay_guests
+     SET external_guest_id = NULL, first_name_norm = NULL, last_name_norm = NULL, display_name = NULL,
+         pin_hash = NULL
+   WHERE stay_id = p_stay
+     AND num_nonnulls(external_guest_id, first_name_norm, last_name_norm, display_name, pin_hash) > 0;
+  UPDATE iam_v2.stay_events
+     SET payload = '{"anonymised": true}'::jsonb,
+         external_event_identity = 'anon-' || encode(public.gen_random_bytes(32), 'hex')
+   WHERE stay_id = p_stay AND processing_status <> 'PENDING'
+     AND payload IS DISTINCT FROM '{"anonymised": true}'::jsonb;
+  -- The copy of the names and room migration 0066 kept as rollback evidence goes with the stay
+  -- (GDPR audit 2026-10-19, A6). Not every appliance has the table, so it is looked up first.
+  IF to_regclass('iam_v2.backfill_0066_identity_text') IS NOT NULL THEN
+    EXECUTE $q$
+      UPDATE iam_v2.backfill_0066_identity_text x
+         SET prior_first_name = NULL, prior_last_name = NULL, prior_room = NULL
+       WHERE (x.row_id = $1 OR x.row_id IN (SELECT sg.id FROM iam_v2.stay_guests sg WHERE sg.stay_id = $1))
+         AND num_nonnulls(x.prior_first_name, x.prior_last_name, x.prior_room) > 0
+    $q$ USING p_stay;
+  END IF;
+END $_$;
+
+
+--
+-- Name: FUNCTION anonymise_stay(p_stay uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.anonymise_stay(p_stay uuid) IS 'Anonymises one stay (0127): reservation and stay identity become random tokens; room, VIP, travel agent and rate plan are cleared; every guest''s names, external id, date of birth and PIN hash are cleared; the raw PMS payload and fingerprint of its processed events are replaced. Status, dates and versions are untouched.';
+
+
+--
+-- Name: anonymised_accounts(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.anonymised_accounts(p_tenant uuid) RETURNS uuid[]
+    LANGUAGE sql STABLE
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$ SELECT COALESCE(array_agg(g.id), '{}') FROM guest_access_accounts g
+           WHERE g.tenant_id = p_tenant AND g.username ~ '^anon-[0-9a-f]{32,64}@anonymised[.]removed-' $$;
+
+
+--
+-- Name: anonymised_entitlements(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.anonymised_entitlements(p_tenant uuid) RETURNS uuid[]
+    LANGUAGE sql STABLE
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE(array_agg(en.id), '{}') FROM entitlements en
+   WHERE en.tenant_id = p_tenant
+     AND (en.guest_account_id IN (SELECT g.id FROM guest_access_accounts g WHERE g.tenant_id = p_tenant
+                                    AND g.username ~ '^anon-[0-9a-f]{32,64}@anonymised[.]removed-')
+          OR en.guest_principal_id IN (SELECT gp.id FROM guest_principals gp WHERE gp.tenant_id = p_tenant
+                                         AND EXISTS (SELECT 1 FROM guest_principal_identities i WHERE i.guest_principal_id = gp.id)
+                                         AND NOT EXISTS (SELECT 1 FROM guest_principal_identities i
+                                                          WHERE i.guest_principal_id = gp.id AND NOT iam_v2.is_anon_token(i.factor_value_norm))))
+$$;
+
+
+--
+-- Name: FUNCTION anonymised_entitlements(p_tenant uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.anonymised_entitlements(p_tenant uuid) IS 'Entitlements whose account or identity is already anonymised (0147): a link to someone who no longer identifies anybody does not make a device shared.';
+
+
+--
+-- Name: anonymised_mac(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.anonymised_mac() RETURNS macaddr
+    LANGUAGE sql
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$ SELECT ('03' || encode(public.gen_random_bytes(5), 'hex'))::macaddr $$;
+
+
+--
+-- Name: anonymised_principals(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.anonymised_principals(p_tenant uuid) RETURNS uuid[]
+    LANGUAGE sql STABLE
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$ SELECT COALESCE(array_agg(gp.id), '{}') FROM guest_principals gp
+           WHERE gp.tenant_id = p_tenant
+             AND EXISTS (SELECT 1 FROM guest_principal_identities i WHERE i.guest_principal_id = gp.id)
+             AND NOT EXISTS (SELECT 1 FROM guest_principal_identities i WHERE i.guest_principal_id = gp.id AND NOT iam_v2.is_anon_token(i.factor_value_norm)) $$;
+
+
+--
+-- Name: anonymised_token(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.anonymised_token() RETURNS text
+    LANGUAGE sql
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$ SELECT 'anon-' || encode(public.gen_random_bytes(16), 'hex') $$;
+
+
+--
 -- Name: apply_adjustment(uuid, text, text, uuid, text); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -624,6 +899,1004 @@ BEGIN
     END IF;
   END IF;
   RETURN 'APPLIED';
+END $$;
+
+
+--
+-- Name: assisted_apply_records(uuid, uuid, text[], uuid[]); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.assisted_apply_records(p_tenant uuid, p_site uuid, p_kinds text[], p_ids uuid[]) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE s_ids uuid[]; a_ids uuid[]; g_ids uuid[]; b_ids uuid[]; r_ids uuid[]; p_pass uuid[]; o_ids uuid[]; d_ids uuid[];
+        v_macs text[]; v_id uuid; n integer := 0; k integer;
+BEGIN
+  SELECT COALESCE(array_agg(z.i) FILTER (WHERE z.k = 'session'), '{}'),
+         COALESCE(array_agg(z.i) FILTER (WHERE z.k = 'sign_in_attempt'), '{}'),
+         COALESCE(array_agg(z.i) FILTER (WHERE z.k = 'verification_access'), '{}'),
+         COALESCE(array_agg(z.i) FILTER (WHERE z.k = 'code_device_binding'), '{}'),
+         COALESCE(array_agg(z.i) FILTER (WHERE z.k = 'sign_in_restriction'), '{}'),
+         COALESCE(array_agg(z.i) FILTER (WHERE z.k = 'sign_in_pass'), '{}'),
+         COALESCE(array_agg(z.i) FILTER (WHERE z.k = 'sign_in_redirect'), '{}'),
+         COALESCE(array_agg(z.i) FILTER (WHERE z.k = 'device'), '{}')
+    INTO s_ids, a_ids, g_ids, b_ids, r_ids, p_pass, o_ids, d_ids FROM unnest(p_kinds, p_ids) z(k, i);
+  SELECT COALESCE(array_agg(lower(dv.mac::text)), '{}') INTO v_macs FROM devices dv WHERE dv.id = ANY (d_ids) AND dv.mac::text NOT LIKE '03:%';
+  PERFORM set_config('iam_v2.anonymise', 'retention', true);
+  UPDATE sessions x SET ip = NULL, mac = NULL
+   WHERE x.id = ANY (s_ids) AND x.tenant_id = p_tenant AND x.ended IS NOT NULL AND (x.ip IS NOT NULL OR x.mac IS NOT NULL);
+  GET DIAGNOSTICS k = ROW_COUNT; n := n + k;
+  UPDATE sign_in_attempts x
+     SET submitted_room = NULL, device_ip = NULL, device_mac = NULL,
+         sensitive_ciphertext = NULL, sensitive_nonce = NULL, encryption_key_id = NULL, cipher_version = NULL
+   WHERE x.id = ANY (a_ids) AND x.tenant_id = p_tenant AND num_nonnulls(x.submitted_room, x.device_ip, x.device_mac, x.sensitive_ciphertext) > 0;
+  GET DIAGNOSTICS k = ROW_COUNT; n := n + k;
+  UPDATE verification_access_grants x
+     SET device_mac = anonymised_mac(), ip = '0.0.0.0'::inet, destination_digest = encode(public.gen_random_bytes(32), 'hex')
+   WHERE x.id = ANY (g_ids) AND x.tenant_id = p_tenant AND x.ended_at IS NOT NULL AND x.device_mac::text NOT LIKE '03:%';
+  GET DIAGNOSTICS k = ROW_COUNT; n := n + k;
+  UPDATE otp_device_bindings x SET device_mac = anonymised_mac()
+   WHERE x.challenge_id = ANY (b_ids) AND x.tenant_id = p_tenant AND x.device_mac::text NOT LIKE '03:%';
+  GET DIAGNOSTICS k = ROW_COUNT; n := n + k;
+  UPDATE guest_signin_restrictions x SET device_mac = anonymised_mac(), last_submitted_room = NULL
+   WHERE x.id = ANY (r_ids) AND x.tenant_id = p_tenant AND x.device_mac::text NOT LIKE '03:%';
+  GET DIAGNOSTICS k = ROW_COUNT; n := n + k;
+  UPDATE guest_signin_device_passes x SET device_mac = anonymised_mac()
+   WHERE x.id = ANY (p_pass) AND x.tenant_id = p_tenant AND x.device_mac::text NOT LIKE '03:%';
+  GET DIAGNOSTICS k = ROW_COUNT; n := n + k;
+  UPDATE public.social_oauth_states x SET client_ip = NULL, client_mac = NULL, user_agent = NULL, code_verifier = NULL, nonce = NULL
+   WHERE md5(x.state)::uuid = ANY (o_ids) AND x.tenant_id = p_tenant AND num_nonnulls(x.client_ip, x.client_mac, x.user_agent) > 0;
+  GET DIAGNOSTICS k = ROW_COUNT; n := n + k;
+  FOREACH v_id IN ARRAY d_ids LOOP
+    PERFORM anonymise_device(v_id);
+  END LOOP;
+  PERFORM set_config('iam_v2.anonymise', '', true);
+  RETURN jsonb_build_object('rows_changed', n, 'macs_cleared', to_jsonb(v_macs));
+END $$;
+
+
+--
+-- Name: FUNCTION assisted_apply_records(p_tenant uuid, p_site uuid, p_kinds text[], p_ids uuid[]); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.assisted_apply_records(p_tenant uuid, p_site uuid, p_kinds text[], p_ids uuid[]) IS 'Applies the anonymising writes of an assisted erasure to records by id, without a request (0147): the replay after a restore.';
+
+
+--
+-- Name: assisted_class(text, boolean, boolean, boolean, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.assisted_class(p_subj text, p_inside boolean, p_claim_ok boolean, p_priv_ok boolean, p_state text) RETURNS text[]
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT CASE
+    WHEN NOT p_inside THEN ARRAY['UNVERIFIABLE', 'straddles_range']
+    WHEN p_subj = 'attr' THEN ARRAY['ATTRIBUTABLE', 'own_account_or_identity']
+    WHEN p_subj = 'shared' THEN ARRAY['SHARED', 'voucher_or_open_access']
+    WHEN p_subj = 'multi' THEN ARRAY['SHARED', 'room_shared_by_named_guests']
+    WHEN p_subj = 'other' THEN ARRAY['CONFLICTING', 'another_person_or_access']
+    WHEN p_subj = 'untied' THEN ARRAY['UNVERIFIABLE', 'not_tied_to_the_stated_context']
+    WHEN p_subj IN ('ctx', 'none') THEN
+      CASE WHEN NOT p_claim_ok THEN ARRAY['SHARED', 'statements_missing']
+           WHEN NOT p_priv_ok THEN ARRAY['SHARED', 'private_address_not_confirmed']
+           WHEN p_state IS NOT NULL THEN ARRAY['CONFLICTING', p_state]
+           WHEN p_subj = 'ctx' THEN ARRAY['CLAIMABLE', 'access_of_the_stated_context']
+           ELSE ARRAY['CLAIMABLE', 'used_on_the_stated_device'] END
+    ELSE ARRAY['UNVERIFIABLE', 'no_owner_record'] END
+$$;
+
+
+--
+-- Name: assisted_close(uuid, uuid, uuid, text, text, text, jsonb, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.assisted_close(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_outcome text, p_reason text, p_result jsonb, p_event text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_purpose text;
+BEGIN
+  UPDATE assisted_guest_requests q
+     SET status = p_outcome, closed_by = btrim(p_actor), closed_at = now(), close_reason = btrim(p_reason), result = p_result,
+         macs = NULL, requester_ref = '[removed]', evidence_note = '[removed after the request closed]'
+   WHERE q.id = p_request AND q.tenant_id = p_tenant AND q.site_id = p_site AND q.status = 'OPEN'
+  RETURNING q.purpose INTO v_purpose;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'assisted_request_refused' USING ERRCODE = 'object_in_use', DETAIL = 'closed';
+  END IF;
+  -- Nothing left links the closed request to a person's record, as the erasure register has none: the anchors go; the
+  -- ids of records that were only HANDED OVER (still identifiable) go; the ids of records that were anonymised stay.
+  DELETE FROM assisted_guest_request_anchors WHERE request_id = p_request;
+  IF v_purpose = 'ACCESS' THEN
+    DELETE FROM assisted_guest_request_records WHERE request_id = p_request;
+  END IF;
+  INSERT INTO assisted_guest_request_events (request_id, actor, action, detail)
+  VALUES (p_request, btrim(p_actor), p_event, jsonb_build_object('reason', btrim(p_reason)) || COALESCE(p_result, '{}'::jsonb));
+END $$;
+
+
+--
+-- Name: assisted_context(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.assisted_context(p_tenant uuid, p_site uuid, p_request uuid) RETURNS TABLE(c_attr uuid[], c_ctx uuid[], c_ch uuid[], c_excl uuid[], c_p uuid[], c_a uuid[], c_stays uuid[], c_guests uuid[], c_multi uuid[], c_claim_ok boolean, c_priv_ok boolean)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE r record; x record; v_attr uuid[] := '{}'; v_cred uuid[] := '{}'; v_ch uuid[] := '{}'; v_excl uuid[] := '{}';
+        v_p uuid[] := '{}'; v_a uuid[] := '{}'; v_stays uuid[] := '{}'; v_ctx uuid[]; v_guests uuid[] := '{}'; v_gr uuid[]; v_multi uuid[];
+BEGIN
+  SELECT * INTO r FROM assisted_guest_requests q WHERE q.id = p_request AND q.tenant_id = p_tenant AND q.site_id = p_site;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'assisted request not found' USING ERRCODE = 'no_data_found';
+  END IF;
+  FOR x IN SELECT a.anchor_kind, a.anchor_id FROM assisted_guest_request_anchors a WHERE a.request_id = p_request LOOP
+    SELECT v_attr || COALESCE(array_agg(o_id) FILTER (WHERE o_kind = 'entitlement'), '{}'),
+           v_cred || COALESCE(array_agg(o_id) FILTER (WHERE o_kind = 'entitlement_credential'), '{}'),
+           v_ch   || COALESCE(array_agg(o_id) FILTER (WHERE o_kind = 'challenge'), '{}'),
+           v_excl || COALESCE(array_agg(o_id) FILTER (WHERE o_kind = 'device'), '{}'),
+           v_p    || COALESCE(array_agg(o_id) FILTER (WHERE o_kind = 'principal'), '{}'),
+           v_a    || COALESCE(array_agg(o_id) FILTER (WHERE o_kind = 'account'), '{}'),
+           v_stays || COALESCE(array_agg(o_id) FILTER (WHERE o_kind IN ('stay', 'stay_shared')), '{}'),
+           COALESCE(array_agg(o_id) FILTER (WHERE o_kind = 'stay_guest'), '{}')
+      INTO v_attr, v_cred, v_ch, v_excl, v_p, v_a, v_stays, v_gr
+      FROM guest_data_scope(p_tenant, p_site, x.anchor_kind, x.anchor_id);
+    v_guests := v_guests || v_gr;
+  END LOOP;
+  -- The PMS guest rows the requester can be: the named guest of a stay with one named guest, or the stated guest of a
+  -- shared one. On a shared stay named by the stay alone nobody is, so nothing the PMS matched to a guest there is theirs.
+  v_guests := v_guests || COALESCE((SELECT array_agg(sg.id) FROM stay_guests sg
+                                     WHERE sg.stay_id = ANY (v_stays) AND stay_named_guests(sg.stay_id) <= 1), '{}');
+  -- A reservation that names more than one guest shares its room between identified people: the PMS itself says two
+  -- persons hold the credentials, and a statement can not say whose phone is whose. Its room access is shared, never
+  -- claimable (as 0145 keeps a shared stay whole).
+  v_multi := COALESCE((SELECT array_agg(st) FROM unnest(v_stays) st WHERE stay_named_guests(st) > 1), '{}');
+  v_stays := ARRAY(SELECT st FROM unnest(v_stays) st WHERE NOT st = ANY (v_multi));
+  -- The access of the stated context: the room's entitlements of the single-guest reservations in scope, and the
+  -- entitlements of a staff-issued account. Shared by nature; claimable only on staff's statements.
+  SELECT COALESCE(array_agg(en.id), '{}') INTO v_ctx FROM entitlements en
+   WHERE en.tenant_id = p_tenant AND en.site_id = p_site AND (en.stay_id = ANY (v_stays) OR en.id = ANY (v_cred));
+  RETURN QUERY SELECT v_attr, v_ctx, v_ch, v_excl, v_p, v_a, v_stays, v_guests,
+    COALESCE((SELECT array_agg(en.id) FROM entitlements en WHERE en.tenant_id = p_tenant AND en.site_id = p_site AND en.stay_id = ANY (v_multi)), '{}'),
+    (r.attest_identity AND r.attest_device AND r.attest_sole_use),
+    (r.attest_private_address OR NOT EXISTS (SELECT 1 FROM unnest(r.macs) m WHERE mac_is_private(m)));
+END $$;
+
+
+--
+-- Name: assisted_device_state(uuid[], macaddr, uuid, uuid, uuid[], uuid[], uuid[], uuid[], uuid[], uuid[]); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.assisted_device_state(p_devices uuid[], p_mac macaddr, p_tenant uuid, p_site uuid, p_allowed uuid[], p_stays uuid[], p_guests uuid[], p_p uuid[], p_a uuid[], p_ch uuid[]) RETURNS text
+    LANGUAGE sql STABLE
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT CASE
+    WHEN EXISTS (SELECT 1 FROM principal_device_credentials c WHERE c.device_id = ANY (p_devices) AND NOT c.guest_principal_id = ANY (p_p))
+      OR EXISTS (SELECT 1 FROM auth_contexts ac WHERE ac.device_id = ANY (p_devices) AND ac.guest_principal_id IS NOT NULL
+                    AND NOT ac.guest_principal_id = ANY (p_p))
+      OR EXISTS (SELECT 1 FROM auth_contexts ac JOIN guest_access_accounts g ON g.id = ac.guest_account_id
+                  WHERE ac.device_id = ANY (p_devices) AND g.self_registered AND NOT g.id = ANY (p_a))
+      OR EXISTS (SELECT 1 FROM guest_access_accounts g
+                  WHERE g.tenant_id = p_tenant AND g.site_id = p_site AND g.created_by_device_mac = p_mac AND NOT g.id = ANY (p_a))
+      OR EXISTS (SELECT 1 FROM verification_access_grants gr
+                  WHERE gr.tenant_id = p_tenant AND gr.site_id = p_site AND gr.device_mac = p_mac
+                    AND (gr.challenge_id IS NULL OR NOT gr.challenge_id = ANY (p_ch)))
+      OR EXISTS (SELECT 1 FROM otp_device_bindings b WHERE b.tenant_id = p_tenant AND b.device_mac = p_mac AND NOT b.challenge_id = ANY (p_ch))
+      -- The PMS matched a sign-in attempt on this address to a guest who is not the one stated.
+      OR EXISTS (SELECT 1 FROM sign_in_attempts sa
+                  WHERE sa.tenant_id = p_tenant AND sa.site_id = p_site AND sa.device_mac = p_mac
+                    AND sa.matched_guest_id IS NOT NULL AND NOT sa.matched_guest_id = ANY (p_guests))
+      THEN 'device_used_by_another_person'
+    WHEN EXISTS (SELECT 1 FROM sessions se WHERE se.device_id = ANY (p_devices) AND NOT se.entitlement_id = ANY (p_allowed))
+      OR EXISTS (SELECT 1 FROM entitlement_devices ed WHERE ed.device_id = ANY (p_devices) AND NOT ed.entitlement_id = ANY (p_allowed))
+      -- Past use, left behind when a binding is released: the authorisation history and the slot actions.
+      OR EXISTS (SELECT 1 FROM entitlement_device_authorizations a WHERE a.device_id = ANY (p_devices) AND NOT a.entitlement_id = ANY (p_allowed))
+      OR EXISTS (SELECT 1 FROM device_slot_actions a
+                  WHERE (a.device_id = ANY (p_devices) OR a.replacement_device_id = ANY (p_devices))
+                    AND (a.entitlement_id IS NULL OR NOT a.entitlement_id = ANY (p_allowed)))
+      OR EXISTS (SELECT 1 FROM guest_device_actions a WHERE a.device_id = ANY (p_devices) AND NOT a.entitlement_id = ANY (p_allowed))
+      OR EXISTS (SELECT 1 FROM auth_contexts ac WHERE ac.device_id = ANY (p_devices)
+                    AND ((ac.stay_id IS NOT NULL AND NOT ac.stay_id = ANY (p_stays))
+                         OR ac.voucher_id IS NOT NULL OR ac.anonymous_subject_id IS NOT NULL OR ac.post_stay_profile_id IS NOT NULL
+                         OR (ac.guest_account_id IS NOT NULL AND NOT ac.guest_account_id = ANY (p_a))))
+      OR EXISTS (SELECT 1 FROM sign_in_attempts sa
+                  WHERE sa.tenant_id = p_tenant AND sa.site_id = p_site AND sa.device_mac = p_mac
+                    AND ((sa.entitlement_id IS NOT NULL AND NOT sa.entitlement_id = ANY (p_allowed))
+                         OR (sa.matched_stay_id IS NOT NULL AND NOT sa.matched_stay_id = ANY (p_stays))))
+      THEN 'device_used_under_another_access'
+    END
+$$;
+
+
+--
+-- Name: assisted_device_tied(uuid[], macaddr, uuid, uuid, uuid[], uuid[], uuid[], uuid[], uuid[]); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.assisted_device_tied(p_devices uuid[], p_mac macaddr, p_tenant uuid, p_site uuid, p_allowed uuid[], p_stays uuid[], p_p uuid[], p_a uuid[], p_ch uuid[]) RETURNS boolean
+    LANGUAGE sql STABLE
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT EXISTS (SELECT 1 FROM sessions se WHERE se.device_id = ANY (p_devices) AND se.entitlement_id = ANY (p_allowed))
+      OR EXISTS (SELECT 1 FROM entitlement_devices ed WHERE ed.device_id = ANY (p_devices) AND ed.entitlement_id = ANY (p_allowed))
+      OR EXISTS (SELECT 1 FROM auth_contexts ac WHERE ac.device_id = ANY (p_devices)
+                    AND (ac.stay_id = ANY (p_stays) OR ac.guest_account_id = ANY (p_a) OR ac.guest_principal_id = ANY (p_p)))
+      OR EXISTS (SELECT 1 FROM principal_device_credentials c WHERE c.device_id = ANY (p_devices) AND c.guest_principal_id = ANY (p_p))
+      OR EXISTS (SELECT 1 FROM verification_access_grants gr
+                  WHERE gr.tenant_id = p_tenant AND gr.site_id = p_site AND gr.device_mac = p_mac AND gr.challenge_id = ANY (p_ch))
+      OR EXISTS (SELECT 1 FROM sign_in_attempts sa
+                  WHERE sa.tenant_id = p_tenant AND sa.site_id = p_site AND sa.device_mac = p_mac
+                    AND (sa.entitlement_id = ANY (p_allowed) OR sa.matched_stay_id = ANY (p_stays)))
+$$;
+
+
+--
+-- Name: assisted_device_whole(uuid, macaddr, uuid, uuid, timestamp with time zone, timestamp with time zone); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.assisted_device_whole(p_device uuid, p_mac macaddr, p_tenant uuid, p_site uuid, p_from timestamp with time zone, p_to timestamp with time zone) RETURNS boolean
+    LANGUAGE sql STABLE
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT NOT EXISTS (SELECT 1 FROM sessions se WHERE se.device_id = p_device
+                        AND NOT (se.started >= p_from AND se.ended IS NOT NULL AND se.ended <= p_to))
+     AND NOT EXISTS (SELECT 1 FROM sign_in_attempts sa WHERE sa.tenant_id = p_tenant AND sa.site_id = p_site AND sa.device_mac = p_mac
+                        AND NOT (sa.occurred_at >= p_from AND sa.occurred_at < p_to))
+     AND NOT EXISTS (SELECT 1 FROM verification_access_grants g WHERE g.tenant_id = p_tenant AND g.site_id = p_site AND g.device_mac = p_mac
+                        AND NOT (g.started_at >= p_from AND g.started_at < p_to AND g.ended_at IS NOT NULL AND g.ended_at <= p_to))
+     AND NOT EXISTS (SELECT 1 FROM otp_device_bindings b WHERE b.tenant_id = p_tenant AND b.device_mac = p_mac
+                        AND NOT (b.issued_at >= p_from AND b.issued_at < p_to))
+     AND NOT EXISTS (SELECT 1 FROM guest_signin_restrictions x WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.device_mac = p_mac
+                        AND NOT (COALESCE(x.restricted_at, x.created_at) >= p_from AND COALESCE(x.restricted_at, x.created_at) < p_to))
+     AND NOT EXISTS (SELECT 1 FROM guest_signin_device_passes x WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.device_mac = p_mac
+                        AND NOT (x.granted_at >= p_from AND x.granted_at < p_to))
+     AND NOT EXISTS (SELECT 1 FROM public.social_oauth_states x WHERE x.tenant_id = p_tenant AND x.client_mac = p_mac
+                        AND NOT (x.created_at >= p_from AND x.created_at < p_to))
+     AND NOT EXISTS (SELECT 1 FROM entitlement_devices ed WHERE ed.device_id = p_device
+                        AND NOT (COALESCE(ed.first_authorized, p_from) >= p_from AND COALESCE(ed.last_authorized, p_from) <= p_to))
+     AND NOT EXISTS (SELECT 1 FROM devices dv WHERE dv.id = p_device
+                        AND ((dv.first_seen IS NOT NULL AND dv.first_seen < p_from) OR (dv.last_seen IS NOT NULL AND dv.last_seen > p_to)))
+$$;
+
+
+--
+-- Name: assisted_record_detail(uuid, uuid, text, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.assisted_record_detail(p_tenant uuid, p_site uuid, p_kind text, p_id uuid) RETURNS jsonb
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT CASE p_kind
+    WHEN 'session' THEN (SELECT jsonb_build_object(
+        'started', se.started, 'ended', se.ended, 'end_reason', se.end_reason, 'ip', se.ip, 'mac_address', se.mac,
+        'bytes_up', se.bytes_up, 'bytes_down', se.bytes_down,
+        'usage_samples', (SELECT COALESCE(jsonb_agg(jsonb_build_object('at', ar.sampled_at, 'bytes_up', ar.bytes_up,
+                                                                       'bytes_down', ar.bytes_down) ORDER BY ar.sampled_at), '[]'::jsonb)
+                            FROM accounting_records ar WHERE ar.session_id = se.id))
+      FROM sessions se WHERE se.id = p_id AND se.tenant_id = p_tenant AND se.site_id = p_site)
+    WHEN 'sign_in_attempt' THEN (SELECT jsonb_build_object(
+        'at', sa.occurred_at, 'room_entered', sa.submitted_room, 'checked_against', sa.verifier_kind, 'result', sa.result,
+        'guest_network', sa.guest_network_name, 'device_ip', sa.device_ip, 'device_mac_address', sa.device_mac)
+      FROM sign_in_attempts sa WHERE sa.id = p_id AND sa.tenant_id = p_tenant AND sa.site_id = p_site)
+    WHEN 'verification_access' THEN (SELECT jsonb_build_object(
+        'started_at', g.started_at, 'expires_at', g.expires_at, 'ended_at', g.ended_at, 'end_reason', g.end_reason,
+        'ip', g.ip, 'device_mac_address', g.device_mac, 'used_bytes', g.used_bytes)
+      FROM verification_access_grants g WHERE g.id = p_id AND g.tenant_id = p_tenant AND g.site_id = p_site)
+    WHEN 'code_device_binding' THEN (SELECT jsonb_build_object('issued_at', b.issued_at, 'device_mac_address', b.device_mac)
+      FROM otp_device_bindings b WHERE b.challenge_id = p_id AND b.tenant_id = p_tenant)
+    WHEN 'sign_in_restriction' THEN (SELECT jsonb_build_object(
+        'device_mac_address', x.device_mac, 'guest_network', x.guest_network_name, 'room_entered', x.last_submitted_room,
+        'restricted_at', x.restricted_at, 'until', x.expires_at, 'failures', x.failure_count, 'reason', x.reason,
+        'released_at', x.released_at)
+      FROM guest_signin_restrictions x WHERE x.id = p_id AND x.tenant_id = p_tenant AND x.site_id = p_site)
+    WHEN 'sign_in_pass' THEN (SELECT jsonb_build_object('device_mac_address', x.device_mac, 'granted_at', x.granted_at)
+      FROM guest_signin_device_passes x WHERE x.id = p_id AND x.tenant_id = p_tenant AND x.site_id = p_site)
+    WHEN 'sign_in_redirect' THEN (SELECT jsonb_build_object(
+        'provider', x.provider, 'from_ip', x.client_ip, 'device_mac_address', x.client_mac, 'browser', x.user_agent,
+        'started_at', x.created_at, 'completed_at', x.consumed_at)
+      FROM public.social_oauth_states x WHERE md5(x.state)::uuid = p_id AND x.tenant_id = p_tenant)
+    WHEN 'device' THEN (SELECT jsonb_build_object(
+        'mac_address', dv.mac, 'first_seen', dv.first_seen, 'last_seen', dv.last_seen, 'last_ip', dv.last_ip,
+        'networks_seen_on', (SELECT COALESCE(jsonb_agg(jsonb_build_object('guest_network', na.guest_network_id,
+                                'first_seen', na.first_seen, 'last_seen', na.last_seen) ORDER BY na.first_seen), '[]'::jsonb)
+                               FROM device_network_appearances na WHERE na.device_id = dv.id))
+      FROM devices dv WHERE dv.id = p_id AND dv.tenant_id = p_tenant AND dv.site_id = p_site)
+  END
+$$;
+
+
+--
+-- Name: assisted_request_anchors_json(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.assisted_request_anchors_json(p_tenant uuid, p_site uuid, p_request uuid) RETURNS jsonb
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE(jsonb_agg(jsonb_build_object('kind', a.anchor_kind, 'id', a.anchor_id)), '[]'::jsonb)
+    FROM assisted_guest_request_anchors a JOIN assisted_guest_requests q ON q.id = a.request_id
+   WHERE a.request_id = p_request AND q.tenant_id = p_tenant AND q.site_id = p_site
+$$;
+
+
+--
+-- Name: assisted_request_close(uuid, uuid, uuid, text, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.assisted_request_close(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_outcome text, p_reason text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE q record; v_exports integer; v_disclosed integer;
+BEGIN
+  IF p_actor IS NULL OR length(btrim(p_actor)) NOT BETWEEN 1 AND 200 THEN
+    RAISE EXCEPTION 'an operator is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_outcome IS NULL OR p_outcome NOT IN ('COMPLETED', 'CANCELLED') THEN
+    RAISE EXCEPTION 'the outcome must be COMPLETED or CANCELLED' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_reason IS NULL OR length(btrim(p_reason)) NOT BETWEEN 4 AND 500 THEN
+    RAISE EXCEPTION 'a reason of 4-500 characters is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  SELECT * INTO q FROM assisted_guest_requests x WHERE x.id = p_request AND x.tenant_id = p_tenant AND x.site_id = p_site FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'assisted request not found' USING ERRCODE = 'no_data_found';
+  END IF;
+  IF q.status <> 'OPEN' THEN
+    RAISE EXCEPTION 'assisted_request_refused' USING ERRCODE = 'object_in_use', DETAIL = 'closed';
+  END IF;
+  SELECT count(*) INTO v_exports FROM assisted_guest_request_events e WHERE e.request_id = p_request AND e.action = 'EXPORTED';
+  SELECT count(*) INTO v_disclosed FROM assisted_guest_request_records r WHERE r.request_id = p_request AND r.action = 'DISCLOSED';
+  -- An erasure completes only by running; an access request completes only after something was handed over.
+  IF p_outcome = 'COMPLETED' AND (q.purpose <> 'ACCESS' OR v_exports = 0) THEN
+    RAISE EXCEPTION 'assisted_request_refused' USING ERRCODE = 'object_in_use', DETAIL = 'nothing_done';
+  END IF;
+  PERFORM assisted_close(p_tenant, p_site, p_request, p_actor, p_outcome, p_reason,
+                         jsonb_build_object('exports', v_exports, 'records_disclosed', v_disclosed),
+                         CASE p_outcome WHEN 'COMPLETED' THEN 'COMPLETED' ELSE 'CANCELLED' END);
+  PERFORM ledger_append(p_tenant, p_site, 'assisted_closed', jsonb_build_object(
+    'id', p_request, 'ref', q.ref, 'purpose', q.purpose, 'status', p_outcome, 'closed_at', now()));
+  -- The hotel's file of this request, handed back once: closing it removes the addresses and the free text.
+  RETURN jsonb_build_object('ref', q.ref, 'status', p_outcome,
+    'receipt', jsonb_build_object('reference', q.ref, 'purpose', q.purpose, 'requester', q.requester_ref,
+                                  'verification_method', q.verification_method, 'evidence_note', q.evidence_note,
+                                  'range_from', q.range_from, 'range_to', q.range_to,
+                                  'statements', jsonb_build_object('identity_verified', q.attest_identity, 'device_shown', q.attest_device,
+                                                                   'sole_use', q.attest_sole_use, 'private_address_confirmed', q.attest_private_address),
+                                  'prepared_by', q.created_by, 'opened_at', q.created_at,
+                                  'exports', v_exports, 'records_disclosed', v_disclosed));
+END $$;
+
+
+--
+-- Name: assisted_request_erase_run(uuid, uuid, uuid, text, text, text, text, jsonb); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.assisted_request_erase_run(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_reason text, p_confirm text, p_signature text, p_selected jsonb) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE q record; v jsonb; v_ref text; v_id uuid; v_macs text[] := '{}'; v_counts jsonb; v_receipt jsonb;
+        n_sessions integer := 0; n_attempts integer := 0; n_verif integer := 0; n_bind integer := 0; n_restr integer := 0;
+        n_pass integer := 0; n_redirect integer := 0; n_dev integer := 0; v_k integer; v_total integer;
+        s_ids uuid[]; a_ids uuid[]; g_ids uuid[]; b_ids uuid[]; r_ids uuid[]; p_ids uuid[]; o_ids uuid[]; d_ids uuid[];
+        v_since timestamptz;
+BEGIN
+  IF p_actor IS NULL OR length(btrim(p_actor)) NOT BETWEEN 1 AND 200 THEN
+    RAISE EXCEPTION 'an operator is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_reason IS NULL OR length(btrim(p_reason)) NOT BETWEEN 4 AND 500 THEN
+    RAISE EXCEPTION 'a reason of 4-500 characters is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  SELECT * INTO q FROM assisted_guest_requests x WHERE x.id = p_request AND x.tenant_id = p_tenant AND x.site_id = p_site FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'assisted request not found' USING ERRCODE = 'no_data_found';
+  END IF;
+  IF q.status <> 'OPEN' THEN
+    RAISE EXCEPTION 'assisted_request_refused' USING ERRCODE = 'object_in_use', DETAIL = 'closed';
+  END IF;
+  IF q.purpose <> 'ERASURE' THEN
+    RAISE EXCEPTION 'assisted_request_refused' USING ERRCODE = 'object_in_use', DETAIL = 'wrong_purpose';
+  END IF;
+  IF lower(btrim(COALESCE(p_confirm, ''))) <> lower(q.ref) THEN
+    RAISE EXCEPTION 'assisted_request_refused' USING ERRCODE = 'object_in_use', DETAIL = 'confirmation';
+  END IF;
+  -- NOTHING MOVES UNDER THE REVIEW: the request, the address (among assisted requests) and the devices are locked, then
+  -- the review is computed again and must be what staff saw. A session that begins meanwhile waits for the device;
+  -- other records keyed by the address are not locked out, and a change in them shows in the signature.
+  PERFORM pg_advisory_xact_lock(hashtextextended(p_site::text || ':' || m::text, 146)) FROM unnest(q.macs) m ORDER BY m;
+  PERFORM 1 FROM devices dv WHERE dv.tenant_id = p_tenant AND dv.site_id = p_site AND dv.mac = ANY (q.macs) ORDER BY dv.id FOR UPDATE;
+  v := assisted_validate_selection(p_tenant, p_site, p_request, p_signature, p_selected, true);
+  v_total := jsonb_array_length(v -> 'selected');
+
+  SELECT COALESCE(array_agg(s.id) FILTER (WHERE s.kind = 'session'), '{}'),
+         COALESCE(array_agg(s.id) FILTER (WHERE s.kind = 'sign_in_attempt'), '{}'),
+         COALESCE(array_agg(s.id) FILTER (WHERE s.kind = 'verification_access'), '{}'),
+         COALESCE(array_agg(s.id) FILTER (WHERE s.kind = 'code_device_binding'), '{}'),
+         COALESCE(array_agg(s.id) FILTER (WHERE s.kind = 'sign_in_restriction'), '{}'),
+         COALESCE(array_agg(s.id) FILTER (WHERE s.kind = 'sign_in_pass'), '{}'),
+         COALESCE(array_agg(s.id) FILTER (WHERE s.kind = 'sign_in_redirect'), '{}'),
+         COALESCE(array_agg(s.id) FILTER (WHERE s.kind = 'device'), '{}')
+    INTO s_ids, a_ids, g_ids, b_ids, r_ids, p_ids, o_ids, d_ids
+    FROM jsonb_to_recordset(v -> 'selected') AS s(kind text, id uuid, class text, device uuid);
+  -- The addresses of the devices that are anonymised, read before they are: the activity log is cleaned of them.
+  SELECT COALESCE(array_agg(lower(dv.mac::text)), '{}'),
+         CASE WHEN bool_or(dv.first_seen IS NULL) THEN NULL ELSE min(dv.first_seen) - interval '1 day' END
+    INTO v_macs, v_since FROM devices dv WHERE dv.id = ANY (d_ids);
+
+  PERFORM set_config('iam_v2.anonymise', 'retention', true);
+  -- Only ended sessions (the review never offers another), and only their addresses: usage totals, entitlements and
+  -- the accounting samples are untouched.
+  UPDATE sessions x SET ip = NULL, mac = NULL
+   WHERE x.id = ANY (s_ids) AND x.tenant_id = p_tenant AND x.site_id = p_site AND x.ended IS NOT NULL AND (x.ip IS NOT NULL OR x.mac IS NOT NULL);
+  GET DIAGNOSTICS n_sessions = ROW_COUNT;
+  UPDATE sign_in_attempts x
+     SET submitted_room = NULL, device_ip = NULL, device_mac = NULL,
+         sensitive_ciphertext = NULL, sensitive_nonce = NULL, encryption_key_id = NULL, cipher_version = NULL
+   WHERE x.id = ANY (a_ids) AND x.tenant_id = p_tenant AND x.site_id = p_site;
+  GET DIAGNOSTICS n_attempts = ROW_COUNT;
+  UPDATE verification_access_grants x
+     SET device_mac = anonymised_mac(), ip = '0.0.0.0'::inet, destination_digest = encode(public.gen_random_bytes(32), 'hex')
+   WHERE x.id = ANY (g_ids) AND x.tenant_id = p_tenant AND x.site_id = p_site AND x.ended_at IS NOT NULL;
+  GET DIAGNOSTICS n_verif = ROW_COUNT;
+  UPDATE otp_device_bindings x SET device_mac = anonymised_mac()
+   WHERE x.challenge_id = ANY (b_ids) AND x.tenant_id = p_tenant AND x.device_mac = ANY (q.macs);
+  GET DIAGNOSTICS n_bind = ROW_COUNT;
+  UPDATE guest_signin_restrictions x SET device_mac = anonymised_mac(), last_submitted_room = NULL
+   WHERE x.id = ANY (r_ids) AND x.tenant_id = p_tenant AND x.site_id = p_site;
+  GET DIAGNOSTICS n_restr = ROW_COUNT;
+  UPDATE guest_signin_device_passes x SET device_mac = anonymised_mac()
+   WHERE x.id = ANY (p_ids) AND x.tenant_id = p_tenant AND x.site_id = p_site;
+  GET DIAGNOSTICS n_pass = ROW_COUNT;
+  UPDATE public.social_oauth_states x SET client_ip = NULL, client_mac = NULL, user_agent = NULL, code_verifier = NULL, nonce = NULL
+   WHERE md5(x.state)::uuid = ANY (o_ids) AND x.tenant_id = p_tenant AND x.client_mac = ANY (q.macs);
+  GET DIAGNOSTICS n_redirect = ROW_COUNT;
+  -- A device whose every record is inside the request and selected is anonymised like an exclusive device (its
+  -- remaining ended sessions lose their addresses with it: they are all selected, the review required it).
+  FOREACH v_id IN ARRAY d_ids LOOP
+    PERFORM anonymise_device(v_id);
+    n_dev := n_dev + 1;
+  END LOOP;
+  -- An account the person registered on that device holds its address too (only a stated account can be here: any other
+  -- account created on the device made it someone else's).
+  UPDATE guest_access_accounts g SET created_by_device_mac = NULL
+   WHERE g.tenant_id = p_tenant AND g.site_id = p_site AND g.created_by_device_mac = ANY (q.macs)
+     AND g.created_by_device_mac::text = ANY (v_macs);
+  PERFORM set_config('iam_v2.anonymise', '', true);
+
+  v_ref := 'ER-' || upper(encode(public.gen_random_bytes(6), 'hex'));
+  v_counts := jsonb_build_object('assisted_request', q.ref, 'sessions', n_sessions, 'sign_in_attempts', n_attempts,
+                                 'verification_records', n_verif + n_bind, 'sign_in_restrictions', n_restr,
+                                 'sign_in_passes', n_pass, 'sign_in_redirects', n_redirect, 'devices', n_dev,
+                                 'records_selected', v_total);
+  INSERT INTO guest_data_erasures (erasure_ref, tenant_id, site_id, subject_kind, erased_by, erase_reason, counts)
+  VALUES (v_ref, p_tenant, p_site, 'assisted', btrim(p_actor), btrim(p_reason), v_counts);
+  INSERT INTO erasure_journal (tenant_id, site_id, erasure_ref, kind, subject_id, detail)
+    SELECT p_tenant, p_site, v_ref, 'assisted_record', s.id, s.kind FROM jsonb_to_recordset(v -> 'selected') AS s(kind text, id uuid, class text, device uuid)
+    ON CONFLICT DO NOTHING;
+  INSERT INTO assisted_guest_request_records (request_id, rec_kind, rec_id, rec_class, action)
+    SELECT p_request, s.kind, s.id, s.class, 'ANONYMISED' FROM jsonb_to_recordset(v -> 'selected') AS s(kind text, id uuid, class text, device uuid);
+  -- The file the hotel keeps of this request, handed back once: the closing scrub removes it from the database.
+  v_receipt := jsonb_build_object('reference', q.ref, 'requester', q.requester_ref, 'verification_method', q.verification_method,
+                                  'evidence_note', q.evidence_note, 'range_from', q.range_from, 'range_to', q.range_to,
+                                  'statements', jsonb_build_object('identity_verified', q.attest_identity, 'device_shown', q.attest_device,
+                                                                   'sole_use', q.attest_sole_use, 'private_address_confirmed', q.attest_private_address),
+                                  'prepared_by', q.created_by, 'opened_at', q.created_at);
+  PERFORM assisted_close(p_tenant, p_site, p_request, p_actor, 'COMPLETED', p_reason, v_counts || jsonb_build_object('erasure_ref', v_ref), 'COMPLETED');
+  RETURN jsonb_build_object('erasure_ref', v_ref, 'counts', v_counts, 'receipt', v_receipt, 'macs_cleared', to_jsonb(v_macs),
+                            'since', COALESCE(v_since, '-infinity'::timestamptz));
+END $$;
+
+
+--
+-- Name: assisted_request_export_doc(uuid, uuid, uuid, text, text, text, text, jsonb); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.assisted_request_export_doc(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_reason text, p_confirm text, p_signature text, p_selected jsonb) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE q record; v jsonb; v_kinds jsonb; v_n integer; v_total integer;
+BEGIN
+  IF p_actor IS NULL OR length(btrim(p_actor)) NOT BETWEEN 1 AND 200 THEN
+    RAISE EXCEPTION 'an operator is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_reason IS NULL OR length(btrim(p_reason)) NOT BETWEEN 4 AND 500 THEN
+    RAISE EXCEPTION 'a reason of 4-500 characters is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  SELECT * INTO q FROM assisted_guest_requests x WHERE x.id = p_request AND x.tenant_id = p_tenant AND x.site_id = p_site FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'assisted request not found' USING ERRCODE = 'no_data_found';
+  END IF;
+  IF q.status <> 'OPEN' THEN
+    RAISE EXCEPTION 'assisted_request_refused' USING ERRCODE = 'object_in_use', DETAIL = 'closed';
+  END IF;
+  IF q.purpose <> 'ACCESS' THEN
+    RAISE EXCEPTION 'assisted_request_refused' USING ERRCODE = 'object_in_use', DETAIL = 'wrong_purpose';
+  END IF;
+  IF lower(btrim(COALESCE(p_confirm, ''))) <> lower(q.ref) THEN
+    RAISE EXCEPTION 'assisted_request_refused' USING ERRCODE = 'object_in_use', DETAIL = 'confirmation';
+  END IF;
+  -- Nothing about these addresses is anonymised while the document is built.
+  PERFORM pg_advisory_xact_lock_shared(hashtextextended(p_site::text || ':' || m::text, 146)) FROM unnest(q.macs) m ORDER BY m;
+  PERFORM 1 FROM devices dv WHERE dv.tenant_id = p_tenant AND dv.site_id = p_site AND dv.mac = ANY (q.macs) ORDER BY dv.id FOR SHARE;
+
+  v := assisted_validate_selection(p_tenant, p_site, p_request, p_signature, p_selected, false);
+  v_total := (v ->> 'total')::integer;
+  SELECT jsonb_object_agg(g.kind, g.docs) INTO v_kinds FROM (
+    SELECT s.kind, jsonb_agg(assisted_record_detail(p_tenant, p_site, s.kind, s.id) ORDER BY s.kind, s.id) AS docs
+      FROM jsonb_to_recordset(v -> 'selected') AS s(kind text, id uuid, class text, device uuid) GROUP BY s.kind) g;
+  v_n := jsonb_array_length(v -> 'selected');
+  INSERT INTO assisted_guest_request_records (request_id, rec_kind, rec_id, rec_class, action)
+    SELECT p_request, s.kind, s.id, s.class, 'DISCLOSED' FROM jsonb_to_recordset(v -> 'selected') AS s(kind text, id uuid, class text, device uuid)
+    ON CONFLICT DO NOTHING;
+  INSERT INTO assisted_guest_request_events (request_id, actor, action, detail)
+  VALUES (p_request, btrim(p_actor), 'EXPORTED', jsonb_build_object('reason', btrim(p_reason), 'records', v_n,
+          'by_kind', (SELECT COALESCE(jsonb_object_agg(g.kind, g.n), '{}'::jsonb)
+                        FROM (SELECT s.kind, count(*) AS n FROM jsonb_to_recordset(v -> 'selected') AS s(kind text, id uuid, class text, device uuid)
+                               GROUP BY s.kind) g)));
+  RETURN jsonb_build_object(
+    'format', 'stayconnect.assisted-guest-data-export/1', 'exported_at', now(),
+    'request', jsonb_build_object(
+        -- What the requester is told about their own request. The hotel's evidence note and the staff member's name stay in
+        -- the hotel's file (handed back when the request is closed), not in what is handed to the requester.
+        'reference', q.ref, 'purpose', 'ACCESS', 'range_from', q.range_from, 'range_to', q.range_to,
+        'requester', q.requester_ref, 'verification_method', q.verification_method,
+        'statements', jsonb_build_object('identity_verified', q.attest_identity, 'device_shown', q.attest_device,
+                                         'sole_use', q.attest_sole_use, 'private_address_confirmed', q.attest_private_address),
+        'opened_at', q.created_at),
+    'records', COALESCE(v_kinds, '{}'::jsonb),
+    'not_included', jsonb_build_object(
+        'records', GREATEST(v_total - v_n, 0),
+        'why', 'Records for these device addresses that the hotel could not attribute to you with sufficient certainty, '
+               || 'or did not select after review, are not included. A device address, a room or a shared internet '
+               || 'access does not show who used it, and other people''s use is never disclosed to you. The hotel '
+               || 'answers a request about those records separately, by its own manual and legal process.'));
+END $$;
+
+
+--
+-- Name: assisted_request_get(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.assisted_request_get(p_tenant uuid, p_site uuid, p_request uuid) RETURNS jsonb
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE q record; v_anchors jsonb; v_events jsonb;
+BEGIN
+  SELECT * INTO q FROM assisted_guest_requests x WHERE x.id = p_request AND x.tenant_id = p_tenant AND x.site_id = p_site;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'assisted request not found' USING ERRCODE = 'no_data_found';
+  END IF;
+  IF q.status = 'OPEN' THEN
+    SELECT COALESCE(jsonb_agg(jsonb_build_object('kind', a.anchor_kind, 'id', a.anchor_id, 'label', CASE a.anchor_kind
+        WHEN 'account' THEN (SELECT CASE WHEN x.username NOT LIKE 'anon-%' THEN x.username END FROM guest_access_accounts x WHERE x.id = a.anchor_id)
+        WHEN 'principal' THEN (SELECT COALESCE(g.display_name, 'a guest identity') FROM guest_principals g WHERE g.id = a.anchor_id)
+        WHEN 'stay' THEN (SELECT 'Room ' || COALESCE(s.normalized_room_number, '?') || ' · reservation ' || s.external_reservation_id
+                            FROM stays s WHERE s.id = a.anchor_id)
+        WHEN 'stay_guest' THEN (SELECT COALESCE(sg.display_name, 'a guest') || ' · room ' || COALESCE(s.normalized_room_number, '?')
+                                  FROM stay_guests sg JOIN stays s ON s.id = sg.stay_id WHERE sg.id = a.anchor_id) END)
+        ORDER BY a.anchor_kind), '[]'::jsonb)
+      INTO v_anchors FROM assisted_guest_request_anchors a WHERE a.request_id = p_request;
+  ELSE
+    v_anchors := '[]'::jsonb;
+  END IF;
+  SELECT COALESCE(jsonb_agg(jsonb_build_object('at', e.at, 'by', e.actor, 'action', e.action, 'detail', e.detail) ORDER BY e.at), '[]'::jsonb)
+    INTO v_events FROM assisted_guest_request_events e WHERE e.request_id = p_request;
+  RETURN jsonb_build_object(
+    'id', q.id, 'ref', q.ref, 'purpose', q.purpose, 'status', q.status,
+    'addresses', CASE WHEN q.macs IS NOT NULL THEN to_jsonb(ARRAY(SELECT m::text FROM unnest(q.macs) m)) END,
+    'range_from', q.range_from, 'range_to', q.range_to, 'pms_interface_id', q.pms_interface_id,
+    'requester', q.requester_ref, 'verification_method', q.verification_method,
+    'evidence_note', CASE WHEN q.status = 'OPEN' THEN q.evidence_note END,
+    'statements', jsonb_build_object('identity_verified', q.attest_identity, 'device_shown', q.attest_device,
+                                     'sole_use', q.attest_sole_use, 'private_address_confirmed', q.attest_private_address),
+    'reason', q.open_reason, 'created_by', q.created_by, 'created_at', q.created_at,
+    'closed_by', q.closed_by, 'closed_at', q.closed_at, 'close_reason', q.close_reason, 'result', q.result,
+    'anchors', v_anchors, 'events', v_events);
+END $$;
+
+
+--
+-- Name: assisted_request_list(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.assisted_request_list(p_tenant uuid, p_site uuid) RETURNS jsonb
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE(jsonb_agg(jsonb_build_object(
+      'id', x.id, 'ref', x.ref, 'purpose', x.purpose, 'status', x.status, 'range_from', x.range_from, 'range_to', x.range_to,
+      'requester', x.requester_ref, 'created_by', x.created_by, 'created_at', x.created_at, 'closed_at', x.closed_at,
+      'closed_by', x.closed_by, 'result', x.result) ORDER BY x.created_at DESC), '[]'::jsonb)
+    FROM (SELECT * FROM assisted_guest_requests q WHERE q.tenant_id = p_tenant AND q.site_id = p_site
+           ORDER BY q.created_at DESC LIMIT 100) x
+$$;
+
+
+--
+-- Name: assisted_request_open(uuid, uuid, text, text, text[], timestamp with time zone, timestamp with time zone, jsonb, text, text, text, boolean, boolean, boolean, boolean, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.assisted_request_open(p_tenant uuid, p_site uuid, p_actor text, p_purpose text, p_macs text[], p_from timestamp with time zone, p_to timestamp with time zone, p_anchors jsonb, p_requester text, p_method text, p_evidence text, p_att_identity boolean, p_att_device boolean, p_att_sole boolean, p_att_private boolean, p_reason text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $_$
+DECLARE v_macs macaddr[] := '{}'; m text; v_mac macaddr; a record; v_id uuid := gen_random_uuid(); v_ref text; v_ifaces uuid[];
+        v_n integer;
+BEGIN
+  IF p_actor IS NULL OR length(btrim(p_actor)) NOT BETWEEN 1 AND 200 THEN
+    RAISE EXCEPTION 'an operator is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_purpose IS NULL OR p_purpose NOT IN ('ACCESS', 'ERASURE') THEN
+    RAISE EXCEPTION 'the purpose must be ACCESS (hand over the records) or ERASURE (anonymise them)' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_macs IS NULL OR cardinality(p_macs) NOT BETWEEN 1 AND 5 THEN
+    RAISE EXCEPTION 'give 1 to 5 device addresses' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  FOREACH m IN ARRAY p_macs LOOP
+    IF m IS NULL OR lower(btrim(m)) !~ '^([0-9a-f]{2}:){5}[0-9a-f]{2}$|^([0-9a-f]{2}-){5}[0-9a-f]{2}$|^[0-9a-f]{12}$' THEN
+      RAISE EXCEPTION 'a device address is six pairs of hexadecimal digits, such as 3c:22:fb:0a:11:7e' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    v_mac := regexp_replace(regexp_replace(lower(btrim(m)), '[:-]', '', 'g'), '(..)(?=.)', '\1:', 'g')::macaddr;
+    IF (get_byte(decode(replace(v_mac::text, ':', ''), 'hex'), 0) & 1) = 1 THEN
+      RAISE EXCEPTION 'that is not the address of a single device' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF NOT v_mac = ANY (v_macs) THEN
+      v_macs := v_macs || v_mac;
+    END IF;
+  END LOOP;
+  IF p_from IS NULL OR p_to IS NULL OR p_to <= p_from OR p_to - p_from > interval '366 days' OR p_to > now() + interval '1 minute' THEN
+    RAISE EXCEPTION 'the range must end now or earlier, start before it ends and cover at most 366 days' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_requester IS NULL OR length(btrim(p_requester)) NOT BETWEEN 2 AND 120 THEN
+    RAISE EXCEPTION 'say who is asking (2-120 characters)' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_evidence IS NULL OR length(btrim(p_evidence)) NOT BETWEEN 9 AND 1000 THEN
+    RAISE EXCEPTION 'describe the evidence (9-1000 characters)' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_reason IS NULL OR length(btrim(p_reason)) NOT BETWEEN 4 AND 500 THEN
+    RAISE EXCEPTION 'a reason of 4-500 characters is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_att_identity IS NOT TRUE THEN
+    RAISE EXCEPTION 'the requester must be verified before a request is opened' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  -- A MAC address alone identifies nobody: the request names the reservation, guest or account it is about.
+  IF jsonb_typeof(p_anchors) IS DISTINCT FROM 'array' OR jsonb_array_length(p_anchors) NOT BETWEEN 1 AND 5 THEN
+    RAISE EXCEPTION 'name 1 to 5 reservations, guests or accounts the records are about: an address alone identifies nobody'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  FOR a IN SELECT DISTINCT x.kind, x.id FROM jsonb_to_recordset(p_anchors) AS x(kind text, id uuid) LOOP
+    IF a.kind IS NULL OR a.id IS NULL OR a.kind NOT IN ('account', 'principal', 'stay', 'stay_guest') THEN
+      RAISE EXCEPTION 'each record must be an account, identity, stay or stay guest from the search' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    -- It must exist on this site and be one this site may export (not also another site's guest).
+    PERFORM 1 FROM guest_data_scope(p_tenant, p_site, a.kind, a.id) LIMIT 1;
+  END LOOP;
+  -- The PMS interface the reservation came from, where there is one: reservations from two interfaces are two requests.
+  SELECT COALESCE(array_agg(DISTINCT z.iface) FILTER (WHERE z.iface IS NOT NULL), '{}') INTO v_ifaces FROM (
+    SELECT st.pms_interface_id AS iface FROM jsonb_to_recordset(p_anchors) AS x(kind text, id uuid)
+      JOIN stays st ON st.id = x.id AND st.tenant_id = p_tenant AND st.site_id = p_site WHERE x.kind = 'stay'
+    UNION ALL
+    SELECT st.pms_interface_id FROM jsonb_to_recordset(p_anchors) AS x(kind text, id uuid)
+      JOIN stay_guests sg ON sg.id = x.id JOIN stays st ON st.id = sg.stay_id AND st.tenant_id = p_tenant AND st.site_id = p_site
+     WHERE x.kind = 'stay_guest') z;
+  IF cardinality(v_ifaces) > 1 THEN
+    RAISE EXCEPTION 'the reservations come from different PMS interfaces: make one request for each' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+
+  v_ref := 'AR-' || upper(encode(public.gen_random_bytes(5), 'hex'));
+  INSERT INTO assisted_guest_requests (id, ref, tenant_id, site_id, purpose, macs, range_from, range_to, pms_interface_id,
+        requester_ref, verification_method, evidence_note, attest_identity, attest_device, attest_sole_use, attest_private_address,
+        open_reason, created_by)
+  VALUES (v_id, v_ref, p_tenant, p_site, p_purpose, v_macs, p_from, p_to, v_ifaces[1], btrim(p_requester), p_method, btrim(p_evidence),
+        true, COALESCE(p_att_device, false), COALESCE(p_att_sole, false), COALESCE(p_att_private, false), btrim(p_reason), btrim(p_actor));
+  INSERT INTO assisted_guest_request_anchors (request_id, anchor_kind, anchor_id)
+    SELECT v_id, x.kind, x.id FROM jsonb_to_recordset(p_anchors) AS x(kind text, id uuid) GROUP BY x.kind, x.id;
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  INSERT INTO assisted_guest_request_events (request_id, actor, action, detail)
+  VALUES (v_id, btrim(p_actor), 'OPENED', jsonb_build_object('purpose', p_purpose, 'addresses', cardinality(v_macs), 'anchors', v_n,
+                                                             'reason', btrim(p_reason)));
+  RETURN jsonb_build_object('id', v_id, 'ref', v_ref);
+END $_$;
+
+
+--
+-- Name: assisted_request_review(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.assisted_request_review(p_tenant uuid, p_site uuid, p_request uuid) RETURNS TABLE(o_kind text, o_id uuid, o_at timestamp with time zone, o_device uuid, o_class text, o_reason text, o_erase_block text)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE r record; cx record; v_n integer; v_state jsonb; v_dev jsonb; v_tied jsonb; v_allowed uuid[];
+BEGIN
+  SELECT * INTO r FROM assisted_guest_requests q WHERE q.id = p_request AND q.tenant_id = p_tenant AND q.site_id = p_site;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'assisted request not found' USING ERRCODE = 'no_data_found';
+  END IF;
+  IF r.status <> 'OPEN' THEN
+    RAISE EXCEPTION 'assisted_request_refused' USING ERRCODE = 'object_in_use', DETAIL = 'closed';
+  END IF;
+  SELECT * INTO cx FROM assisted_context(p_tenant, p_site, p_request);
+  v_allowed := cx.c_attr || cx.c_ctx;
+
+  -- A bounded review: a person can read it. A year of a busy address is more than that; narrow the range.
+  SELECT (SELECT count(*) FROM sessions se JOIN devices dv ON dv.id = se.device_id
+           WHERE se.tenant_id = p_tenant AND se.site_id = p_site AND dv.mac = ANY (r.macs)
+             AND se.started < r.range_to AND COALESCE(se.ended, 'infinity'::timestamptz) > r.range_from)
+       + (SELECT count(*) FROM sign_in_attempts sa
+           WHERE sa.tenant_id = p_tenant AND sa.site_id = p_site AND sa.device_mac = ANY (r.macs)
+             AND sa.occurred_at >= r.range_from AND sa.occurred_at < r.range_to)
+       + (SELECT count(*) FROM verification_access_grants g
+           WHERE g.tenant_id = p_tenant AND g.site_id = p_site AND g.device_mac = ANY (r.macs)
+             AND g.started_at >= r.range_from AND g.started_at < r.range_to)
+    INTO v_n;
+  IF v_n > 2000 THEN
+    RAISE EXCEPTION 'these addresses have more than 2000 records in this range: choose a shorter range'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+
+  -- What each stated address looks like: has anyone but the stated context ever used it, and does anything tie it to the
+  -- stated context? Both are answered about the ADDRESS, over every device row it has on this site.
+  SELECT COALESCE(jsonb_object_agg(m::text, to_jsonb(assisted_device_state(d.ids, m, p_tenant, p_site, v_allowed, cx.c_stays, cx.c_guests,
+                                                                          cx.c_p, cx.c_a, cx.c_ch))), '{}'::jsonb),
+         COALESCE(jsonb_object_agg(m::text, to_jsonb(d.ids[1]::text)) FILTER (WHERE cardinality(d.ids) > 0), '{}'::jsonb),
+         COALESCE(jsonb_object_agg(m::text, to_jsonb(assisted_device_tied(d.ids, m, p_tenant, p_site, v_allowed, cx.c_stays,
+                                                                         cx.c_p, cx.c_a, cx.c_ch))), '{}'::jsonb)
+    INTO v_state, v_dev, v_tied
+    FROM unnest(r.macs) m
+    CROSS JOIN LATERAL (SELECT COALESCE(array_agg(dv.id ORDER BY dv.id), '{}') AS ids FROM devices dv
+                         WHERE dv.tenant_id = p_tenant AND dv.site_id = p_site AND dv.mac = m) d;
+
+  RETURN QUERY
+  SELECT 'session'::text, se.id, se.started, se.device_id, k.v[1], k.v[2],
+         CASE WHEN se.ended IS NOT NULL AND se.ended > now() - interval '24 hours' THEN 'recent' END
+    FROM sessions se
+    JOIN devices dv ON dv.id = se.device_id
+    JOIN entitlements en ON en.id = se.entitlement_id
+   CROSS JOIN LATERAL assisted_class(
+          CASE WHEN se.entitlement_id = ANY (cx.c_attr) THEN 'attr'
+               WHEN se.entitlement_id = ANY (cx.c_ctx) THEN 'ctx'
+               WHEN se.entitlement_id = ANY (cx.c_multi) THEN 'multi'
+               WHEN en.voucher_id IS NOT NULL OR en.anonymous_subject_id IS NOT NULL THEN 'shared'
+               ELSE 'other' END,
+          se.ended IS NOT NULL AND se.started >= r.range_from AND se.ended <= r.range_to,
+          cx.c_claim_ok, cx.c_priv_ok, v_state ->> dv.mac::text) k(v)
+   WHERE se.tenant_id = p_tenant AND se.site_id = p_site AND dv.mac = ANY (r.macs)
+     AND se.started < r.range_to AND COALESCE(se.ended, 'infinity'::timestamptz) > r.range_from;
+
+  RETURN QUERY
+  SELECT 'sign_in_attempt'::text, sa.id, sa.occurred_at, (v_dev ->> sa.device_mac::text)::uuid, k.v[1], k.v[2],
+         CASE WHEN sa.occurred_at > now() - interval '24 hours' THEN 'recent' END
+    FROM sign_in_attempts sa
+   CROSS JOIN LATERAL assisted_class(
+          CASE WHEN sa.entitlement_id = ANY (cx.c_attr) THEN 'attr'
+               WHEN sa.entitlement_id = ANY (cx.c_ctx) OR sa.matched_stay_id = ANY (cx.c_stays) THEN
+                    CASE WHEN sa.matched_guest_id IS NOT NULL AND NOT sa.matched_guest_id = ANY (cx.c_guests) THEN 'other' ELSE 'ctx' END
+               WHEN sa.entitlement_id IS NOT NULL OR sa.matched_stay_id IS NOT NULL OR sa.matched_guest_id IS NOT NULL THEN 'other'
+               WHEN (v_tied ->> sa.device_mac::text) IS DISTINCT FROM 'true' THEN 'untied'
+               ELSE 'none' END,
+          true, cx.c_claim_ok, cx.c_priv_ok, v_state ->> sa.device_mac::text) k(v)
+   WHERE sa.tenant_id = p_tenant AND sa.site_id = p_site AND sa.device_mac = ANY (r.macs)
+     AND sa.occurred_at >= r.range_from AND sa.occurred_at < r.range_to
+     AND num_nonnulls(sa.submitted_room, sa.device_ip, sa.device_mac, sa.sensitive_ciphertext) > 0;
+
+  -- A verification access and a code binding are tied to a person by the address their one-time code went to, never
+  -- by the device: theirs only if that code is among the stated person's own.
+  RETURN QUERY
+  SELECT 'verification_access'::text, g.id, g.started_at, (v_dev ->> g.device_mac::text)::uuid, k.v[1], k.v[2],
+         CASE WHEN g.ended_at IS NULL THEN 'live' WHEN g.started_at > now() - interval '24 hours' THEN 'recent' END
+    FROM verification_access_grants g
+   CROSS JOIN LATERAL assisted_class(
+          CASE WHEN g.challenge_id = ANY (cx.c_ch) THEN 'attr' WHEN g.challenge_id IS NULL THEN 'unk' ELSE 'other' END,
+          g.ended_at IS NOT NULL AND g.ended_at <= r.range_to, cx.c_claim_ok, cx.c_priv_ok, NULL) k(v)
+   WHERE g.tenant_id = p_tenant AND g.site_id = p_site AND g.device_mac = ANY (r.macs)
+     AND g.started_at >= r.range_from AND g.started_at < r.range_to;
+
+  RETURN QUERY
+  SELECT 'code_device_binding'::text, b.challenge_id, b.issued_at, (v_dev ->> b.device_mac::text)::uuid, k.v[1], k.v[2],
+         CASE WHEN b.issued_at > now() - interval '24 hours' THEN 'recent' END
+    FROM otp_device_bindings b
+   CROSS JOIN LATERAL assisted_class(
+          CASE WHEN b.challenge_id = ANY (cx.c_ch) THEN 'attr' ELSE 'other' END,
+          true, cx.c_claim_ok, cx.c_priv_ok, NULL) k(v)
+   WHERE b.tenant_id = p_tenant AND b.device_mac = ANY (r.macs)
+     AND b.issued_at >= r.range_from AND b.issued_at < r.range_to;
+
+  RETURN QUERY
+  SELECT 'sign_in_restriction'::text, x.id, COALESCE(x.restricted_at, x.created_at), (v_dev ->> x.device_mac::text)::uuid, k.v[1], k.v[2],
+         CASE WHEN x.restricted_at IS NOT NULL AND x.released_at IS NULL AND x.expires_at >= now() THEN 'live'
+              WHEN COALESCE(x.restricted_at, x.created_at) > now() - interval '24 hours' THEN 'recent' END
+    FROM guest_signin_restrictions x
+   CROSS JOIN LATERAL assisted_class(CASE WHEN (v_tied ->> x.device_mac::text) IS DISTINCT FROM 'true' THEN 'untied' ELSE 'none' END,
+                                     true, cx.c_claim_ok, cx.c_priv_ok, v_state ->> x.device_mac::text) k(v)
+   WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.device_mac = ANY (r.macs)
+     AND COALESCE(x.restricted_at, x.created_at) >= r.range_from AND COALESCE(x.restricted_at, x.created_at) < r.range_to;
+
+  RETURN QUERY
+  SELECT 'sign_in_pass'::text, x.id, x.granted_at, (v_dev ->> x.device_mac::text)::uuid, k.v[1], k.v[2],
+         -- A pass lets a device try again while its pause lasts: anonymising it would end it early.
+         CASE WHEN pz.ended_at IS NULL AND pz.expires_at > now() THEN 'live'
+              WHEN x.granted_at > now() - interval '24 hours' THEN 'recent' END
+    FROM guest_signin_device_passes x
+    LEFT JOIN guest_signin_network_pauses pz ON pz.id = x.pause_id
+   CROSS JOIN LATERAL assisted_class(CASE WHEN (v_tied ->> x.device_mac::text) IS DISTINCT FROM 'true' THEN 'untied' ELSE 'none' END,
+                                     true, cx.c_claim_ok, cx.c_priv_ok, v_state ->> x.device_mac::text) k(v)
+   WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.device_mac = ANY (r.macs)
+     AND x.granted_at >= r.range_from AND x.granted_at < r.range_to;
+
+  -- A social sign-in redirect is keyed by the device's address, not by a record id: its id is a digest of its state.
+  RETURN QUERY
+  SELECT 'sign_in_redirect'::text, md5(x.state)::uuid, x.created_at, (v_dev ->> x.client_mac::text)::uuid, k.v[1], k.v[2],
+         CASE WHEN x.created_at > now() - interval '24 hours' THEN 'recent' END
+    FROM public.social_oauth_states x
+   CROSS JOIN LATERAL assisted_class(CASE WHEN (v_tied ->> x.client_mac::text) IS DISTINCT FROM 'true' THEN 'untied' ELSE 'none' END,
+                                     true, cx.c_claim_ok, cx.c_priv_ok, v_state ->> x.client_mac::text) k(v)
+   WHERE x.tenant_id = p_tenant AND x.client_mac = ANY (r.macs)
+     AND x.created_at >= r.range_from AND x.created_at < r.range_to
+     AND num_nonnulls(x.client_ip, x.client_mac, x.user_agent) > 0;
+
+  -- The device row itself is offered only when every record of the device is inside the range: otherwise anonymising
+  -- it would reach records the request did not state.
+  RETURN QUERY
+  SELECT 'device'::text, dv.id, COALESCE(dv.last_seen, dv.first_seen), dv.id, k.v[1],
+         CASE WHEN NOT w.whole THEN 'device_has_records_outside_the_request' ELSE k.v[2] END,
+         CASE WHEN EXISTS (SELECT 1 FROM entitlement_devices ed JOIN entitlements en ON en.id = ed.entitlement_id
+                            WHERE ed.device_id = dv.id AND en.status <> 'TERMINATED')
+                OR EXISTS (SELECT 1 FROM sessions se WHERE se.device_id = dv.id AND se.ended IS NULL)
+                OR EXISTS (SELECT 1 FROM guest_signin_restrictions x WHERE x.tenant_id = p_tenant AND x.site_id = p_site
+                            AND x.device_mac = dv.mac AND x.restricted_at IS NOT NULL AND x.released_at IS NULL AND x.expires_at >= now())
+                OR EXISTS (SELECT 1 FROM verification_access_grants g WHERE g.tenant_id = p_tenant AND g.site_id = p_site
+                            AND g.device_mac = dv.mac AND g.ended_at IS NULL)
+              THEN 'live'
+              WHEN dv.last_seen > now() - interval '24 hours' THEN 'recent' END
+    FROM devices dv
+   CROSS JOIN LATERAL (SELECT assisted_device_whole(dv.id, dv.mac, p_tenant, p_site, r.range_from, r.range_to) AS whole) w
+   CROSS JOIN LATERAL assisted_class(CASE WHEN dv.id = ANY (cx.c_excl) THEN 'attr'
+                                              WHEN (v_tied ->> dv.mac::text) IS DISTINCT FROM 'true' THEN 'untied' ELSE 'ctx' END, w.whole,
+                                     cx.c_claim_ok, cx.c_priv_ok, v_state ->> dv.mac::text) k(v)
+   WHERE dv.tenant_id = p_tenant AND dv.site_id = p_site AND dv.mac = ANY (r.macs);
+END $$;
+
+
+--
+-- Name: FUNCTION assisted_request_review(p_tenant uuid, p_site uuid, p_request uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.assisted_request_review(p_tenant uuid, p_site uuid, p_request uuid) IS 'Classifies every record of an open assisted request (0146). Only ATTRIBUTABLE and CLAIMABLE records can ever be selected; a MAC address, a room or a shared device identifies nobody on its own.';
+
+
+--
+-- Name: assisted_request_review_json(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.assisted_request_review_json(p_tenant uuid, p_site uuid, p_request uuid) RETURNS jsonb
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_sig text; v_rows jsonb; v_sum jsonb; v_purpose text;
+BEGIN
+  SELECT q.purpose INTO v_purpose FROM assisted_guest_requests q WHERE q.id = p_request AND q.tenant_id = p_tenant AND q.site_id = p_site;
+  v_sig := assisted_review_signature(p_tenant, p_site, p_request);
+  SELECT COALESCE(jsonb_agg(jsonb_build_object(
+            'kind', v.o_kind, 'id', v.o_id, 'at', v.o_at, 'class', v.o_class, 'reason', v.o_reason,
+            'erase_block', CASE WHEN v_purpose = 'ERASURE' THEN v.o_erase_block END,
+            'selectable', v.o_class IN ('ATTRIBUTABLE', 'CLAIMABLE')
+                          AND (v_purpose = 'ACCESS' OR v.o_erase_block IS NULL),
+            'detail', CASE WHEN v.o_class IN ('ATTRIBUTABLE', 'CLAIMABLE')
+                           THEN assisted_record_detail(p_tenant, p_site, v.o_kind, v.o_id) END)
+          ORDER BY v.o_at, v.o_kind, v.o_id), '[]'::jsonb)
+    INTO v_rows FROM assisted_request_review(p_tenant, p_site, p_request) v;
+  SELECT COALESCE(jsonb_object_agg(x.cls, x.n), '{}'::jsonb) INTO v_sum FROM (
+    SELECT v.o_class AS cls, count(*) AS n FROM assisted_request_review(p_tenant, p_site, p_request) v GROUP BY v.o_class) x;
+  RETURN jsonb_build_object('signature', v_sig, 'by_class', v_sum, 'records', v_rows);
+END $$;
+
+
+--
+-- Name: assisted_requests_guard(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.assisted_requests_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'an assisted guest data request is never deleted' USING ERRCODE = 'restrict_violation';
+  END IF;
+  IF OLD.status <> 'OPEN' THEN
+    RAISE EXCEPTION 'a closed assisted guest data request does not change' USING ERRCODE = 'restrict_violation';
+  END IF;
+  IF (NEW.id, NEW.ref, NEW.tenant_id, NEW.site_id, NEW.purpose, NEW.range_from, NEW.range_to, NEW.pms_interface_id,
+      NEW.verification_method, NEW.attest_identity, NEW.attest_device, NEW.attest_sole_use, NEW.attest_private_address,
+      NEW.open_reason, NEW.created_by, NEW.created_at)
+     IS DISTINCT FROM
+     (OLD.id, OLD.ref, OLD.tenant_id, OLD.site_id, OLD.purpose, OLD.range_from, OLD.range_to, OLD.pms_interface_id,
+      OLD.verification_method, OLD.attest_identity, OLD.attest_device, OLD.attest_sole_use, OLD.attest_private_address,
+      OLD.open_reason, OLD.created_by, OLD.created_at) THEN
+    RAISE EXCEPTION 'what an assisted guest data request states cannot be edited' USING ERRCODE = 'restrict_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+
+
+--
+-- Name: assisted_review_signature(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.assisted_review_signature(p_tenant uuid, p_site uuid, p_request uuid) RETURNS text
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT md5(COALESCE(string_agg(v.o_kind || ':' || v.o_id::text || ':' || v.o_class || ':' || v.o_reason
+                                 || ':' || CASE WHEN q.purpose = 'ERASURE' THEN COALESCE(v.o_erase_block, '') ELSE '' END
+                                 || ':' || CASE WHEN v.o_class IN ('ATTRIBUTABLE', 'CLAIMABLE')
+                                                THEN md5(assisted_record_detail(p_tenant, p_site, v.o_kind, v.o_id)::text) ELSE '' END,
+                                 ',' ORDER BY v.o_kind, v.o_id), ''))
+    FROM assisted_request_review(p_tenant, p_site, p_request) v, assisted_guest_requests q WHERE q.id = p_request
+$$;
+
+
+--
+-- Name: assisted_validate_selection(uuid, uuid, uuid, text, jsonb, boolean); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.assisted_validate_selection(p_tenant uuid, p_site uuid, p_request uuid, p_signature text, p_selected jsonb, p_erase boolean) RETURNS jsonb
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_sig text; v_total integer; n_sel integer; n_found integer; n_bad integer; v_block text; v_inc boolean; v_rows jsonb;
+        v_purpose text;
+BEGIN
+  IF jsonb_typeof(p_selected) IS DISTINCT FROM 'array' THEN
+    RAISE EXCEPTION 'select the records to process' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  SELECT q.purpose INTO v_purpose FROM assisted_guest_requests q WHERE q.id = p_request AND q.tenant_id = p_tenant AND q.site_id = p_site;
+  WITH rv AS MATERIALIZED (SELECT * FROM assisted_request_review(p_tenant, p_site, p_request)),
+       sel AS (SELECT DISTINCT s.kind, s.id FROM jsonb_to_recordset(p_selected) AS s(kind text, id uuid))
+  SELECT md5(COALESCE((SELECT string_agg(rv.o_kind || ':' || rv.o_id::text || ':' || rv.o_class || ':' || rv.o_reason || ':'
+                                        || CASE WHEN v_purpose = 'ERASURE' THEN COALESCE(rv.o_erase_block, '') ELSE '' END
+                                        || ':' || CASE WHEN rv.o_class IN ('ATTRIBUTABLE', 'CLAIMABLE')
+                                                       THEN md5(assisted_record_detail(p_tenant, p_site, rv.o_kind, rv.o_id)::text) ELSE '' END,
+                                        ',' ORDER BY rv.o_kind, rv.o_id) FROM rv), '')),
+         (SELECT count(*) FROM rv),
+         (SELECT count(*) FROM sel),
+         (SELECT count(*) FROM rv JOIN sel ON sel.kind = rv.o_kind AND sel.id = rv.o_id),
+         (SELECT count(*) FROM rv JOIN sel ON sel.kind = rv.o_kind AND sel.id = rv.o_id
+           WHERE rv.o_class NOT IN ('ATTRIBUTABLE', 'CLAIMABLE')),
+         (SELECT min(rv.o_erase_block) FROM rv JOIN sel ON sel.kind = rv.o_kind AND sel.id = rv.o_id
+           WHERE p_erase AND rv.o_erase_block IS NOT NULL),
+         EXISTS (SELECT 1 FROM rv d JOIN sel sd ON sd.kind = 'device' AND sd.id = d.o_id
+                   JOIN rv o ON o.o_device = d.o_id AND o.o_kind <> 'device'
+                  WHERE d.o_kind = 'device'
+                    AND NOT EXISTS (SELECT 1 FROM sel so WHERE so.kind = o.o_kind AND so.id = o.o_id)),
+         (SELECT COALESCE(jsonb_agg(jsonb_build_object('kind', rv.o_kind, 'id', rv.o_id, 'class', rv.o_class, 'device', rv.o_device)), '[]'::jsonb)
+            FROM rv JOIN sel ON sel.kind = rv.o_kind AND sel.id = rv.o_id)
+    INTO v_sig, v_total, n_sel, n_found, n_bad, v_block, v_inc, v_rows;
+  IF p_signature IS DISTINCT FROM v_sig THEN
+    RAISE EXCEPTION 'assisted_request_refused' USING ERRCODE = 'object_in_use', DETAIL = 'changed';
+  END IF;
+  IF n_sel = 0 OR n_sel > 2000 THEN
+    RAISE EXCEPTION 'select between 1 and 2000 records' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF n_found <> n_sel THEN
+    RAISE EXCEPTION 'assisted_request_refused' USING ERRCODE = 'object_in_use', DETAIL = 'not_listed';
+  END IF;
+  IF n_bad > 0 THEN
+    RAISE EXCEPTION 'assisted_request_refused' USING ERRCODE = 'object_in_use', DETAIL = 'not_eligible';
+  END IF;
+  IF v_block IS NOT NULL THEN
+    RAISE EXCEPTION 'assisted_request_refused' USING ERRCODE = 'object_in_use', DETAIL = 'blocked_' || v_block;
+  END IF;
+  IF v_inc THEN
+    RAISE EXCEPTION 'assisted_request_refused' USING ERRCODE = 'object_in_use', DETAIL = 'device_incomplete';
+  END IF;
+  RETURN jsonb_build_object('total', v_total, 'selected', v_rows);
 END $$;
 
 
@@ -1124,6 +2397,98 @@ COMMENT ON FUNCTION iam_v2.complete_sign_in_attempt(p_tenant uuid, p_site uuid, 
 
 
 --
+-- Name: data_retention_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.data_retention_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'iam_v2.% is append-only: % refused', TG_TABLE_NAME, TG_OP USING ERRCODE = 'restrict_violation';
+END $$;
+
+
+--
+-- Name: data_retention_defaults(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.data_retention_defaults(OUT pms_stay_days integer, OUT client_activity_days integer, OUT inactive_identity_days integer, OUT expired_record_days integer, OUT audit_log_days integer, OUT sign_in_attempt_days integer, OUT log_days integer, OUT staff_note_days integer) RETURNS record
+    LANGUAGE sql IMMUTABLE
+    AS $$ SELECT 30, 365, 365, 7, 730, 30, 14, 730 $$;
+
+
+--
+-- Name: FUNCTION data_retention_defaults(OUT pms_stay_days integer, OUT client_activity_days integer, OUT inactive_identity_days integer, OUT expired_record_days integer, OUT audit_log_days integer, OUT sign_in_attempt_days integer, OUT log_days integer, OUT staff_note_days integer); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.data_retention_defaults(OUT pms_stay_days integer, OUT client_activity_days integer, OUT inactive_identity_days integer, OUT expired_record_days integer, OUT audit_log_days integer, OUT sign_in_attempt_days integer, OUT log_days integer, OUT staff_note_days integer) IS 'The Product Owner''s approved retention defaults, in days (D-C1 2026-10-17, D-F5 2026-10-19, C4 2026-10-19): PMS stay data 30 after checkout, sessions/devices 365, inactive guest identities 365, expired single-use records 7, audit log 730, sign-in attempts 30, system logs 14, staff notes 730 (GDPR audit C4). The one source of the defaults: a site with no row reads these.';
+
+
+--
+-- Name: data_retention_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.data_retention_get(p_tenant uuid, p_site uuid) RETURNS TABLE(pms_stay_days integer, client_activity_days integer, inactive_identity_days integer, expired_record_days integer, audit_log_days integer, sign_in_attempt_days integer, log_days integer, staff_note_days integer, config_version bigint, updated_at timestamp with time zone, updated_by text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE(s.pms_stay_days, d.pms_stay_days), COALESCE(s.client_activity_days, d.client_activity_days),
+         COALESCE(s.inactive_identity_days, d.inactive_identity_days),
+         COALESCE(s.expired_record_days, d.expired_record_days), COALESCE(s.audit_log_days, d.audit_log_days),
+         COALESCE(s.sign_in_attempt_days, d.sign_in_attempt_days), COALESCE(s.log_days, d.log_days),
+         COALESCE(s.staff_note_days, d.staff_note_days),
+         COALESCE(s.config_version, 0), s.updated_at, s.updated_by
+    FROM iam_v2.data_retention_defaults() d
+    LEFT JOIN iam_v2.site_data_retention s ON s.tenant_id = p_tenant AND s.site_id = p_site;
+$$;
+
+
+--
+-- Name: data_retention_set(uuid, uuid, integer, integer, integer, integer, integer, integer, integer, integer, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.data_retention_set(p_tenant uuid, p_site uuid, p_pms_stay_days integer, p_client_activity_days integer, p_inactive_identity_days integer, p_expired_record_days integer, p_audit_log_days integer, p_sign_in_attempt_days integer, p_log_days integer, p_staff_note_days integer, p_operator text, p_reason text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_version bigint; v_old jsonb; v_new jsonb;
+BEGIN
+  IF p_operator IS NULL OR btrim(p_operator) = '' THEN
+    RAISE EXCEPTION 'an operator label is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_reason IS NULL OR length(btrim(p_reason)) < 4 OR length(btrim(p_reason)) > 500 THEN
+    RAISE EXCEPTION 'a reason of 4-500 characters is required to change data retention'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF num_nulls(p_pms_stay_days, p_client_activity_days, p_inactive_identity_days, p_expired_record_days,
+               p_audit_log_days, p_sign_in_attempt_days, p_log_days, p_staff_note_days) > 0 THEN
+    RAISE EXCEPTION 'every retention period is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('data_retention'), hashtext(p_site::text));
+  SELECT to_jsonb(s) - 'tenant_id' - 'site_id' - 'config_version' - 'updated_at' - 'updated_by' INTO v_old
+    FROM iam_v2.site_data_retention s WHERE s.tenant_id = p_tenant AND s.site_id = p_site FOR UPDATE;
+  INSERT INTO iam_v2.site_data_retention AS s
+    (tenant_id, site_id, pms_stay_days, client_activity_days, inactive_identity_days, expired_record_days,
+     audit_log_days, sign_in_attempt_days, log_days, staff_note_days, updated_by)
+  VALUES (p_tenant, p_site, p_pms_stay_days, p_client_activity_days, p_inactive_identity_days,
+          p_expired_record_days, p_audit_log_days, p_sign_in_attempt_days, p_log_days, p_staff_note_days, btrim(p_operator))
+  ON CONFLICT (tenant_id, site_id) DO UPDATE
+     SET pms_stay_days = EXCLUDED.pms_stay_days, client_activity_days = EXCLUDED.client_activity_days,
+         inactive_identity_days = EXCLUDED.inactive_identity_days,
+         expired_record_days = EXCLUDED.expired_record_days, audit_log_days = EXCLUDED.audit_log_days,
+         sign_in_attempt_days = EXCLUDED.sign_in_attempt_days, log_days = EXCLUDED.log_days,
+         staff_note_days = EXCLUDED.staff_note_days,
+         updated_by = EXCLUDED.updated_by, config_version = s.config_version + 1, updated_at = now()
+  RETURNING s.config_version, to_jsonb(s) - 'tenant_id' - 'site_id' - 'config_version' - 'updated_at' - 'updated_by'
+    INTO v_version, v_new;
+  INSERT INTO iam_v2.data_retention_changes
+    (tenant_id, site_id, changed_by, change_reason, old_settings, new_settings, new_config_version)
+  VALUES (p_tenant, p_site, btrim(p_operator), btrim(p_reason), v_old, v_new, v_version);
+  RETURN v_version;
+END $$;
+
+
+--
 -- Name: deauthorize_entitlement_device(uuid, uuid, timestamp with time zone, text); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -1153,6 +2518,54 @@ BEGIN
     WHERE entitlement_id = p_ent AND device_id = p_device;
   RETURN true;
 END $_$;
+
+
+--
+-- Name: device_exclusive_to(uuid, uuid[], uuid[], uuid[], uuid[]); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.device_exclusive_to(p_device uuid, p_own_ind uuid[], p_principals uuid[], p_accounts uuid[], p_challenges uuid[]) RETURNS boolean
+    LANGUAGE sql STABLE
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT (
+      EXISTS (SELECT 1 FROM entitlement_devices ed WHERE ed.device_id = p_device AND ed.entitlement_id = ANY (p_own_ind || iam_v2.anonymised_entitlements((SELECT dv0.tenant_id FROM iam_v2.devices dv0 WHERE dv0.id = p_device))))
+      OR EXISTS (SELECT 1 FROM sessions se WHERE se.device_id = p_device AND se.entitlement_id = ANY (p_own_ind || iam_v2.anonymised_entitlements((SELECT dv0.tenant_id FROM iam_v2.devices dv0 WHERE dv0.id = p_device))))
+      OR EXISTS (SELECT 1 FROM principal_device_credentials c WHERE c.device_id = p_device AND c.guest_principal_id = ANY (p_principals || iam_v2.anonymised_principals((SELECT dv0.tenant_id FROM iam_v2.devices dv0 WHERE dv0.id = p_device))))
+      OR EXISTS (SELECT 1 FROM auth_contexts ac WHERE ac.device_id = p_device
+                    AND (ac.guest_account_id = ANY (p_accounts || iam_v2.anonymised_accounts((SELECT dv0.tenant_id FROM iam_v2.devices dv0 WHERE dv0.id = p_device))) OR ac.guest_principal_id = ANY (p_principals || iam_v2.anonymised_principals((SELECT dv0.tenant_id FROM iam_v2.devices dv0 WHERE dv0.id = p_device)))))
+      OR EXISTS (SELECT 1 FROM devices dv JOIN guest_access_accounts g
+                    ON g.created_by_device_mac = dv.mac AND g.tenant_id = dv.tenant_id AND g.site_id = dv.site_id
+                  WHERE dv.id = p_device AND g.id = ANY (p_accounts || iam_v2.anonymised_accounts((SELECT dv0.tenant_id FROM iam_v2.devices dv0 WHERE dv0.id = p_device))))
+    )
+    AND NOT EXISTS (SELECT 1 FROM entitlement_devices ed WHERE ed.device_id = p_device AND NOT ed.entitlement_id = ANY (p_own_ind || iam_v2.anonymised_entitlements((SELECT dv0.tenant_id FROM iam_v2.devices dv0 WHERE dv0.id = p_device))))
+    AND NOT EXISTS (SELECT 1 FROM sessions se WHERE se.device_id = p_device AND NOT se.entitlement_id = ANY (p_own_ind || iam_v2.anonymised_entitlements((SELECT dv0.tenant_id FROM iam_v2.devices dv0 WHERE dv0.id = p_device))))
+    AND NOT EXISTS (SELECT 1 FROM principal_device_credentials c WHERE c.device_id = p_device AND NOT c.guest_principal_id = ANY (p_principals || iam_v2.anonymised_principals((SELECT dv0.tenant_id FROM iam_v2.devices dv0 WHERE dv0.id = p_device))))
+    AND NOT EXISTS (SELECT 1 FROM auth_contexts ac WHERE ac.device_id = p_device
+                       AND NOT (COALESCE(ac.guest_account_id = ANY (p_accounts || iam_v2.anonymised_accounts((SELECT dv0.tenant_id FROM iam_v2.devices dv0 WHERE dv0.id = p_device))), false)
+                                OR COALESCE(ac.guest_principal_id = ANY (p_principals || iam_v2.anonymised_principals((SELECT dv0.tenant_id FROM iam_v2.devices dv0 WHERE dv0.id = p_device))), false)))
+    AND NOT EXISTS (SELECT 1 FROM devices dv JOIN guest_access_accounts g
+                       ON g.created_by_device_mac = dv.mac AND g.tenant_id = dv.tenant_id AND g.site_id = dv.site_id
+                     WHERE dv.id = p_device AND NOT g.id = ANY (p_accounts || iam_v2.anonymised_accounts((SELECT dv0.tenant_id FROM iam_v2.devices dv0 WHERE dv0.id = p_device))))
+    -- Someone else proved an address on it, or signed in with an access that is not theirs: records keyed by the
+    -- device's MAC address that this person's own one-time codes do not explain.
+    AND NOT EXISTS (SELECT 1 FROM devices dv JOIN verification_access_grants g
+                       ON g.device_mac = dv.mac AND g.tenant_id = dv.tenant_id AND g.site_id = dv.site_id
+                     WHERE dv.id = p_device AND (g.challenge_id IS NULL OR NOT g.challenge_id = ANY (p_challenges)))
+    AND NOT EXISTS (SELECT 1 FROM devices dv JOIN otp_device_bindings b
+                       ON b.device_mac = dv.mac AND b.tenant_id = dv.tenant_id
+                     WHERE dv.id = p_device AND NOT b.challenge_id = ANY (p_challenges))
+    AND NOT EXISTS (SELECT 1 FROM devices dv JOIN sign_in_attempts sa
+                       ON sa.device_mac = dv.mac AND sa.tenant_id = dv.tenant_id AND sa.site_id = dv.site_id
+                     WHERE dv.id = p_device AND sa.entitlement_id IS NOT NULL AND NOT sa.entitlement_id = ANY (p_own_ind || iam_v2.anonymised_entitlements((SELECT dv0.tenant_id FROM iam_v2.devices dv0 WHERE dv0.id = p_device))));
+$$;
+
+
+--
+-- Name: FUNCTION device_exclusive_to(p_device uuid, p_own_ind uuid[], p_principals uuid[], p_accounts uuid[], p_challenges uuid[]); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.device_exclusive_to(p_device uuid, p_own_ind uuid[], p_principals uuid[], p_accounts uuid[], p_challenges uuid[]) IS 'A device is one person''s only when something that person did binds it to them and no other entitlement, session, credential, sign-in or account touches it (0145, D-R5). A MAC address alone identifies nobody.';
 
 
 --
@@ -1241,6 +2654,13 @@ CREATE FUNCTION iam_v2.device_slot_actions_append_only() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
+  IF TG_OP = 'UPDATE'
+     AND current_setting('iam_v2.anonymise', true) = 'retention'
+     AND current_user = (SELECT pg_get_userbyid(c.relowner) FROM pg_class c WHERE c.oid = TG_RELID)
+     AND NEW.reason = 'Removed after the staff-notes period'
+     AND (to_jsonb(NEW) - 'reason') = (to_jsonb(OLD) - 'reason') THEN
+    RETURN NEW;
+  END IF;
   RAISE EXCEPTION 'iam_v2.device_slot_actions is append-only: % refused', TG_OP USING ERRCODE = 'restrict_violation';
 END $$;
 
@@ -1330,6 +2750,307 @@ $$;
 --
 
 COMMENT ON FUNCTION iam_v2.entitlement_usage_bytes(p_ent uuid, p_at timestamp with time zone) IS 'Bytes attributed to ONE Entitlement up to ONE instant, by binding interval, with the no-binding fallback for sessions that predate the binding table. SECURITY DEFINER so a caller can obtain the aggregate without holding SELECT on iam_v2.accounting_records -- svc_pmsd needs the number at a checkout boundary and Gate-P forbids it the table. It returns four aggregate numbers about an entitlement the caller must already be able to name; it exposes no guest, Stay, reservation, folio, payment or PMS data, and it writes nothing.';
+
+
+--
+-- Name: erase_guest_records(uuid, uuid, text, uuid, text, text, jsonb); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.erase_guest_records(p_tenant uuid, p_site uuid, p_kind text, p_id uuid, p_operator text, p_reason text, p_public_counts jsonb) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $_$
+DECLARE a uuid[]; p uuid[]; s uuid[]; e uuid[]; d uuid[]; ev uuid[]; room uuid[]; macs macaddr[]; live text[] := '{}';
+        ec uuid[]; ch uuid[]; ev_open uuid[];
+        v_id uuid; v_shared integer; v_attempts integer; v_sessions integer; v_k integer; v_verif integer := 0;
+        v_events integer := 0; v_given integer := 0; v_ref text; v_counts jsonb;
+        ss uuid[]; gr uuid[]; v_who jsonb; v_guests integer := 0; v_other integer; v_try integer := 0;
+        v_sig text; v_sig2 text; v_today date;
+        v_replay boolean := COALESCE((p_public_counts->>'_replay')::boolean, false);
+BEGIN
+  IF p_operator IS NULL OR length(btrim(p_operator)) NOT BETWEEN 1 AND 200 THEN
+    RAISE EXCEPTION 'an operator is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_reason IS NULL OR length(btrim(p_reason)) NOT BETWEEN 4 AND 500 THEN
+    RAISE EXCEPTION 'a reason of 4-500 characters is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  -- NOTHING JOINS THE SCOPE WHILE IT IS ERASED (0144). Lock every record in scope, then compute the scope again
+  -- under the locks; if it moved in between, lock the new records too, a few times at most.
+  LOOP
+    SELECT COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'account'), '{}'),
+           COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'principal'), '{}'),
+           COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'stay'), '{}'),
+           COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'entitlement'), '{}'),
+           COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'device'), '{}'),
+           COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'stay_event'), '{}'),
+           count(*) FILTER (WHERE o_kind = 'device_shared'),
+           COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'stay_shared'), '{}'),
+           COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'stay_guest'), '{}'),
+           count(*) FILTER (WHERE o_kind = 'stay_shared_other'),
+           COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'access_shared'), '{}'),
+           COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'entitlement_credential'), '{}'),
+           COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'challenge'), '{}'),
+           md5(string_agg(o_kind || ':' || o_id::text, ',' ORDER BY o_kind, o_id))
+      INTO a, p, s, e, d, ev, v_shared, ss, gr, v_other, room, ec, ch, v_sig FROM guest_data_scope(p_tenant, p_site, p_kind, p_id);
+    PERFORM 1 FROM stays x WHERE x.id = ANY (s) OR x.id = ANY (ss) ORDER BY x.id FOR UPDATE;
+    PERFORM 1 FROM guest_access_accounts x WHERE x.id = ANY (a) ORDER BY x.id FOR UPDATE;
+    PERFORM 1 FROM guest_principals x WHERE x.id = ANY (p) ORDER BY x.id FOR UPDATE;
+    PERFORM 1 FROM entitlements x WHERE x.id = ANY (e) OR x.id = ANY (ec) OR x.id = ANY (room) ORDER BY x.id FOR UPDATE;
+    PERFORM 1 FROM devices dv WHERE dv.id = ANY (d) ORDER BY dv.id FOR UPDATE;
+    SELECT md5(string_agg(o_kind || ':' || o_id::text, ',' ORDER BY o_kind, o_id)) INTO v_sig2
+      FROM guest_data_scope(p_tenant, p_site, p_kind, p_id);
+    EXIT WHEN v_sig2 IS NOT DISTINCT FROM v_sig;
+    v_try := v_try + 1;
+    IF v_try >= 3 THEN
+      RAISE EXCEPTION 'guest_data_live' USING ERRCODE = 'object_in_use', DETAIL = 'busy';
+    END IF;
+  END LOOP;
+  SELECT COALESCE(array_agg(dv.mac), '{}') INTO macs FROM devices dv WHERE dv.id = ANY (d) AND dv.mac::text NOT LIKE '03:%';
+  v_today := site_today(p_site);
+
+  -- REFUSED WHILE LIVE (D-C3). The PMS would copy an open stay straight back, and anonymising a stay, access or a
+  -- device in use would cut people off mid-session. The room's access is checked here although it is not
+  -- changed: the people using it are not the person asking, but they are online on this reservation.
+  -- A STAY WITH MORE THAN ONE GUEST IS ERASED ONE GUEST AT A TIME (0141).
+  IF p_kind = 'stay' AND stay_named_guests(p_id) > 1 THEN
+    live := live || 'co_guests'::text;
+  END IF;
+  IF EXISTS (SELECT 1 FROM stays x WHERE (x.id = ANY (s) OR x.id = ANY (ss))
+                                     AND x.status IN ('RESERVED', 'IN_HOUSE')
+                                     AND ((x.departure IS NULL AND NOT stay_absent_from_published_roster(x.id))
+                                          OR x.departure >= v_today - 1)) THEN
+    live := live || 'pms_open'::text;
+  END IF;
+  -- A PMS event received in the last 24 hours may still be processed: refused. An older one that is still
+  -- waiting will not be, and is given up below (0139, D-B2).
+  IF EXISTS (SELECT 1 FROM stay_events x WHERE x.id = ANY (ev) AND x.processing_status = 'PENDING'
+                                          AND x.received_at >= now() - interval '24 hours') THEN
+    live := live || 'pms_pending'::text;
+  END IF;
+  IF EXISTS (SELECT 1 FROM entitlements x WHERE (x.id = ANY (e) OR x.id = ANY (ec) OR x.id = ANY (room)) AND x.status <> 'TERMINATED')
+     OR EXISTS (SELECT 1 FROM post_stay_profiles x
+                 WHERE x.origin_stay_id = ANY (s) AND x.status = 'ACTIVE' AND x.valid_until > now()) THEN
+    live := live || 'access_live'::text;
+  END IF;
+  IF EXISTS (SELECT 1 FROM sessions x WHERE (x.device_id = ANY (d) OR x.entitlement_id = ANY (e) OR x.entitlement_id = ANY (ec)
+                                              OR x.entitlement_id = ANY (room)) AND x.ended IS NULL)
+     OR EXISTS (SELECT 1 FROM verification_access_grants x
+                 WHERE x.tenant_id = p_tenant AND x.challenge_id = ANY (ch) AND x.ended_at IS NULL AND x.expires_at > now()) THEN
+    live := live || 'online'::text;
+  END IF;
+  IF EXISTS (SELECT 1 FROM guest_signin_restrictions x
+              WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.device_mac = ANY (macs)
+                AND x.released_at IS NULL AND (x.expires_at IS NULL OR x.expires_at >= now())) THEN
+    live := live || 'signin_restricted'::text;
+  END IF;
+  -- A replay after a restore erases what was erased before: the checks were passed then, and the restored state is older.
+  IF cardinality(live) > 0 AND NOT v_replay THEN
+    RAISE EXCEPTION 'guest_data_live' USING ERRCODE = 'object_in_use', DETAIL = array_to_string(live, ',');
+  END IF;
+
+  PERFORM set_config('iam_v2.anonymise', 'retention', true);
+  -- What the person typed and where from: kept as a count, nothing else. Only their own access and exclusive
+  -- devices; attempts to enter the reservation's room credentials are the typist's.
+  UPDATE sign_in_attempts x
+     SET submitted_room = NULL, device_ip = NULL, device_mac = NULL,
+         sensitive_ciphertext = NULL, sensitive_nonce = NULL, encryption_key_id = NULL, cipher_version = NULL
+   WHERE x.tenant_id = p_tenant AND x.site_id = p_site
+     AND (x.entitlement_id = ANY (e) OR x.device_mac = ANY (macs))
+     AND num_nonnulls(x.submitted_room, x.device_ip, x.device_mac, x.sensitive_ciphertext) > 0;
+  GET DIAGNOSTICS v_attempts = ROW_COUNT;
+  -- What was typed to enter THIS reservation (the holder's name, the room) is the reservation's; who typed it
+  -- (the address and device) is not, and stays.
+  UPDATE sign_in_attempts x
+     SET submitted_room = NULL, sensitive_ciphertext = NULL, sensitive_nonce = NULL, encryption_key_id = NULL, cipher_version = NULL
+   WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.matched_stay_id = ANY (s)
+     AND num_nonnulls(x.submitted_room, x.sensitive_ciphertext) > 0;
+  GET DIAGNOSTICS v_k = ROW_COUNT; v_attempts := v_attempts + v_k;
+  -- The MAC address is the key of these records, so it is replaced before the device itself is anonymised.
+  UPDATE verification_access_grants x
+     SET device_mac = anonymised_mac(), ip = '0.0.0.0'::inet, destination_digest = encode(public.gen_random_bytes(32), 'hex')
+   WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.challenge_id = ANY (ch);
+  GET DIAGNOSTICS v_k = ROW_COUNT; v_verif := v_verif + v_k;
+  UPDATE guest_signin_restrictions x SET device_mac = anonymised_mac(), last_submitted_room = NULL
+   WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.device_mac = ANY (macs);
+  GET DIAGNOSTICS v_k = ROW_COUNT; v_verif := v_verif + v_k;
+  UPDATE otp_device_bindings x SET device_mac = anonymised_mac()
+   WHERE x.tenant_id = p_tenant AND x.challenge_id = ANY (ch);
+  GET DIAGNOSTICS v_k = ROW_COUNT; v_verif := v_verif + v_k;
+  UPDATE guest_signin_device_passes x SET device_mac = anonymised_mac()
+   WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.device_mac = ANY (macs);
+  GET DIAGNOSTICS v_k = ROW_COUNT; v_verif := v_verif + v_k;
+  -- Session addresses only on the person's exclusive devices (any session there is theirs by definition).
+  UPDATE sessions x SET ip = NULL, mac = NULL
+   WHERE x.device_id = ANY (d) AND x.ended IS NOT NULL AND (x.ip IS NOT NULL OR x.mac IS NOT NULL);
+  GET DIAGNOSTICS v_sessions = ROW_COUNT;
+
+  -- PMS events that never resolved to a stay but name the guest's reservation (stay events are anonymised with
+  -- their stay below). A waiting one older than 24 hours is given up first; a newer one was refused above.
+  PERFORM begin_controlled_operation('stay');
+  -- Only a message that never resolved to a stay may be given up here. A waiting message cannot carry a stay
+  -- (the inbox guard forbids it), but a shared stay's messages are other guests' too and are never given up.
+  ev_open := ARRAY(SELECT x.id FROM stay_events x WHERE x.id = ANY (ev) AND x.stay_id IS NULL);
+  v_given := give_up_waiting_stay_events(p_tenant, p_site, now() - interval '24 hours', ev_open, 10000);
+  IF NOT v_replay AND EXISTS (SELECT 1 FROM stay_events x WHERE x.id = ANY (ev) AND x.processing_status = 'PENDING') THEN
+    RAISE EXCEPTION 'guest_data_live' USING ERRCODE = 'object_in_use', DETAIL = 'pms_pending';
+  END IF;
+  UPDATE stay_events x
+     SET payload = '{"anonymised": true}'::jsonb,
+         external_event_identity = 'anon-' || encode(public.gen_random_bytes(32), 'hex')
+   WHERE x.id = ANY (ev) AND x.stay_id IS NULL AND x.processing_status <> 'PENDING'
+     AND (cardinality(s) > 0 OR cardinality(gr) = 0)
+     AND x.payload IS DISTINCT FROM '{"anonymised": true}'::jsonb;
+  GET DIAGNOSTICS v_events = ROW_COUNT;
+  IF v_given > 0 THEN
+    v_events := v_events + (SELECT count(*) FROM stay_events x
+                             WHERE x.id = ANY (ev) AND x.stay_id IS NULL AND x.review_code = 'RETENTION_GIVEN_UP');
+  END IF;
+
+  FOREACH v_id IN ARRAY d LOOP PERFORM anonymise_device(v_id); END LOOP;
+  FOREACH v_id IN ARRAY a LOOP PERFORM anonymise_guest_account(v_id); END LOOP;
+  FOREACH v_id IN ARRAY p LOOP PERFORM anonymise_guest_principal(v_id); END LOOP;
+  FOREACH v_id IN ARRAY s LOOP PERFORM anonymise_stay(v_id); END LOOP;
+  SELECT v_events + count(*) INTO v_events FROM stay_events x WHERE x.id = ANY (ev) AND x.stay_id IS NOT NULL
+                                                                 AND x.stay_id = ANY (s);
+  -- One guest of a shared stay: their own rows, their copy in migration 0066's rollback table, and their name in
+  -- the stay's PMS events. The stay, its other guests and its shared access stay as they are.
+  IF cardinality(gr) > 0 THEN
+    v_who := stay_guests_as_json(gr);
+    UPDATE stay_events x SET payload = event_payload_for_guests(x.payload, v_who, false, x.pms_interface_id)
+     WHERE x.id = ANY (ev) AND x.processing_status <> 'PENDING'
+       AND x.payload IS DISTINCT FROM event_payload_for_guests(x.payload, v_who, false, x.pms_interface_id);
+    GET DIAGNOSTICS v_k = ROW_COUNT; v_events := v_events + v_k;
+    UPDATE stay_guests x
+       SET external_guest_id = NULL, first_name_norm = NULL, last_name_norm = NULL, display_name = NULL, pin_hash = NULL
+     WHERE x.id = ANY (gr);
+    GET DIAGNOSTICS v_guests = ROW_COUNT;
+    IF to_regclass('iam_v2.backfill_0066_identity_text') IS NOT NULL THEN
+      EXECUTE $q$
+        UPDATE iam_v2.backfill_0066_identity_text x
+           SET prior_first_name = NULL, prior_last_name = NULL, prior_room = NULL
+         WHERE x.row_id = ANY ($1) AND num_nonnulls(x.prior_first_name, x.prior_last_name, x.prior_room) > 0
+      $q$ USING gr;
+    END IF;
+  END IF;
+  PERFORM set_config('iam_v2.anonymise', '', true);
+
+  -- The public half names the reference when it already used it in the activity log (0144).
+  v_ref := COALESCE(p_public_counts->>'_erasure_ref', 'ER-' || upper(encode(public.gen_random_bytes(6), 'hex')));
+  v_counts := jsonb_build_object(
+    'client_accounts', cardinality(a), 'guest_identities', cardinality(p), 'hotel_stays', cardinality(s),
+    'stay_guests', v_guests, 'hotel_stays_kept_shared', cardinality(ss) + v_other,
+    'pms_events', v_events, 'devices', cardinality(d), 'devices_kept_shared', v_shared,
+    'room_access_kept_shared', cardinality(room), 'sessions', v_sessions,
+    'sign_in_attempts', v_attempts, 'verification_records', v_verif)
+    || (COALESCE(p_public_counts, '{}'::jsonb) - '_erasure_ref' - '_replay');
+  IF NOT v_replay THEN
+    INSERT INTO guest_data_erasures (erasure_ref, tenant_id, site_id, subject_kind, erased_by, erase_reason, counts)
+    VALUES (v_ref, p_tenant, p_site, p_kind, btrim(p_operator), btrim(p_reason), v_counts);
+    INSERT INTO erasure_journal (tenant_id, site_id, erasure_ref, kind, subject_id) VALUES (p_tenant, p_site, v_ref, p_kind, p_id);
+  END IF;
+  RETURN jsonb_build_object('erasure_ref', v_ref, 'counts', v_counts);
+END $_$;
+
+
+--
+-- Name: event_payload_for_guests(jsonb, jsonb, boolean, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.event_payload_for_guests(p_payload jsonb, p_guests jsonb, p_keep boolean, p_iface uuid) RETURNS jsonb
+    LANGUAGE sql IMMUTABLE
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  WITH g AS (SELECT CASE WHEN x->>'iface' IS NULL OR p_iface IS NULL OR x->>'iface' = p_iface::text
+                         THEN NULLIF(x->>'id', '') END AS id,
+                    NULLIF(x->>'first', '') AS f, NULLIF(x->>'last', '') AS l,
+                    COALESCE((x->>'rival')::boolean, false) AS rival
+               FROM jsonb_array_elements(COALESCE(p_guests, '[]'::jsonb)) x),
+  sh AS (SELECT s.value AS v, s.ordinality AS n,
+                NULLIF(btrim(s.value->>'external_guest_id'), '') AS id,
+                NULLIF(upper(btrim(s.value->>'first_name')), '') AS f,
+                NULLIF(upper(btrim(s.value->>'last_name')), '') AS l
+           FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_payload->'sharers') = 'array'
+                                          THEN p_payload->'sharers' ELSE '[]'::jsonb END) WITH ORDINALITY s),
+  -- The SAME test keeps a name (export) and takes it out (erasure): a PMS guest number on this interface; a full
+  -- first AND last name that is unique among the sharers; or a surname alone when nobody else on the stay or among
+  -- the sharers has it. A surname shared with a relative is nobody's, in either direction, so the relative is
+  -- neither handed over nor altered.
+  shm AS (SELECT sh.v, sh.n,
+                 EXISTS (SELECT 1 FROM g
+                          WHERE (g.id IS NOT NULL AND sh.id = g.id)
+                             OR ((g.id IS NULL OR sh.id IS NULL) AND g.f IS NOT NULL AND g.l IS NOT NULL
+                                 AND sh.f = g.f AND sh.l = g.l
+                                 AND (SELECT count(*) FROM sh o WHERE o.f = sh.f AND o.l = sh.l) = 1)
+                             OR (sh.f IS NULL AND sh.l IS NOT NULL AND g.l = sh.l AND NOT g.rival
+                                 AND (SELECT count(*) FROM sh o WHERE o.l = sh.l) = 1)) AS mine
+            FROM sh),
+  top AS (SELECT EXISTS (SELECT 1 FROM g
+                          WHERE (g.f IS NOT NULL AND g.l IS NOT NULL
+                                 AND NULLIF(upper(btrim(p_payload->>'last_name')), '') = g.l
+                                 AND NULLIF(upper(btrim(p_payload->>'first_name')), '') = g.f)
+                             OR (NULLIF(btrim(p_payload->>'first_name'), '') IS NULL AND g.l IS NOT NULL AND NOT g.rival
+                                 AND NULLIF(upper(btrim(p_payload->>'last_name')), '') = g.l)) AS mine)
+  SELECT CASE WHEN p_payload IS NULL OR jsonb_typeof(p_payload) <> 'object' THEN p_payload ELSE
+    (CASE WHEN (SELECT mine FROM top) = p_keep THEN p_payload ELSE p_payload - 'last_name' - 'first_name' - 'vip' - 'travel_agent' END)
+    || CASE WHEN jsonb_typeof(p_payload->'sharers') = 'array' THEN jsonb_build_object('sharers', COALESCE((
+         SELECT jsonb_agg(shm.v ORDER BY shm.n) FROM shm WHERE shm.mine = p_keep), '[]'::jsonb))
+       ELSE '{}'::jsonb END
+  END;
+$$;
+
+
+--
+-- Name: expire_assisted_requests(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.expire_assisted_requests(p_tenant uuid, p_site uuid) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE r record; n integer := 0;
+BEGIN
+  FOR r IN SELECT q.id FROM assisted_guest_requests q
+            WHERE q.tenant_id = p_tenant AND q.site_id = p_site AND q.status = 'OPEN' AND q.created_at < now() - interval '30 days'
+            ORDER BY q.created_at LIMIT 200 FOR UPDATE LOOP
+    PERFORM assisted_close(p_tenant, p_site, r.id, 'system', 'CANCELLED', 'not completed within 30 days',
+                           jsonb_build_object('exports', 0, 'records_disclosed', 0, 'expired', true), 'EXPIRED');
+    n := n + 1;
+  END LOOP;
+  RETURN n;
+END $$;
+
+
+--
+-- Name: give_up_waiting_stay_events(uuid, uuid, timestamp with time zone, uuid[], integer); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.give_up_waiting_stay_events(p_tenant uuid, p_site uuid, p_before timestamp with time zone, p_only uuid[], p_limit integer) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE n integer;
+BEGIN
+  PERFORM set_config('iam_v2.anonymise', 'retention', true);
+  PERFORM iam_v2.begin_controlled_operation('stay');
+  UPDATE iam_v2.stay_events e
+     SET processing_status = 'FAILED', review_code = 'RETENTION_GIVEN_UP', processed_at = now(),
+         payload = '{"anonymised": true}'::jsonb,
+         external_event_identity = 'anon-' || encode(public.gen_random_bytes(32), 'hex')
+   WHERE e.id IN (SELECT x.id FROM iam_v2.stay_events x
+                   WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.processing_status = 'PENDING'
+                     AND x.received_at < p_before AND (p_only IS NULL OR x.id = ANY (p_only))
+                   ORDER BY x.received_at LIMIT p_limit
+                   FOR UPDATE SKIP LOCKED);
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RETURN n;
+END $$;
+
+
+--
+-- Name: FUNCTION give_up_waiting_stay_events(p_tenant uuid, p_site uuid, p_before timestamp with time zone, p_only uuid[], p_limit integer); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.give_up_waiting_stay_events(p_tenant uuid, p_site uuid, p_before timestamp with time zone, p_only uuid[], p_limit integer) IS 'Gives up PMS events still PENDING that were received before p_before (0139, GDPR audit B2): FAILED with review code RETENTION_GIVEN_UP, payload blanked. Rows the stay engine holds are skipped. Run by retention and erasure only; granted to nobody.';
 
 
 --
@@ -1434,12 +3155,671 @@ CREATE FUNCTION iam_v2.guest_access_account_removed_is_final() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
+  -- RETENTION ANONYMISATION (0127): the table owner, inside a retention run, may rename a removed account to
+  -- an anonymised username that is still a removed one.
+  IF current_setting('iam_v2.anonymise', true) = 'retention'
+     AND current_user = (SELECT pg_get_userbyid(c.relowner) FROM pg_class c WHERE c.oid = TG_RELID)
+     AND NOT NEW.enabled AND lower(NEW.username) LIKE '%.removed-%.invalid' THEN
+    RETURN NEW;
+  END IF;
   IF NOT OLD.enabled AND lower(OLD.username) LIKE '%.removed-%.invalid'
      AND (NEW.enabled OR NEW.username IS DISTINCT FROM OLD.username) THEN
     RAISE EXCEPTION 'client account % has been removed: it cannot be enabled or renamed', OLD.id
       USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
+END $$;
+
+
+--
+-- Name: guest_data_erasures_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.guest_data_erasures_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF TG_OP = 'UPDATE'
+     AND current_setting('iam_v2.anonymise', true) = 'retention'
+     AND current_user = (SELECT pg_get_userbyid(c.relowner) FROM pg_class c WHERE c.oid = TG_RELID)
+     AND NEW.erase_reason = 'Removed after the staff-notes period'
+     AND (to_jsonb(NEW) - 'erase_reason') = (to_jsonb(OLD) - 'erase_reason') THEN
+    RETURN NEW;
+  END IF;
+  RAISE EXCEPTION 'iam_v2.% is append-only: % refused', TG_TABLE_NAME, TG_OP USING ERRCODE = 'restrict_violation';
+END $$;
+
+
+--
+-- Name: guest_data_export_records(uuid, uuid, text, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.guest_data_export_records(p_tenant uuid, p_site uuid, p_kind text, p_id uuid) RETURNS jsonb
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE a uuid[]; p uuid[]; s uuid[]; e uuid[]; d uuid[]; ev uuid[]; macs macaddr[]; se_ids uuid[]; pu_ids uuid[];
+        ss uuid[]; gr uuid[]; v_who jsonb; v_ids text[]; n_other integer; n_dshared integer; room uuid[]; n_room_dev integer;
+        ec uuid[]; ch uuid[]; v_holder jsonb;
+BEGIN
+  -- A stay with more than one guest is exported one guest at a time (0141, GDPR audit C3): the whole stay would
+  -- hand one guest the others' data (Art. 15(4)).
+  IF p_kind = 'stay' AND stay_named_guests(p_id) > 1 THEN
+    RAISE EXCEPTION 'this stay has more than one guest: export each guest from the search'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  SELECT COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'account'), '{}'),
+         COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'principal'), '{}'),
+         COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'stay'), '{}'),
+         COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'entitlement'), '{}'),
+         COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'device'), '{}'),
+         COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'stay_event'), '{}'),
+         COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'stay_shared'), '{}'),
+         COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'stay_guest'), '{}'),
+         count(*) FILTER (WHERE o_kind = 'stay_shared_other'),
+         count(*) FILTER (WHERE o_kind = 'device_shared'),
+         COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'access_shared'), '{}'),
+         COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'entitlement_credential'), '{}'),
+         COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'challenge'), '{}')
+    INTO a, p, s, e, d, ev, ss, gr, n_other, n_dshared, room, ec, ch FROM guest_data_scope(p_tenant, p_site, p_kind, p_id);
+  SELECT COALESCE(array_agg(dv.mac), '{}') INTO macs FROM devices dv WHERE dv.id = ANY (d);
+  -- The reservation's own guests: used to keep other people's names out of the PMS messages.
+  v_holder := stay_guests_as_json(ARRAY(SELECT sg.id FROM stay_guests sg WHERE sg.stay_id = ANY (s)));
+  -- How many devices the room's access has seen: a number, never a device.
+  SELECT count(DISTINCT z.dev) INTO n_room_dev FROM (
+    SELECT ed.device_id AS dev FROM entitlement_devices ed WHERE ed.entitlement_id = ANY (room)
+    UNION SELECT se.device_id FROM sessions se WHERE se.entitlement_id = ANY (room)) z;
+  -- The guest, as named on their own stays and on the shared stays: their names are kept in the events, nobody
+  -- else's.
+  v_who := stay_guests_as_json(gr || ARRAY(SELECT sg.id FROM stay_guests sg WHERE sg.stay_id = ANY (s)));
+  SELECT COALESCE(array_agg(sg.external_guest_id) FILTER (WHERE sg.external_guest_id IS NOT NULL), '{}') INTO v_ids
+    FROM stay_guests sg WHERE sg.id = ANY (gr);
+  -- Sessions on the person's exclusive devices only; a session on a shared device could be anyone's.
+  SELECT COALESCE(array_agg(se.id), '{}') INTO se_ids FROM sessions se
+   WHERE se.tenant_id = p_tenant AND se.device_id = ANY (d);
+  SELECT COALESCE(array_agg(DISTINCT pu.id), '{}') INTO pu_ids FROM purchases pu
+   WHERE pu.tenant_id = p_tenant AND pu.site_id = p_site
+     AND pu.id IN (SELECT x.purchase_id FROM entitlements x WHERE x.id = ANY (e));
+
+  RETURN jsonb_build_object(
+    'client_accounts', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'username', x.username, 'display_name', x.display_name, 'notes', x.notes, 'enabled', x.enabled,
+        'self_registered', x.self_registered, 'linked_to_a_reservation', x.stay_id IS NOT NULL,
+        'created_at', x.created_at, 'valid_from', x.valid_from,
+        'valid_until', x.valid_until, 'email_verified_at', x.email_verified_at,
+        'last_sign_in_at', x.last_login_at, 'sign_in_count', x.login_count) ORDER BY x.created_at), '[]'::jsonb)
+      FROM guest_access_accounts x WHERE x.id = ANY (a)),
+    'guest_identities', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'display_name', g.display_name,
+        'sign_in_methods', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+            'type', i.factor_type, 'issuer', i.factor_issuer, 'value', i.factor_value_norm,
+            'verified_at', i.verified_at, 'details', i.attrs) ORDER BY i.verified_at), '[]'::jsonb)
+          FROM guest_principal_identities i WHERE i.guest_principal_id = g.id))), '[]'::jsonb)
+      FROM guest_principals g WHERE g.id = ANY (p)),
+    'remembered_devices', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'method', c.method, 'device_mac_address', dv.mac, 'created_at', c.created_at, 'expires_at', c.expires_at,
+        'last_used_at', c.last_used_at, 'revoked_at', c.revoked_at) ORDER BY c.created_at), '[]'::jsonb)
+      FROM principal_device_credentials c LEFT JOIN devices dv ON dv.id = c.device_id
+     WHERE c.guest_principal_id = ANY (p)),
+    'hotel_stays', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'reservation', x.external_reservation_id, 'room', x.normalized_room_number, 'room_type', x.room_type,
+        'rate_plan', x.rate_plan,
+        'vip', CASE WHEN x.id = ANY (s) THEN x.vip END, 'travel_agent', CASE WHEN x.id = ANY (s) THEN x.travel_agent END,
+        'arrival', x.arrival, 'departure', x.departure, 'checked_out_at', x.effective_checkout_at,
+        'status', x.status,
+        'guests', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+            'name', sg.display_name, 'first_name', sg.first_name_norm, 'last_name', sg.last_name_norm,
+            'pms_guest_id', sg.external_guest_id, 'primary', sg.is_primary) ORDER BY sg.is_primary DESC), '[]'::jsonb)
+          FROM stay_guests sg WHERE sg.stay_id = x.id AND (x.id = ANY (s) OR sg.id = ANY (gr))),
+        'linked_to', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+            'reason', k.reason, 'other_reservation', o.external_reservation_id,
+            'direction', CASE WHEN k.from_stay = x.id THEN 'continued_as' ELSE 'continues' END)), '[]'::jsonb)
+          FROM stay_links k JOIN stays o ON o.id = CASE WHEN k.from_stay = x.id THEN k.to_stay ELSE k.from_stay END
+         WHERE (k.from_stay = x.id OR k.to_stay = x.id) AND (o.id = ANY (s) OR o.id = ANY (ss)))) ORDER BY x.arrival), '[]'::jsonb)
+      FROM stays x WHERE x.id = ANY (s) OR x.id = ANY (ss)),
+    'pms_events', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'type', x.event_type, 'received_at', x.received_at, 'pms_time', x.pms_timestamp_utc,
+        'status', x.processing_status,
+        'details', CASE
+            WHEN cardinality(gr) > 0 THEN event_payload_for_guests(x.payload, v_who, true, x.pms_interface_id)
+            -- Even a reservation with one named guest may list sharers in a PMS message; only the guest's own entry
+            -- (by number, or a unique full name) goes to them.
+            WHEN jsonb_typeof(x.payload->'sharers') = 'array' THEN
+              (x.payload - 'sharers') || jsonb_build_object('sharers', COALESCE(
+                 event_payload_for_guests(jsonb_build_object('sharers', x.payload->'sharers'), v_holder, true, x.pms_interface_id)->'sharers', '[]'::jsonb))
+            ELSE x.payload END)
+        ORDER BY x.received_at), '[]'::jsonb)
+      FROM stay_events x WHERE x.id = ANY (ev)),
+    'post_stay_access', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'status', x.status, 'issued_at', x.issued_at, 'issued_via', x.issued_via, 'valid_until', x.valid_until,
+        'pin_set_at', x.pin_set_at, 'revoked_at', x.revoked_at, 'revoke_reason', x.revoke_reason) ORDER BY x.created_at), '[]'::jsonb)
+      FROM post_stay_profiles x WHERE x.origin_stay_id = ANY (s)),
+    'internet_access', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'status', x.status, 'activated_at', x.activated_at, 'ends_at', x.window_ends_at,
+        'ended_at', x.terminated_at, 'ended_because', x.terminal_reason,
+        'data_used_bytes', x.consumed_data_bytes, 'online_seconds', x.consumed_online_seconds)
+        ORDER BY x.activated_at NULLS LAST), '[]'::jsonb)
+      FROM entitlements x WHERE x.id = ANY (e) OR x.id = ANY (ec)),
+    'purchases', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'amount_minor', pu.amount_minor, 'currency', pu.currency, 'currency_exponent', pu.currency_exponent,
+        'tax_amount_minor', pu.tax_amount_minor, 'state', pu.state, 'paid_by', pu.trigger)), '[]'::jsonb)
+      FROM purchases pu WHERE pu.id = ANY (pu_ids)),
+    'payments', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'type', t.transaction_type, 'provider', t.provider, 'amount_minor', t.amount_minor, 'currency', t.currency,
+        'currency_exponent', t.currency_exponent, 'status', t.status, 'provider_reference', t.provider_txn_ref,
+        'created_at', t.intent_created_at) ORDER BY t.intent_created_at), '[]'::jsonb)
+      FROM payment_transactions t JOIN settlements st ON st.id = t.settlement_id
+     WHERE st.purchase_id = ANY (pu_ids)),
+    'refunds_that_ended_access', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'captured_minor', x.captured_minor, 'refunded_minor', x.refunded_minor, 'ended_at', x.terminated_at)
+        ORDER BY x.terminated_at), '[]'::jsonb)
+      FROM refund_access_terminations x WHERE x.entitlement_id = ANY (e)),
+    -- The folio of the reservation: the reservation holder's, so its PMS guest number is shown only to a request
+    -- about the reservation. A posting made for the person's own purchase carries no guest number.
+    'room_charges', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'type', x.posting_type, 'amount_minor', x.amount_minor, 'currency', x.currency,
+        'currency_exponent', x.currency_exponent,
+        'pms_guest_number', CASE WHEN x.stay_id = ANY (s) OR (x.stay_id = ANY (ss) AND x.g_number = ANY (v_ids)) THEN x.g_number END,
+        'created_at', x.created_at)
+        ORDER BY x.created_at), '[]'::jsonb)
+      FROM pms_postings x WHERE x.tenant_id = p_tenant
+       AND (x.purchase_id = ANY (pu_ids) OR x.stay_id = ANY (s) OR (x.stay_id = ANY (ss) AND x.g_number = ANY (v_ids)))),
+    'devices', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'mac_address', dv.mac, 'first_seen', dv.first_seen, 'last_seen', dv.last_seen, 'last_ip', dv.last_ip,
+        'networks_seen_on', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+            'guest_network', na.guest_network_id, 'first_seen', na.first_seen, 'last_seen', na.last_seen)
+            ORDER BY na.first_seen), '[]'::jsonb)
+          FROM device_network_appearances na WHERE na.device_id = dv.id),
+        'staff_actions', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+            'action', sa.action, 'outcome', sa.outcome, 'by', sa.actor, 'reason', sa.reason, 'at', sa.acted_at)
+            ORDER BY sa.acted_at), '[]'::jsonb)
+          FROM device_slot_actions sa WHERE sa.device_id = dv.id OR sa.replacement_device_id = dv.id))
+        ORDER BY dv.first_seen), '[]'::jsonb)
+      FROM devices dv WHERE dv.id = ANY (d)),
+    'sessions', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'started', se.started, 'ended', se.ended, 'end_reason', se.end_reason, 'ip', se.ip, 'mac_address', se.mac,
+        'bytes_up', se.bytes_up, 'bytes_down', se.bytes_down,
+        'usage_samples', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+            'at', ar.sampled_at, 'bytes_up', ar.bytes_up, 'bytes_down', ar.bytes_down) ORDER BY ar.sampled_at), '[]'::jsonb)
+          FROM accounting_records ar WHERE ar.session_id = se.id)) ORDER BY se.started), '[]'::jsonb)
+      FROM sessions se WHERE se.id = ANY (se_ids)),
+    -- What was tried with the person's own access or from their exclusive device. Attempts to enter a room's
+    -- credentials are the typist's, not the reservation holder's, and are never exported with the reservation.
+    'sign_in_attempts', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'at', sa.occurred_at, 'room_entered', sa.submitted_room, 'checked_against', sa.verifier_kind,
+        'result', sa.result, 'guest_network', sa.guest_network_name, 'device_ip', sa.device_ip,
+        'device_mac_address', sa.device_mac) ORDER BY sa.occurred_at), '[]'::jsonb)
+      FROM sign_in_attempts sa
+     WHERE sa.tenant_id = p_tenant AND sa.site_id = p_site
+       AND (sa.entitlement_id = ANY (e) OR sa.device_mac = ANY (macs))),
+    'sign_in_restrictions', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'device_mac_address', x.device_mac, 'guest_network', x.guest_network_name, 'room_entered', x.last_submitted_room,
+        'restricted_at', x.restricted_at, 'until', x.expires_at, 'failures', x.failure_count, 'reason', x.reason,
+        'released_at', x.released_at, 'release_reason', x.release_reason) ORDER BY x.restricted_at), '[]'::jsonb)
+      FROM guest_signin_restrictions x
+     WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.device_mac = ANY (macs)),
+    -- A verification access and a code binding are tied to a person by the address their one-time code went to,
+    -- not by the device (0145).
+    'verification_access', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'device_mac_address', x.device_mac, 'ip', x.ip, 'guest_network', x.guest_network_id,
+        'started_at', x.started_at, 'expires_at', x.expires_at, 'ended_at', x.ended_at, 'end_reason', x.end_reason,
+        'used_bytes', x.used_bytes) ORDER BY x.started_at), '[]'::jsonb)
+      FROM verification_access_grants x
+     WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.challenge_id = ANY (ch)),
+    'code_device_bindings', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'device_mac_address', x.device_mac, 'issued_at', x.issued_at) ORDER BY x.issued_at), '[]'::jsonb)
+      FROM otp_device_bindings x WHERE x.tenant_id = p_tenant AND x.challenge_id = ANY (ch)),
+    -- A staff "let this device try again" pass: keyed by the device, so only an exclusive device's.
+    'sign_in_passes', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'device_mac_address', x.device_mac, 'granted_at', x.granted_at) ORDER BY x.granted_at), '[]'::jsonb)
+      FROM guest_signin_device_passes x WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.device_mac = ANY (macs)),
+    -- What staff did with the person's access, and what the person did with their devices (the staff member's name is not given).
+    'access_adjustments', (SELECT COALESCE(jsonb_agg(jsonb_build_object('field', x.field, 'from', x.old_value, 'to', x.new_value,
+        'reason', x.reason, 'at', x.created_at) ORDER BY x.created_at), '[]'::jsonb)
+      FROM entitlement_adjustments x WHERE x.entitlement_id = ANY (e)),
+    'access_history', (SELECT COALESCE(jsonb_agg(jsonb_build_object('from', x.from_state, 'to', x.to_state, 'effective_at', x.effective_at,
+        'reason', x.reason) ORDER BY x.seq), '[]'::jsonb)
+      FROM entitlement_state_transitions x WHERE x.entitlement_id = ANY (e)),
+    'device_actions', (SELECT COALESCE(jsonb_agg(z.o ORDER BY z.at), '[]'::jsonb) FROM (
+        SELECT x.acted_at AS at, jsonb_build_object('by', x.actor, 'action', x.action, 'outcome', x.outcome, 'reason', x.reason,
+                 'detail', x.detail, 'at', x.acted_at) AS o
+          FROM device_slot_actions x WHERE x.entitlement_id = ANY (e)
+        UNION ALL
+        SELECT x.acted_at, jsonb_build_object('by', 'the guest', 'action', x.action, 'outcome', x.outcome, 'detail', x.detail, 'at', x.acted_at)
+          FROM guest_device_actions x WHERE x.entitlement_id = ANY (e)) z),
+    'device_authorisations', (SELECT COALESCE(jsonb_agg(jsonb_build_object('authorised_at', x.authorized_at, 'ended_at', x.deauthorized_at,
+        'device_mac_address', dv.mac) ORDER BY x.authorized_at), '[]'::jsonb)
+      FROM entitlement_device_authorizations x LEFT JOIN devices dv ON dv.id = x.device_id AND dv.id = ANY (d)
+     WHERE x.entitlement_id = ANY (e)),
+    'sign_in_events', (SELECT COALESCE(jsonb_agg(jsonb_build_object('method', ac.method, 'guest_network', ac.guest_network_id,
+        'valid_until', ac.expires_at, 'used_at', ac.consumed_at, 'client_group', ac.client_group_id) ORDER BY ac.expires_at), '[]'::jsonb)
+      FROM auth_contexts ac
+     WHERE ac.tenant_id = p_tenant AND ac.site_id = p_site
+       AND (ac.guest_principal_id = ANY (p)
+            OR ac.guest_account_id IN (SELECT g.id FROM guest_access_accounts g WHERE g.id = ANY (a) AND g.self_registered))),
+    'account_messages', (SELECT COALESCE(jsonb_agg(jsonb_build_object('purpose', x.purpose, 'created_at', x.created_at, 'sent_at', x.sent_at,
+        'used_at', x.used_at, 'send_attempts', x.send_attempts) ORDER BY x.created_at), '[]'::jsonb)
+      FROM account_email_tokens x WHERE x.account_id = ANY (a)),
+    'account_security', (SELECT COALESCE(jsonb_agg(jsonb_build_object('failed_sign_ins', x.failed_attempts, 'locked_until', x.locked_until,
+        'grace_until', x.grace_until, 'grace_extensions_used', x.grace_extensions_used,
+        'created_on_device_mac_address', x.created_by_device_mac) ORDER BY x.created_at), '[]'::jsonb)
+      FROM guest_access_accounts x WHERE x.id = ANY (a)),
+    -- Staff notes about the reservation, and the postings' PMS numbers (kept by law, see kept_by_law).
+    'staff_notes_about_the_reservation', (SELECT COALESCE(jsonb_agg(z.o ORDER BY z.at), '[]'::jsonb) FROM (
+        SELECT x.created_at AS at, jsonb_build_object('kind', 'posting block', 'reason', x.reason, 'note', x.note, 'cleared_reason', x.cleared_reason,
+                 'at', x.created_at) AS o FROM stay_posting_blocks x WHERE x.stay_id = ANY (s)
+        UNION ALL
+        SELECT x.resolved_at, jsonb_build_object('kind', 'PMS case', 'disposition', x.disposition, 'note', x.note, 'at', x.resolved_at)
+          FROM pms_case_resolutions x WHERE x.stay_id = ANY (s)) z),
+    'posting_attempts', (SELECT COALESCE(jsonb_agg(jsonb_build_object('posting_number', x.rn, 'pms_guest_number', x.g_number, 'sent_at', x.sent_at,
+        'outcome', x.outcome) ORDER BY x.sent_at), '[]'::jsonb)
+      FROM posting_attempts x JOIN pms_postings pp ON pp.id = x.internal_posting_id
+     WHERE pp.tenant_id = p_tenant AND (pp.purchase_id = ANY (pu_ids) OR pp.stay_id = ANY (s))),
+    'other_reservations_with_your_pms_guest_number', (SELECT COALESCE(jsonb_agg(jsonb_build_object('reservation', st2.external_reservation_id,
+        'arrival', st2.arrival, 'departure', st2.departure, 'status', st2.status) ORDER BY st2.arrival), '[]'::jsonb)
+      FROM stays st2
+     WHERE st2.tenant_id = p_tenant AND st2.site_id = p_site AND NOT st2.id = ANY (s) AND NOT st2.id = ANY (ss)
+       AND NOT is_anon_token(st2.external_reservation_id)
+       AND EXISTS (SELECT 1 FROM stay_guests g2 JOIN stay_guests g1 ON g1.external_guest_id = g2.external_guest_id AND g1.pms_interface_id = g2.pms_interface_id
+                    WHERE g2.stay_id = st2.id AND g2.external_guest_id IS NOT NULL
+                      AND (g1.stay_id = ANY (s) OR g1.id = ANY (gr)))),
+    'static_address_reservations_kept', (SELECT count(*) FROM public.dhcp_reservations r WHERE r.mac = ANY (macs)),
+    'kept_by_law', jsonb_build_object(
+        'what', 'Room charges, payments and the PMS posting records of this guest are kept for the legal period for financial records, and are given above.',
+        'what_they_still_carry', 'The PMS guest number on each posting, the posting numbers, the payment provider references, the amounts and the dates.',
+        'why', 'The hotel must keep its financial records (accounting and tax law). Erasing a guest anonymises their account, reservation, devices and usage; it does not remove these.'),
+    'names_before_normalisation', CASE WHEN to_regclass('iam_v2.backfill_0066_identity_text') IS NULL THEN '[]'::jsonb
+      ELSE (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+              'first_name', b.prior_first_name, 'last_name', b.prior_last_name, 'room', b.prior_room,
+              'recorded_at', b.captured_at) ORDER BY b.captured_at), '[]'::jsonb)
+            FROM backfill_0066_identity_text b
+           WHERE b.tenant_id = p_tenant AND b.site_id = p_site
+             AND num_nonnulls(b.prior_first_name, b.prior_last_name, b.prior_room) > 0
+             AND (b.row_id = ANY (gr) OR b.row_id = ANY (s)
+                  OR b.row_id IN (SELECT sg.id FROM stay_guests sg WHERE sg.stay_id = ANY (s)))) END)
+  || CASE WHEN cardinality(ss) > 0 OR n_other > 0 THEN jsonb_build_object('shared_stays_note',
+       'Other guests are named on a stay linked to this guest. Only this guest''s own details are included: the '
+       || 'room''s internet access, devices and sessions are shared by everyone on the stay and are not included.')
+     ELSE '{}'::jsonb END
+  || CASE WHEN cardinality(room) > 0 OR n_dshared > 0 THEN jsonb_build_object('not_included', jsonb_build_object(
+       'why', 'Internet access used through a room, voucher or staff-issued credential, and any device also used '
+              || 'with someone else, is shared by several people. It cannot be attributed to one person, so it is '
+              || 'not included here and this system never discloses or changes it for one person. The hotel '
+              || 'answers a request about it separately, by its own manual and legal process; the end of a '
+              || 'retention period is not an answer to such a request.',
+       'room_access_records', cardinality(room), 'devices_seen_by_that_access', n_room_dev, 'shared_devices', n_dshared))
+     ELSE '{}'::jsonb END;
+END $$;
+
+
+--
+-- Name: guest_data_find(uuid, uuid, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.guest_data_find(p_tenant uuid, p_site uuid, p_query text) RETURNS TABLE(o_kind text, o_id uuid, o_label text, o_detail text, o_status text, o_last_activity timestamp with time zone)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $_$
+DECLARE q text := lower(btrim(COALESCE(p_query, ''))); pat text; v_mac macaddr; v_ents uuid[] := '{}';
+BEGIN
+  IF length(q) NOT BETWEEN 2 AND 200 THEN
+    RAISE EXCEPTION 'a search of 2-200 characters is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  pat := '%' || replace(replace(replace(q, '\', '\\'), '%', '\%'), '_', '\_') || '%';
+  IF q ~ '^[0-9a-f]{2}([:.-]?[0-9a-f]{2}){5}$' THEN
+    BEGIN v_mac := q::macaddr; EXCEPTION WHEN others THEN v_mac := NULL; END;
+  END IF;
+  -- A MAC address finds whoever held access on that device: authorised on it, or with a session from it.
+  IF v_mac IS NOT NULL THEN
+    SELECT COALESCE(array_agg(DISTINCT z.ent), '{}') INTO v_ents FROM (
+      SELECT ed.entitlement_id FROM entitlement_devices ed JOIN devices dv ON dv.id = ed.device_id
+       WHERE dv.tenant_id = p_tenant AND dv.site_id = p_site AND dv.mac = v_mac
+      UNION SELECT se.entitlement_id FROM sessions se JOIN devices dv ON dv.id = se.device_id
+       WHERE dv.tenant_id = p_tenant AND dv.site_id = p_site AND dv.mac = v_mac AND se.entitlement_id IS NOT NULL
+    ) z(ent);
+    -- A device identifies nobody (0145): only a person's own access (account or identity) is found by it,
+    -- never a room's, a voucher's or an anonymous one.
+    v_ents := ARRAY(SELECT en.id FROM entitlements en WHERE en.id = ANY (v_ents)
+                     AND (en.guest_account_id IS NOT NULL OR en.guest_principal_id IS NOT NULL));
+  END IF;
+
+  RETURN QUERY
+  SELECT r.* FROM (
+    SELECT 'account'::text, x.id, x.username, x.display_name,
+           CASE WHEN NOT x.enabled AND x.username LIKE '%.removed-%.invalid' THEN 'removed'
+                WHEN x.enabled THEN 'enabled' ELSE 'disabled' END,
+           GREATEST(x.created_at, x.last_login_at)
+      FROM guest_access_accounts x
+     WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND NOT iam_v2.is_anon_token(x.username)
+       AND (lower(x.username) LIKE pat OR lower(COALESCE(x.display_name, '')) LIKE pat
+            OR x.created_by_device_mac = v_mac
+            OR EXISTS (SELECT 1 FROM entitlements en WHERE en.id = ANY (v_ents) AND en.guest_account_id = x.id))
+    UNION ALL
+    SELECT 'principal'::text, g.id,
+           (SELECT string_agg(i.factor_value_norm, ', ' ORDER BY i.verified_at DESC NULLS LAST)
+              FROM guest_principal_identities i
+             WHERE i.guest_principal_id = g.id AND NOT iam_v2.is_anon_token(i.factor_value_norm)),
+           g.display_name,
+           (SELECT string_agg(DISTINCT i.factor_type, ', ') FROM guest_principal_identities i
+             WHERE i.guest_principal_id = g.id AND NOT iam_v2.is_anon_token(i.factor_value_norm)),
+           (SELECT max(i.verified_at) FROM guest_principal_identities i WHERE i.guest_principal_id = g.id)
+      FROM guest_principals g
+     WHERE g.tenant_id = p_tenant
+       -- Not another site's guest (0144): an identity also used at another site is not offered here, as the
+       -- scope refuses it.
+       AND NOT EXISTS (SELECT 1 FROM auth_contexts ac WHERE ac.guest_principal_id = g.id AND ac.site_id <> p_site)
+       AND NOT EXISTS (SELECT 1 FROM entitlements en WHERE en.guest_principal_id = g.id AND en.site_id <> p_site)
+       AND (lower(COALESCE(g.display_name, '')) LIKE pat
+            OR EXISTS (SELECT 1 FROM guest_principal_identities i
+                        WHERE i.guest_principal_id = g.id AND NOT iam_v2.is_anon_token(i.factor_value_norm)
+                          AND lower(i.factor_value_norm) LIKE pat)
+            OR EXISTS (SELECT 1 FROM principal_device_credentials c JOIN devices dv ON dv.id = c.device_id
+                        WHERE c.guest_principal_id = g.id AND dv.mac = v_mac AND dv.site_id = p_site)
+            OR EXISTS (SELECT 1 FROM entitlements en WHERE en.id = ANY (v_ents) AND en.guest_principal_id = g.id))
+    UNION ALL
+    -- A stay with more than one guest named on it is offered one guest at a time (0141, GDPR audit C3).
+    SELECT CASE WHEN gs.id IS NULL THEN 'stay' ELSE 'stay_guest' END, COALESCE(gs.id, x.id),
+           'Room ' || COALESCE(x.normalized_room_number, '?') || ' · reservation ' || x.external_reservation_id,
+           COALESCE(gs.display_name,
+             (SELECT string_agg(sg.display_name, ', ' ORDER BY sg.is_primary DESC) FROM stay_guests sg WHERE sg.stay_id = x.id)),
+           x.status,
+           COALESCE(x.effective_checkout_at, x.departure::timestamptz, x.arrival::timestamptz)
+      FROM stays x
+      LEFT JOIN LATERAL (SELECT sg.id, COALESCE(sg.display_name, initcap(concat_ws(' ', sg.first_name_norm, sg.last_name_norm))) AS display_name
+                           FROM stay_guests sg
+                          WHERE sg.stay_id = x.id AND stay_named_guests(x.id) > 1
+                            AND num_nonnulls(sg.first_name_norm, sg.last_name_norm, sg.display_name) > 0) gs ON true
+     WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND NOT iam_v2.is_anon_token(x.external_reservation_id)
+       AND (lower(COALESCE(x.normalized_room_number, '')) = q OR lower(x.external_reservation_id) = q
+            OR EXISTS (SELECT 1 FROM stay_guests sg
+                        WHERE sg.stay_id = x.id
+                          AND (lower(COALESCE(sg.display_name, '')) LIKE pat OR lower(COALESCE(sg.last_name_norm, '')) LIKE pat
+                               OR lower(COALESCE(sg.first_name_norm, '')) LIKE pat)))
+  ) r ORDER BY 6 DESC NULLS LAST LIMIT 51;
+END $_$;
+
+
+--
+-- Name: FUNCTION guest_data_find(p_tenant uuid, p_site uuid, p_query text); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.guest_data_find(p_tenant uuid, p_site uuid, p_query text) IS 'Finds the client accounts, guest identities and hotel stays matching a search (0128, GDPR plan C3/C4): email, phone, username or name (substring), room or reservation (exact), or a device MAC address. At most 50, most recent first. Already-anonymised records are never returned.';
+
+
+--
+-- Name: guest_data_identifiers(uuid, uuid, text, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.guest_data_identifiers(p_tenant uuid, p_site uuid, p_kind text, p_id uuid) RETURNS TABLE(o_kind text, o_value text)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE ks text[]; ids uuid[]; vs text[]; s uuid[]; gr uuid[]; a uuid[];
+BEGIN
+  SELECT COALESCE(array_agg(sc.o_kind), '{}'), COALESCE(array_agg(sc.o_id), '{}'), COALESCE(array_agg(sc.o_value), '{}')
+    INTO ks, ids, vs FROM guest_data_scope(p_tenant, p_site, p_kind, p_id) sc;
+  SELECT COALESCE(array_agg(z.i) FILTER (WHERE z.k = 'stay'), '{}'), COALESCE(array_agg(z.i) FILTER (WHERE z.k = 'stay_guest'), '{}'),
+         COALESCE(array_agg(z.i) FILTER (WHERE z.k = 'account'), '{}')
+    INTO s, gr, a FROM unnest(ks, ids) z(k, i);
+  RETURN QUERY
+    SELECT DISTINCT t.k, lower(btrim(t.v)) FROM (
+      SELECT 'strong'::text AS k, g.v FROM unnest(ks, vs) g(k, v) WHERE g.k IN ('account', 'identity', 'device', 'stay')
+      UNION ALL SELECT 'name', g.v FROM unnest(ks, vs) g(k, v) WHERE g.k IN ('principal', 'stay_guest')
+      UNION ALL SELECT 'name', sg.display_name FROM stay_guests sg WHERE sg.stay_id = ANY (s) OR sg.id = ANY (gr)
+      UNION ALL SELECT 'name', concat_ws(' ', sg.first_name_norm, sg.last_name_norm)
+                  FROM stay_guests sg WHERE (sg.stay_id = ANY (s) OR sg.id = ANY (gr))
+                   AND sg.first_name_norm IS NOT NULL AND sg.last_name_norm IS NOT NULL
+      UNION ALL SELECT 'name', x.display_name FROM guest_access_accounts x WHERE x.id = ANY (a)
+      UNION ALL SELECT 'weak', x.normalized_room_number FROM stays x WHERE x.id = ANY (s)
+      UNION ALL SELECT 'weak', sg.first_name_norm FROM stay_guests sg WHERE sg.stay_id = ANY (s) OR sg.id = ANY (gr)
+      UNION ALL SELECT 'weak', sg.last_name_norm FROM stay_guests sg WHERE sg.stay_id = ANY (s) OR sg.id = ANY (gr)
+    ) t
+    WHERE t.v IS NOT NULL AND length(btrim(t.v)) >= 2 AND NOT iam_v2.is_anon_token(t.v);
+END $$;
+
+
+--
+-- Name: guest_data_scope(uuid, uuid, text, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.guest_data_scope(p_tenant uuid, p_site uuid, p_kind text, p_id uuid) RETURNS TABLE(o_kind text, o_id uuid, o_value text)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $_$
+DECLARE a uuid[] := '{}'; p uuid[] := '{}'; s uuid[] := '{}'; ss uuid[] := '{}'; sso uuid[] := '{}'; gr uuid[] := '{}';
+        anchor uuid[] := '{}'; own uuid[]; own_ind uuid[]; ind_a uuid[]; room uuid[]; cand uuid[]; d uuid[]; dshared uuid[];
+        ch uuid[]; v_origin uuid; v_seen uuid[]; v_front uuid[]; v_next uuid[]; v_depth integer := 0; v_st uuid;
+        v_rows uuid[]; v_walked boolean := false; v_anchor0 uuid[];
+BEGIN
+  IF p_kind = 'stay_guest' THEN
+    SELECT ARRAY[sg.id], ARRAY[sg.stay_id] INTO anchor, v_front
+      FROM stay_guests sg WHERE sg.id = p_id AND sg.tenant_id = p_tenant AND sg.site_id = p_site;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'guest record not found' USING ERRCODE = 'no_data_found';
+    END IF;
+    -- THE GUEST'S OWN STAYS: from their row, through stay links, continuing only from a stay they are on.
+    v_seen := v_front;
+    WHILE cardinality(v_front) > 0 AND v_depth < 20 LOOP
+      SELECT COALESCE(array_agg(DISTINCT CASE WHEN k.from_stay = ANY (v_front) THEN k.to_stay ELSE k.from_stay END), '{}')
+        INTO v_next
+        FROM stay_links k
+       WHERE k.tenant_id = p_tenant AND k.site_id = p_site AND (k.from_stay = ANY (v_front) OR k.to_stay = ANY (v_front));
+      v_next := ARRAY(SELECT z.x FROM unnest(v_next) z(x) WHERE NOT z.x = ANY (v_seen));
+      v_seen := v_seen || v_next;
+      v_front := '{}';
+      FOREACH v_st IN ARRAY v_next LOOP
+        IF cardinality(same_guest_rows(anchor, ARRAY[v_st])) > 0 THEN
+          v_front := v_front || v_st;
+        END IF;
+      END LOOP;
+      v_depth := v_depth + 1;
+    END LOOP;
+    -- Stays the guest is on: one with a single named guest is the reservation's own, whole (its PMS data -- never
+    -- its room access, which more people than the named guest use); on a shared one, only their rows.
+    FOREACH v_st IN ARRAY v_seen LOOP
+      v_rows := same_guest_rows(anchor, ARRAY[v_st]);
+      IF cardinality(v_rows) = 0 THEN
+        CONTINUE;
+      ELSIF stay_named_guests(v_st) <= 1 THEN
+        s := s || v_st;
+      ELSE
+        ss := ss || v_st; gr := gr || v_rows;
+      END IF;
+    END LOOP;
+    v_walked := true;
+  ELSIF p_kind = 'account' THEN
+    SELECT COALESCE(array_agg(x.id), '{}') INTO a FROM guest_access_accounts x
+     WHERE x.id = p_id AND x.tenant_id = p_tenant AND x.site_id = p_site;
+  ELSIF p_kind = 'principal' THEN
+    SELECT COALESCE(array_agg(x.id), '{}') INTO p FROM guest_principals x WHERE x.id = p_id AND x.tenant_id = p_tenant;
+  ELSIF p_kind = 'stay' THEN
+    SELECT COALESCE(array_agg(x.id), '{}') INTO s FROM stays x
+     WHERE x.id = p_id AND x.tenant_id = p_tenant AND x.site_id = p_site;
+    v_origin := p_id;
+  ELSE
+    RAISE EXCEPTION 'unknown guest record kind %', p_kind USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF cardinality(a) + cardinality(p) + cardinality(s) + cardinality(ss) = 0 THEN
+    RAISE EXCEPTION 'guest record not found' USING ERRCODE = 'no_data_found';
+  END IF;
+
+  -- A client account's link to a stay is a reference, not ownership of the reservation (0145): the stay is
+  -- reached only by a request about the stay.
+  IF NOT v_walked AND cardinality(s) > 0 THEN
+    -- A ROOM MOVE OR A TRANSFER IS THE SAME STAY CONTINUED: followed both ways, at most 20 links, and only
+    -- onward from a stay with one guest named. A shared stay is reached, never passed through.
+    v_front := ARRAY(SELECT z.x FROM unnest(s) z(x) WHERE stay_named_guests(z.x) <= 1);
+    v_seen := s;
+    -- A LINK IS FOLLOWED ONLY TO THE SAME GUEST. A stay linked to another person's (a transfer, a post-stay chain) is that
+    -- person's reservation: it is not exported and not anonymised for this guest.
+    v_anchor0 := ARRAY(SELECT sg.id FROM stay_guests sg WHERE sg.stay_id = ANY (s)
+                        AND num_nonnulls(sg.first_name_norm, sg.last_name_norm, sg.display_name, sg.external_guest_id) > 0);
+    WHILE cardinality(v_front) > 0 AND v_depth < 20 LOOP
+      SELECT COALESCE(array_agg(DISTINCT CASE WHEN k.from_stay = ANY (v_front) THEN k.to_stay ELSE k.from_stay END), '{}')
+        INTO v_next
+        FROM stay_links k
+       WHERE k.tenant_id = p_tenant AND k.site_id = p_site AND (k.from_stay = ANY (v_front) OR k.to_stay = ANY (v_front));
+      v_next := ARRAY(SELECT z.x FROM unnest(v_next) z(x)
+                       WHERE NOT z.x = ANY (v_seen)
+                         AND (stay_named_guests(z.x) > 1 OR cardinality(same_guest_rows(v_anchor0, ARRAY[z.x])) > 0));
+      v_seen := v_seen || v_next;
+      v_front := ARRAY(SELECT z.x FROM unnest(v_next) z(x) WHERE stay_named_guests(z.x) <= 1);
+      v_depth := v_depth + 1;
+    END LOOP;
+    s := v_seen;
+    -- A shared stay other than the one asked for is kept whole: neither it nor its shared access is in scope.
+    ss := ARRAY(SELECT z.x FROM unnest(s) z(x) WHERE stay_named_guests(z.x) > 1 AND z.x IS DISTINCT FROM v_origin);
+    s := ARRAY(SELECT z.x FROM unnest(s) z(x) WHERE NOT z.x = ANY (ss));
+  END IF;
+
+  -- NO OTHER SITE'S GUEST. An identity is the tenant's; if it was used at another site, this site's staff cannot
+  -- export or erase it.
+  IF EXISTS (SELECT 1 FROM entitlements x WHERE x.guest_principal_id = ANY (p) AND x.site_id <> p_site)
+     OR EXISTS (SELECT 1 FROM auth_contexts x WHERE x.guest_principal_id = ANY (p) AND x.site_id <> p_site) THEN
+    RAISE EXCEPTION 'guest_data_live' USING ERRCODE = 'object_in_use', DETAIL = 'other_site';
+  END IF;
+
+  -- Asked for by stay: the guest of that stay is the guest who asked, so on a shared stay it continues as, their
+  -- own rows are in scope (D-R4: PMS guest number on the same interface, or a unique full name).
+  IF p_kind = 'stay' AND cardinality(ss) > 0 THEN
+    anchor := ARRAY(SELECT sg.id FROM stay_guests sg WHERE sg.stay_id = ANY (s)
+                     AND num_nonnulls(sg.first_name_norm, sg.last_name_norm, sg.display_name, sg.external_guest_id) > 0);
+    gr := ARRAY(SELECT z.x FROM unnest(same_guest_rows(anchor, ss)) z(x) WHERE NOT z.x = ANY (anchor));
+  END IF;
+  sso := ARRAY(SELECT z.x FROM unnest(ss) z(x) WHERE NOT EXISTS (SELECT 1 FROM stay_guests sg WHERE sg.stay_id = z.x AND sg.id = ANY (gr)));
+  ss := ARRAY(SELECT z.x FROM unnest(ss) z(x) WHERE NOT z.x = ANY (sso));
+
+  -- THE PERSON'S OWN ACCESS: the entitlements whose subject is the account or the identity. The room's access
+  -- (subject: a stay) is shared by everyone in the room and is never the person's.
+  SELECT COALESCE(array_agg(x.id), '{}') INTO own FROM entitlements x
+   WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND (x.guest_account_id = ANY (a) OR x.guest_principal_id = ANY (p));
+  SELECT COALESCE(array_agg(x.id), '{}') INTO ind_a FROM guest_access_accounts x WHERE x.id = ANY (a) AND x.self_registered;
+  SELECT COALESCE(array_agg(x.id), '{}') INTO own_ind FROM entitlements x
+   WHERE x.id = ANY (own) AND (x.guest_account_id = ANY (ind_a) OR x.guest_principal_id = ANY (p));
+  SELECT COALESCE(array_agg(x.id), '{}') INTO room FROM entitlements x
+   WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.stay_id = ANY (s);
+  -- THE PERSON'S OWN ONE-TIME CODES: sent to an address they proved (an identity's email or phone, a
+  -- self-registered account's email). What those codes led to -- a verification access, a code binding -- is
+  -- theirs by the address, whatever device it happened on.
+  SELECT COALESCE(array_agg(o.id), '{}') INTO ch FROM public.auth_otps o
+   WHERE o.tenant_id = p_tenant AND lower(o.destination) IN (
+           SELECT lower(i.factor_value_norm) FROM guest_principal_identities i
+            WHERE i.guest_principal_id = ANY (p) AND NOT iam_v2.is_anon_token(i.factor_value_norm)
+           UNION SELECT lower(x.username) FROM guest_access_accounts x
+            WHERE x.id = ANY (ind_a) AND NOT iam_v2.is_anon_token(x.username));
+
+  -- DEVICES: reached through the person's own access, identity or registration, and theirs only when nothing else
+  -- touches them. A staff-issued account is a credential that may be shared, so its devices are never attributed.
+  SELECT COALESCE(array_agg(DISTINCT z.dev), '{}') INTO cand FROM (
+    SELECT ed.device_id AS dev FROM entitlement_devices ed WHERE ed.entitlement_id = ANY (own)
+    UNION SELECT se.device_id FROM sessions se WHERE se.entitlement_id = ANY (own)
+    UNION SELECT c.device_id FROM principal_device_credentials c WHERE c.guest_principal_id = ANY (p)
+    UNION SELECT ac.device_id FROM auth_contexts ac
+           WHERE ac.tenant_id = p_tenant AND ac.site_id = p_site AND (ac.guest_account_id = ANY (a) OR ac.guest_principal_id = ANY (p))
+    UNION SELECT dv.id FROM devices dv JOIN guest_access_accounts x ON x.id = ANY (a) AND dv.mac = x.created_by_device_mac
+           WHERE dv.tenant_id = p_tenant AND dv.site_id = p_site
+  ) z WHERE z.dev IS NOT NULL;
+  SELECT COALESCE(array_agg(z.dev), '{}') INTO d FROM unnest(cand) z(dev)
+   WHERE device_exclusive_to(z.dev, own_ind, p, ind_a, ch);
+  dshared := ARRAY(SELECT z.dev FROM unnest(cand) z(dev) WHERE NOT z.dev = ANY (d));
+
+  RETURN QUERY SELECT 'account'::text, x.id, CASE WHEN NOT iam_v2.is_anon_token(x.username) THEN x.username END
+                 FROM guest_access_accounts x WHERE x.id = ANY (a);
+  -- A removed account's username still carries the address it was created with.
+  RETURN QUERY SELECT 'account'::text, x.id, substring(x.username FROM '^(.+)\.removed-[^.]+\.invalid$')
+                 FROM guest_access_accounts x
+                WHERE x.id = ANY (a) AND NOT iam_v2.is_anon_token(x.username) AND x.username ~ '\.removed-[^.]+\.invalid$';
+  RETURN QUERY SELECT 'principal'::text, x.id, x.display_name FROM guest_principals x WHERE x.id = ANY (p);
+  RETURN QUERY SELECT 'identity'::text, i.guest_principal_id, i.factor_value_norm FROM guest_principal_identities i
+                WHERE i.guest_principal_id = ANY (p) AND NOT iam_v2.is_anon_token(i.factor_value_norm);
+  RETURN QUERY SELECT 'stay'::text, x.id, CASE WHEN NOT iam_v2.is_anon_token(x.external_reservation_id) THEN x.external_reservation_id END
+                 FROM stays x WHERE x.id = ANY (s);
+  -- The stay's PMS messages, and those that never resolved to a stay but name its reservation ON THE SAME PMS
+  -- INTERFACE: a reservation number means something only inside its own interface (0145).
+  RETURN QUERY SELECT 'stay_event'::text, ev.id, ev.processing_status FROM stay_events ev
+                WHERE ev.tenant_id = p_tenant AND ev.site_id = p_site
+                  AND (ev.stay_id = ANY (s)
+                       OR (ev.stay_id IS NULL AND EXISTS (
+                             SELECT 1 FROM stays st
+                              WHERE st.id = ANY (s) AND NOT iam_v2.is_anon_token(st.external_reservation_id)
+                                AND st.pms_interface_id = ev.pms_interface_id
+                                AND st.external_reservation_id = ev.payload->>'reservation')));
+  -- The person's own access. An individual identity's or self-registered account's entitlements are theirs; a
+  -- staff-issued account's belong to a credential that may be shared (its usage is counted, its payers and
+  -- sign-ins are not attributed).
+  RETURN QUERY SELECT 'entitlement'::text, z.x, NULL::text FROM unnest(own_ind) z(x);
+  RETURN QUERY SELECT 'entitlement_credential'::text, z.x, NULL::text FROM unnest(own) z(x) WHERE NOT z.x = ANY (own_ind);
+  RETURN QUERY SELECT 'challenge'::text, z.x, NULL::text FROM unnest(ch) z(x);
+  RETURN QUERY SELECT 'access_shared'::text, z.x, NULL::text FROM unnest(room) z(x);
+  RETURN QUERY SELECT 'device'::text, dv.id, CASE WHEN dv.mac::text NOT LIKE '03:%' THEN dv.mac::text END
+                 FROM devices dv WHERE dv.id = ANY (d);
+  RETURN QUERY SELECT 'device_shared'::text, z.x, NULL::text FROM unnest(dshared) z(x);
+  RETURN QUERY SELECT 'stay_shared'::text, z.x, NULL::text FROM unnest(ss) z(x);
+  RETURN QUERY SELECT 'stay_shared_other'::text, z.x, NULL::text FROM unnest(sso) z(x);
+  -- The guest's own rows on those shared stays, and the shared stays' PMS messages, from which only they are removed.
+  IF cardinality(gr) > 0 THEN
+    RETURN QUERY SELECT 'stay_guest'::text, sg.id, sg.display_name FROM stay_guests sg WHERE sg.id = ANY (gr);
+    RETURN QUERY SELECT 'stay_event'::text, ev.id, ev.processing_status FROM stay_events ev
+                  WHERE ev.tenant_id = p_tenant AND ev.site_id = p_site AND ev.stay_id = ANY (ss);
+  END IF;
+END $_$;
+
+
+--
+-- Name: FUNCTION guest_data_scope(p_tenant uuid, p_site uuid, p_kind text, p_id uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.guest_data_scope(p_tenant uuid, p_site uuid, p_kind text, p_id uuid) IS 'Everything held about one guest (0128, 0137): the anchor record, the accounts, identities and stays one step away through the access it held, stays linked to those by a room move or transfer, their PMS events, that access, and the devices it used alone. Shared by export and erasure.';
+
+
+--
+-- Name: guest_signin_confirm_device(uuid, uuid, uuid, macaddr, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.guest_signin_confirm_device(p_tenant uuid, p_site uuid, p_pause uuid, p_mac macaddr, p_operator text, p_reason text) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+BEGIN
+  IF p_operator IS NULL OR btrim(p_operator) = '' OR p_reason IS NULL OR length(btrim(p_reason)) < 3 THEN
+    RAISE EXCEPTION 'an operator and a reason are required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_mac IS NULL OR NOT EXISTS (
+       SELECT 1 FROM iam_v2.guest_signin_network_pauses x
+        WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.id = p_pause
+          AND x.ended_at IS NULL AND x.expires_at > now()) THEN
+    RETURN 0;
+  END IF;
+  INSERT INTO iam_v2.guest_signin_device_passes (pause_id, tenant_id, site_id, device_mac, granted_by, reason)
+  VALUES (p_pause, p_tenant, p_site, p_mac, btrim(p_operator), btrim(p_reason))
+  ON CONFLICT (pause_id, device_mac) DO NOTHING;
+  UPDATE iam_v2.guest_signin_restrictions
+     SET released_at = now(), released_by = btrim(p_operator), release_reason = btrim(p_reason),
+         counter_reset_at = now(), updated_at = now()
+   WHERE tenant_id = p_tenant AND site_id = p_site AND device_mac = p_mac
+     AND released_at IS NULL AND expires_at > now();
+  RETURN 1;
+END $$;
+
+
+--
+-- Name: guest_signin_end_network_pause(uuid, uuid, uuid, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.guest_signin_end_network_pause(p_tenant uuid, p_site uuid, p_pause uuid, p_operator text, p_reason text) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_rows integer;
+BEGIN
+  IF p_operator IS NULL OR btrim(p_operator) = '' OR p_reason IS NULL OR length(btrim(p_reason)) < 3 THEN
+    RAISE EXCEPTION 'an operator and a reason are required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  UPDATE iam_v2.guest_signin_network_pauses
+     SET ended_at = now(), ended_by = btrim(p_operator), end_reason = btrim(p_reason)
+   WHERE tenant_id = p_tenant AND site_id = p_site AND id = p_pause AND ended_at IS NULL AND expires_at > now();
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  RETURN v_rows;
 END $$;
 
 
@@ -1466,6 +3846,147 @@ $$;
 --
 
 COMMENT ON FUNCTION iam_v2.guest_signin_gate(p_tenant uuid, p_site uuid, p_mac macaddr) IS 'Whether this device is currently refused, and for how much longer. remaining_seconds is the SERVER''s answer and is what the guest is shown counting down -- a browser that ignores it gains nothing, because this same gate refuses the next submission.';
+
+
+--
+-- Name: guest_signin_network_gate(uuid, uuid, uuid, macaddr); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.guest_signin_network_gate(p_tenant uuid, p_site uuid, p_network uuid, p_mac macaddr) RETURNS TABLE(paused boolean, pause_id uuid, remaining_seconds integer)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT (p.id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM iam_v2.guest_signin_device_passes d
+                                             WHERE d.pause_id = p.id AND d.device_mac = p_mac)),
+         p.id,
+         CASE WHEN p.id IS NOT NULL THEN GREATEST(1, CEIL(EXTRACT(EPOCH FROM (p.expires_at - now())))::int) END
+    FROM (SELECT 1) one
+    LEFT JOIN LATERAL (
+      SELECT x.id, x.expires_at FROM iam_v2.guest_signin_network_pauses x
+       WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.guest_network_id = p_network
+         AND x.ended_at IS NULL AND x.expires_at > now()
+       ORDER BY x.expires_at DESC LIMIT 1) p ON true;
+$$;
+
+
+--
+-- Name: guest_signin_network_pause_devices(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.guest_signin_network_pause_devices(p_tenant uuid, p_site uuid, p_pause uuid) RETURNS TABLE(device_mac text, last_submitted_room text, last_attempt_at timestamp with time zone, attempts integer, confirmed boolean)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  WITH p AS (
+    SELECT x.id, x.guest_network_id, x.started_at FROM iam_v2.guest_signin_network_pauses x
+     WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.id = p_pause
+       AND x.ended_at IS NULL AND x.expires_at > now())
+  SELECT a.device_mac::text,
+         (array_agg(a.submitted_room ORDER BY a.occurred_at DESC))[1],
+         max(a.occurred_at), count(*)::int,
+         EXISTS (SELECT 1 FROM iam_v2.guest_signin_device_passes d WHERE d.pause_id = p.id AND d.device_mac = a.device_mac)
+    FROM p JOIN iam_v2.sign_in_attempts a
+      ON a.tenant_id = p_tenant AND a.site_id = p_site AND a.guest_network_id = p.guest_network_id
+     AND a.occurred_at > p.started_at - interval '30 minutes' AND a.device_mac IS NOT NULL
+   GROUP BY a.device_mac, p.id
+   ORDER BY max(a.occurred_at) DESC
+   LIMIT 200;
+$$;
+
+
+--
+-- Name: guest_signin_network_policy_changes_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.guest_signin_network_policy_changes_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'iam_v2.guest_signin_network_policy_changes is append-only: % refused', TG_OP
+    USING ERRCODE = 'restrict_violation';
+END $$;
+
+
+--
+-- Name: guest_signin_network_policy_get(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.guest_signin_network_policy_get(p_tenant uuid, p_site uuid) RETURNS TABLE(network_max_failures integer, network_window_seconds integer, network_pause_seconds integer, config_version bigint, updated_at timestamp with time zone, is_default boolean)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE(s.network_max_failures, 30), COALESCE(s.network_window_seconds, 600),
+         COALESCE(s.network_pause_seconds, 900), COALESCE(s.config_version, 1), s.updated_at, (s.tenant_id IS NULL)
+    FROM (SELECT 1) one
+    LEFT JOIN iam_v2.site_guest_signin_network_policy s ON s.tenant_id = p_tenant AND s.site_id = p_site;
+$$;
+
+
+--
+-- Name: guest_signin_network_policy_set(uuid, uuid, integer, integer, integer, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.guest_signin_network_policy_set(p_tenant uuid, p_site uuid, p_max integer, p_window integer, p_pause integer, p_operator text, p_reason text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_version bigint; v_old iam_v2.site_guest_signin_network_policy;
+BEGIN
+  IF p_operator IS NULL OR btrim(p_operator) = '' THEN
+    RAISE EXCEPTION 'an operator label is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_reason IS NULL OR length(btrim(p_reason)) < 3 THEN
+    RAISE EXCEPTION 'a reason is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_max IS NULL OR p_max < 10 OR p_max > 1000 THEN
+    RAISE EXCEPTION 'wrong room sign-ins before a pause must be between 10 and 1000 (got %)', p_max;
+  END IF;
+  IF p_window IS NULL OR p_window < 60 OR p_window > 3600 THEN
+    RAISE EXCEPTION 'the counting window must be between 60 and 3600 seconds (got %)', p_window;
+  END IF;
+  IF p_pause IS NULL OR p_pause < 60 OR p_pause > 3600 THEN
+    RAISE EXCEPTION 'the pause must be between 60 and 3600 seconds (got %)', p_pause;
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('guest_signin_network_policy'), hashtext(p_site::text));
+  SELECT * INTO v_old FROM iam_v2.site_guest_signin_network_policy s
+   WHERE s.tenant_id = p_tenant AND s.site_id = p_site FOR UPDATE;
+  INSERT INTO iam_v2.site_guest_signin_network_policy AS s
+    (tenant_id, site_id, network_max_failures, network_window_seconds, network_pause_seconds)
+  VALUES (p_tenant, p_site, p_max, p_window, p_pause)
+  ON CONFLICT (tenant_id, site_id) DO UPDATE
+     SET network_max_failures = EXCLUDED.network_max_failures,
+         network_window_seconds = EXCLUDED.network_window_seconds,
+         network_pause_seconds = EXCLUDED.network_pause_seconds,
+         config_version = s.config_version + 1, updated_at = now()
+  RETURNING s.config_version INTO v_version;
+  INSERT INTO iam_v2.guest_signin_network_policy_changes
+    (tenant_id, site_id, changed_by, change_reason, old_network_max_failures, old_network_window_seconds,
+     old_network_pause_seconds, new_network_max_failures, new_network_window_seconds, new_network_pause_seconds,
+     new_config_version)
+  VALUES (p_tenant, p_site, btrim(p_operator), btrim(p_reason), v_old.network_max_failures,
+          v_old.network_window_seconds, v_old.network_pause_seconds, p_max, p_window, p_pause, v_version);
+  RETURN v_version;
+END $$;
+
+
+--
+-- Name: guest_signin_network_prune(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.guest_signin_network_prune() RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE n1 integer; n2 integer;
+BEGIN
+  DELETE FROM iam_v2.guest_signin_device_passes d USING iam_v2.guest_signin_network_pauses x
+   WHERE d.pause_id = x.id AND LEAST(COALESCE(x.ended_at, x.expires_at), x.expires_at) < now() - interval '1 day';
+  GET DIAGNOSTICS n1 = ROW_COUNT;
+  DELETE FROM iam_v2.guest_signin_network_pauses x
+   WHERE LEAST(COALESCE(x.ended_at, x.expires_at), x.expires_at) < now() - interval '30 days';
+  GET DIAGNOSTICS n2 = ROW_COUNT;
+  RETURN n1 + n2;
+END $$;
 
 
 --
@@ -1549,6 +4070,49 @@ END $$;
 --
 
 COMMENT ON FUNCTION iam_v2.guest_signin_note_failure(p_tenant uuid, p_site uuid, p_mac macaddr, p_network uuid, p_network_name text, p_room text) IS 'Counts this device''s wrong credentials over the site''s rolling window and creates a restriction when the threshold is reached. Counts ONLY CREDENTIAL_MISMATCH and ROOM_NOT_IN_MIRROR. Takes the device row lock before counting, so concurrent failures serialise, and refuses to extend a restriction that is already running.';
+
+
+--
+-- Name: guest_signin_note_network_failure(uuid, uuid, uuid, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.guest_signin_note_network_failure(p_tenant uuid, p_site uuid, p_network uuid, p_network_name text) RETURNS TABLE(paused_now boolean, expires_at timestamp with time zone, failure_count integer)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_max int; v_window int; v_pause int; v_reset timestamptz; v_count int; v_expires timestamptz;
+BEGIN
+  IF p_network IS NULL THEN
+    RETURN QUERY SELECT false, NULL::timestamptz, 0;
+    RETURN;
+  END IF;
+  SELECT g.network_max_failures, g.network_window_seconds, g.network_pause_seconds
+    INTO v_max, v_window, v_pause FROM iam_v2.guest_signin_network_policy_get(p_tenant, p_site) g;
+  PERFORM pg_advisory_xact_lock(hashtext('guest_signin_network_pause'), hashtext(p_network::text));
+  IF EXISTS (SELECT 1 FROM iam_v2.guest_signin_network_pauses x
+              WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.guest_network_id = p_network
+                AND x.ended_at IS NULL AND x.expires_at > now()) THEN
+    RETURN QUERY SELECT false, NULL::timestamptz, 0;
+    RETURN;
+  END IF;
+  -- Failures up to the end of the last pause were already answered by it.
+  SELECT COALESCE(max(LEAST(COALESCE(x.ended_at, x.expires_at), x.expires_at)), '-infinity'::timestamptz)
+    INTO v_reset FROM iam_v2.guest_signin_network_pauses x
+   WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.guest_network_id = p_network;
+  SELECT count(*) INTO v_count FROM iam_v2.sign_in_attempts a
+   WHERE a.tenant_id = p_tenant AND a.site_id = p_site AND a.guest_network_id = p_network
+     AND a.result IN ('CREDENTIAL_MISMATCH','ROOM_NOT_IN_MIRROR')
+     AND a.occurred_at > now() - make_interval(secs => v_window) AND a.occurred_at > v_reset;
+  IF v_count < v_max THEN
+    RETURN QUERY SELECT false, NULL::timestamptz, v_count;
+    RETURN;
+  END IF;
+  v_expires := now() + make_interval(secs => v_pause);
+  INSERT INTO iam_v2.guest_signin_network_pauses (tenant_id, site_id, guest_network_id, guest_network_name,
+                                                   expires_at, failure_count)
+  VALUES (p_tenant, p_site, p_network, NULLIF(p_network_name, ''), v_expires, v_count);
+  RETURN QUERY SELECT true, v_expires, v_count;
+END $$;
 
 
 --
@@ -2042,6 +4606,15 @@ END $$;
 
 
 --
+-- Name: is_anon_token(text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.is_anon_token(p text) RETURNS boolean
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE
+    AS $_$ SELECT p ~ '^anon-[0-9a-f]{32,64}$' $_$;
+
+
+--
 -- Name: issue_or_return_pms_context(uuid, uuid, uuid, uuid, uuid, uuid, uuid, uuid, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -2110,6 +4683,221 @@ BEGIN
             v_lifecycle, v_ev, p_request, now() + make_interval(secs => p_ttl_seconds))
     RETURNING id, false;
 END $$;
+
+
+--
+-- Name: ledger_append(uuid, uuid, text, jsonb); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.ledger_append(p_tenant uuid, p_site uuid, p_kind text, p_body jsonb) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE m record; v_seq bigint; v_prev text; v_at bigint; v_body text; v_hash text;
+BEGIN
+  IF p_kind NOT IN ('erase', 'request_answered', 'assisted_closed', 'checkpoint') THEN
+    RAISE EXCEPTION 'unknown ledger entry kind %', p_kind USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('stayconnect-erasure-ledger'));
+  SELECT * INTO m FROM ledger_meta;
+  SELECT l.seq, l.hash INTO v_seq, v_prev FROM erasure_ledger l ORDER BY l.seq DESC LIMIT 1;
+  v_seq := COALESCE(v_seq, 0) + 1;
+  v_prev := COALESCE(v_prev, repeat('0', 64));
+  v_at := (extract(epoch from clock_timestamp()) * 1000000)::bigint;
+  v_body := p_body::text;
+  v_hash := ledger_hash(m.ledger_id, v_seq, v_prev, p_kind, p_tenant, p_site, v_at, v_body);
+  INSERT INTO erasure_ledger (seq, ledger_id, tenant_id, site_id, kind, at_us, body, prev_hash, hash, confirmed)
+  VALUES (v_seq, m.ledger_id, p_tenant, p_site, p_kind, v_at, v_body, v_prev, v_hash, false);
+  RETURN jsonb_build_object('ledger', m.ledger_id, 'seq', v_seq, 'prev', v_prev, 'kind', p_kind, 'tenant', p_tenant, 'site', p_site,
+                            'at_us', v_at, 'body', v_body, 'hash', v_hash);
+END $$;
+
+
+--
+-- Name: ledger_append_erasure(uuid, uuid, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.ledger_append_erasure(p_tenant uuid, p_site uuid, p_ref text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE e record; v_records jsonb;
+BEGIN
+  SELECT * INTO e FROM guest_data_erasures x WHERE x.erasure_ref = p_ref AND x.tenant_id = p_tenant AND x.site_id = p_site;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'the erasure % is not recorded', p_ref USING ERRCODE = 'no_data_found';
+  END IF;
+  SELECT COALESCE(jsonb_agg(jsonb_build_object('kind', j.kind, 'id', j.subject_id, 'detail', j.detail) ORDER BY j.kind, j.subject_id, COALESCE(j.detail, '')), '[]'::jsonb)
+    INTO v_records FROM erasure_journal j WHERE j.erasure_ref = p_ref AND j.tenant_id = p_tenant AND j.site_id = p_site;
+  RETURN ledger_append(p_tenant, p_site, 'erase', jsonb_build_object(
+    'erasure_ref', e.erasure_ref, 'subject_kind', e.subject_kind, 'erased_at', e.erased_at, 'counts', e.counts, 'records', v_records));
+END $$;
+
+
+--
+-- Name: ledger_confirm(text[]); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.ledger_confirm(p_hashes text[]) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE n integer;
+BEGIN
+  UPDATE erasure_ledger SET confirmed = true WHERE NOT confirmed AND hash = ANY (p_hashes);
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RETURN n;
+END $$;
+
+
+--
+-- Name: ledger_export(bigint); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.ledger_export(p_from bigint) RETURNS jsonb
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE(jsonb_agg(ledger_row_json(l) ORDER BY l.seq), '[]'::jsonb) FROM erasure_ledger l WHERE l.confirmed AND l.seq > COALESCE(p_from, 0)
+$$;
+
+
+--
+-- Name: ledger_guard(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.ledger_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+BEGIN
+  IF TG_TABLE_NAME = 'ledger_meta' THEN
+    IF TG_OP = 'UPDATE' AND current_setting('iam_v2.ledger_adopt', true) = 'on' THEN
+      RETURN NEW;
+    END IF;
+    RAISE EXCEPTION 'the erasure ledger is append-only: % refused', TG_OP USING ERRCODE = 'restrict_violation';
+  END IF;
+  -- NESTED, not AND-ed: OLD and NEW do not exist for a TRUNCATE, and SQL does not promise to stop at the first false operand.
+  IF TG_OP = 'UPDATE' THEN
+    IF OLD.confirmed = false AND NEW.confirmed = true
+       AND (NEW.seq, NEW.ledger_id, NEW.tenant_id, NEW.site_id, NEW.kind, NEW.at_us, NEW.body, NEW.prev_hash, NEW.hash)
+           IS NOT DISTINCT FROM (OLD.seq, OLD.ledger_id, OLD.tenant_id, OLD.site_id, OLD.kind, OLD.at_us, OLD.body, OLD.prev_hash, OLD.hash) THEN
+      RETURN NEW;
+    END IF;
+  ELSIF TG_OP = 'DELETE' THEN
+    IF current_setting('iam_v2.ledger_adopt', true) = 'on' THEN
+      RETURN OLD;
+    END IF;
+  END IF;
+  RAISE EXCEPTION 'the erasure ledger is append-only: % refused', TG_OP USING ERRCODE = 'restrict_violation';
+END $$;
+
+
+--
+-- Name: ledger_hash(uuid, bigint, text, text, uuid, uuid, bigint, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.ledger_hash(p_ledger uuid, p_seq bigint, p_prev text, p_kind text, p_tenant uuid, p_site uuid, p_at_us bigint, p_body text) RETURNS text
+    LANGUAGE sql IMMUTABLE
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $$
+  SELECT encode(sha256(convert_to(concat_ws(E'\x1f', 'stayconnect-ledger-v1', p_ledger::text, p_seq::text, p_prev, p_kind,
+                                            p_tenant::text, p_site::text, p_at_us::text, p_body), 'UTF8')), 'hex')
+$$;
+
+
+--
+-- Name: ledger_head(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.ledger_head() RETURNS jsonb
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT jsonb_build_object('ledger', m.ledger_id, 'seq', COALESCE(h.seq, 0), 'hash', COALESCE(h.hash, ''), 'at_us', COALESCE(h.at_us, 0),
+                            'unconfirmed', (SELECT count(*) FROM erasure_ledger u WHERE NOT u.confirmed))
+    FROM ledger_meta m LEFT JOIN LATERAL (SELECT l.seq, l.hash, l.at_us FROM erasure_ledger l WHERE l.confirmed ORDER BY l.seq DESC LIMIT 1) h ON true
+$$;
+
+
+--
+-- Name: ledger_pending(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.ledger_pending() RETURNS jsonb
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE(jsonb_agg(ledger_row_json(l) ORDER BY l.seq), '[]'::jsonb) FROM erasure_ledger l WHERE NOT l.confirmed
+$$;
+
+
+SET default_tablespace = '';
+
+SET default_table_access_method = heap;
+
+--
+-- Name: erasure_ledger; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.erasure_ledger (
+    seq bigint NOT NULL,
+    ledger_id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    kind text NOT NULL,
+    at_us bigint NOT NULL,
+    body text NOT NULL,
+    prev_hash text NOT NULL,
+    hash text NOT NULL,
+    confirmed boolean DEFAULT false NOT NULL,
+    CONSTRAINT ledger_hash_shape CHECK ((hash ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT ledger_kind CHECK ((kind = ANY (ARRAY['genesis'::text, 'erase'::text, 'request_answered'::text, 'assisted_closed'::text, 'checkpoint'::text]))),
+    CONSTRAINT ledger_prev CHECK ((prev_hash ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT ledger_seq CHECK ((seq >= 1))
+);
+
+
+--
+-- Name: TABLE erasure_ledger; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.erasure_ledger IS 'The erasure ledger (0148): append-only and hash-chained. A row is confirmed once it is durable in both external copies; an unconfirmed row exists only inside the transaction that made it. Holds no guest data and no staff-typed text.';
+
+
+--
+-- Name: ledger_row_json(iam_v2.erasure_ledger); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.ledger_row_json(l iam_v2.erasure_ledger) RETURNS jsonb
+    LANGUAGE sql IMMUTABLE
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT jsonb_build_object('ledger', l.ledger_id, 'seq', l.seq, 'prev', l.prev_hash, 'kind', l.kind, 'tenant', l.tenant_id,
+                            'site', l.site_id, 'at_us', l.at_us, 'body', l.body, 'hash', l.hash)
+$$;
+
+
+--
+-- Name: ledger_verify(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.ledger_verify() RETURNS jsonb
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  WITH r AS (
+    SELECT l.seq, l.hash, l.prev_hash, l.ledger_id,
+           lag(l.hash) OVER (ORDER BY l.seq) AS before_hash, lag(l.seq) OVER (ORDER BY l.seq) AS before_seq,
+           ledger_hash(l.ledger_id, l.seq, l.prev_hash, l.kind, l.tenant_id, l.site_id, l.at_us, l.body) AS calc
+      FROM erasure_ledger l WHERE l.confirmed)
+  SELECT jsonb_build_object('ok', count(*) FILTER (WHERE calc <> hash OR (before_seq IS NULL AND (seq <> 1 OR prev_hash <> repeat('0', 64)))
+                                                      OR (before_seq IS NOT NULL AND (seq <> before_seq + 1 OR prev_hash <> before_hash))) = 0,
+                            'entries', count(*),
+                            'first_bad', min(seq) FILTER (WHERE calc <> hash OR (before_seq IS NULL AND (seq <> 1 OR prev_hash <> repeat('0', 64)))
+                                                              OR (before_seq IS NOT NULL AND (seq <> before_seq + 1 OR prev_hash <> before_hash))))
+    FROM r
+$$;
 
 
 --
@@ -2215,6 +5003,15 @@ END $$;
 --
 
 COMMENT ON FUNCTION iam_v2.lock_stay(p_tenant uuid, p_site uuid, p_stay uuid) IS 'Takes the L1 Stay lock on ONE iam_v2.stays row and returns nothing. Exists so the guest-auth services can hold the lock their lock order starts from without holding UPDATE on iam_v2.stays, which is the stay engine''s to write. Tenant- and site-scoped; a missing Stay is not an error, because the caller''s pin set refuses it on its own terms.';
+
+
+--
+-- Name: mac_is_private(macaddr); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.mac_is_private(p_mac macaddr) RETURNS boolean
+    LANGUAGE sql IMMUTABLE
+    AS $$ SELECT (get_byte(decode(replace(p_mac::text, ':', ''), 'hex'), 0) & 2) <> 0 $$;
 
 
 --
@@ -3226,6 +6023,38 @@ BEGIN
     RAISE EXCEPTION 'stay_events is append-only (DELETE rejected)';
   END IF;
 
+  -- RETENTION ANONYMISATION (0127). The table owner, inside a retention run, may replace the payload and the
+  -- event fingerprint of a processed event -- and nothing else. The new payload is the blank marker or a part
+  -- of the old one (0144): anonymisation removes, it never writes something new.
+  --
+  -- GIVING UP A WAITING EVENT (0139; GDPR audit B2, D-B2). An event still PENDING long after any real PMS would
+  -- have been processed may, in the same run, be closed as FAILED with review code RETENTION_GIVEN_UP, its
+  -- payload blanked and its fingerprint replaced, in ONE move. No other column may change, so the processor can
+  -- never act on a blanked payload: the event is terminal before anyone sees it empty.
+  IF TG_OP = 'UPDATE'
+     AND current_setting('iam_v2.anonymise', true) = 'retention'
+     AND current_user = (SELECT pg_get_userbyid(c.relowner) FROM pg_class c WHERE c.oid = TG_RELID) THEN
+    IF OLD.processing_status = 'PENDING' THEN
+      IF NEW.processing_status = 'FAILED' AND NEW.review_code = 'RETENTION_GIVEN_UP' AND NEW.processed_at IS NOT NULL
+         AND NEW.payload = '{"anonymised": true}'::jsonb AND NEW.stay_id IS NOT DISTINCT FROM OLD.stay_id
+         AND (to_jsonb(NEW) - 'payload' - 'external_event_identity' - 'processing_status' - 'review_code' - 'processed_at')
+             = (to_jsonb(OLD) - 'payload' - 'external_event_identity' - 'processing_status' - 'review_code' - 'processed_at') THEN
+        RETURN NEW;
+      END IF;
+      RAISE EXCEPTION 'a waiting stay_events row may only be given up whole (FAILED, RETENTION_GIVEN_UP, payload blanked)';
+    END IF;
+    IF (to_jsonb(NEW) - 'payload' - 'external_event_identity')
+       IS DISTINCT FROM (to_jsonb(OLD) - 'payload' - 'external_event_identity') THEN
+      RAISE EXCEPTION 'stay_events anonymisation may replace only payload and external_event_identity of a processed event';
+    END IF;
+    IF NEW.payload IS DISTINCT FROM OLD.payload
+       AND NEW.payload IS DISTINCT FROM '{"anonymised": true}'::jsonb
+       AND NOT (OLD.payload @> NEW.payload) THEN
+      RAISE EXCEPTION 'stay_events anonymisation may only remove from a payload or blank it';
+    END IF;
+    RETURN NEW;
+  END IF;
+
   IF TG_OP = 'INSERT' THEN
     IF NEW.processing_status <> 'PENDING' THEN
       RAISE EXCEPTION 'stay_events must be inserted as PENDING (no terminal event inserted directly)';
@@ -3332,6 +6161,24 @@ CREATE FUNCTION iam_v2.p3_stay_lifecycle_guard() RETURNS trigger
     AS $$
 DECLARE allowed boolean; is_reinstate boolean; evidence_changed boolean;
 BEGIN
+  -- ANONYMISING A FINISHED STAY (0147) may coarsen the checkout boundary and the occupancy evidence time to the day, and
+  -- nothing else about the lifecycle: the boundary stays inside its day, the status, versions and evidence identity do not
+  -- move. Only the table's owner, inside the anonymising definer functions (the flag is transaction-local).
+  IF current_setting('iam_v2.anonymise', true) = 'retention'
+     AND current_user = (SELECT pg_get_userbyid(c.relowner) FROM pg_class c WHERE c.oid = TG_RELID)
+     AND OLD.status IN ('CHECKED_OUT', 'POST_STAY_ACTIVE', 'CANCELLED', 'NO_SHOW')
+     AND NEW.status = OLD.status AND NEW.lifecycle_version = OLD.lifecycle_version
+     AND NEW.last_applied_event_version = OLD.last_applied_event_version
+     AND NEW.occupancy_evidence_version = OLD.occupancy_evidence_version
+     AND NEW.occupancy_revision_id IS NOT DISTINCT FROM OLD.occupancy_revision_id
+     AND NEW.occupancy_normalization_version IS NOT DISTINCT FROM OLD.occupancy_normalization_version
+     AND NEW.occupancy_clock_suspect IS NOT DISTINCT FROM OLD.occupancy_clock_suspect
+     AND (NEW.effective_checkout_at IS NOT DISTINCT FROM OLD.effective_checkout_at
+          OR NEW.effective_checkout_at = date_trunc('day', OLD.effective_checkout_at))
+     AND (NEW.occupancy_evidence_at IS NOT DISTINCT FROM OLD.occupancy_evidence_at
+          OR NEW.occupancy_evidence_at = date_trunc('day', OLD.occupancy_evidence_at)) THEN
+    RETURN NEW;
+  END IF;
   IF NEW.last_applied_event_version < OLD.last_applied_event_version THEN
     RAISE EXCEPTION 'stays.last_applied_event_version cannot decrease (% -> %)',
       OLD.last_applied_event_version, NEW.last_applied_event_version;
@@ -7982,6 +10829,13 @@ CREATE FUNCTION iam_v2.pms_case_resolutions_append_only() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
+    IF TG_OP = 'UPDATE'
+       AND current_setting('iam_v2.anonymise', true) = 'retention'
+       AND current_user = (SELECT pg_get_userbyid(c.relowner) FROM pg_class c WHERE c.oid = TG_RELID)
+       AND NEW.note = 'Removed after the staff-notes period'
+       AND (to_jsonb(NEW) - 'note') = (to_jsonb(OLD) - 'note') THEN
+        RETURN NEW;
+    END IF;
     RAISE EXCEPTION 'iam_v2.pms_case_resolutions is append-only: % refused', TG_OP
         USING ERRCODE = 'restrict_violation';
 END;
@@ -9129,10 +11983,9 @@ BEGIN
   IF p_batch IS NULL OR p_batch NOT BETWEEN 1 AND 100000 THEN
     RAISE EXCEPTION 'a batch of 1-100000 records is required' USING ERRCODE = 'invalid_parameter_value';
   END IF;
-  SELECT s.detail_retention_days INTO v_days
-    FROM iam_v2.site_accounting_retention s WHERE s.tenant_id = p_tenant AND s.site_id = p_site;
+  SELECT g.detail_retention_days INTO v_days FROM iam_v2.accounting_retention_get(p_tenant, p_site) g;
   IF v_days IS NULL THEN
-    RETURN 0;   -- UNLIMITED (the default): nothing is read, nothing is deleted, nothing is recorded
+    RETURN 0;   -- UNLIMITED (the administrator's choice): nothing is read, nothing is deleted, nothing is recorded
   END IF;
   v_cutoff := now() - make_interval(days => v_days);
   PERFORM set_config('iam_v2.accounting_purge', 'retention', true);
@@ -9165,7 +12018,7 @@ END $$;
 -- Name: FUNCTION purge_accounting_detail(p_tenant uuid, p_site uuid, p_batch integer); Type: COMMENT; Schema: iam_v2; Owner: -
 --
 
-COMMENT ON FUNCTION iam_v2.purge_accounting_detail(p_tenant uuid, p_site uuid, p_batch integer) IS 'The accounting-detail retention purge (0122). Does nothing while the site''s retention is unlimited (the default). Otherwise removes at most p_batch accounting records older than the retention, of sessions ended before it whose every entitlement is TERMINATED, and records the run. Totals on entitlements and sessions are not touched.';
+COMMENT ON FUNCTION iam_v2.purge_accounting_detail(p_tenant uuid, p_site uuid, p_batch integer) IS 'The accounting-detail retention purge (0122; 0131: a site that never chose keeps 365 days). Does nothing while the site''s administrator has chosen unlimited. Otherwise removes at most p_batch accounting records older than the retention, of sessions ended before it whose every entitlement is TERMINATED, and records the run. Totals on entitlements and sessions are not touched.';
 
 
 --
@@ -9440,6 +12293,38 @@ END $$;
 
 
 --
+-- Name: redact_guest_text(jsonb, text[], boolean); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.redact_guest_text(p_payload jsonb, p_vals text[], p_search boolean) RETURNS jsonb
+    LANGUAGE plpgsql IMMUTABLE
+    AS $$
+DECLARE r jsonb; k text; v jsonb;
+BEGIN
+  CASE jsonb_typeof(p_payload)
+    WHEN 'object' THEN
+      r := '{}'::jsonb;
+      FOR k, v IN SELECT * FROM jsonb_each(p_payload) LOOP
+        r := r || jsonb_build_object(k, iam_v2.redact_guest_text(v, p_vals, p_search));
+      END LOOP;
+      RETURN r;
+    WHEN 'array' THEN
+      RETURN COALESCE((SELECT jsonb_agg(iam_v2.redact_guest_text(x, p_vals, p_search) ORDER BY n)
+                         FROM jsonb_array_elements(p_payload) WITH ORDINALITY t(x, n)), '[]'::jsonb);
+    WHEN 'string' THEN
+      IF iam_v2.text_names_any(p_payload #>> '{}', p_vals)
+         OR (p_search AND length(btrim(p_payload #>> '{}')) >= 2
+             AND EXISTS (SELECT 1 FROM unnest(p_vals) x WHERE position(lower(btrim(p_payload #>> '{}')) IN x) > 0)) THEN
+        RETURN to_jsonb('[erased]'::text);
+      END IF;
+      RETURN p_payload;
+    ELSE
+      RETURN p_payload;
+  END CASE;
+END $$;
+
+
+--
 -- Name: refund_access_terminations_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -9570,6 +12455,151 @@ COMMENT ON FUNCTION iam_v2.request_full_resync(p_tenant uuid, p_site uuid, p_int
 
 
 --
+-- Name: request_register_answer(uuid, uuid, uuid, text, text, text, text, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.request_register_answer(p_tenant uuid, p_site uuid, p_id uuid, p_actor text, p_status text, p_outcome text, p_note text, p_erasure_ref text, p_assisted_ref text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE q record;
+BEGIN
+  IF p_actor IS NULL OR length(btrim(p_actor)) NOT BETWEEN 1 AND 200 THEN
+    RAISE EXCEPTION 'an operator is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_status IS NULL OR p_status NOT IN ('ANSWERED', 'PARTLY_REFUSED', 'REFUSED', 'WITHDRAWN') THEN
+    RAISE EXCEPTION 'the outcome is answered, partly refused, refused or withdrawn' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  -- A refusal, or a part-refusal, names its ground: the person is told it, and told they may complain (Art. 12(4)).
+  IF p_status IN ('PARTLY_REFUSED', 'REFUSED') AND COALESCE(p_outcome, 'NONE') = 'NONE' THEN
+    RAISE EXCEPTION 'a refusal names its ground' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_note IS NOT NULL AND length(p_note) > 500 THEN
+    RAISE EXCEPTION 'the note is at most 500 characters' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  SELECT * INTO q FROM guest_data_request_register x WHERE x.id = p_id AND x.tenant_id = p_tenant AND x.site_id = p_site FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'request not found' USING ERRCODE = 'no_data_found'; END IF;
+  IF q.status <> 'OPEN' THEN
+    RAISE EXCEPTION 'register_refused' USING ERRCODE = 'object_in_use', DETAIL = 'closed';
+  END IF;
+  UPDATE guest_data_request_register
+     SET status = p_status, outcome_code = COALESCE(NULLIF(p_outcome, ''), 'NONE'), answered_by = btrim(p_actor), answered_at = now(),
+         erasure_ref = NULLIF(p_erasure_ref, ''), assisted_ref = NULLIF(p_assisted_ref, ''),
+         requester_ref = '[removed]', outcome_note = NULL, extension_reason = NULL
+   WHERE id = p_id;
+  PERFORM ledger_append(p_tenant, p_site, 'request_answered', jsonb_build_object(
+    'id', p_id, 'ref', q.ref, 'kind', q.kind, 'received_at', q.received_at, 'due_at', q.due_at, 'extended_until', q.extended_until,
+    'status', p_status, 'outcome', COALESCE(NULLIF(p_outcome, ''), 'NONE'), 'erasure_ref', NULLIF(p_erasure_ref, ''),
+    'assisted_ref', NULLIF(p_assisted_ref, ''), 'verification_method', q.verification_method, 'answered_at', now()));
+  RETURN jsonb_build_object('reference', q.ref, 'kind', q.kind, 'requester', q.requester_ref, 'received_at', q.received_at,
+                            'due_at', COALESCE(q.extended_until, q.due_at), 'answered_at', now(), 'status', p_status,
+                            'outcome', COALESCE(NULLIF(p_outcome, ''), 'NONE'), 'note', p_note,
+                            'verification_method', q.verification_method, 'erasure_ref', NULLIF(p_erasure_ref, ''),
+                            'assisted_ref', NULLIF(p_assisted_ref, ''), 'answered_in_time', iam_v2.site_today(p_site) <= COALESCE(q.extended_until, q.due_at));
+END $$;
+
+
+--
+-- Name: request_register_extend(uuid, uuid, uuid, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.request_register_extend(p_tenant uuid, p_site uuid, p_id uuid, p_actor text, p_reason text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE q record;
+BEGIN
+  IF p_reason IS NULL OR length(btrim(p_reason)) NOT BETWEEN 4 AND 500 THEN
+    RAISE EXCEPTION 'say why the request needs longer (4-500 characters)' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  -- The reason is kept in the register: it names no one (no address, no number).
+  IF p_reason ~ '@' OR p_reason ~ '[0-9][^0-9]*[0-9][^0-9]*[0-9][^0-9]*[0-9][^0-9]*[0-9][^0-9]*[0-9]' THEN
+    RAISE EXCEPTION 'the reason must not contain an email address or a number that could identify someone' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  SELECT * INTO q FROM guest_data_request_register x WHERE x.id = p_id AND x.tenant_id = p_tenant AND x.site_id = p_site FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'request not found' USING ERRCODE = 'no_data_found'; END IF;
+  IF q.status <> 'OPEN' OR q.extended_until IS NOT NULL OR iam_v2.site_today(p_site) > q.due_at THEN
+    RAISE EXCEPTION 'register_refused' USING ERRCODE = 'object_in_use', DETAIL = 'not_extendable';
+  END IF;
+  UPDATE guest_data_request_register SET extended_until = (received_at + interval '3 months')::date,
+         extension_reason = btrim(p_reason) WHERE id = p_id;
+  RETURN jsonb_build_object('id', p_id, 'due_at', (q.received_at + interval '3 months')::date);
+END $$;
+
+
+--
+-- Name: request_register_guard(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.request_register_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'a request in the register is never deleted' USING ERRCODE = 'restrict_violation';
+  END IF;
+  IF OLD.status <> 'OPEN' THEN
+    RAISE EXCEPTION 'an answered request does not change' USING ERRCODE = 'restrict_violation';
+  END IF;
+  IF (NEW.id, NEW.ref, NEW.tenant_id, NEW.site_id, NEW.kind, NEW.received_at, NEW.due_at, NEW.created_by, NEW.created_at)
+     IS DISTINCT FROM (OLD.id, OLD.ref, OLD.tenant_id, OLD.site_id, OLD.kind, OLD.received_at, OLD.due_at, OLD.created_by, OLD.created_at) THEN
+    RAISE EXCEPTION 'what was received, and when, cannot be edited' USING ERRCODE = 'restrict_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+
+
+--
+-- Name: request_register_list(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.request_register_list(p_tenant uuid, p_site uuid) RETURNS jsonb
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE(jsonb_agg(jsonb_build_object(
+      'id', x.id, 'ref', x.ref, 'kind', x.kind, 'received_at', x.received_at, 'due_at', COALESCE(x.extended_until, x.due_at),
+      'extended', x.extended_until IS NOT NULL, 'extension_reason', CASE WHEN x.status = 'OPEN' THEN x.extension_reason END,
+      'requester', x.requester_ref, 'verification_method', x.verification_method, 'status', x.status, 'outcome', x.outcome_code,
+      'erasure_ref', x.erasure_ref, 'assisted_ref', x.assisted_ref, 'created_by', x.created_by, 'answered_by', x.answered_by,
+      'answered_at', x.answered_at,
+      'days_left', CASE WHEN x.status = 'OPEN' THEN COALESCE(x.extended_until, x.due_at) - iam_v2.site_today(p_site) END,
+      'overdue', x.status = 'OPEN' AND iam_v2.site_today(p_site) > COALESCE(x.extended_until, x.due_at))
+      ORDER BY (x.status = 'OPEN') DESC, COALESCE(x.extended_until, x.due_at), x.received_at DESC), '[]'::jsonb)
+    FROM (SELECT * FROM guest_data_request_register r WHERE r.tenant_id = p_tenant AND r.site_id = p_site
+           ORDER BY (r.status = 'OPEN') DESC, r.received_at DESC LIMIT 300) x
+$$;
+
+
+--
+-- Name: request_register_open(uuid, uuid, text, text, date, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.request_register_open(p_tenant uuid, p_site uuid, p_actor text, p_kind text, p_received date, p_requester text, p_method text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_ref text := 'RQ-' || upper(encode(public.gen_random_bytes(4), 'hex')); v_id uuid; v_due date;
+BEGIN
+  IF p_actor IS NULL OR length(btrim(p_actor)) NOT BETWEEN 1 AND 200 THEN
+    RAISE EXCEPTION 'an operator is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_received IS NULL OR p_received > iam_v2.site_today(p_site) OR p_received < iam_v2.site_today(p_site) - 366 THEN
+    RAISE EXCEPTION 'the request was received on a day up to a year ago, and not in the future' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_requester IS NULL OR length(btrim(p_requester)) NOT BETWEEN 2 AND 120 THEN
+    RAISE EXCEPTION 'say who is asking (2-120 characters)' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  v_due := (p_received + interval '1 month')::date;
+  INSERT INTO guest_data_request_register (ref, tenant_id, site_id, kind, received_at, due_at, requester_ref, verification_method, created_by)
+  VALUES (v_ref, p_tenant, p_site, p_kind, p_received, v_due, btrim(p_requester), NULLIF(p_method, ''), btrim(p_actor))
+  RETURNING id INTO v_id;
+  RETURN jsonb_build_object('id', v_id, 'ref', v_ref, 'due_at', v_due);
+END $$;
+
+
+--
 -- Name: reserve_device_slot(uuid, uuid, text, text, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -9593,6 +12623,455 @@ BEGIN
     VALUES (t,s,p_ent,p_dev,'AUTHORIZED',now(),now());
   RETURN 'AUTHORIZED';
 END; $$;
+
+
+--
+-- Name: run_data_retention(uuid, uuid, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.run_data_retention(p_tenant uuid, p_site uuid, p_batch integer) RETURNS TABLE(o_category text, o_cutoff timestamp with time zone, o_anonymised integer)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE r record; v_cut timestamptz; v_n integer; v_k integer; v_id uuid; v_floor timestamptz;
+BEGIN
+  IF p_batch IS NULL OR p_batch NOT BETWEEN 1 AND 10000 THEN
+    RAISE EXCEPTION 'a batch of 1-10000 is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  SELECT * INTO r FROM iam_v2.data_retention_get(p_tenant, p_site);
+  SELECT f.since INTO v_floor FROM iam_v2.retention_floor f;
+  v_floor := COALESCE(v_floor, now());
+  PERFORM set_config('iam_v2.anonymise', 'retention', true);
+
+  -- PMS STAYS: the stay is over (checked out, cancelled or no-show) for longer than the retention, nothing it
+  -- granted is still live, and no post-stay access is valid inside the retention. A date is a day in the
+  -- hotel's time zone (0144).
+  v_cut := now() - make_interval(days => r.pms_stay_days); v_n := 0;
+  FOR v_id IN
+    SELECT s.id FROM iam_v2.stays s
+      LEFT JOIN LATERAL (SELECT max(e.received_at) AS last_event FROM iam_v2.stay_events e WHERE e.stay_id = s.id) le ON true
+     WHERE s.tenant_id = p_tenant AND s.site_id = p_site
+       AND (s.status IN ('CHECKED_OUT', 'POST_STAY_ACTIVE', 'CANCELLED', 'NO_SHOW')
+            -- A stay the PMS never closed (0137, audit B2): its departure is older than the retention.
+            OR (s.status IN ('RESERVED', 'IN_HOUSE') AND s.departure IS NOT NULL
+                AND iam_v2.site_day_start(p_site, s.departure + 1) < v_cut)
+            -- ... or with no departure at all (0143): the PMS's latest full room list no longer has it, and it has
+            -- had no PMS message for longer than the retention.
+            OR (s.status IN ('RESERVED', 'IN_HOUSE') AND s.departure IS NULL
+                AND COALESCE(le.last_event, iam_v2.site_day_start(p_site, s.arrival + 1)) < v_cut
+                AND iam_v2.stay_absent_from_published_roster(s.id)))
+       AND NOT iam_v2.is_anon_token(s.external_reservation_id)
+       AND COALESCE(s.effective_checkout_at, iam_v2.site_day_start(p_site, s.departure + 1),
+                    iam_v2.site_day_start(p_site, s.arrival + 1), le.last_event) < v_cut
+       AND NOT EXISTS (SELECT 1 FROM iam_v2.entitlements e WHERE e.stay_id = s.id AND e.status <> 'TERMINATED')
+       AND NOT EXISTS (SELECT 1 FROM iam_v2.post_stay_profiles p
+                        WHERE p.origin_stay_id = s.id AND p.status = 'ACTIVE' AND p.valid_until >= v_cut)
+     ORDER BY s.id LIMIT p_batch
+  LOOP
+    PERFORM iam_v2.anonymise_stay(v_id); v_n := v_n + 1;
+  END LOOP;
+  -- Processed PMS events that never resolved to a stay carry the same guest data. One still waiting for a staff
+  -- decision is first closed as undecided (0144), as 0123's expiry closes one, so it leaves the review queue
+  -- instead of staying in it blank. A message whose reservation is still open in the mirror is left alone.
+  INSERT INTO iam_v2.pms_case_resolutions
+         (tenant_id, site_id, pms_interface_id, stay_event_id, stay_id, disposition,
+          evidence_kind, evidence_ref, resolved_by, note)
+  SELECT x.tenant_id, x.site_id, x.pms_interface_id, x.id, NULL, 'EXPIRED_UNDECIDED',
+         'DATA_RETENTION', 'stay retention ' || r.pms_stay_days::text || ' days', 'data retention', NULL
+    FROM iam_v2.stay_events x
+   WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.stay_id IS NULL
+     AND x.processing_status = 'MANUAL_REVIEW' AND x.received_at < v_cut
+     AND NOT EXISTS (SELECT 1 FROM iam_v2.pms_case_resolutions c WHERE c.stay_event_id = x.id)
+     AND NOT EXISTS (SELECT 1 FROM iam_v2.stays o
+                      WHERE o.tenant_id = x.tenant_id AND o.site_id = x.site_id AND o.pms_interface_id = x.pms_interface_id
+                        AND o.status IN ('RESERVED', 'IN_HOUSE')
+                        AND o.external_reservation_id = btrim(COALESCE(x.payload->>'reservation', '')))
+   ORDER BY x.received_at LIMIT p_batch
+  ON CONFLICT (stay_event_id) DO NOTHING;
+  PERFORM iam_v2.begin_controlled_operation('stay');
+  UPDATE iam_v2.stay_events e
+     SET payload = '{"anonymised": true}'::jsonb,
+         external_event_identity = 'anon-' || encode(public.gen_random_bytes(32), 'hex')
+   WHERE e.id IN (SELECT x.id FROM iam_v2.stay_events x
+                   WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.stay_id IS NULL
+                     AND x.processing_status <> 'PENDING' AND x.received_at < v_cut
+                     AND x.payload IS DISTINCT FROM '{"anonymised": true}'::jsonb
+                     AND (x.processing_status <> 'MANUAL_REVIEW'
+                          OR EXISTS (SELECT 1 FROM iam_v2.pms_case_resolutions c WHERE c.stay_event_id = x.id))
+                     AND NOT EXISTS (SELECT 1 FROM iam_v2.stays o
+                                      WHERE o.tenant_id = x.tenant_id AND o.site_id = x.site_id
+                                        AND o.pms_interface_id = x.pms_interface_id
+                                        AND o.status IN ('RESERVED', 'IN_HOUSE')
+                                        AND o.external_reservation_id = btrim(COALESCE(x.payload->>'reservation', '')))
+                   LIMIT p_batch);
+  GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+  -- Events still waiting after the stay retention are given up (0139, D-B2). Rows the stay engine holds are
+  -- skipped, never waited for; it finishes them or a later run gives them up.
+  v_n := v_n + iam_v2.give_up_waiting_stay_events(p_tenant, p_site, v_cut, NULL, p_batch);
+  IF v_n > 0 THEN
+    INSERT INTO iam_v2.data_retention_runs (tenant_id, site_id, category, retention_days, cutoff, rows_anonymised)
+    VALUES (p_tenant, p_site, 'pms_stays', r.pms_stay_days, v_cut, v_n);
+    o_category := 'pms_stays'; o_cutoff := v_cut; o_anonymised := v_n; RETURN NEXT;
+  END IF;
+
+  -- CLIENT ACTIVITY: a device unseen for longer than the retention with nothing live on it, and the address
+  -- columns of every session that ended before the cutoff. A device never seen is as old as the floor (0144).
+  v_cut := now() - make_interval(days => r.client_activity_days); v_n := 0;
+  FOR v_id IN
+    SELECT d.id FROM iam_v2.devices d
+     WHERE d.tenant_id = p_tenant AND d.site_id = p_site
+       AND d.mac::text NOT LIKE '03:%'
+       AND COALESCE(d.last_seen, d.first_seen, v_floor) < v_cut
+       AND NOT EXISTS (SELECT 1 FROM iam_v2.sessions se WHERE se.device_id = d.id AND (se.ended IS NULL OR se.ended >= v_cut))
+       AND NOT EXISTS (SELECT 1 FROM iam_v2.entitlement_devices ed WHERE ed.device_id = d.id AND ed.status = 'AUTHORIZED')
+       AND NOT EXISTS (SELECT 1 FROM iam_v2.principal_device_credentials c
+                        WHERE c.device_id = d.id AND c.revoked_at IS NULL AND c.expires_at > now())
+     ORDER BY d.id LIMIT p_batch
+  LOOP
+    PERFORM iam_v2.anonymise_device(v_id); v_n := v_n + 1;
+  END LOOP;
+  UPDATE iam_v2.sessions se SET ip = NULL, mac = NULL
+   WHERE se.id IN (SELECT x.id FROM iam_v2.sessions x
+                    WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.ended < v_cut
+                      AND (x.ip IS NOT NULL OR x.mac IS NOT NULL)
+                    LIMIT p_batch);
+  GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+  IF v_n > 0 THEN
+    INSERT INTO iam_v2.data_retention_runs (tenant_id, site_id, category, retention_days, cutoff, rows_anonymised)
+    VALUES (p_tenant, p_site, 'client_activity', r.client_activity_days, v_cut, v_n);
+    o_category := 'client_activity'; o_cutoff := v_cut; o_anonymised := v_n; RETURN NEXT;
+  END IF;
+
+  -- INACTIVE IDENTITIES: no sign-in, verification, access or remembered-device use inside the retention, and
+  -- nothing granted to the identity still live.
+  v_cut := now() - make_interval(days => r.inactive_identity_days); v_n := 0;
+  FOR v_id IN
+    SELECT gp.id FROM iam_v2.guest_principals gp
+     WHERE gp.tenant_id = p_tenant
+       AND (gp.display_name IS NOT NULL
+            OR EXISTS (SELECT 1 FROM iam_v2.guest_principal_identities i
+                        WHERE i.guest_principal_id = gp.id AND NOT iam_v2.is_anon_token(i.factor_value_norm)))
+       AND NOT EXISTS (SELECT 1 FROM iam_v2.guest_principal_identities i
+                        WHERE i.guest_principal_id = gp.id AND i.verified_at >= v_cut)
+       AND NOT EXISTS (SELECT 1 FROM iam_v2.entitlements e
+                        WHERE e.guest_principal_id = gp.id
+                          AND (e.status <> 'TERMINATED' OR COALESCE(e.terminated_at, 'infinity') >= v_cut))
+       AND NOT EXISTS (SELECT 1 FROM iam_v2.auth_contexts ac
+                        WHERE ac.guest_principal_id = gp.id AND COALESCE(ac.consumed_at, ac.expires_at) >= v_cut)
+       AND NOT EXISTS (SELECT 1 FROM iam_v2.principal_device_credentials c
+                        WHERE c.guest_principal_id = gp.id
+                          AND (GREATEST(c.created_at, c.last_used_at) >= v_cut
+                               OR (c.revoked_at IS NULL AND c.expires_at > now())))
+     ORDER BY gp.id LIMIT p_batch
+  LOOP
+    PERFORM iam_v2.anonymise_guest_principal(v_id); v_n := v_n + 1;
+  END LOOP;
+  -- A client account: nothing about it is newer than the cutoff -- not its creation (the floor when 0104 could
+  -- not record it), not its start or end of validity, not a verification, sign-in or lock (0144).
+  FOR v_id IN
+    SELECT a.id FROM iam_v2.guest_access_accounts a
+     WHERE a.tenant_id = p_tenant AND a.site_id = p_site
+       AND a.username NOT LIKE 'anon-%@anonymised.removed-%'
+       AND GREATEST(COALESCE(a.created_at, v_floor), COALESCE(a.valid_from, '-infinity'),
+                    COALESCE(a.valid_until, '-infinity'),
+                    COALESCE(a.grace_until, '-infinity'), COALESCE(a.email_verified_at, '-infinity'),
+                    COALESCE(a.last_login_at, '-infinity'), COALESCE(a.locked_until, '-infinity')) < v_cut
+       AND NOT EXISTS (SELECT 1 FROM iam_v2.entitlements e
+                        WHERE e.guest_account_id = a.id
+                          AND (e.status <> 'TERMINATED' OR COALESCE(e.terminated_at, 'infinity') >= v_cut))
+       AND NOT EXISTS (SELECT 1 FROM iam_v2.auth_contexts ac
+                        WHERE ac.guest_account_id = a.id AND COALESCE(ac.consumed_at, ac.expires_at) >= v_cut)
+     ORDER BY a.id LIMIT p_batch
+  LOOP
+    PERFORM iam_v2.anonymise_guest_account(v_id); v_n := v_n + 1;
+  END LOOP;
+  IF v_n > 0 THEN
+    INSERT INTO iam_v2.data_retention_runs (tenant_id, site_id, category, retention_days, cutoff, rows_anonymised)
+    VALUES (p_tenant, p_site, 'inactive_identities', r.inactive_identity_days, v_cut, v_n);
+    o_category := 'inactive_identities'; o_cutoff := v_cut; o_anonymised := v_n; RETURN NEXT;
+  END IF;
+
+  -- EXPIRED SINGLE-USE RECORDS (iam_v2 part; public tables are in run_data_retention_public).
+  v_cut := now() - make_interval(days => r.expired_record_days); v_n := 0;
+  UPDATE iam_v2.verification_access_grants g
+     SET device_mac = iam_v2.anonymised_mac(), ip = '0.0.0.0'::inet,
+         destination_digest = encode(public.gen_random_bytes(32), 'hex')
+   WHERE g.id IN (SELECT x.id FROM iam_v2.verification_access_grants x
+                   WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.expires_at < v_cut
+                     AND x.device_mac::text NOT LIKE '03:%'
+                   LIMIT p_batch);
+  GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+  UPDATE iam_v2.guest_signin_restrictions g
+     SET device_mac = iam_v2.anonymised_mac(), last_submitted_room = NULL
+   WHERE g.id IN (SELECT x.id FROM iam_v2.guest_signin_restrictions x
+                   WHERE x.tenant_id = p_tenant AND x.site_id = p_site
+                     AND GREATEST(x.updated_at, COALESCE(x.expires_at, '-infinity'), COALESCE(x.released_at, '-infinity')) < v_cut
+                     AND x.device_mac::text NOT LIKE '03:%'
+                   LIMIT p_batch);
+  GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+  UPDATE iam_v2.account_email_tokens t SET last_send_error = NULL
+   WHERE t.id IN (SELECT x.id FROM iam_v2.account_email_tokens x
+                   WHERE x.tenant_id = p_tenant AND x.site_id = p_site AND x.expires_at < v_cut
+                     AND x.last_send_error IS NOT NULL
+                   LIMIT p_batch);
+  GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+  IF v_n > 0 THEN
+    INSERT INTO iam_v2.data_retention_runs (tenant_id, site_id, category, retention_days, cutoff, rows_anonymised)
+    VALUES (p_tenant, p_site, 'expired_records', r.expired_record_days, v_cut, v_n);
+    o_category := 'expired_records'; o_cutoff := v_cut; o_anonymised := v_n; RETURN NEXT;
+  END IF;
+
+  PERFORM set_config('iam_v2.anonymise', '', true);
+END $$;
+
+
+--
+-- Name: FUNCTION run_data_retention(p_tenant uuid, p_site uuid, p_batch integer); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.run_data_retention(p_tenant uuid, p_site uuid, p_batch integer) IS 'The hourly guest-data retention run for the iam_v2 tables (0127, GDPR plan C1): anonymises, in batches of at most p_batch per category, PMS stays over for longer than the site''s retention, devices and sessions, inactive guest identities and accounts, and expired single-use records. Deletes nothing; records every run that changed something in iam_v2.data_retention_runs.';
+
+
+--
+-- Name: run_staff_note_retention(uuid, uuid, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.run_staff_note_retention(p_tenant uuid, p_site uuid, p_batch integer) RETURNS TABLE(o_category text, o_cutoff timestamp with time zone, o_anonymised integer)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_days integer; v_cut timestamptz; v_n integer := 0; v_k integer;
+        c_removed constant text := 'Removed after the staff-notes period';
+BEGIN
+  SELECT r.staff_note_days INTO v_days FROM iam_v2.data_retention_get(p_tenant, p_site) r;
+  v_cut := now() - make_interval(days => v_days);
+  PERFORM set_config('iam_v2.anonymise', 'retention', true);
+
+  UPDATE iam_v2.pms_case_resolutions x SET note = c_removed
+   WHERE x.id IN (SELECT y.id FROM iam_v2.pms_case_resolutions y
+                   WHERE y.tenant_id = p_tenant AND y.site_id = p_site AND y.resolved_at < v_cut
+                     AND y.note IS NOT NULL AND y.note <> c_removed
+                   LIMIT p_batch);
+  GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+
+  UPDATE iam_v2.device_slot_actions x SET reason = c_removed
+   WHERE x.id IN (SELECT y.id FROM iam_v2.device_slot_actions y
+                   WHERE y.tenant_id = p_tenant AND y.site_id = p_site AND y.acted_at < v_cut
+                     AND y.reason IS NOT NULL AND y.reason <> c_removed
+                   LIMIT p_batch);
+  GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+
+  UPDATE iam_v2.post_stay_profiles x SET revoke_reason = c_removed
+   WHERE x.id IN (SELECT y.id FROM iam_v2.post_stay_profiles y
+                   WHERE y.tenant_id = p_tenant AND y.site_id = p_site AND y.status = 'REVOKED'
+                     AND y.revoked_at < v_cut AND y.revoke_reason <> c_removed
+                   LIMIT p_batch);
+  GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+
+  UPDATE iam_v2.stay_posting_blocks x SET note = c_removed
+   WHERE x.id IN (SELECT y.id FROM iam_v2.stay_posting_blocks y
+                   WHERE y.tenant_id = p_tenant AND y.site_id = p_site AND y.created_at < v_cut
+                     AND y.note IS NOT NULL AND y.note <> c_removed
+                   LIMIT p_batch);
+  GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+
+  UPDATE iam_v2.stay_posting_blocks x SET cleared_reason = c_removed
+   WHERE x.id IN (SELECT y.id FROM iam_v2.stay_posting_blocks y
+                   WHERE y.tenant_id = p_tenant AND y.site_id = p_site AND y.cleared_at < v_cut
+                     AND y.cleared_reason IS NOT NULL AND y.cleared_reason <> c_removed
+                   LIMIT p_batch);
+  GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+
+  UPDATE iam_v2.vouchers x SET notes = c_removed
+   WHERE x.id IN (SELECT y.id FROM iam_v2.vouchers y
+                   WHERE y.tenant_id = p_tenant AND y.site_id = p_site AND y.created_at < v_cut
+                     AND y.notes IS NOT NULL AND btrim(y.notes) <> '' AND y.notes <> c_removed
+                   LIMIT p_batch);
+  GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+
+  UPDATE iam_v2.guest_data_erasures x SET erase_reason = c_removed
+   WHERE x.erasure_ref IN (SELECT y.erasure_ref FROM iam_v2.guest_data_erasures y
+                            WHERE y.tenant_id = p_tenant AND y.site_id = p_site AND y.erased_at < v_cut
+                              AND y.erase_reason <> c_removed
+                            LIMIT p_batch);
+  GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+
+  v_k := iam_v2.scrub_registry_notes(p_tenant, p_site, v_cut, p_batch, c_removed); v_n := v_n + v_k;
+
+  PERFORM set_config('iam_v2.anonymise', '', true);
+  IF v_n > 0 THEN
+    INSERT INTO iam_v2.data_retention_runs (tenant_id, site_id, category, retention_days, cutoff, rows_anonymised)
+    VALUES (p_tenant, p_site, 'staff_notes', v_days, v_cut, v_n);
+    o_category := 'staff_notes'; o_cutoff := v_cut; o_anonymised := v_n;
+    RETURN NEXT;
+  END IF;
+END $$;
+
+
+--
+-- Name: FUNCTION run_staff_note_retention(p_tenant uuid, p_site uuid, p_batch integer); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.run_staff_note_retention(p_tenant uuid, p_site uuid, p_batch integer) IS 'Hourly (scd, 0140, GDPR audit C4): replaces staff notes older than the site''s staff_note_days -- PMS case decision notes, device-slot action reasons, post-stay revoke reasons -- with a fixed text, at most p_batch of each per call. The records themselves stay.';
+
+
+--
+-- Name: same_guest(text, text, text, uuid, text, text, text, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.same_guest(a_ext text, a_first text, a_last text, a_iface uuid, b_ext text, b_first text, b_last text, b_iface uuid) RETURNS text
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT CASE
+    WHEN a_iface IS NOT DISTINCT FROM b_iface
+     AND NULLIF(btrim(a_ext), '') IS NOT NULL AND NULLIF(btrim(b_ext), '') IS NOT NULL THEN
+      CASE WHEN btrim(a_ext) = btrim(b_ext) THEN 'id' END
+    WHEN NULLIF(btrim(a_first), '') IS NOT NULL AND NULLIF(btrim(a_last), '') IS NOT NULL
+     AND NULLIF(btrim(b_first), '') IS NOT NULL AND NULLIF(btrim(b_last), '') IS NOT NULL
+     AND upper(btrim(a_first)) = upper(btrim(b_first)) AND upper(btrim(a_last)) = upper(btrim(b_last)) THEN 'name'
+  END;
+$$;
+
+
+--
+-- Name: FUNCTION same_guest(a_ext text, a_first text, a_last text, a_iface uuid, b_ext text, b_first text, b_last text, b_iface uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.same_guest(a_ext text, a_first text, a_last text, a_iface uuid, b_ext text, b_first text, b_last text, b_iface uuid) IS 'Whether two PMS guest rows are one person (0145, D-R4/D-R5): the PMS guest number only within one PMS interface; otherwise the same first AND last name. A number from another interface says nothing.';
+
+
+--
+-- Name: same_guest_rows(uuid[], uuid[]); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.same_guest_rows(p_guests uuid[], p_stays uuid[]) RETURNS uuid[]
+    LANGUAGE plpgsql STABLE
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v uuid[];
+BEGIN
+  IF EXISTS (
+      SELECT 1
+        FROM stay_guests a
+        JOIN stay_guests b ON b.stay_id = ANY (p_stays) AND b.stay_id <> a.stay_id
+       WHERE a.id = ANY (p_guests)
+         AND same_guest(a.external_guest_id, a.first_name_norm, a.last_name_norm, a.pms_interface_id,
+                        b.external_guest_id, b.first_name_norm, b.last_name_norm, b.pms_interface_id) IS NOT NULL
+       -- More than one row of one stay that could be this guest -- by number or by name, an id-less namesake
+       -- included -- cannot be told apart: refused, never guessed.
+       GROUP BY a.id, b.stay_id HAVING count(*) > 1)
+     OR EXISTS (
+      SELECT 1
+        FROM stay_guests a
+        JOIN stay_guests t ON t.stay_id = a.stay_id AND t.id <> a.id
+       WHERE a.id = ANY (p_guests) AND NOT t.id = ANY (p_guests)
+         AND same_guest(NULL, a.first_name_norm, a.last_name_norm, a.pms_interface_id,
+                        NULL, t.first_name_norm, t.last_name_norm, t.pms_interface_id) = 'name'
+         AND EXISTS (SELECT 1 FROM stay_guests b
+                      WHERE b.stay_id = ANY (p_stays) AND b.stay_id <> a.stay_id
+                        AND same_guest(a.external_guest_id, a.first_name_norm, a.last_name_norm, a.pms_interface_id,
+                                       b.external_guest_id, b.first_name_norm, b.last_name_norm, b.pms_interface_id) = 'name')) THEN
+    RAISE EXCEPTION 'ambiguous guest: more than one guest has this name, so the guest cannot be told apart on a '
+                    'linked stay. Choose the guest row from the search.' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  SELECT COALESCE(array_agg(DISTINCT b.id), '{}') INTO v
+    FROM stay_guests a JOIN stay_guests b ON b.stay_id = ANY (p_stays)
+   WHERE a.id = ANY (p_guests)
+     AND (b.id = a.id
+          OR (b.stay_id <> a.stay_id
+              AND same_guest(a.external_guest_id, a.first_name_norm, a.last_name_norm, a.pms_interface_id,
+                             b.external_guest_id, b.first_name_norm, b.last_name_norm, b.pms_interface_id) IS NOT NULL));
+  RETURN v;
+END $$;
+
+
+--
+-- Name: scrub_guard(); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.scrub_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE r record; v_o jsonb := to_jsonb(OLD); v_n jsonb := to_jsonb(NEW);
+BEGIN
+  IF TG_OP <> 'UPDATE'
+     OR current_setting('iam_v2.scrub', true) IS DISTINCT FROM 'on'
+     OR (current_user <> (SELECT pg_get_userbyid(c.relowner) FROM pg_class c WHERE c.oid = TG_RELID)
+         AND NOT COALESCE((SELECT pr.rolsuper FROM pg_roles pr WHERE pr.rolname = current_user), false)) THEN
+    RAISE EXCEPTION '% is append-only: % refused', TG_TABLE_NAME, TG_OP USING ERRCODE = 'restrict_violation';
+  END IF;
+  FOR r IN SELECT x.column_name, x.jsonb_key FROM iam_v2.scrub_registry x WHERE x.table_name = TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME LOOP
+    IF r.jsonb_key IS NULL THEN
+      v_o := v_o - r.column_name; v_n := v_n - r.column_name;
+    ELSE
+      IF v_o -> r.column_name IS NOT NULL AND jsonb_typeof(v_o -> r.column_name) = 'object' THEN
+        v_o := jsonb_set(v_o, ARRAY[r.column_name], (v_o -> r.column_name) - r.jsonb_key);
+      END IF;
+      IF v_n -> r.column_name IS NOT NULL AND jsonb_typeof(v_n -> r.column_name) = 'object' THEN
+        v_n := jsonb_set(v_n, ARRAY[r.column_name], (v_n -> r.column_name) - r.jsonb_key);
+      END IF;
+    END IF;
+  END LOOP;
+  IF v_o IS DISTINCT FROM v_n THEN
+    RAISE EXCEPTION '% may be scrubbed only in its registered columns', TG_TABLE_NAME USING ERRCODE = 'restrict_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+
+
+--
+-- Name: scrub_registry_notes(uuid, uuid, timestamp with time zone, integer, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.scrub_registry_notes(p_tenant uuid, p_site uuid, p_cut timestamp with time zone, p_batch integer, p_placeholder text) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $_$
+DECLARE r record; n integer := 0; k integer;
+BEGIN
+  PERFORM set_config('iam_v2.scrub', 'on', true);
+  FOR r IN SELECT x.* FROM iam_v2.scrub_registry x WHERE x.kind = 'note' AND NOT x.handled LOOP
+    IF to_regclass(r.table_name) IS NULL THEN CONTINUE; END IF;
+    IF r.jsonb_key IS NULL THEN
+      EXECUTE format('UPDATE %1$s x SET %2$I = $1 WHERE x.ctid IN (SELECT y.ctid FROM %1$s y WHERE y.tenant_id = $2 AND y.site_id = $3
+                       AND y.%3$I < $4 AND y.%2$I IS NOT NULL AND y.%2$I <> $1 LIMIT $5)', r.table_name, r.column_name, r.ts_column)
+        USING p_placeholder, p_tenant, p_site, p_cut, p_batch;
+    ELSE
+      EXECUTE format('UPDATE %1$s x SET %2$I = jsonb_set(x.%2$I, ARRAY[%4$L], to_jsonb($1::text)) WHERE x.ctid IN (SELECT y.ctid FROM %1$s y
+                       WHERE y.tenant_id = $2 AND y.site_id = $3 AND y.%3$I < $4 AND y.%2$I ? %4$L AND y.%2$I ->> %4$L <> $1 LIMIT $5)',
+                     r.table_name, r.column_name, r.ts_column, r.jsonb_key)
+        USING p_placeholder, p_tenant, p_site, p_cut, p_batch;
+    END IF;
+    GET DIAGNOSTICS k = ROW_COUNT; n := n + k;
+  END LOOP;
+  PERFORM set_config('iam_v2.scrub', '', true);
+  RETURN n;
+END $_$;
+
+
+--
+-- Name: scrub_staff_label(text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.scrub_staff_label(p_old text, p_new text) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $_$
+DECLARE r record; n integer := 0; k integer;
+BEGIN
+  IF p_old IS NULL OR btrim(p_old) = '' OR p_new !~ '^removed-[0-9a-f]{12}@staff[.]invalid$' THEN
+    RETURN 0;
+  END IF;
+  PERFORM set_config('iam_v2.scrub', 'on', true);
+  FOR r IN SELECT x.table_name, x.column_name FROM iam_v2.scrub_registry x WHERE x.kind = 'label' AND x.table_name LIKE 'iam_v2.%' LOOP
+    IF to_regclass(r.table_name) IS NULL THEN CONTINUE; END IF;
+    EXECUTE format('UPDATE %s SET %I = $2 WHERE lower(%I) = lower($1)', r.table_name, r.column_name, r.column_name) USING p_old, p_new;
+    GET DIAGNOSTICS k = ROW_COUNT; n := n + k;
+  END LOOP;
+  PERFORM set_config('iam_v2.scrub', '', true);
+  RETURN n;
+END $_$;
 
 
 --
@@ -9891,6 +13370,25 @@ END $$;
 
 
 --
+-- Name: site_day_start(uuid, date); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.site_day_start(p_site uuid, p_day date) RETURNS timestamp with time zone
+    LANGUAGE sql STABLE
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT p_day::timestamp AT TIME ZONE COALESCE((SELECT s.timezone FROM public.sites s WHERE s.id = p_site), 'UTC');
+$$;
+
+
+--
+-- Name: FUNCTION site_day_start(p_site uuid, p_day date); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.site_day_start(p_site uuid, p_day date) IS 'Midnight at the start of a date, in the site''s time zone (public.sites.timezone; UTC if unknown) (0144).';
+
+
+--
 -- Name: site_module_changes_append_only(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -9997,6 +13495,18 @@ END $$;
 
 
 --
+-- Name: site_today(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.site_today(p_site uuid) RETURNS date
+    LANGUAGE sql STABLE
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT (now() AT TIME ZONE COALESCE((SELECT s.timezone FROM public.sites s WHERE s.id = p_site), 'UTC'))::date;
+$$;
+
+
+--
 -- Name: staff_release_device_slot(uuid, uuid, uuid, uuid, uuid, text, text); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -10087,6 +13597,85 @@ COMMENT ON FUNCTION iam_v2.staff_require_device_signin(p_tenant uuid, p_site uui
 
 
 --
+-- Name: stay_absent_from_published_roster(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.stay_absent_from_published_roster(p_stay uuid) RETURNS boolean
+    LANGUAGE sql STABLE
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM iam_v2.stays s
+      JOIN iam_v2.pms_interface_runtime r
+        ON r.tenant_id = s.tenant_id AND r.site_id = s.site_id AND r.pms_interface_id = s.pms_interface_id
+       AND r.published_resync_generation > 0
+      CROSS JOIN LATERAL (
+        SELECT COALESCE(r.last_complete_sync_at, max(se.received_at)) AS sent_at FROM iam_v2.stay_events se
+         WHERE se.tenant_id = s.tenant_id AND se.site_id = s.site_id AND se.pms_interface_id = s.pms_interface_id
+           AND se.admission_kind = 'RESYNC' AND se.resync_generation = r.published_resync_generation) roster
+     WHERE s.id = p_stay
+       AND roster.sent_at IS NOT NULL
+       AND roster.sent_at > COALESCE((SELECT max(e.received_at) FROM iam_v2.stay_events e WHERE e.stay_id = s.id), 'infinity')
+       AND NOT EXISTS (
+         SELECT 1 FROM iam_v2.stay_events se
+          WHERE se.tenant_id = s.tenant_id AND se.site_id = s.site_id AND se.pms_interface_id = s.pms_interface_id
+            AND se.admission_kind = 'RESYNC' AND se.resync_generation = r.published_resync_generation
+            AND se.event_type IN ('GI', 'GC')
+            AND (btrim(COALESCE(se.payload->>'reservation', '')) = s.external_reservation_id
+                 OR (btrim(COALESCE(se.payload->>'reservation', '')) = ''
+                     AND upper(btrim(COALESCE(se.payload->>'room', ''))) = s.normalized_room_number))));
+$$;
+
+
+--
+-- Name: FUNCTION stay_absent_from_published_roster(p_stay uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.stay_absent_from_published_roster(p_stay uuid) IS 'True only when the stay''s PMS has published a full room list (a resync), that list was published (last_complete_sync_at) after the last message about the stay, and the stay is not in it. False when no list was published, or the stay heard from the PMS since: nothing can be concluded (0143, 0144).';
+
+
+--
+-- Name: stay_guests_as_json(uuid[]); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.stay_guests_as_json(p_guests uuid[]) RETURNS jsonb
+    LANGUAGE sql STABLE
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  -- 'rival': someone else on the same stay has this guest's surname, so a surname alone cannot say which of them
+  -- a PMS message means.
+  SELECT COALESCE(jsonb_agg(jsonb_build_object('id', sg.external_guest_id, 'iface', sg.pms_interface_id,
+                                               'first', upper(btrim(sg.first_name_norm)),
+                                               'last', upper(btrim(sg.last_name_norm)),
+                                               'rival', EXISTS (SELECT 1 FROM iam_v2.stay_guests o
+                                                                 WHERE o.stay_id = sg.stay_id AND NOT o.id = ANY (p_guests)
+                                                                   AND upper(btrim(o.last_name_norm)) = upper(btrim(sg.last_name_norm))))),
+                    '[]'::jsonb)
+    FROM iam_v2.stay_guests sg WHERE sg.id = ANY (p_guests);
+$$;
+
+
+--
+-- Name: stay_named_guests(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.stay_named_guests(p_stay uuid) RETURNS integer
+    LANGUAGE sql STABLE
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT count(*)::integer FROM iam_v2.stay_guests sg
+   WHERE sg.stay_id = p_stay AND num_nonnulls(sg.first_name_norm, sg.last_name_norm, sg.display_name, sg.external_guest_id) > 0;
+$$;
+
+
+--
+-- Name: FUNCTION stay_named_guests(p_stay uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.stay_named_guests(p_stay uuid) IS 'How many guests are still named on a stay (0141, GDPR audit C3): more than one makes it a shared stay, exported and erased one guest at a time.';
+
+
+--
 -- Name: stay_posting_blocks_guard(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -10097,6 +13686,13 @@ CREATE FUNCTION iam_v2.stay_posting_blocks_guard() RETURNS trigger
 BEGIN
   IF TG_OP = 'DELETE' THEN
     RAISE EXCEPTION 'stay_posting_blocks is not deletable' USING ERRCODE = 'restrict_violation';
+  END IF;
+  IF current_setting('iam_v2.anonymise', true) = 'retention'
+     AND current_user = (SELECT pg_get_userbyid(c.relowner) FROM pg_class c WHERE c.oid = TG_RELID)
+     AND (NEW.note IS NOT DISTINCT FROM OLD.note OR NEW.note = 'Removed after the staff-notes period')
+     AND (NEW.cleared_reason IS NOT DISTINCT FROM OLD.cleared_reason OR NEW.cleared_reason = 'Removed after the staff-notes period')
+     AND (to_jsonb(NEW) - 'note' - 'cleared_reason') = (to_jsonb(OLD) - 'note' - 'cleared_reason') THEN
+    RETURN NEW;
   END IF;
   IF ROW(NEW.id, NEW.tenant_id, NEW.site_id, NEW.pms_interface_id, NEW.stay_id, NEW.reason, NEW.source, NEW.posting_id,
          NEW.pa_as_status, NEW.note, NEW.created_by, NEW.created_at)
@@ -10193,6 +13789,22 @@ BEGIN
   PERFORM iam_v2.p3_rederive_entitlement_times(p_ent);
   RETURN v_new;
 END $_$;
+
+
+--
+-- Name: text_names_any(text, text[]); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.text_names_any(p_text text, p_vals text[]) RETURNS boolean
+    LANGUAGE sql IMMUTABLE
+    AS $_$
+  SELECT p_text IS NOT NULL AND EXISTS (
+    SELECT 1 FROM unnest(p_vals) v
+     WHERE length(v) >= 3
+       AND (lower(btrim(p_text)) = v
+            OR lower(p_text) ~ ('(^|[^[:alnum:]])' || regexp_replace(v, '([.*+?^${}()|\[\]\\-])', '\\\1', 'g')
+                                || '($|[^[:alnum:]])')));
+$_$;
 
 
 --
@@ -10827,6 +14439,936 @@ COMMENT ON FUNCTION iam_v2.walled_garden_settings_set(p_tenant uuid, p_site uuid
 
 
 --
+-- Name: assisted_reason_check(uuid, uuid, jsonb, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.assisted_reason_check(p_tenant uuid, p_site uuid, p_anchors jsonb, p_reason text) RETURNS void
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $_$
+DECLARE a record;
+BEGIN
+  IF p_reason IS NULL OR length(btrim(p_reason)) NOT BETWEEN 4 AND 500 THEN
+    RAISE EXCEPTION 'a reason of 4-500 characters is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  -- A device address in any spelling (pairs separated by : - . _ or a space, three groups of four, or twelve digits)
+  -- or an IPv4 address.
+  IF p_reason ~* '([0-9a-f]{2}[:._ -]){5}[0-9a-f]{2}' OR p_reason ~* '[0-9a-f]{4}[.-][0-9a-f]{4}[.-][0-9a-f]{4}'
+     OR p_reason ~* '(^|[^0-9a-f])[0-9a-f]{12}($|[^0-9a-f])' OR p_reason ~ '[0-9]{1,3}([.][0-9]{1,3}){3}' THEN
+    RAISE EXCEPTION 'the reason must not name the guest: leave out their name, email, phone, room, reservation and device'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF jsonb_typeof(p_anchors) = 'array' THEN
+    FOR a IN SELECT x.kind, x.id FROM jsonb_to_recordset(p_anchors) AS x(kind text, id uuid) LOOP
+      PERFORM public.guest_data_reason_check(p_tenant, p_site, a.kind, a.id, p_reason);
+    END LOOP;
+  END IF;
+END $_$;
+
+
+--
+-- Name: assisted_request_close(uuid, uuid, uuid, text, text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.assisted_request_close(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_outcome text, p_reason text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+BEGIN
+  PERFORM public.assisted_reason_check(p_tenant, p_site, iam_v2.assisted_request_anchors_json(p_tenant, p_site, p_request), p_reason);
+  RETURN iam_v2.assisted_request_close(p_tenant, p_site, p_request, p_actor, p_outcome, p_reason);
+END $$;
+
+
+--
+-- Name: assisted_request_erase(uuid, uuid, uuid, text, text, text, text, jsonb); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.assisted_request_erase(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_reason text, p_confirm text, p_signature text, p_selected jsonb) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+DECLARE v jsonb; v_macs text[]; v_pats text[]; v_ref text; v_since timestamptz; n_audit integer := 0;
+BEGIN
+  PERFORM public.assisted_reason_check(p_tenant, p_site, iam_v2.assisted_request_anchors_json(p_tenant, p_site, p_request), p_reason);
+  v := iam_v2.assisted_request_erase_run(p_tenant, p_site, p_request, p_actor, p_reason, p_confirm, p_signature, p_selected);
+  v_ref := v ->> 'erasure_ref';
+  PERFORM iam_v2.ledger_append_erasure(p_tenant, p_site, v_ref);
+  v_macs := ARRAY(SELECT jsonb_array_elements_text(v -> 'macs_cleared'));
+  n_audit := public.audit_clean_macs(p_tenant, v_macs, v_ref, COALESCE((v ->> 'since')::timestamptz, '-infinity'));
+  RETURN (v - 'macs_cleared' - 'since') || jsonb_build_object('activity_log_entries_cleaned', n_audit);
+END $$;
+
+
+--
+-- Name: assisted_request_export(uuid, uuid, uuid, text, text, text, text, jsonb); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.assisted_request_export(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_reason text, p_confirm text, p_signature text, p_selected jsonb) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+BEGIN
+  PERFORM public.assisted_reason_check(p_tenant, p_site, iam_v2.assisted_request_anchors_json(p_tenant, p_site, p_request), p_reason);
+  RETURN iam_v2.assisted_request_export_doc(p_tenant, p_site, p_request, p_actor, p_reason, p_confirm, p_signature, p_selected);
+END $$;
+
+
+--
+-- Name: assisted_request_open(uuid, uuid, text, text, text[], timestamp with time zone, timestamp with time zone, jsonb, text, text, text, boolean, boolean, boolean, boolean, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.assisted_request_open(p_tenant uuid, p_site uuid, p_actor text, p_purpose text, p_macs text[], p_from timestamp with time zone, p_to timestamp with time zone, p_anchors jsonb, p_requester text, p_method text, p_evidence text, p_att_identity boolean, p_att_device boolean, p_att_sole boolean, p_att_private boolean, p_reason text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+BEGIN
+  PERFORM public.assisted_reason_check(p_tenant, p_site, p_anchors, p_reason);
+  RETURN iam_v2.assisted_request_open(p_tenant, p_site, p_actor, p_purpose, p_macs, p_from, p_to, p_anchors, p_requester,
+                                      p_method, p_evidence, p_att_identity, p_att_device, p_att_sole, p_att_private, p_reason);
+END $$;
+
+
+--
+-- Name: assisted_request_reason_check(uuid, uuid, uuid, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.assisted_request_reason_check(p_tenant uuid, p_site uuid, p_request uuid, p_reason text) RETURNS void
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+BEGIN
+  PERFORM public.assisted_reason_check(p_tenant, p_site, iam_v2.assisted_request_anchors_json(p_tenant, p_site, p_request), p_reason);
+END $$;
+
+
+--
+-- Name: audit_clean_macs(uuid, text[], text, timestamp with time zone); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.audit_clean_macs(p_tenant uuid, p_macs text[], p_ref text, p_since timestamp with time zone) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+DECLARE v_macs text[]; v_pats text[]; n integer := 0;
+BEGIN
+  -- Staff type an address in any spelling: colons, dashes, none, or three groups of four.
+  v_macs := ARRAY(SELECT DISTINCT lower(x) FROM unnest(p_macs) m
+                    CROSS JOIN LATERAL unnest(ARRAY[m, replace(m, ':', '-'), replace(m, ':', ''),
+                      substr(replace(m, ':', ''), 1, 4) || '.' || substr(replace(m, ':', ''), 5, 4) || '.' || substr(replace(m, ':', ''), 9, 4)]) x);
+  IF cardinality(v_macs) = 0 THEN
+    RETURN 0;
+  END IF;
+  v_pats := ARRAY(SELECT '%' || replace(replace(replace(x, '\', '\\'), '%', '\%'), '_', '\_') || '%' FROM unnest(v_macs) x);
+  WITH cand AS MATERIALIZED (
+    SELECT l.tableoid AS toid, l.ctid AS rid, l.payload AS old_payload, (lower(l.target_id) = ANY (v_macs)) AS about_it,
+           iam_v2.redact_guest_text(l.payload, v_macs, l.action = 'guest_data.searched') AS new_payload
+      FROM audit_log l
+     WHERE l.tenant_id = p_tenant AND l.ts >= COALESCE(p_since, '-infinity')
+       AND (lower(l.target_id) = ANY (v_macs) OR l.action = 'guest_data.searched' OR lower(l.payload::text) LIKE ANY (v_pats)))
+  UPDATE audit_log l
+     SET payload = cand.new_payload || jsonb_build_object('erasure_ref', p_ref),
+         target_id = CASE WHEN cand.about_it THEN NULL ELSE l.target_id END
+    FROM cand
+   WHERE l.tableoid = cand.toid AND l.ctid = cand.rid AND (cand.about_it OR cand.new_payload IS DISTINCT FROM cand.old_payload);
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RETURN n;
+END $$;
+
+
+--
+-- Name: backup_key_holder_add(uuid, uuid, text, text, text, boolean, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.backup_key_holder_add(p_tenant uuid, p_site uuid, p_label text, p_public_key text, p_check_code_hash text, p_loss_acknowledged boolean, p_actor text) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+DECLARE v_id uuid;
+BEGIN
+  IF p_loss_acknowledged IS NOT TRUE THEN
+    RAISE EXCEPTION 'the hotel must acknowledge that lost keys mean unreadable backups'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  INSERT INTO backup_key_holders (tenant_id, site_id, label, public_key, check_code_hash, loss_acknowledged, created_by)
+  VALUES (p_tenant, p_site, btrim(p_label), p_public_key, p_check_code_hash, true, btrim(p_actor))
+  RETURNING id INTO v_id;
+  INSERT INTO backup_key_holder_events (tenant_id, site_id, holder_id, event, actor)
+  VALUES (p_tenant, p_site, v_id, 'added', btrim(p_actor));
+  RETURN v_id;
+END $$;
+
+
+--
+-- Name: backup_key_holder_confirm(uuid, uuid, uuid, text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.backup_key_holder_confirm(p_tenant uuid, p_site uuid, p_id uuid, p_check_code_hash text, p_actor text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+DECLARE h backup_key_holders%ROWTYPE;
+BEGIN
+  SELECT * INTO h FROM backup_key_holders WHERE id = p_id AND tenant_id = p_tenant AND site_id = p_site FOR UPDATE;
+  IF NOT FOUND OR h.status <> 'PENDING' THEN
+    RAISE EXCEPTION 'no backup key is waiting for confirmation' USING ERRCODE = 'no_data_found';
+  END IF;
+  IF h.created_at < now() - interval '1 hour' THEN
+    RAISE EXCEPTION 'the key was handed over more than an hour ago; add the holder again' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_check_code_hash IS DISTINCT FROM h.check_code_hash THEN
+    RAISE EXCEPTION 'the check code does not match' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  UPDATE backup_key_holders SET status = 'ACTIVE', confirmed_at = now(), check_code_hash = NULL WHERE id = p_id;
+  INSERT INTO backup_key_holder_events (tenant_id, site_id, holder_id, event, actor)
+  VALUES (p_tenant, p_site, p_id, 'confirmed', btrim(p_actor));
+END $$;
+
+
+--
+-- Name: backup_key_holder_events_append_only(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.backup_key_holder_events_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'backup_key_holder_events is append-only: % refused', TG_OP USING ERRCODE = 'restrict_violation';
+END $$;
+
+
+--
+-- Name: backup_key_holder_remove(uuid, uuid, uuid, text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.backup_key_holder_remove(p_tenant uuid, p_site uuid, p_id uuid, p_actor text, p_reason text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+DECLARE h backup_key_holders%ROWTYPE;
+BEGIN
+  IF p_reason IS NULL OR length(btrim(p_reason)) NOT BETWEEN 4 AND 500 THEN
+    RAISE EXCEPTION 'a reason of 4-500 characters is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  -- Serialise removals per site, so two at once cannot both pass the last-holder check.
+  PERFORM 1 FROM backup_key_holders WHERE tenant_id = p_tenant AND site_id = p_site AND status = 'ACTIVE' FOR UPDATE;
+  SELECT * INTO h FROM backup_key_holders WHERE id = p_id AND tenant_id = p_tenant AND site_id = p_site FOR UPDATE;
+  IF NOT FOUND OR h.status = 'REMOVED' THEN
+    RAISE EXCEPTION 'no such backup key holder' USING ERRCODE = 'no_data_found';
+  END IF;
+  IF h.status = 'ACTIVE' AND NOT EXISTS (SELECT 1 FROM backup_key_holders
+                                          WHERE tenant_id = p_tenant AND site_id = p_site AND status = 'ACTIVE' AND id <> p_id) THEN
+    RAISE EXCEPTION 'this is the last backup key holder: add another before removing it' USING ERRCODE = 'object_in_use';
+  END IF;
+  UPDATE backup_key_holders
+     SET status = 'REMOVED', removed_at = now(), removed_by = btrim(p_actor), remove_reason = btrim(p_reason),
+         check_code_hash = NULL
+   WHERE id = p_id;
+  INSERT INTO backup_key_holder_events (tenant_id, site_id, holder_id, event, actor, reason)
+  VALUES (p_tenant, p_site, p_id, 'removed', btrim(p_actor), btrim(p_reason));
+END $$;
+
+
+--
+-- Name: backup_key_holder_tested(uuid, uuid, text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.backup_key_holder_tested(p_tenant uuid, p_site uuid, p_public_key text, p_actor text) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+DECLARE v_id uuid;
+BEGIN
+  UPDATE backup_key_holders SET last_tested_at = now()
+   WHERE tenant_id = p_tenant AND site_id = p_site AND public_key = p_public_key AND status <> 'PENDING'
+  RETURNING id INTO v_id;
+  IF v_id IS NULL THEN
+    RAISE EXCEPTION 'this key is not a registered backup key holder' USING ERRCODE = 'no_data_found';
+  END IF;
+  INSERT INTO backup_key_holder_events (tenant_id, site_id, holder_id, event, actor)
+  VALUES (p_tenant, p_site, v_id, 'restore_tested', btrim(p_actor));
+  RETURN v_id;
+END $$;
+
+
+--
+-- Name: backup_key_holders_no_delete(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.backup_key_holders_no_delete() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'a backup key holder is never deleted; remove it instead' USING ERRCODE = 'restrict_violation';
+END $$;
+
+
+--
+-- Name: backup_key_recipients(uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.backup_key_recipients(p_tenant uuid DEFAULT NULL::uuid, p_site uuid DEFAULT NULL::uuid) RETURNS SETOF text
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+BEGIN
+  IF p_tenant IS NULL OR p_site IS NULL THEN
+    -- The site the appliance serves is the one in public.sites; a previous owner's holders are never used.
+    IF (SELECT count(DISTINCT (h.tenant_id, h.site_id)) FROM backup_key_holders h
+          JOIN sites st ON st.id = h.site_id AND st.tenant_id = h.tenant_id
+         WHERE h.status = 'ACTIVE') > 1 THEN
+      RAISE EXCEPTION 'backup key holders of more than one site are active; name the site'
+        USING ERRCODE = 'cardinality_violation';
+    END IF;
+    RETURN QUERY SELECT h.public_key FROM backup_key_holders h
+                   JOIN sites st ON st.id = h.site_id AND st.tenant_id = h.tenant_id
+                  WHERE h.status = 'ACTIVE' ORDER BY h.confirmed_at;
+  ELSE
+    RETURN QUERY SELECT public_key FROM backup_key_holders
+                  WHERE status = 'ACTIVE' AND tenant_id = p_tenant AND site_id = p_site ORDER BY confirmed_at;
+  END IF;
+END $$;
+
+
+--
+-- Name: guest_data_erase(uuid, uuid, text, uuid, text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guest_data_erase(p_tenant uuid, p_site uuid, p_kind text, p_id uuid, p_operator text, p_reason text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+DECLARE v jsonb;
+BEGIN
+  v := public.guest_data_erase_core(p_tenant, p_site, p_kind, p_id, p_operator, p_reason, false, NULL);
+  PERFORM iam_v2.ledger_append_erasure(p_tenant, p_site, v ->> 'erasure_ref');
+  RETURN v;
+END $$;
+
+
+--
+-- Name: FUNCTION guest_data_erase(p_tenant uuid, p_site uuid, p_kind text, p_id uuid, p_operator text, p_reason text); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.guest_data_erase(p_tenant uuid, p_site uuid, p_kind text, p_id uuid, p_operator text, p_reason text) IS 'Erases one guest (0128, GDPR plan C3, Art. 17; D-C3): anonymises everything iam_v2.guest_data_scope finds with the 0127 routine, and the guest''s sign-in codes, OAuth states and audit-log mentions. Deletes no row. Refused (SQLSTATE 55006, DETAIL pms_open / access_live / online) while anything is live. Returns the erasure reference.';
+
+
+--
+-- Name: guest_data_erase_core(uuid, uuid, text, uuid, text, text, boolean, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guest_data_erase_core(p_tenant uuid, p_site uuid, p_kind text, p_id uuid, p_operator text, p_reason text, p_replay boolean, p_ref text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+DECLARE v_ids text[]; v_vals text[]; v_strong text[]; v_names text[]; v_weak text[]; v_macs text[]; v_pats text[];
+        v_since timestamptz; n_codes integer; n_oauth integer; n_audit integer; v_ref text; v_res jsonb;
+        a uuid[]; p uuid[]; s uuid[]; d uuid[]; gr uuid[]; n_dhcp integer;
+BEGIN
+  -- What identifies the guest, read BEFORE anything is anonymised.
+  SELECT COALESCE(array_agg(o_value) FILTER (WHERE o_kind = 'strong'), '{}'),
+         COALESCE(array_agg(o_value) FILTER (WHERE o_kind = 'name'), '{}'),
+         COALESCE(array_agg(o_value) FILTER (WHERE o_kind = 'weak'), '{}')
+    INTO v_strong, v_names, v_weak FROM iam_v2.guest_data_identifiers(p_tenant, p_site, p_kind, p_id);
+  IF NOT p_replay THEN
+    PERFORM public.guest_data_reason_check(p_tenant, p_site, p_kind, p_id, p_reason);
+  END IF;
+  SELECT COALESCE(array_agg(DISTINCT o_id::text) FILTER (
+             WHERE o_kind NOT IN ('stay_shared', 'stay_shared_other', 'access_shared', 'device_shared', 'challenge')
+               AND NOT (o_kind = 'stay_event' AND EXISTS (SELECT 1 FROM iam_v2.stay_events e
+                                                         WHERE e.id = o_id AND iam_v2.stay_named_guests(e.stay_id) > 1))), '{}'),
+         COALESCE(array_agg(DISTINCT lower(o_value))
+                    FILTER (WHERE o_kind IN ('account', 'identity', 'device') AND o_value IS NOT NULL), '{}'),
+         COALESCE(array_agg(DISTINCT lower(o_value)) FILTER (WHERE o_kind = 'device' AND o_value IS NOT NULL), '{}'),
+         COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'account'), '{}'),
+         COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind IN ('principal', 'identity')), '{}'),
+         COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'stay'), '{}'),
+         COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'device'), '{}'),
+         COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'stay_guest'), '{}')
+    INTO v_ids, v_vals, v_macs, a, p, s, d, gr FROM iam_v2.guest_data_scope(p_tenant, p_site, p_kind, p_id);
+  -- Nothing about the guest can be older than their first record: the activity log is read from there.
+  SELECT least((SELECT min(x.created_at) FROM iam_v2.guest_access_accounts x WHERE x.id = ANY (a)),
+               (SELECT min(x.verified_at) FROM iam_v2.guest_principal_identities x WHERE x.guest_principal_id = ANY (p)),
+               (SELECT min(x.expires_at) - interval '1 day' FROM iam_v2.auth_contexts x
+                 WHERE x.guest_principal_id = ANY (p) OR x.guest_account_id = ANY (a) OR x.stay_id = ANY (s)),
+               (SELECT min(x.received_at) FROM iam_v2.stay_events x
+                 WHERE x.stay_id = ANY (s) OR x.stay_id IN (SELECT sg.stay_id FROM iam_v2.stay_guests sg WHERE sg.id = ANY (gr))),
+               (SELECT min(x.first_seen) FROM iam_v2.devices x WHERE x.id = ANY (d))) - interval '1 day'
+    INTO v_since;
+  IF EXISTS (SELECT 1 FROM iam_v2.guest_access_accounts x WHERE x.id = ANY (a) AND x.created_at IS NULL)
+     OR EXISTS (SELECT 1 FROM iam_v2.devices x WHERE x.id = ANY (d) AND x.first_seen IS NULL) THEN
+    v_since := NULL;
+  END IF;
+  v_since := COALESCE(v_since, '-infinity');
+
+  -- The one-time codes are anonymised LAST: the person's verification records and code bindings are tied to them by
+  -- the address the code went to, and the erasure below reads that address (0145). Counted now, changed after.
+  SELECT count(*) INTO n_codes FROM auth_otps o WHERE o.tenant_id = p_tenant AND lower(o.destination) = ANY (v_vals);
+  UPDATE social_oauth_states x SET client_ip = NULL, client_mac = NULL, user_agent = NULL, code_verifier = NULL, nonce = NULL
+   WHERE x.tenant_id = p_tenant AND x.client_mac::text = ANY (v_macs);
+  GET DIAGNOSTICS n_oauth = ROW_COUNT;
+
+  -- THE ACTIVITY LOG KEEPS WHO AND WHEN (D-R2), AND TOUCHES NOTHING THAT IS NOT ABOUT THIS GUEST (0145). An entry
+  -- about the guest's own records keeps its action, staff member and time; the record id gives way to the erasure
+  -- reference and the guest's identifiers and name become "[erased]". Any other entry loses only a STRONG
+  -- identifier (an address, a username, a reservation number, a device address): a room number, a first or last
+  -- name alone, or a display name never rewrites an entry about something else (a VLAN 101, a Smith family
+  -- request). What staff typed into the guest-data screens is read more widely, since staff typed it about
+  -- someone: the full name there, and in a search any part of a name or room. A refusal below undoes this.
+  v_ref := COALESCE(p_ref, 'ER-' || upper(encode(public.gen_random_bytes(6), 'hex')));
+  v_pats := ARRAY(SELECT '%' || replace(replace(replace(x, '\', '\\'), '%', '\%'), '_', '\_') || '%'
+                    FROM unnest(v_strong || v_names || v_weak) x WHERE length(x) >= 3);
+  WITH cand AS MATERIALIZED (
+    SELECT l.tableoid AS toid, l.ctid AS rid, l.payload AS old_payload, l.actor_type,
+           (l.target_id = ANY (v_ids) OR lower(l.target_id) = ANY (v_strong) OR lower(l.actor_id) = ANY (v_strong)) AS about_it,
+           CASE
+             WHEN l.action = 'guest_data.searched' THEN iam_v2.redact_guest_text(l.payload, v_strong || v_names || v_weak, true)
+             -- An entry ABOUT this guest loses every way of naming them (a surname and a room number included); one a staff
+             -- member typed about someone loses a full name and the strong identifiers.
+             WHEN l.target_id = ANY (v_ids) OR lower(l.target_id) = ANY (v_strong) OR lower(l.actor_id) = ANY (v_strong)
+               THEN iam_v2.redact_guest_text(l.payload, v_strong || v_names || v_weak, false)
+             WHEN l.action LIKE 'guest_data.%'
+               THEN iam_v2.redact_guest_text(l.payload, v_strong || v_names, false)
+             ELSE iam_v2.redact_guest_text(l.payload, v_strong, false)
+           END AS new_payload
+      FROM audit_log l
+     WHERE l.tenant_id = p_tenant AND l.ts >= v_since
+       AND (l.target_id = ANY (v_ids) OR lower(l.target_id) = ANY (v_strong) OR lower(l.actor_id) = ANY (v_strong)
+            OR l.action = 'guest_data.searched' OR lower(l.payload::text) LIKE ANY (v_pats)))
+  UPDATE audit_log l
+     SET payload = cand.new_payload || jsonb_build_object('erasure_ref', v_ref),
+         target_id = CASE WHEN cand.about_it THEN NULL ELSE l.target_id END,
+         ip = CASE WHEN l.actor_type IN ('operator', 'system', 'appliance') THEN l.ip END,
+         user_agent = CASE WHEN l.actor_type IN ('operator', 'system', 'appliance') THEN l.user_agent END,
+         actor_id = CASE WHEN l.actor_type IN ('operator', 'system', 'appliance') THEN l.actor_id END
+    FROM cand
+   WHERE l.tableoid = cand.toid AND l.ctid = cand.rid AND (cand.about_it OR cand.new_payload IS DISTINCT FROM cand.old_payload);
+  GET DIAGNOSTICS n_audit = ROW_COUNT;
+
+  -- Refuses (and so undoes the above) while anything is live.
+  v_res := iam_v2.erase_guest_records(p_tenant, p_site, p_kind, p_id, p_operator, p_reason,
+             jsonb_build_object('verification_codes', n_codes, 'oauth_states', n_oauth, 'audit_entries', n_audit,
+                                '_erasure_ref', v_ref, '_replay', p_replay));
+  UPDATE auth_otps o SET destination = 'anonymised', ip = NULL, user_agent = NULL
+   WHERE o.tenant_id = p_tenant AND lower(o.destination) = ANY (v_vals);
+  -- A static address reservation (Network -> DHCP) is staff-managed infrastructure and is not touched here; it is reported,
+  -- so that staff remove it where it lives.
+  SELECT count(*) INTO n_dhcp FROM public.dhcp_reservations r WHERE lower(r.mac::text) = ANY (v_macs);
+  IF n_dhcp > 0 THEN
+    v_res := jsonb_set(v_res, '{counts,dhcp_reservations_kept}', to_jsonb(n_dhcp));
+  END IF;
+  RETURN v_res;
+END $$;
+
+
+--
+-- Name: guest_data_export(uuid, uuid, text, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guest_data_export(p_tenant uuid, p_site uuid, p_kind text, p_id uuid) RETURNS jsonb
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+DECLARE v jsonb; v_ids text[]; v_vals text[]; v_macs text[];
+        a uuid[]; p uuid[]; s uuid[]; e uuid[]; d uuid[]; v_ctx uuid[]; v_strong text[]; v_pats text[];
+BEGIN
+  v := iam_v2.guest_data_export_records(p_tenant, p_site, p_kind, p_id);
+  SELECT COALESCE(array_agg(o_value) FILTER (WHERE o_kind = 'strong'), '{}') INTO v_strong FROM iam_v2.guest_data_identifiers(p_tenant, p_site, p_kind, p_id);
+  v_pats := ARRAY(SELECT '%' || replace(replace(replace(x, '\', '\\'), '%', '\%'), '_', '\_') || '%' FROM unnest(v_strong) x WHERE length(x) >= 4);
+  SELECT COALESCE(array_agg(DISTINCT o_id::text) FILTER (
+             WHERE o_kind NOT IN ('stay_shared', 'stay_shared_other', 'access_shared', 'device_shared', 'challenge')
+               AND NOT (o_kind = 'stay_event' AND EXISTS (SELECT 1 FROM iam_v2.stay_events e
+                                                         WHERE e.id = o_id AND iam_v2.stay_named_guests(e.stay_id) > 1))), '{}'),
+         COALESCE(array_agg(DISTINCT lower(o_value)) FILTER (WHERE o_kind IN ('account', 'identity') AND o_value IS NOT NULL), '{}'),
+         COALESCE(array_agg(DISTINCT lower(o_value)) FILTER (WHERE o_kind = 'device' AND o_value IS NOT NULL), '{}'),
+         COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'account'), '{}'),
+         COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind IN ('principal', 'identity')), '{}'),
+         COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'stay'), '{}'),
+         COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'entitlement'), '{}'),
+         COALESCE(array_agg(DISTINCT o_id) FILTER (WHERE o_kind = 'device'), '{}')
+    INTO v_ids, v_vals, v_macs, a, p, s, e, d FROM iam_v2.guest_data_scope(p_tenant, p_site, p_kind, p_id);
+  -- The person's sign-ins: by their own account or identity, from a device only they used, or the one that paid
+  -- for access they held. A sign-in with a room's credentials is not attributable to the reservation holder
+  -- (0145), and a shared device is not in d, so nobody else's sign-in is exported.
+  SELECT COALESCE(array_agg(ac.id), '{}') INTO v_ctx FROM iam_v2.auth_contexts ac
+   WHERE ac.tenant_id = p_tenant AND ac.site_id = p_site
+     AND (ac.guest_account_id IN (SELECT x.id FROM iam_v2.guest_access_accounts x WHERE x.id = ANY (a) AND x.self_registered)
+          OR ac.guest_principal_id = ANY (p)
+          OR ac.device_id = ANY (d)
+          OR ac.id IN (SELECT pu.auth_context_id FROM iam_v2.purchases pu
+                         JOIN iam_v2.entitlements en ON en.purchase_id = pu.id WHERE en.id = ANY (e)));
+  RETURN jsonb_build_object('format', 'stayconnect.guest-data-export/2', 'exported_at', now()) || v || jsonb_build_object(
+    'verification_codes', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'channel', o.channel, 'sent_to', o.destination, 'sent_at', o.issued_at, 'used_at', o.consumed_at,
+        'requested_from_ip', o.ip, 'requested_from_browser', o.user_agent)
+        ORDER BY o.issued_at), '[]'::jsonb)
+      FROM auth_otps o WHERE o.tenant_id = p_tenant AND lower(o.destination) = ANY (v_vals)),
+    'sign_in_redirects', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'provider', x.provider, 'from_ip', x.client_ip, 'device_mac_address', x.client_mac, 'browser', x.user_agent,
+        'started_at', x.created_at, 'completed_at', x.consumed_at) ORDER BY x.created_at), '[]'::jsonb)
+      FROM social_oauth_states x WHERE x.tenant_id = p_tenant AND x.client_mac::text = ANY (v_macs)),
+    'activity_log', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'at', l.ts, 'action', l.action, 'by', l.actor_type, 'details', l.payload) ORDER BY l.ts), '[]'::jsonb)
+      FROM audit_log l WHERE l.tenant_id = p_tenant
+       -- The same entries the erasure rewrites: by the record's id, by an address, a username or a number of theirs, as the
+       -- target or the actor, or named in the entry.
+       AND (l.target_id = ANY (v_ids) OR lower(l.target_id) = ANY (v_strong) OR lower(l.actor_id) = ANY (v_strong)
+            OR lower(l.payload::text) LIKE ANY (v_pats))),
+    'privacy_notices_shown', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'signed_in_at', ac.privacy_notice_shown_at, 'sign_in_method', ac.method, 'notice', left(pv.fingerprint, 12))
+        ORDER BY ac.privacy_notice_shown_at), '[]'::jsonb)
+      FROM iam_v2.auth_contexts ac JOIN privacy_notice_versions pv ON pv.id = ac.privacy_notice_version_id
+     WHERE ac.id = ANY (v_ctx)),
+    'privacy_notices', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'notice', left(pv.fingerprint, 12), 'first_shown_at', pv.first_shown_at, 'text', pv.privacy_text,
+        'link', pv.privacy_url, 'terms_link', pv.terms_url) ORDER BY pv.first_shown_at), '[]'::jsonb)
+      FROM privacy_notice_versions pv
+     WHERE pv.id IN (SELECT ac.privacy_notice_version_id FROM iam_v2.auth_contexts ac WHERE ac.id = ANY (v_ctx))));
+END $$;
+
+
+--
+-- Name: FUNCTION guest_data_export(p_tenant uuid, p_site uuid, p_kind text, p_id uuid); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.guest_data_export(p_tenant uuid, p_site uuid, p_kind text, p_id uuid) IS 'One guest''s data as a JSON document (0128, 0130, 0137; GDPR Art. 15/20): accounts, identities, remembered devices, stays with their PMS events and links, post-stay access, internet access, purchases, payments, refunds and room charges, devices with their network sightings and staff actions, sessions with usage samples, sign-in attempts and restrictions, verification access and codes, the activity log entries about them with their details, and the privacy notices each sign-in happened under. Changes nothing.';
+
+
+--
+-- Name: guest_data_reason_check(uuid, uuid, text, uuid, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guest_data_reason_check(p_tenant uuid, p_site uuid, p_kind text, p_id uuid, p_reason text) RETURNS void
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+DECLARE v_vals text[];
+BEGIN
+  SELECT COALESCE(array_agg(o_value), '{}') INTO v_vals FROM iam_v2.guest_data_identifiers(p_tenant, p_site, p_kind, p_id);
+  -- A phone number is a run of at least nine digits (spaces, dots, dashes and brackets between them allowed); a
+  -- date such as 2026-10-17 has eight and passes.
+  IF p_reason ~* '[[:alnum:]._%+-]+@[[:alnum:].-]+\.[[:alpha:]]{2,}'
+     OR EXISTS (SELECT 1 FROM regexp_matches(p_reason, '(\+?[0-9][0-9 ().-]{6,}[0-9])', 'g') m
+                 WHERE length(regexp_replace(m[1], '[^0-9]', '', 'g')) >= 9)
+     OR iam_v2.text_names_any(p_reason, v_vals) THEN
+    RAISE EXCEPTION 'the reason must not name the guest: leave out their name, email, phone, room, reservation and device'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+END $$;
+
+
+--
+-- Name: FUNCTION guest_data_reason_check(p_tenant uuid, p_site uuid, p_kind text, p_id uuid, p_reason text); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.guest_data_reason_check(p_tenant uuid, p_site uuid, p_kind text, p_id uuid, p_reason text) IS 'Refuses (22023) a guest-data export or erasure reason that contains one of the guest''s identifiers as a word, an email address or a phone number (0144, D-C4): the reason is kept in the erasure and activity logs.';
+
+
+--
+-- Name: ledger_apply(jsonb, boolean); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.ledger_apply(p_entries jsonb, p_adopt boolean DEFAULT false) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+DECLARE e record; m record; v_head_seq bigint; v_head_hash text; v_applied integer := 0; v_known integer := 0;
+        v_failed jsonb := NULL; v_conflict jsonb := NULL; v_hash text; v_first record; v_stored text;
+BEGIN
+  IF jsonb_typeof(p_entries) IS DISTINCT FROM 'array' THEN
+    RAISE EXCEPTION 'a ledger is a list of entries' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('stayconnect-erasure-ledger'));
+  SELECT * INTO m FROM iam_v2.ledger_meta;
+  SELECT x.* INTO v_first FROM jsonb_to_recordset(p_entries) AS x(ledger uuid, seq bigint) ORDER BY x.seq LIMIT 1;
+  IF p_adopt AND v_first.seq = 1 AND v_first.ledger IS DISTINCT FROM m.ledger_id
+     AND (SELECT count(*) FROM iam_v2.erasure_ledger) = 1 THEN
+    PERFORM set_config('iam_v2.ledger_adopt', 'on', true);
+    DELETE FROM iam_v2.erasure_ledger;
+    UPDATE iam_v2.ledger_meta SET ledger_id = v_first.ledger;
+    PERFORM set_config('iam_v2.ledger_adopt', '', true);
+    SELECT * INTO m FROM iam_v2.ledger_meta;
+  END IF;
+  SELECT l.seq, l.hash INTO v_head_seq, v_head_hash FROM iam_v2.erasure_ledger l ORDER BY l.seq DESC LIMIT 1;
+  v_head_seq := COALESCE(v_head_seq, 0);
+  v_head_hash := COALESCE(v_head_hash, repeat('0', 64));
+  FOR e IN SELECT x.* FROM jsonb_to_recordset(p_entries)
+             AS x(ledger uuid, seq bigint, prev text, kind text, tenant uuid, site uuid, at_us bigint, body text, hash text)
+            ORDER BY x.seq LOOP
+    IF e.ledger IS DISTINCT FROM m.ledger_id THEN
+      v_conflict := jsonb_build_object('seq', e.seq, 'why', 'another ledger');
+      EXIT;
+    END IF;
+    IF e.seq <= v_head_seq THEN
+      SELECT l.hash INTO v_stored FROM iam_v2.erasure_ledger l WHERE l.seq = e.seq;
+      IF v_stored IS DISTINCT FROM e.hash THEN
+        v_conflict := jsonb_build_object('seq', e.seq, 'why', 'the entry differs from the one in the database');
+        EXIT;
+      END IF;
+      v_known := v_known + 1;
+      CONTINUE;
+    END IF;
+    v_hash := iam_v2.ledger_hash(e.ledger, e.seq, e.prev, e.kind, e.tenant, e.site, e.at_us, e.body);
+    IF e.seq <> v_head_seq + 1 OR e.prev IS DISTINCT FROM v_head_hash OR v_hash IS DISTINCT FROM e.hash THEN
+      v_conflict := jsonb_build_object('seq', e.seq, 'why', 'the entry does not continue the ledger');
+      EXIT;
+    END IF;
+    BEGIN
+      IF e.kind = 'erase' THEN
+        PERFORM public.ledger_replay_erase(e.tenant, e.site, e.body::jsonb);
+      ELSIF e.kind = 'request_answered' THEN
+        PERFORM public.ledger_replay_answer(e.tenant, e.site, e.body::jsonb);
+      ELSIF e.kind = 'assisted_closed' THEN
+        PERFORM public.ledger_replay_assisted_closed(e.tenant, e.site, e.body::jsonb);
+      END IF;
+      INSERT INTO iam_v2.erasure_ledger (seq, ledger_id, tenant_id, site_id, kind, at_us, body, prev_hash, hash, confirmed)
+      VALUES (e.seq, e.ledger, e.tenant, e.site, e.kind, e.at_us, e.body, e.prev, e.hash, true);
+    EXCEPTION WHEN OTHERS THEN
+      v_failed := jsonb_build_object('seq', e.seq, 'kind', e.kind, 'error', SQLERRM);
+    END;
+    IF v_failed IS NOT NULL THEN
+      EXIT;
+    END IF;
+    v_head_seq := e.seq;
+    v_head_hash := e.hash;
+    v_applied := v_applied + 1;
+  END LOOP;
+  RETURN jsonb_build_object('applied', v_applied, 'already_known', v_known, 'failed', v_failed, 'conflict', v_conflict,
+                            'head', jsonb_build_object('ledger', m.ledger_id, 'seq', v_head_seq, 'hash', v_head_hash));
+END $$;
+
+
+--
+-- Name: FUNCTION ledger_apply(p_entries jsonb, p_adopt boolean); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.ledger_apply(p_entries jsonb, p_adopt boolean) IS 'Applies the erasure ledger entries the database does not have (0148). Run by scd on a restored database before it goes live, and hourly; granted to nobody else.';
+
+
+--
+-- Name: ledger_destination_get(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.ledger_destination_get() RETURNS jsonb
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+  SELECT COALESCE((SELECT to_jsonb(d) - 'singleton' - 'secret_ct' - 'secret_nonce' FROM public.ledger_destination d), 'null'::jsonb)
+$$;
+
+
+--
+-- Name: ledger_destination_note(boolean, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.ledger_destination_note(p_ok boolean, p_error text) RETURNS void
+    LANGUAGE sql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+  UPDATE public.ledger_destination
+     SET last_ok_at = CASE WHEN p_ok THEN now() ELSE last_ok_at END,
+         last_error = CASE WHEN p_ok THEN NULL ELSE left(p_error, 300) END,
+         last_error_at = CASE WHEN p_ok THEN NULL ELSE now() END
+$$;
+
+
+--
+-- Name: ledger_destination_secret(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.ledger_destination_secret() RETURNS TABLE(secret_ct bytea, secret_nonce bytea, secret_key_id text, secret_ver integer)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+  SELECT d.secret_ct, d.secret_nonce, d.secret_key_id, d.secret_ver FROM public.ledger_destination d
+$$;
+
+
+--
+-- Name: ledger_destination_set(text, jsonb, bytea, bytea, text, integer, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.ledger_destination_set(p_kind text, p_config jsonb, p_ct bytea, p_nonce bytea, p_key_id text, p_ver integer, p_by text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+BEGIN
+  IF p_kind NOT IN ('dir', 'sftp', 's3') THEN
+    RAISE EXCEPTION 'unknown storage kind' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  INSERT INTO public.ledger_destination (singleton, kind, config, secret_ct, secret_nonce, secret_key_id, secret_ver, configured_by, configured_at, verified_at, last_ok_at, last_error, last_error_at)
+  VALUES (true, p_kind, p_config, p_ct, p_nonce, p_key_id, p_ver, p_by, now(), now(), NULL, NULL, NULL)
+  ON CONFLICT (singleton) DO UPDATE
+     SET kind = EXCLUDED.kind, config = EXCLUDED.config, secret_ct = EXCLUDED.secret_ct, secret_nonce = EXCLUDED.secret_nonce,
+         secret_key_id = EXCLUDED.secret_key_id, secret_ver = EXCLUDED.secret_ver, configured_by = EXCLUDED.configured_by,
+         configured_at = now(), verified_at = now(), last_ok_at = NULL, last_error = NULL, last_error_at = NULL;
+END $$;
+
+
+--
+-- Name: ledger_replay_answer(uuid, uuid, jsonb); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.ledger_replay_answer(p_tenant uuid, p_site uuid, p_body jsonb) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'public', 'pg_temp'
+    AS $$
+DECLARE v_id uuid := (p_body ->> 'id')::uuid; v_at timestamptz := COALESCE((p_body ->> 'answered_at')::timestamptz, now());
+BEGIN
+  UPDATE guest_data_request_register q
+     SET status = p_body ->> 'status', outcome_code = p_body ->> 'outcome', answered_by = 'restored from the erasure ledger',
+         answered_at = v_at, erasure_ref = NULLIF(p_body ->> 'erasure_ref', ''), assisted_ref = NULLIF(p_body ->> 'assisted_ref', ''),
+         requester_ref = '[removed]', outcome_note = NULL, extension_reason = NULL,
+         extended_until = NULLIF(p_body ->> 'extended_until', '')::date
+   WHERE q.id = v_id AND q.tenant_id = p_tenant AND q.site_id = p_site AND q.status = 'OPEN';
+  IF NOT FOUND AND NOT EXISTS (SELECT 1 FROM guest_data_request_register q WHERE q.id = v_id) THEN
+    INSERT INTO guest_data_request_register (id, ref, tenant_id, site_id, kind, received_at, due_at, extended_until, requester_ref,
+                                             verification_method, status, outcome_code, erasure_ref, assisted_ref, created_by,
+                                             created_at, answered_by, answered_at)
+    VALUES (v_id, p_body ->> 'ref', p_tenant, p_site, p_body ->> 'kind', (p_body ->> 'received_at')::date, (p_body ->> 'due_at')::date,
+            NULLIF(p_body ->> 'extended_until', '')::date, '[removed]', NULLIF(p_body ->> 'verification_method', ''),
+            p_body ->> 'status', p_body ->> 'outcome', NULLIF(p_body ->> 'erasure_ref', ''), NULLIF(p_body ->> 'assisted_ref', ''),
+            'restored from the erasure ledger', (p_body ->> 'received_at')::timestamptz, 'restored from the erasure ledger', v_at)
+    ON CONFLICT DO NOTHING;
+  END IF;
+END $$;
+
+
+--
+-- Name: ledger_replay_assisted_closed(uuid, uuid, jsonb); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.ledger_replay_assisted_closed(p_tenant uuid, p_site uuid, p_body jsonb) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'public', 'pg_temp'
+    AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM assisted_guest_requests q WHERE q.id = (p_body ->> 'id')::uuid AND q.tenant_id = p_tenant
+                AND q.site_id = p_site AND q.status = 'OPEN') THEN
+    PERFORM assisted_close(p_tenant, p_site, (p_body ->> 'id')::uuid, 'restored from the erasure ledger', p_body ->> 'status',
+                           'closed before the restore', jsonb_build_object('restored', true), COALESCE(p_body ->> 'status', 'CANCELLED'));
+  END IF;
+END $$;
+
+
+--
+-- Name: ledger_replay_erase(uuid, uuid, jsonb); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.ledger_replay_erase(p_tenant uuid, p_site uuid, p_body jsonb) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'public', 'pg_temp'
+    AS $$
+DECLARE r record; v_ref text := p_body ->> 'erasure_ref'; v_res jsonb; v_kinds text[] := '{}'; v_ids uuid[] := '{}';
+BEGIN
+  FOR r IN SELECT x.kind, x.id, x.detail FROM jsonb_to_recordset(p_body -> 'records') AS x(kind text, id uuid, detail text) LOOP
+    IF r.kind = 'assisted_record' THEN
+      v_kinds := v_kinds || r.detail;
+      v_ids := v_ids || r.id;
+    ELSE
+      BEGIN
+        PERFORM public.guest_data_erase_core(p_tenant, p_site, r.kind, r.id, 'restore', 'erasure replayed from the ledger', true, v_ref);
+      EXCEPTION WHEN no_data_found THEN
+        NULL;   -- the record did not exist in the restored data
+      END;
+    END IF;
+  END LOOP;
+  IF cardinality(v_ids) > 0 THEN
+    v_res := assisted_apply_records(p_tenant, p_site, v_kinds, v_ids);
+    PERFORM public.audit_clean_macs(p_tenant, ARRAY(SELECT jsonb_array_elements_text(v_res -> 'macs_cleared')), v_ref, '-infinity');
+  END IF;
+  INSERT INTO guest_data_erasures (erasure_ref, tenant_id, site_id, subject_kind, erased_by, erase_reason, counts, erased_at)
+  VALUES (v_ref, p_tenant, p_site, p_body ->> 'subject_kind', 'restored from the erasure ledger',
+          'erasure replayed from the ledger; the reason is not kept there', COALESCE(p_body -> 'counts', '{}'::jsonb),
+          COALESCE((p_body ->> 'erased_at')::timestamptz, now()))
+  ON CONFLICT (erasure_ref) DO NOTHING;
+  INSERT INTO erasure_journal (tenant_id, site_id, erasure_ref, kind, subject_id, detail, erased_at)
+    SELECT p_tenant, p_site, v_ref, x.kind, x.id, x.detail, COALESCE((p_body ->> 'erased_at')::timestamptz, now())
+      FROM jsonb_to_recordset(p_body -> 'records') AS x(kind text, id uuid, detail text)
+  ON CONFLICT DO NOTHING;
+END $$;
+
+
+--
+-- Name: ledger_reset(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.ledger_reset() RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+DECLARE v_id uuid := gen_random_uuid(); v_us bigint := (extract(epoch from clock_timestamp()) * 1000000)::bigint;
+        c_nil constant uuid := '00000000-0000-0000-0000-000000000000'; c_body constant text := '{"note": "ledger created"}';
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('stayconnect-erasure-ledger'));
+  PERFORM set_config('iam_v2.ledger_adopt', 'on', true);
+  DELETE FROM iam_v2.erasure_ledger;
+  UPDATE iam_v2.ledger_meta SET ledger_id = v_id, created_at = now();
+  INSERT INTO iam_v2.erasure_ledger (seq, ledger_id, tenant_id, site_id, kind, at_us, body, prev_hash, hash, confirmed)
+  VALUES (1, v_id, c_nil, c_nil, 'genesis', v_us, c_body, repeat('0', 64),
+          iam_v2.ledger_hash(v_id, 1, repeat('0', 64), 'genesis', c_nil, c_nil, v_us, c_body), true);
+  DELETE FROM public.ledger_destination;
+  PERFORM set_config('iam_v2.ledger_adopt', '', true);
+  RETURN jsonb_build_object('ledger', v_id);
+END $$;
+
+
+--
+-- Name: operator_account_retention_changes_append_only(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.operator_account_retention_changes_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'public.operator_account_retention_changes is append-only: % refused', TG_OP
+    USING ERRCODE = 'restrict_violation';
+END $$;
+
+
+--
+-- Name: operator_account_retention_get(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.operator_account_retention_get() RETURNS TABLE(disabled_account_days integer, config_version bigint, updated_at timestamp with time zone, updated_by text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT COALESCE(p.disabled_account_days, 730), COALESCE(p.config_version, 0::bigint), p.updated_at, p.updated_by
+    FROM (SELECT 1) one
+    LEFT JOIN public.operator_account_retention p ON p.id;
+$$;
+
+
+--
+-- Name: operator_account_retention_set(integer, text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.operator_account_retention_set(p_disabled_account_days integer, p_operator text, p_reason text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE v_version bigint; v_old jsonb;
+BEGIN
+  IF p_operator IS NULL OR btrim(p_operator) = '' THEN
+    RAISE EXCEPTION 'an operator label is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_reason IS NULL OR length(btrim(p_reason)) < 4 OR length(btrim(p_reason)) > 500 THEN
+    RAISE EXCEPTION 'a reason of 4-500 characters is required to change how long disabled accounts are kept'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('operator_account_retention'));
+  SELECT jsonb_build_object('disabled_account_days', p.disabled_account_days)
+    INTO v_old FROM public.operator_account_retention p WHERE p.id FOR UPDATE;
+  INSERT INTO public.operator_account_retention AS p (id, disabled_account_days, updated_by)
+  VALUES (true, p_disabled_account_days, btrim(p_operator))
+  ON CONFLICT (id) DO UPDATE
+     SET disabled_account_days = EXCLUDED.disabled_account_days, updated_by = EXCLUDED.updated_by,
+         config_version = p.config_version + 1, updated_at = now()
+  RETURNING p.config_version INTO v_version;
+  INSERT INTO public.operator_account_retention_changes (changed_by, change_reason, old_values, new_values, new_config_version)
+  VALUES (btrim(p_operator), btrim(p_reason), v_old,
+          jsonb_build_object('disabled_account_days', p_disabled_account_days), v_version);
+  RETURN v_version;
+END $$;
+
+
+--
+-- Name: operator_mfa_remove(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.operator_mfa_remove(p_operator uuid) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE n integer;
+BEGIN
+  DELETE FROM public.operator_mfa_recovery_codes WHERE operator_id = p_operator;
+  DELETE FROM public.operator_mfa WHERE operator_id = p_operator;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RETURN n > 0;
+END $$;
+
+
+--
+-- Name: operator_mfa_status(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.operator_mfa_status(p_operator uuid) RETURNS TABLE(enrolled boolean, confirmed_at timestamp with time zone, recovery_codes_left integer)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT m.confirmed_at IS NOT NULL, m.confirmed_at,
+         (SELECT count(*)::integer FROM public.operator_mfa_recovery_codes c
+           WHERE c.operator_id = p_operator AND c.used_at IS NULL)
+    FROM (SELECT 1) one
+    LEFT JOIN public.operator_mfa m ON m.operator_id = p_operator;
+$$;
+
+
+--
+-- Name: operator_session_policy_changes_append_only(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.operator_session_policy_changes_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'public.operator_session_policy_changes is append-only: % refused', TG_OP
+    USING ERRCODE = 'restrict_violation';
+END $$;
+
+
+--
+-- Name: operator_session_policy_get(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.operator_session_policy_get() RETURNS TABLE(idle_timeout_minutes integer, max_session_hours integer, config_version bigint, updated_at timestamp with time zone, updated_by text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  SELECT COALESCE(p.idle_timeout_minutes, 30), COALESCE(p.max_session_hours, 12),
+         COALESCE(p.config_version, 0::bigint), p.updated_at, p.updated_by
+    FROM (SELECT 1) one
+    LEFT JOIN public.operator_session_policy p ON p.id;
+$$;
+
+
+--
+-- Name: operator_session_policy_set(integer, integer, text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.operator_session_policy_set(p_idle_timeout_minutes integer, p_max_session_hours integer, p_operator text, p_reason text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE v_version bigint; v_old jsonb; v_new jsonb;
+BEGIN
+  IF p_operator IS NULL OR btrim(p_operator) = '' THEN
+    RAISE EXCEPTION 'an operator label is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_reason IS NULL OR length(btrim(p_reason)) < 4 OR length(btrim(p_reason)) > 500 THEN
+    RAISE EXCEPTION 'a reason of 4-500 characters is required to change the session limits'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  -- The bounds are the table CHECKs; the INSERT below refuses anything outside them with check_violation.
+  PERFORM pg_advisory_xact_lock(hashtext('operator_session_policy'));
+  SELECT jsonb_build_object('idle_timeout_minutes', p.idle_timeout_minutes, 'max_session_hours', p.max_session_hours)
+    INTO v_old FROM public.operator_session_policy p WHERE p.id FOR UPDATE;
+  INSERT INTO public.operator_session_policy AS p (id, idle_timeout_minutes, max_session_hours, updated_by)
+  VALUES (true, p_idle_timeout_minutes, p_max_session_hours, btrim(p_operator))
+  ON CONFLICT (id) DO UPDATE
+     SET idle_timeout_minutes = EXCLUDED.idle_timeout_minutes, max_session_hours = EXCLUDED.max_session_hours,
+         updated_by = EXCLUDED.updated_by, config_version = p.config_version + 1, updated_at = now()
+  RETURNING p.config_version INTO v_version;
+  v_new := jsonb_build_object('idle_timeout_minutes', p_idle_timeout_minutes, 'max_session_hours', p_max_session_hours);
+  INSERT INTO public.operator_session_policy_changes (changed_by, change_reason, old_values, new_values, new_config_version)
+  VALUES (btrim(p_operator), btrim(p_reason), v_old, v_new, v_version);
+  RETURN v_version;
+END $$;
+
+
+--
 -- Name: operator_signin_protection_changes_append_only(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -10911,8 +15453,8 @@ CREATE FUNCTION public.operator_signin_throttle_clear(p_scope text, p_key_hash t
     SET search_path TO 'public', 'pg_temp'
     AS $$
 BEGIN
-  IF p_scope IS NULL OR p_scope NOT IN ('account','reauth') THEN
-    RAISE EXCEPTION 'only an account or step-up counter can be cleared (got %)', p_scope
+  IF p_scope IS NULL OR p_scope NOT IN ('account','reauth','mfa') THEN
+    RAISE EXCEPTION 'only an account, step-up or code counter can be cleared (got %)', p_scope
       USING ERRCODE = 'invalid_parameter_value';
   END IF;
   DELETE FROM public.operator_signin_throttle t WHERE t.scope = p_scope AND t.key_hash = p_key_hash;
@@ -10929,7 +15471,7 @@ CREATE FUNCTION public.operator_signin_throttle_fail(p_scope text, p_key_hash te
     AS $$
 DECLARE l record; v_fail integer; v_until timestamptz; v_was timestamptz;
 BEGIN
-  IF p_scope IS NULL OR p_scope NOT IN ('account','ip','reauth') THEN
+  IF p_scope IS NULL OR p_scope NOT IN ('account','ip','reauth','mfa') THEN
     RAISE EXCEPTION 'unknown throttle scope %', p_scope USING ERRCODE = 'invalid_parameter_value';
   END IF;
   SELECT * INTO l FROM public.operator_signin_throttle_limits(p_scope);
@@ -11009,6 +15551,34 @@ $$;
 
 
 --
+-- Name: operators_track_disabled(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.operators_track_disabled() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.status = 'disabled' THEN
+      NEW.disabled_at := COALESCE(NEW.disabled_at, now());
+    ELSE
+      NEW.disabled_at := NULL;
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF OLD.anonymised_at IS NOT NULL AND NEW.status <> 'disabled' THEN
+    RAISE EXCEPTION 'an anonymised staff account cannot be enabled again' USING ERRCODE = 'restrict_violation';
+  END IF;
+  IF NEW.status = 'disabled' AND OLD.status IS DISTINCT FROM 'disabled' THEN
+    NEW.disabled_at := COALESCE(NEW.disabled_at, now());
+  ELSIF NEW.status <> 'disabled' THEN
+    NEW.disabled_at := NULL;
+  END IF;
+  RETURN NEW;
+END $$;
+
+
+--
 -- Name: portal_https_settings_changes_append_only(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -11016,13 +15586,301 @@ CREATE FUNCTION public.portal_https_settings_changes_append_only() RETURNS trigg
     LANGUAGE plpgsql
     AS $$
 BEGIN
+  IF TG_OP = 'UPDATE' AND current_setting('public.staff_retention', true) = 'on'
+     AND NEW.source_ip IS NULL
+     AND (to_jsonb(NEW) - 'source_ip') = (to_jsonb(OLD) - 'source_ip') THEN
+    RETURN NEW;
+  END IF;
   RAISE EXCEPTION 'portal_https_settings_changes is append-only';
 END $$;
 
 
-SET default_tablespace = '';
+--
+-- Name: privacy_notice_in_force(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
 
-SET default_table_access_method = heap;
+CREATE FUNCTION public.privacy_notice_in_force(p_tenant uuid) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+DECLARE b jsonb; d jsonb; v_text text; v_url text; v_terms text; v_fp text; v_id uuid;
+        c_builtin constant text := '[built-in notice] This Wi-Fi is provided by the hotel, which is responsible for your personal data on it. To give you internet access and keep the network secure, it records your device''s network addresses, when you connect and how much data you use, and what you sign in with. These records are deleted or made anonymous after a set time. Ask at reception for the hotel''s full privacy notice, or to see, correct or delete your data. (Shown in the guest''s language.)';
+BEGIN
+  SELECT t.branding INTO b FROM public.tenants t WHERE t.id = p_tenant;
+  IF NOT FOUND THEN
+    RETURN NULL;
+  END IF;
+  d := CASE WHEN jsonb_typeof(b) = 'object' AND b ? 'design' THEN b -> 'design' ELSE b END;
+  IF jsonb_typeof(d) = 'object' THEN
+    v_text  := NULLIF(CASE WHEN jsonb_typeof(d -> 'privacy_text') = 'string' THEN d ->> 'privacy_text' END, '');
+    v_url   := NULLIF(CASE WHEN jsonb_typeof(d -> 'privacy_url') = 'string' THEN d ->> 'privacy_url' END, '');
+    v_terms := NULLIF(CASE WHEN jsonb_typeof(d -> 'terms_url') = 'string' THEN d ->> 'terms_url' END, '');
+  END IF;
+  -- With no notice of its own the portal shows its short built-in one (privacy.default): that is what the guest was shown,
+  -- and what is recorded -- not "nothing".
+  IF v_text IS NULL THEN
+    v_text := c_builtin;
+  END IF;
+  v_fp := encode(sha256(convert_to(jsonb_build_array(v_text, v_url, v_terms)::text, 'UTF8')), 'hex');
+
+  INSERT INTO public.privacy_notice_versions (tenant_id, fingerprint, privacy_text, privacy_url, terms_url)
+  VALUES (p_tenant, v_fp, v_text, v_url, v_terms)
+  ON CONFLICT ON CONSTRAINT pnv_one_per_content DO NOTHING
+  RETURNING id INTO v_id;
+  IF v_id IS NULL THEN
+    SELECT x.id INTO v_id FROM public.privacy_notice_versions x WHERE x.tenant_id = p_tenant AND x.fingerprint = v_fp;
+  END IF;
+  RETURN v_id;
+END $$;
+
+
+--
+-- Name: FUNCTION privacy_notice_in_force(p_tenant uuid); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.privacy_notice_in_force(p_tenant uuid) IS 'The privacy notice in force for a tenant now, as a public.privacy_notice_versions id, recording the version on first use (0130, GDPR plan C6). NULL when the tenant has no row.';
+
+
+--
+-- Name: privacy_notice_versions_append_only(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.privacy_notice_versions_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'privacy_notice_versions is append-only: % refused', TG_OP USING ERRCODE = 'restrict_violation';
+END $$;
+
+
+--
+-- Name: run_data_retention_public(uuid, uuid, integer); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.run_data_retention_public(p_tenant uuid, p_site uuid, p_batch integer) RETURNS TABLE(o_category text, o_cutoff timestamp with time zone, o_anonymised integer)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+DECLARE r record; v_cut timestamptz; v_n integer; v_k integer; v_from timestamptz; v_to timestamptz;
+BEGIN
+  IF p_batch IS NULL OR p_batch NOT BETWEEN 1 AND 10000 THEN
+    RAISE EXCEPTION 'a batch of 1-10000 is required' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  SELECT * INTO r FROM iam_v2.data_retention_get(p_tenant, p_site);
+
+  v_cut := now() - make_interval(days => r.expired_record_days); v_n := 0;
+  UPDATE public.auth_otps o SET destination = 'anonymised', ip = NULL, user_agent = NULL
+   WHERE o.id IN (SELECT x.id FROM public.auth_otps x
+                   WHERE x.tenant_id = p_tenant AND x.expires_at < v_cut
+                     AND (x.destination <> 'anonymised' OR x.ip IS NOT NULL OR x.user_agent IS NOT NULL)
+                   LIMIT p_batch);
+  GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+  UPDATE public.social_oauth_states s
+     SET client_ip = NULL, client_mac = NULL, user_agent = NULL, code_verifier = NULL, nonce = NULL
+   WHERE s.state IN (SELECT x.state FROM public.social_oauth_states x
+                      WHERE x.tenant_id = p_tenant AND x.expires_at < v_cut
+                        AND num_nonnulls(x.client_ip, x.client_mac, x.user_agent, x.code_verifier, x.nonce) > 0
+                      LIMIT p_batch);
+  GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+  UPDATE public.pms_attempts a SET room_number = 'anonymised', ip = NULL
+   WHERE a.id IN (SELECT x.id FROM public.pms_attempts x
+                   WHERE x.tenant_id = p_tenant AND x.attempted_at < v_cut
+                     AND (x.room_number <> 'anonymised' OR x.ip IS NOT NULL)
+                   LIMIT p_batch);
+  GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+  IF v_n > 0 THEN
+    INSERT INTO iam_v2.data_retention_runs (tenant_id, site_id, category, retention_days, cutoff, rows_anonymised)
+    VALUES (p_tenant, p_site, 'expired_records', r.expired_record_days, v_cut, v_n);
+    o_category := 'expired_records'; o_cutoff := v_cut; o_anonymised := v_n; RETURN NEXT;
+  END IF;
+
+  -- AUDIT LOG: oldest first, at most seven days of rows per call. What happened, when, and which operator did
+  -- it stay; addresses, user agents, targets, payloads and guest actor ids go.
+  v_cut := now() - make_interval(days => r.audit_log_days);
+  SELECT k.done_until INTO v_from FROM iam_v2.data_retention_checkpoints k
+   WHERE k.tenant_id = p_tenant AND k.site_id = p_site AND k.category = 'audit_log';
+  IF v_from IS NULL THEN
+    SELECT min(l.ts) INTO v_from FROM public.audit_log l;
+  END IF;
+  IF v_from IS NOT NULL AND v_from < v_cut THEN
+    v_to := LEAST(v_from + interval '7 days', v_cut);
+    UPDATE public.audit_log l
+       SET ip = NULL, user_agent = NULL, target_id = NULL, payload = '{"anonymised": true}'::jsonb,
+           actor_id = CASE WHEN l.actor_type IN ('operator', 'system', 'appliance') THEN l.actor_id END
+     WHERE l.ts >= v_from AND l.ts < v_to
+       AND (l.tenant_id = p_tenant OR l.tenant_id IS NULL)
+       AND l.payload IS DISTINCT FROM '{"anonymised": true}'::jsonb;
+    GET DIAGNOSTICS v_n = ROW_COUNT;
+    INSERT INTO iam_v2.data_retention_checkpoints (tenant_id, site_id, category, done_until)
+    VALUES (p_tenant, p_site, 'audit_log', v_to)
+    ON CONFLICT (tenant_id, site_id, category) DO UPDATE SET done_until = EXCLUDED.done_until;
+    IF v_n > 0 THEN
+      INSERT INTO iam_v2.data_retention_runs (tenant_id, site_id, category, retention_days, cutoff, rows_anonymised)
+      VALUES (p_tenant, p_site, 'audit_log', r.audit_log_days, v_cut, v_n);
+      o_category := 'audit_log'; o_cutoff := v_cut; o_anonymised := v_n; RETURN NEXT;
+    END IF;
+  END IF;
+  -- ENTRIES ABOUT A GUEST go with the guest, not with the audit log's own (longer) period: an entry that names a client
+  -- account, a device address, a session address or a stay, and what a staff member searched for, loses its target and
+  -- its text once the longest of the guest-data periods has passed. What happened, when, and by which operator stay.
+  v_cut := now() - make_interval(days => GREATEST(r.pms_stay_days, r.client_activity_days, r.inactive_identity_days));
+  WITH cand AS (
+    SELECT l.tableoid AS toid, l.ctid AS rid FROM public.audit_log l
+     WHERE (l.tenant_id = p_tenant OR l.tenant_id IS NULL) AND l.ts < v_cut
+       AND l.target_type IN ('guest_account', 'client_account', 'client_accounts', 'guest_device', 'device', 'devices', 'device_mac',
+                              'session', 'sessions', 'stay', 'stays', 'stay_events', 'post_stay_profile', 'sign_in_attempt',
+                              'sign_in_attempts', 'otp_challenge', 'guest_data', 'usage_stays', 'usage_sources', 'usage_source',
+                              'dhcp_leases', 'pms_stay')
+       AND (l.payload IS DISTINCT FROM '{"anonymised": true}'::jsonb OR l.target_id IS NOT NULL)
+     LIMIT p_batch)
+  UPDATE public.audit_log l
+     SET ip = NULL, user_agent = NULL, target_id = NULL, payload = '{"anonymised": true}'::jsonb,
+         actor_id = CASE WHEN l.actor_type IN ('operator', 'system', 'appliance') THEN l.actor_id END
+    FROM cand WHERE l.tableoid = cand.toid AND l.ctid = cand.rid;
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  IF v_n > 0 THEN
+    INSERT INTO iam_v2.data_retention_runs (tenant_id, site_id, category, retention_days, cutoff, rows_anonymised)
+    VALUES (p_tenant, p_site, 'audit_log', GREATEST(r.pms_stay_days, r.client_activity_days, r.inactive_identity_days), v_cut, v_n);
+    o_category := 'audit_log'; o_cutoff := v_cut; o_anonymised := v_n; RETURN NEXT;
+  END IF;
+END $$;
+
+
+--
+-- Name: FUNCTION run_data_retention_public(p_tenant uuid, p_site uuid, p_batch integer); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.run_data_retention_public(p_tenant uuid, p_site uuid, p_batch integer) IS 'The hourly guest-data retention run for the public tables (0127, GDPR plan C1): anonymises expired verification codes, OAuth states and legacy PMS attempts, and audit-log rows older than the site''s retention. Deletes nothing; records runs in iam_v2.data_retention_runs.';
+
+
+--
+-- Name: run_staff_retention(uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.run_staff_retention(p_tenant uuid, p_site uuid) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE v_days integer; v_audit_days integer; ids uuid[]; n_ops integer; n_audit integer; n_net integer; n_https integer; n_assisted integer;
+        rec record; n_labels integer := 0;
+BEGIN
+  SELECT r.disabled_account_days INTO v_days FROM public.operator_account_retention_get() r;
+  SELECT r.audit_log_days INTO v_audit_days FROM iam_v2.data_retention_get(p_tenant, p_site) r;
+
+  SELECT COALESCE(array_agg(o.id), '{}') INTO ids FROM (
+    SELECT o.id FROM public.operators o
+     WHERE o.status = 'disabled' AND o.anonymised_at IS NULL
+       AND o.disabled_at < now() - make_interval(days => v_days)
+     ORDER BY o.disabled_at LIMIT 500 FOR UPDATE) o;
+  -- Before the email goes, it is taken out of every record that names the person as the one who acted.
+  FOR rec IN SELECT o.id, o.email FROM public.operators o WHERE o.id = ANY (ids) LOOP
+    n_labels := n_labels + iam_v2.scrub_staff_label(rec.email, 'removed-' || left(replace(rec.id::text, '-', ''), 12) || '@staff.invalid')
+                         + public.scrub_staff_label_public(rec.email, 'removed-' || left(replace(rec.id::text, '-', ''), 12) || '@staff.invalid');
+  END LOOP;
+  UPDATE public.operators o
+     SET email = 'removed-' || left(replace(o.id::text, '-', ''), 12) || '@staff.invalid',
+         display_name = NULL, password_hash = NULL, oidc_sub = NULL, anonymised_at = now(), updated_at = now()
+   WHERE o.id = ANY (ids);
+  GET DIAGNOSTICS n_ops = ROW_COUNT;
+  DELETE FROM public.operator_mfa_recovery_codes WHERE operator_id = ANY (ids);
+  DELETE FROM public.operator_mfa WHERE operator_id = ANY (ids);
+  UPDATE public.audit_log l SET payload = l.payload - 'email' - 'display_name' - 'username'
+   WHERE l.target_type = 'operator' AND l.target_id = ANY (ids::text[])
+     AND (l.payload ? 'email' OR l.payload ? 'display_name' OR l.payload ? 'username');
+  GET DIAGNOSTICS n_audit = ROW_COUNT;
+
+  UPDATE public.system_network_audit x SET source_ip = NULL
+   WHERE x.id IN (SELECT y.id FROM public.system_network_audit y
+                   WHERE y.source_ip IS NOT NULL AND y.created_at < now() - make_interval(days => v_audit_days)
+                   LIMIT 5000);
+  GET DIAGNOSTICS n_net = ROW_COUNT;
+  PERFORM set_config('public.staff_retention', 'on', true);
+  UPDATE public.portal_https_settings_changes x SET source_ip = NULL
+   WHERE x.id IN (SELECT y.id FROM public.portal_https_settings_changes y
+                   WHERE y.source_ip IS NOT NULL AND y.changed_at < now() - make_interval(days => v_audit_days)
+                   LIMIT 5000);
+  GET DIAGNOSTICS n_https = ROW_COUNT;
+  PERFORM set_config('public.staff_retention', '', true);
+
+  -- An assisted guest data request left open for 30 days is cancelled and scrubbed (0146).
+  BEGIN
+    n_assisted := iam_v2.expire_assisted_requests(p_tenant, p_site);
+  EXCEPTION WHEN OTHERS THEN
+    n_assisted := 0;   -- reported by the next run; the staff accounts above are already anonymised
+  END;
+
+  RETURN jsonb_build_object('staff_accounts_anonymised', n_ops, 'audit_entries', n_audit,
+                            'staff_addresses_cleared', n_net + n_https, 'assisted_requests_expired', n_assisted,
+                            'staff_labels_scrubbed', n_labels);
+END $$;
+
+
+--
+-- Name: FUNCTION run_staff_retention(p_tenant uuid, p_site uuid); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.run_staff_retention(p_tenant uuid, p_site uuid) IS 'Hourly (scd, 0138, GDPR audit B4): anonymises staff accounts disabled for longer than public.operator_account_retention, and clears staff IP addresses kept outside the activity log once they are older than the site''s activity-log period. Returns what changed.';
+
+
+--
+-- Name: scrub_staff_label_public(text, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.scrub_staff_label_public(p_old text, p_new text) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $_$
+DECLARE r record; n integer := 0; k integer;
+BEGIN
+  IF p_old IS NULL OR btrim(p_old) = '' OR p_new !~ '^removed-[0-9a-f]{12}@staff[.]invalid$' THEN
+    RETURN 0;
+  END IF;
+  PERFORM set_config('iam_v2.scrub', 'on', true);
+  FOR r IN SELECT x.table_name, x.column_name FROM iam_v2.scrub_registry x WHERE x.kind = 'label' AND x.table_name LIKE 'public.%' LOOP
+    IF to_regclass(r.table_name) IS NULL THEN CONTINUE; END IF;
+    EXECUTE format('UPDATE %s SET %I = $2 WHERE lower(%I) = lower($1)', r.table_name, r.column_name, r.column_name) USING p_old, p_new;
+    GET DIAGNOSTICS k = ROW_COUNT; n := n + k;
+  END LOOP;
+  PERFORM set_config('iam_v2.scrub', '', true);
+  RETURN n;
+END $_$;
+
+
+--
+-- Name: stamp_privacy_notice(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.stamp_privacy_notice() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+BEGIN
+  IF TG_OP = 'UPDATE' THEN
+    IF NEW.privacy_notice_version_id IS DISTINCT FROM OLD.privacy_notice_version_id
+       OR NEW.privacy_notice_shown_at IS DISTINCT FROM OLD.privacy_notice_shown_at THEN
+      RAISE EXCEPTION 'the privacy notice a sign-in happened under is a record and cannot be changed'
+        USING ERRCODE = 'restrict_violation';
+    END IF;
+    RETURN NEW;
+  END IF;
+  -- Whatever the writer supplied is replaced: the stamp is the database's, not the caller's.
+  NEW.privacy_notice_version_id := NULL;
+  NEW.privacy_notice_shown_at := now();
+  BEGIN
+    NEW.privacy_notice_version_id := public.privacy_notice_in_force(NEW.tenant_id);
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'privacy notice not recorded for auth context %: % (%)', NEW.id, SQLERRM, SQLSTATE;
+  END;
+  RETURN NEW;
+END $$;
+
+
+--
+-- Name: FUNCTION stamp_privacy_notice(); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.stamp_privacy_notice() IS 'Trigger on iam_v2.auth_contexts (0130, GDPR plan C6): stamps every new sign-in with the privacy notice in force and refuses any later change to that stamp. A failure to stamp never refuses the sign-in.';
+
 
 --
 -- Name: account_email_tokens; Type: TABLE; Schema: iam_v2; Owner: -
@@ -11364,6 +16222,121 @@ COMMENT ON COLUMN iam_v2.appliance_product_settings.guest_device_self_service IS
 
 
 --
+-- Name: assisted_guest_request_anchors; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.assisted_guest_request_anchors (
+    request_id uuid NOT NULL,
+    anchor_kind text NOT NULL,
+    anchor_id uuid NOT NULL,
+    CONSTRAINT agra_kind CHECK ((anchor_kind = ANY (ARRAY['account'::text, 'principal'::text, 'stay'::text, 'stay_guest'::text])))
+);
+
+
+--
+-- Name: TABLE assisted_guest_request_anchors; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.assisted_guest_request_anchors IS 'The reservation, guest, account or identity the requester says the records belong to (0146): a claim, never proof.';
+
+
+--
+-- Name: assisted_guest_request_events; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.assisted_guest_request_events (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    request_id uuid NOT NULL,
+    at timestamp with time zone DEFAULT now() NOT NULL,
+    actor text NOT NULL,
+    action text NOT NULL,
+    detail jsonb DEFAULT '{}'::jsonb NOT NULL,
+    CONSTRAINT agre_action CHECK ((action = ANY (ARRAY['OPENED'::text, 'EXPORTED'::text, 'ERASED'::text, 'COMPLETED'::text, 'CANCELLED'::text, 'EXPIRED'::text])))
+);
+
+
+--
+-- Name: TABLE assisted_guest_request_events; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.assisted_guest_request_events IS 'What happened to an assisted request, in order (0146). Counts and reasons only. Append-only.';
+
+
+--
+-- Name: assisted_guest_request_records; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.assisted_guest_request_records (
+    request_id uuid NOT NULL,
+    rec_kind text NOT NULL,
+    rec_id uuid NOT NULL,
+    rec_class text NOT NULL,
+    action text NOT NULL,
+    done_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT agrr_action CHECK ((action = ANY (ARRAY['DISCLOSED'::text, 'ANONYMISED'::text]))),
+    CONSTRAINT agrr_class CHECK ((rec_class = ANY (ARRAY['ATTRIBUTABLE'::text, 'CLAIMABLE'::text])))
+);
+
+
+--
+-- Name: TABLE assisted_guest_request_records; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.assisted_guest_request_records IS 'Which records a request disclosed or anonymised (0146): kind, id and class only; no personal data.';
+
+
+--
+-- Name: assisted_guest_requests; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.assisted_guest_requests (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ref text NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    purpose text NOT NULL,
+    macs macaddr[],
+    range_from timestamp with time zone NOT NULL,
+    range_to timestamp with time zone NOT NULL,
+    pms_interface_id uuid,
+    requester_ref text NOT NULL,
+    verification_method text NOT NULL,
+    evidence_note text NOT NULL,
+    attest_identity boolean NOT NULL,
+    attest_device boolean NOT NULL,
+    attest_sole_use boolean NOT NULL,
+    attest_private_address boolean NOT NULL,
+    open_reason text NOT NULL,
+    status text DEFAULT 'OPEN'::text NOT NULL,
+    created_by text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    closed_by text,
+    closed_at timestamp with time zone,
+    close_reason text,
+    result jsonb,
+    CONSTRAINT agr_closed CHECK ((((status = 'OPEN'::text) = (closed_at IS NULL)) AND ((closed_at IS NULL) = (closed_by IS NULL)) AND ((closed_at IS NULL) = (close_reason IS NULL)) AND ((closed_at IS NULL) = (result IS NULL)))),
+    CONSTRAINT agr_creator CHECK (((length(btrim(created_by)) >= 1) AND (length(btrim(created_by)) <= 200))),
+    CONSTRAINT agr_evidence CHECK (((length(btrim(evidence_note)) >= 9) AND (length(btrim(evidence_note)) <= 1000))),
+    CONSTRAINT agr_identity CHECK (attest_identity),
+    CONSTRAINT agr_macs CHECK ((((status = 'OPEN'::text) = (macs IS NOT NULL)) AND ((macs IS NULL) OR ((cardinality(macs) >= 1) AND (cardinality(macs) <= 5))))),
+    CONSTRAINT agr_method CHECK ((verification_method = ANY (ARRAY['ID_CHECKED_IN_PERSON'::text, 'ACCOUNT_CONTROL_SHOWN'::text, 'CALLBACK_TO_KNOWN_CONTACT'::text, 'OTHER_DOCUMENTED'::text]))),
+    CONSTRAINT agr_open_reason CHECK (((length(btrim(open_reason)) >= 4) AND (length(btrim(open_reason)) <= 500))),
+    CONSTRAINT agr_purpose CHECK ((purpose = ANY (ARRAY['ACCESS'::text, 'ERASURE'::text]))),
+    CONSTRAINT agr_range CHECK (((range_to > range_from) AND ((range_to - range_from) <= '366 days'::interval))),
+    CONSTRAINT agr_ref CHECK ((ref ~ '^AR-[0-9A-F]{10}$'::text)),
+    CONSTRAINT agr_requester CHECK (((length(btrim(requester_ref)) >= 2) AND (length(btrim(requester_ref)) <= 120))),
+    CONSTRAINT agr_status CHECK ((status = ANY (ARRAY['OPEN'::text, 'COMPLETED'::text, 'CANCELLED'::text])))
+);
+
+
+--
+-- Name: TABLE assisted_guest_requests; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.assisted_guest_requests IS 'A staff-supervised guest data request about records no automatic rule can attribute (0146). While OPEN it holds the addresses, the requester''s reference and the evidence note; closing it scrubs all three. Written only by the definer functions.';
+
+
+--
 -- Name: auth_context_offers; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -11409,6 +16382,8 @@ CREATE TABLE iam_v2.auth_contexts (
     client_group_id uuid,
     client_group_evidence jsonb,
     credential text,
+    privacy_notice_version_id uuid,
+    privacy_notice_shown_at timestamp with time zone,
     CONSTRAINT ac_credential_label CHECK (((credential IS NULL) OR (credential ~ '^[A-Z0-9_]{1,32}$'::text))),
     CONSTRAINT ac_method_subject CHECK ((((method = 'PMS'::text) AND (stay_id IS NOT NULL)) OR ((method = 'VOUCHER'::text) AND (voucher_id IS NOT NULL)) OR ((method = 'ACCOUNT'::text) AND (guest_account_id IS NOT NULL)) OR ((method = ANY (ARRAY['OTP'::text, 'SOCIAL'::text])) AND (guest_principal_id IS NOT NULL)) OR ((method = 'POST_STAY_PIN'::text) AND (post_stay_profile_id IS NOT NULL)) OR ((method = 'OPEN'::text) AND (anonymous_subject_id IS NOT NULL)))),
     CONSTRAINT ac_one_subject CHECK ((num_nonnulls(stay_id, guest_account_id, voucher_id, guest_principal_id, post_stay_profile_id, anonymous_subject_id) = 1)),
@@ -11439,6 +16414,20 @@ COMMENT ON COLUMN iam_v2.auth_contexts.client_group_evidence IS 'Why: {group, ru
 --
 
 COMMENT ON COLUMN iam_v2.auth_contexts.credential IS 'How the client proved themselves for THIS context, as a label the operator reads: EMAIL_OTP, SMS_OTP, WHATSAPP_OTP, SOCIAL_<provider>, VOUCHER, ACCOUNT, OPEN. Copied onto sessions.credential_method at activation. NULL = minted before 0109.';
+
+
+--
+-- Name: COLUMN auth_contexts.privacy_notice_version_id; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.auth_contexts.privacy_notice_version_id IS 'The privacy notice in force when this sign-in completed (0130, GDPR plan C6). Set by trigger, never by the writer, and never changed. NULL: before 0130, or the stamp could not be made (the sign-in was not refused).';
+
+
+--
+-- Name: COLUMN auth_contexts.privacy_notice_shown_at; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.auth_contexts.privacy_notice_shown_at IS 'When this sign-in was stamped with its privacy notice (0130, GDPR plan C6): the sign-in time, which the table did not otherwise record. Set by trigger with the stamp, never changed. NULL before 0130.';
 
 
 --
@@ -11724,6 +16713,63 @@ CREATE TABLE iam_v2.data_crossing_state (
 --
 
 COMMENT ON TABLE iam_v2.data_crossing_state IS 'The exact data-quota crossing instant of an entitlement, established by the full derivation once the running total reached quota_bytes (0122). Trusted only while the entitlement''s quota is still quota_bytes.';
+
+
+--
+-- Name: data_retention_changes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.data_retention_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    changed_by text NOT NULL,
+    change_reason text NOT NULL,
+    old_settings jsonb,
+    new_settings jsonb NOT NULL,
+    new_config_version bigint NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT drc_actor CHECK ((length(btrim(changed_by)) > 0)),
+    CONSTRAINT drc_reason CHECK (((length(btrim(change_reason)) >= 4) AND (length(btrim(change_reason)) <= 500)))
+);
+
+
+--
+-- Name: data_retention_checkpoints; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.data_retention_checkpoints (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    category text NOT NULL,
+    done_until timestamp with time zone NOT NULL,
+    CONSTRAINT drk_category CHECK ((category = 'audit_log'::text))
+);
+
+
+--
+-- Name: data_retention_runs; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.data_retention_runs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    category text NOT NULL,
+    retention_days integer NOT NULL,
+    cutoff timestamp with time zone NOT NULL,
+    rows_anonymised integer NOT NULL,
+    ran_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT drr_category CHECK ((category = ANY (ARRAY['pms_stays'::text, 'client_activity'::text, 'inactive_identities'::text, 'expired_records'::text, 'audit_log'::text, 'staff_notes'::text]))),
+    CONSTRAINT drr_rows CHECK ((rows_anonymised > 0))
+);
+
+
+--
+-- Name: TABLE data_retention_runs; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.data_retention_runs IS 'Every retention run that anonymised something (0127): the category, the retention in force, the cutoff and how many records changed. Append-only. A run that changed nothing writes nothing.';
 
 
 --
@@ -12090,6 +17136,33 @@ COMMENT ON COLUMN iam_v2.entitlements.data_quota_bytes IS 'The byte allowance TH
 
 
 --
+-- Name: erasure_journal; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.erasure_journal (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    erasure_ref text NOT NULL,
+    kind text NOT NULL,
+    subject_id uuid NOT NULL,
+    detail text,
+    erased_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ej_assisted_detail CHECK (((kind = 'assisted_record'::text) = (detail IS NOT NULL))),
+    CONSTRAINT ej_detail CHECK (((detail IS NULL) OR (detail ~ '^[a-z_]{3,40}$'::text))),
+    CONSTRAINT ej_kind CHECK ((kind = ANY (ARRAY['account'::text, 'principal'::text, 'stay'::text, 'stay_guest'::text, 'assisted_record'::text]))),
+    CONSTRAINT ej_ref CHECK ((erasure_ref ~ '^ER-[0-9A-F]{12}$'::text))
+);
+
+
+--
+-- Name: TABLE erasure_journal; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.erasure_journal IS 'Which records an erasure anonymised (0147): kind and record id only. Replayed after a restore so an older backup does not bring an erased guest back. Holds no personal data. Append-only.';
+
+
+--
 -- Name: financial_epoch; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -12260,6 +17333,79 @@ COMMENT ON COLUMN iam_v2.guest_access_accounts.created_by_device_mac IS 'The dev
 
 
 --
+-- Name: guest_data_erasures; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.guest_data_erasures (
+    erasure_ref text NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    subject_kind text NOT NULL,
+    erased_by text NOT NULL,
+    erase_reason text NOT NULL,
+    counts jsonb NOT NULL,
+    erased_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT gde_actor CHECK (((length(btrim(erased_by)) >= 1) AND (length(btrim(erased_by)) <= 200))),
+    CONSTRAINT gde_kind CHECK ((subject_kind = ANY (ARRAY['account'::text, 'principal'::text, 'stay'::text, 'stay_guest'::text, 'assisted'::text]))),
+    CONSTRAINT gde_reason CHECK (((length(btrim(erase_reason)) >= 4) AND (length(btrim(erase_reason)) <= 500))),
+    CONSTRAINT gde_ref CHECK ((erasure_ref ~ '^ER-[0-9A-F]{12}$'::text))
+);
+
+
+--
+-- Name: TABLE guest_data_erasures; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.guest_data_erasures IS 'Every "erase this guest" that ran (0128, GDPR plan C3): a reference to give the guest, who did it and why, and how many records were anonymised. Holds no personal data and no link back to the erased records. Append-only.';
+
+
+--
+-- Name: guest_data_request_register; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.guest_data_request_register (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ref text NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    kind text NOT NULL,
+    received_at date NOT NULL,
+    due_at date NOT NULL,
+    extended_until date,
+    extension_reason text,
+    requester_ref text NOT NULL,
+    verification_method text,
+    status text DEFAULT 'OPEN'::text NOT NULL,
+    outcome_code text,
+    outcome_note text,
+    erasure_ref text,
+    assisted_ref text,
+    created_by text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    answered_by text,
+    answered_at timestamp with time zone,
+    CONSTRAINT gdrr_ar CHECK (((assisted_ref IS NULL) OR (assisted_ref ~ '^AR-[0-9A-F]{10}$'::text))),
+    CONSTRAINT gdrr_closed CHECK ((((status = 'OPEN'::text) = (answered_at IS NULL)) AND ((answered_at IS NULL) = (answered_by IS NULL)) AND ((status = 'OPEN'::text) OR (outcome_code IS NOT NULL)))),
+    CONSTRAINT gdrr_due CHECK (((due_at >= received_at) AND ((extended_until IS NULL) OR (extended_until >= due_at)))),
+    CONSTRAINT gdrr_er CHECK (((erasure_ref IS NULL) OR (erasure_ref ~ '^ER-[0-9A-F]{12}$'::text))),
+    CONSTRAINT gdrr_kind CHECK ((kind = ANY (ARRAY['ACCESS'::text, 'ERASURE'::text, 'OTHER'::text]))),
+    CONSTRAINT gdrr_method CHECK (((verification_method IS NULL) OR (verification_method = ANY (ARRAY['ID_CHECKED_IN_PERSON'::text, 'ACCOUNT_CONTROL_SHOWN'::text, 'CALLBACK_TO_KNOWN_CONTACT'::text, 'OTHER_DOCUMENTED'::text])))),
+    CONSTRAINT gdrr_note CHECK (((outcome_note IS NULL) OR (length(outcome_note) <= 500))),
+    CONSTRAINT gdrr_outcome CHECK (((outcome_code IS NULL) OR (outcome_code = ANY (ARRAY['NONE'::text, 'LEGAL_RETENTION'::text, 'NOT_IDENTIFIED'::text, 'SHARED_ACCESS'::text, 'THIRD_PARTY_RIGHTS'::text, 'MANIFESTLY_UNFOUNDED'::text, 'OTHER'::text])))),
+    CONSTRAINT gdrr_ref CHECK ((ref ~ '^RQ-[0-9A-F]{8}$'::text)),
+    CONSTRAINT gdrr_requester CHECK (((length(btrim(requester_ref)) >= 2) AND (length(btrim(requester_ref)) <= 120))),
+    CONSTRAINT gdrr_status CHECK ((status = ANY (ARRAY['OPEN'::text, 'ANSWERED'::text, 'PARTLY_REFUSED'::text, 'REFUSED'::text, 'WITHDRAWN'::text])))
+);
+
+
+--
+-- Name: TABLE guest_data_request_register; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.guest_data_request_register IS 'A request made under the data-protection rules, its deadline and how it was answered (0147). The requester reference and the note are removed when it is answered; nothing here decides anything.';
+
+
+--
 -- Name: guest_device_actions; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -12405,6 +17551,73 @@ CREATE TABLE iam_v2.guest_principals (
 
 
 --
+-- Name: guest_signin_device_passes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.guest_signin_device_passes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    pause_id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    device_mac macaddr NOT NULL,
+    granted_at timestamp with time zone DEFAULT now() NOT NULL,
+    granted_by text NOT NULL,
+    reason text NOT NULL,
+    CONSTRAINT guest_signin_device_passes_granted_by_check CHECK ((length(btrim(granted_by)) > 0))
+);
+
+
+--
+-- Name: TABLE guest_signin_device_passes; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.guest_signin_device_passes IS 'A device staff confirmed as a genuine guest during a network pause (0136): it may attempt room sign-in while the pause lasts. A permission to attempt, never access. Removed one day after the pause ends.';
+
+
+--
+-- Name: guest_signin_network_pauses; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.guest_signin_network_pauses (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    guest_network_id uuid NOT NULL,
+    guest_network_name text,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    failure_count integer NOT NULL,
+    ended_at timestamp with time zone,
+    ended_by text,
+    end_reason text,
+    CONSTRAINT guest_signin_network_pauses_check CHECK ((expires_at > started_at)),
+    CONSTRAINT guest_signin_network_pauses_check1 CHECK (((ended_at IS NULL) = (ended_by IS NULL)))
+);
+
+
+--
+-- Name: guest_signin_network_policy_changes; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.guest_signin_network_policy_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by text NOT NULL,
+    change_reason text,
+    old_network_max_failures integer,
+    old_network_window_seconds integer,
+    old_network_pause_seconds integer,
+    new_network_max_failures integer NOT NULL,
+    new_network_window_seconds integer NOT NULL,
+    new_network_pause_seconds integer NOT NULL,
+    new_config_version bigint NOT NULL,
+    CONSTRAINT guest_signin_network_policy_changes_changed_by_check CHECK ((length(btrim(changed_by)) > 0))
+);
+
+
+--
 -- Name: guest_signin_protection_changes; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -12539,6 +17752,18 @@ CREATE TABLE iam_v2.internet_packages (
     is_system boolean DEFAULT false NOT NULL,
     current_revision_id uuid,
     central_template_id uuid
+);
+
+
+--
+-- Name: ledger_meta; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.ledger_meta (
+    singleton boolean DEFAULT true NOT NULL,
+    ledger_id uuid DEFAULT gen_random_uuid() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ledger_meta_one CHECK (singleton)
 );
 
 
@@ -13046,7 +18271,7 @@ CREATE TABLE iam_v2.pms_case_resolutions (
     resolved_by text NOT NULL,
     note text,
     CONSTRAINT pms_case_resolutions_disposition_check CHECK ((disposition = ANY (ARRAY['DEPARTED_CONFIRMED_BY_ROSTER'::text, 'NOT_A_DEPARTURE_ROSTER_SNAPSHOT'::text, 'ALREADY_CLOSED'::text, 'NEEDS_PMS_EVIDENCE'::text, 'ACCEPTED_STARTUP_DATA_GAP'::text, 'ACKNOWLEDGED_BY_OPERATOR'::text, 'LINKED_TO_STAY'::text, 'EXPIRED_UNDECIDED'::text]))),
-    CONSTRAINT pms_case_resolutions_evidence_kind_check CHECK ((evidence_kind = ANY (ARRAY['PUBLISHED_ROSTER_GENERATION'::text, 'ADMISSION_KIND'::text, 'STAY_STATE'::text, 'NONE'::text, 'OPERATOR_DECISION'::text, 'EXPIRY_SETTING'::text]))),
+    CONSTRAINT pms_case_resolutions_evidence_kind_check CHECK ((evidence_kind = ANY (ARRAY['PUBLISHED_ROSTER_GENERATION'::text, 'ADMISSION_KIND'::text, 'STAY_STATE'::text, 'NONE'::text, 'OPERATOR_DECISION'::text, 'EXPIRY_SETTING'::text, 'DATA_RETENTION'::text]))),
     CONSTRAINT pms_case_resolutions_evidence_ref_check CHECK (((evidence_ref IS NULL) OR (length(evidence_ref) <= 200))),
     CONSTRAINT pms_case_resolutions_note_check CHECK (((note IS NULL) OR (length(note) <= 500))),
     CONSTRAINT pms_case_resolutions_resolved_by_check CHECK ((length(btrim(resolved_by)) > 0))
@@ -14255,6 +19480,47 @@ COMMENT ON TABLE iam_v2.refund_access_terminations IS 'Evidence: an entitlement 
 
 
 --
+-- Name: retention_floor; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.retention_floor (
+    id boolean DEFAULT true NOT NULL,
+    since timestamp with time zone NOT NULL,
+    CONSTRAINT rf_singleton CHECK (id)
+);
+
+
+--
+-- Name: TABLE retention_floor; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.retention_floor IS 'The latest time a row with no recorded creation or sighting time can have been made (0144): when migration 0104 started recording client-account creation, or when this migration ran if 0104 predates the ledger. Retention counts such rows'' age from here, so a row of unknown age is never taken for an old one.';
+
+
+--
+-- Name: scrub_registry; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.scrub_registry (
+    table_name text NOT NULL,
+    column_name text NOT NULL,
+    kind text NOT NULL,
+    ts_column text,
+    handled boolean DEFAULT false NOT NULL,
+    jsonb_key text,
+    CONSTRAINT sr_kind CHECK ((kind = ANY (ARRAY['label'::text, 'note'::text, 'secret'::text]))),
+    CONSTRAINT sr_note_ts CHECK (((kind = 'note'::text) = (ts_column IS NOT NULL)))
+);
+
+
+--
+-- Name: TABLE scrub_registry; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.scrub_registry IS 'Columns that hold what staff typed about a guest (note), who acted (label) or a secret (0147), and may be scrubbed by the retention runs and by erasure.';
+
+
+--
 -- Name: self_service_settings_changes; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -14576,7 +19842,7 @@ CREATE TABLE iam_v2.site_accounting_retention (
 -- Name: TABLE site_accounting_retention; Type: COMMENT; Schema: iam_v2; Owner: -
 --
 
-COMMENT ON TABLE iam_v2.site_accounting_retention IS 'How long per-sample accounting detail (iam_v2.accounting_records) is kept (0122). NULL -- the default, and what a site with no row reads -- is UNLIMITED: nothing is ever purged. Otherwise 30-3650 days. Written only through iam_v2.accounting_retention_set.';
+COMMENT ON TABLE iam_v2.site_accounting_retention IS 'How long per-sample accounting detail (iam_v2.accounting_records) is kept (0122). A site with no row keeps iam_v2.accounting_retention_default() days (365, 0131); NULL in a row is the administrator''s choice of UNLIMITED: nothing is purged. Otherwise 30-3650 days. Written only through iam_v2.accounting_retention_set.';
 
 
 --
@@ -14640,6 +19906,43 @@ CREATE TABLE iam_v2.site_checkout_grace_config (
 
 
 --
+-- Name: site_data_retention; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.site_data_retention (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    pms_stay_days integer NOT NULL,
+    client_activity_days integer NOT NULL,
+    inactive_identity_days integer NOT NULL,
+    expired_record_days integer NOT NULL,
+    audit_log_days integer NOT NULL,
+    sign_in_attempt_days integer NOT NULL,
+    config_version bigint DEFAULT 1 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_by text,
+    log_days integer DEFAULT 14 NOT NULL,
+    staff_note_days integer DEFAULT 730 NOT NULL,
+    CONSTRAINT sdr_audit_log CHECK (((audit_log_days >= 90) AND (audit_log_days <= 3650))),
+    CONSTRAINT sdr_client_activity CHECK (((client_activity_days >= 30) AND (client_activity_days <= 3650))),
+    CONSTRAINT sdr_expired_record CHECK (((expired_record_days >= 1) AND (expired_record_days <= 365))),
+    CONSTRAINT sdr_inactive_identity CHECK (((inactive_identity_days >= 30) AND (inactive_identity_days <= 3650))),
+    CONSTRAINT sdr_log CHECK (((log_days >= 1) AND (log_days <= 730))),
+    CONSTRAINT sdr_pms_stay CHECK (((pms_stay_days >= 7) AND (pms_stay_days <= 3650))),
+    CONSTRAINT sdr_sign_in_attempt CHECK (((sign_in_attempt_days >= 7) AND (sign_in_attempt_days <= 365))),
+    CONSTRAINT sdr_staff_note CHECK (((staff_note_days >= 30) AND (staff_note_days <= 3650))),
+    CONSTRAINT sdr_version CHECK ((config_version >= 1))
+);
+
+
+--
+-- Name: TABLE site_data_retention; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.site_data_retention IS 'How long guest personal data is kept before it is anonymised, per site (0127, GDPR plan C1). A site with no row uses iam_v2.data_retention_defaults(). Written only through iam_v2.data_retention_set.';
+
+
+--
 -- Name: site_device_settings; Type: TABLE; Schema: iam_v2; Owner: -
 --
 
@@ -14660,6 +19963,29 @@ CREATE TABLE iam_v2.site_device_settings (
 --
 
 COMMENT ON TABLE iam_v2.site_device_settings IS 'Per-site client device management (0118): how many times per package per 24 hours a client may replace or release one of their devices on the portal (default 3, hard bounds 1-10: the protection against passing one package around cannot be switched off). A site with no row reads the default. Written only through iam_v2.device_settings_set.';
+
+
+--
+-- Name: site_guest_signin_network_policy; Type: TABLE; Schema: iam_v2; Owner: -
+--
+
+CREATE TABLE iam_v2.site_guest_signin_network_policy (
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    network_max_failures integer DEFAULT 30 NOT NULL,
+    network_window_seconds integer DEFAULT 600 NOT NULL,
+    network_pause_seconds integer DEFAULT 900 NOT NULL,
+    config_version bigint DEFAULT 1 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT guest_signin_network_policy_bounds CHECK ((((network_max_failures >= 10) AND (network_max_failures <= 1000)) AND ((network_window_seconds >= 60) AND (network_window_seconds <= 3600)) AND ((network_pause_seconds >= 60) AND (network_pause_seconds <= 3600))))
+);
+
+
+--
+-- Name: TABLE site_guest_signin_network_policy; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON TABLE iam_v2.site_guest_signin_network_policy IS 'When many wrong room sign-ins on one guest network pause room sign-in there (0136). No row means the approved defaults (30 / 600 s / 900 s), not "off".';
 
 
 --
@@ -14907,7 +20233,6 @@ CREATE TABLE iam_v2.stay_guests (
     last_name_norm text,
     display_name text,
     is_primary boolean DEFAULT false NOT NULL,
-    date_of_birth date,
     pin_hash text
 );
 
@@ -15505,6 +20830,62 @@ COMMENT ON TABLE public.auth_throttle_buckets IS 'Durable local-first auth throt
 
 
 --
+-- Name: backup_key_holder_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.backup_key_holder_events (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    holder_id uuid NOT NULL,
+    event text NOT NULL,
+    actor text NOT NULL,
+    reason text,
+    at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT bkhe_actor CHECK (((length(btrim(actor)) >= 1) AND (length(btrim(actor)) <= 200))),
+    CONSTRAINT bkhe_event CHECK ((event = ANY (ARRAY['added'::text, 'confirmed'::text, 'removed'::text, 'restore_tested'::text])))
+);
+
+
+--
+-- Name: backup_key_holders; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.backup_key_holders (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    site_id uuid NOT NULL,
+    label text NOT NULL,
+    public_key text NOT NULL,
+    status text DEFAULT 'PENDING'::text NOT NULL,
+    check_code_hash text,
+    loss_acknowledged boolean NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_by text NOT NULL,
+    confirmed_at timestamp with time zone,
+    removed_at timestamp with time zone,
+    removed_by text,
+    remove_reason text,
+    last_tested_at timestamp with time zone,
+    CONSTRAINT bkh_active_confirmed CHECK (((status = 'PENDING'::text) OR (confirmed_at IS NOT NULL) OR (status = 'REMOVED'::text))),
+    CONSTRAINT bkh_check CHECK (((check_code_hash IS NULL) OR (check_code_hash ~ '^[0-9a-f]{64}$'::text))),
+    CONSTRAINT bkh_created_by CHECK (((length(btrim(created_by)) >= 1) AND (length(btrim(created_by)) <= 200))),
+    CONSTRAINT bkh_label CHECK (((length(btrim(label)) >= 1) AND (length(btrim(label)) <= 80))),
+    CONSTRAINT bkh_loss_ack CHECK (loss_acknowledged),
+    CONSTRAINT bkh_public_key CHECK ((public_key ~ '^age1[02-9ac-hj-np-z]{58}$'::text)),
+    CONSTRAINT bkh_removed CHECK (((status = 'REMOVED'::text) = (removed_at IS NOT NULL))),
+    CONSTRAINT bkh_status CHECK ((status = ANY (ARRAY['PENDING'::text, 'ACTIVE'::text, 'REMOVED'::text])))
+);
+
+
+--
+-- Name: TABLE backup_key_holders; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.backup_key_holders IS 'The hotel''s backup key holders (0129, GDPR plan C5, decision D-C5): age public keys every backup is encrypted to. Private keys are never stored. Written only through the backup_key_holder_* functions.';
+
+
+--
 -- Name: backup_records; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -15608,6 +20989,36 @@ CREATE TABLE public.guest_networks (
     CONSTRAINT guest_networks_network_type_check CHECK ((network_type = ANY (ARRAY['untagged'::text, 'vlan'::text]))),
     CONSTRAINT guest_networks_vlan_id_check CHECK (((vlan_id IS NULL) OR ((vlan_id >= 1) AND (vlan_id <= 4094))))
 );
+
+
+--
+-- Name: ledger_destination; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.ledger_destination (
+    singleton boolean DEFAULT true NOT NULL,
+    kind text NOT NULL,
+    config jsonb NOT NULL,
+    secret_ct bytea,
+    secret_nonce bytea,
+    secret_key_id text,
+    secret_ver integer,
+    configured_by text NOT NULL,
+    configured_at timestamp with time zone DEFAULT now() NOT NULL,
+    verified_at timestamp with time zone,
+    last_ok_at timestamp with time zone,
+    last_error text,
+    last_error_at timestamp with time zone,
+    CONSTRAINT ledger_dest_kind CHECK ((kind = ANY (ARRAY['dir'::text, 'sftp'::text, 's3'::text]))),
+    CONSTRAINT ledger_dest_one CHECK (singleton)
+);
+
+
+--
+-- Name: TABLE ledger_destination; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.ledger_destination IS 'Where the second copy of the erasure ledger is kept (0148). Mandatory: erasure is refused until it is set up and verified. The secret is sealed by scd.';
 
 
 --
@@ -15734,6 +21145,99 @@ CREATE TABLE public.notification_providers (
 
 
 --
+-- Name: operator_account_retention; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.operator_account_retention (
+    id boolean DEFAULT true NOT NULL,
+    disabled_account_days integer DEFAULT 730 NOT NULL,
+    config_version bigint DEFAULT 1 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_by text,
+    CONSTRAINT oacr_days CHECK (((disabled_account_days >= 30) AND (disabled_account_days <= 3650))),
+    CONSTRAINT oacr_singleton CHECK (id),
+    CONSTRAINT oacr_version CHECK ((config_version >= 1))
+);
+
+
+--
+-- Name: TABLE operator_account_retention; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.operator_account_retention IS 'How long a disabled staff account is kept before it is anonymised (0138, GDPR audit B4). One row for the appliance; no row means the default, 730 days. Written only through public.operator_account_retention_set.';
+
+
+--
+-- Name: operator_account_retention_changes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.operator_account_retention_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    changed_by text NOT NULL,
+    change_reason text NOT NULL,
+    old_values jsonb,
+    new_values jsonb NOT NULL,
+    new_config_version bigint NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT oacrc_actor CHECK ((length(btrim(changed_by)) > 0)),
+    CONSTRAINT oacrc_reason CHECK (((length(btrim(change_reason)) >= 4) AND (length(btrim(change_reason)) <= 500)))
+);
+
+
+--
+-- Name: TABLE operator_account_retention_changes; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.operator_account_retention_changes IS 'Append-only history of public.operator_account_retention (0138).';
+
+
+--
+-- Name: operator_mfa; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.operator_mfa (
+    operator_id uuid NOT NULL,
+    key_id text NOT NULL,
+    nonce bytea NOT NULL,
+    ciphertext bytea NOT NULL,
+    cipher_version integer NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    confirmed_at timestamp with time zone,
+    last_used_step bigint,
+    CONSTRAINT om_cipher CHECK ((cipher_version = 1)),
+    CONSTRAINT om_key_id CHECK (((length(key_id) >= 1) AND (length(key_id) <= 64)))
+);
+
+
+--
+-- Name: TABLE operator_mfa; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.operator_mfa IS 'The Admin Console operator''s authenticator (0132, GDPR plan C10): the TOTP secret sealed by scd, never in the clear. confirmed_at is set once the operator proved it with a code; last_used_step stops a code being reused.';
+
+
+--
+-- Name: operator_mfa_recovery_codes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.operator_mfa_recovery_codes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    operator_id uuid NOT NULL,
+    code_mac text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    used_at timestamp with time zone,
+    CONSTRAINT omrc_mac CHECK ((code_mac ~ '^[0-9a-f]{64}$'::text))
+);
+
+
+--
+-- Name: TABLE operator_mfa_recovery_codes; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.operator_mfa_recovery_codes IS 'Single-use recovery codes for an operator who lost their authenticator (0132, GDPR plan C10): HMAC-SHA256 of the code under scd''s key, never the code. A new set replaces the old one.';
+
+
+--
 -- Name: operator_roles; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -15744,6 +21248,55 @@ CREATE TABLE public.operator_roles (
     role text NOT NULL,
     CONSTRAINT operator_roles_role_check CHECK ((role = ANY (ARRAY['site_admin'::text, 'hotel_it_manager'::text, 'front_office_operator'::text, 'guest_relations_operator'::text, 'voucher_operator'::text, 'payments_operator'::text, 'site_viewer'::text, 'tenant_admin'::text, 'tenant_operator'::text, 'viewer'::text, 'billing'::text])))
 );
+
+
+--
+-- Name: operator_session_policy; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.operator_session_policy (
+    id boolean DEFAULT true NOT NULL,
+    idle_timeout_minutes integer DEFAULT 30 NOT NULL,
+    max_session_hours integer DEFAULT 12 NOT NULL,
+    config_version bigint DEFAULT 1 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_by text,
+    CONSTRAINT osessp_idle CHECK (((idle_timeout_minutes >= 5) AND (idle_timeout_minutes <= 240))),
+    CONSTRAINT osessp_max CHECK (((max_session_hours >= 1) AND (max_session_hours <= 24))),
+    CONSTRAINT osessp_singleton CHECK (id),
+    CONSTRAINT osessp_version CHECK ((config_version >= 1))
+);
+
+
+--
+-- Name: TABLE operator_session_policy; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.operator_session_policy IS 'Admin Console session limits (0132, GDPR plan C10): signed out after idle_timeout_minutes without activity and max_session_hours after signing in, whatever the activity. One row for the appliance; no row means the defaults (30 minutes, 12 hours). Written only through public.operator_session_policy_set.';
+
+
+--
+-- Name: operator_session_policy_changes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.operator_session_policy_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    changed_by text NOT NULL,
+    change_reason text NOT NULL,
+    old_values jsonb,
+    new_values jsonb NOT NULL,
+    new_config_version bigint NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT osesspc_actor CHECK ((length(btrim(changed_by)) > 0)),
+    CONSTRAINT osesspc_reason CHECK ((length(btrim(change_reason)) > 0))
+);
+
+
+--
+-- Name: TABLE operator_session_policy_changes; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.operator_session_policy_changes IS 'Append-only history of public.operator_session_policy (0132).';
 
 
 --
@@ -15814,7 +21367,7 @@ CREATE TABLE public.operator_signin_throttle (
     locked_until timestamp with time zone,
     CONSTRAINT ost_failures CHECK ((failures >= 0)),
     CONSTRAINT ost_key_hex CHECK ((key_hash ~ '^[0-9a-f]{64}$'::text)),
-    CONSTRAINT ost_scope CHECK ((scope = ANY (ARRAY['account'::text, 'ip'::text, 'reauth'::text])))
+    CONSTRAINT ost_scope CHECK ((scope = ANY (ARRAY['account'::text, 'ip'::text, 'reauth'::text, 'mfa'::text])))
 );
 
 
@@ -15842,6 +21395,8 @@ CREATE TABLE public.operators (
     oidc_sub text,
     last_sso_login_at timestamp with time zone,
     must_change_password boolean DEFAULT false NOT NULL,
+    disabled_at timestamp with time zone,
+    anonymised_at timestamp with time zone,
     CONSTRAINT operators_auth_method_check CHECK ((auth_method = ANY (ARRAY['local'::text, 'sso'::text]))),
     CONSTRAINT operators_status_check CHECK ((status = ANY (ARRAY['active'::text, 'disabled'::text, 'invited'::text])))
 );
@@ -16057,6 +21612,29 @@ CREATE TABLE public.portal_tls_state (
 --
 
 COMMENT ON TABLE public.portal_tls_state IS 'The portal''s HTTPS state as scd last established it (0116). https_active=false means the approved HTTP fallback is in force: manual code entry only, code-only emails, no social sign-in; fallback_reason says why. Recovery is automatic when a valid certificate is installed again.';
+
+
+--
+-- Name: privacy_notice_versions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.privacy_notice_versions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    fingerprint text NOT NULL,
+    privacy_text text,
+    privacy_url text,
+    terms_url text,
+    first_shown_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pnv_fingerprint CHECK ((fingerprint ~ '^[0-9a-f]{64}$'::text))
+);
+
+
+--
+-- Name: TABLE privacy_notice_versions; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.privacy_notice_versions IS 'Every privacy notice (with the terms link) a guest sign-in happened under (0130, GDPR plan C6, decision D-C6), stored once by the SHA-256 of [privacy_text, privacy_url, terms_url]. Append-only. Written only by public.privacy_notice_in_force.';
 
 
 --
@@ -16311,6 +21889,14 @@ ALTER TABLE ONLY iam_v2.accounting_retention_changes
 
 
 --
+-- Name: assisted_guest_requests agr_ref_unique; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.assisted_guest_requests
+    ADD CONSTRAINT agr_ref_unique UNIQUE (ref);
+
+
+--
 -- Name: anonymous_access_subjects anonymous_access_subjects_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -16364,6 +21950,38 @@ ALTER TABLE ONLY iam_v2.appliance_product_setting_changes
 
 ALTER TABLE ONLY iam_v2.appliance_product_settings
     ADD CONSTRAINT appliance_product_settings_pkey PRIMARY KEY (tenant_id, site_id, appliance_id);
+
+
+--
+-- Name: assisted_guest_request_anchors assisted_guest_request_anchors_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.assisted_guest_request_anchors
+    ADD CONSTRAINT assisted_guest_request_anchors_pkey PRIMARY KEY (request_id, anchor_kind, anchor_id);
+
+
+--
+-- Name: assisted_guest_request_events assisted_guest_request_events_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.assisted_guest_request_events
+    ADD CONSTRAINT assisted_guest_request_events_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: assisted_guest_request_records assisted_guest_request_records_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.assisted_guest_request_records
+    ADD CONSTRAINT assisted_guest_request_records_pkey PRIMARY KEY (request_id, rec_kind, rec_id, action);
+
+
+--
+-- Name: assisted_guest_requests assisted_guest_requests_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.assisted_guest_requests
+    ADD CONSTRAINT assisted_guest_requests_pkey PRIMARY KEY (id);
 
 
 --
@@ -16572,6 +22190,30 @@ ALTER TABLE ONLY iam_v2.data_crossing_progress
 
 ALTER TABLE ONLY iam_v2.data_crossing_state
     ADD CONSTRAINT data_crossing_state_pkey PRIMARY KEY (entitlement_id);
+
+
+--
+-- Name: data_retention_changes data_retention_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.data_retention_changes
+    ADD CONSTRAINT data_retention_changes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: data_retention_checkpoints data_retention_checkpoints_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.data_retention_checkpoints
+    ADD CONSTRAINT data_retention_checkpoints_pkey PRIMARY KEY (tenant_id, site_id, category);
+
+
+--
+-- Name: data_retention_runs data_retention_runs_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.data_retention_runs
+    ADD CONSTRAINT data_retention_runs_pkey PRIMARY KEY (id);
 
 
 --
@@ -16791,6 +22433,22 @@ ALTER TABLE ONLY iam_v2.entitlements
 
 
 --
+-- Name: erasure_journal erasure_journal_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.erasure_journal
+    ADD CONSTRAINT erasure_journal_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: erasure_ledger erasure_ledger_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.erasure_ledger
+    ADD CONSTRAINT erasure_ledger_pkey PRIMARY KEY (seq);
+
+
+--
 -- Name: financial_epoch financial_epoch_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -16839,6 +22497,14 @@ ALTER TABLE ONLY iam_v2.financial_restore_events
 
 
 --
+-- Name: guest_data_request_register gdrr_unique; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.guest_data_request_register
+    ADD CONSTRAINT gdrr_unique UNIQUE (ref);
+
+
+--
 -- Name: guest_access_accounts guest_access_accounts_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -16852,6 +22518,22 @@ ALTER TABLE ONLY iam_v2.guest_access_accounts
 
 ALTER TABLE ONLY iam_v2.guest_access_accounts
     ADD CONSTRAINT guest_access_accounts_tenant_id_site_id_id_key UNIQUE (tenant_id, site_id, id);
+
+
+--
+-- Name: guest_data_erasures guest_data_erasures_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.guest_data_erasures
+    ADD CONSTRAINT guest_data_erasures_pkey PRIMARY KEY (erasure_ref);
+
+
+--
+-- Name: guest_data_request_register guest_data_request_register_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.guest_data_request_register
+    ADD CONSTRAINT guest_data_request_register_pkey PRIMARY KEY (id);
 
 
 --
@@ -16908,6 +22590,38 @@ ALTER TABLE ONLY iam_v2.guest_principals
 
 ALTER TABLE ONLY iam_v2.guest_principals
     ADD CONSTRAINT guest_principals_tenant_id_id_key UNIQUE (tenant_id, id);
+
+
+--
+-- Name: guest_signin_device_passes guest_signin_device_passes_pause_id_device_mac_key; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.guest_signin_device_passes
+    ADD CONSTRAINT guest_signin_device_passes_pause_id_device_mac_key UNIQUE (pause_id, device_mac);
+
+
+--
+-- Name: guest_signin_device_passes guest_signin_device_passes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.guest_signin_device_passes
+    ADD CONSTRAINT guest_signin_device_passes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: guest_signin_network_pauses guest_signin_network_pauses_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.guest_signin_network_pauses
+    ADD CONSTRAINT guest_signin_network_pauses_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: guest_signin_network_policy_changes guest_signin_network_policy_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.guest_signin_network_policy_changes
+    ADD CONSTRAINT guest_signin_network_policy_changes_pkey PRIMARY KEY (id);
 
 
 --
@@ -16988,6 +22702,22 @@ ALTER TABLE ONLY iam_v2.internet_packages
 
 ALTER TABLE ONLY iam_v2.internet_packages
     ADD CONSTRAINT internet_packages_tenant_id_site_id_id_key UNIQUE (tenant_id, site_id, id);
+
+
+--
+-- Name: erasure_ledger ledger_hash_unique; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.erasure_ledger
+    ADD CONSTRAINT ledger_hash_unique UNIQUE (hash);
+
+
+--
+-- Name: ledger_meta ledger_meta_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.ledger_meta
+    ADD CONSTRAINT ledger_meta_pkey PRIMARY KEY (singleton);
 
 
 --
@@ -17671,6 +23401,22 @@ ALTER TABLE ONLY iam_v2.refund_access_terminations
 
 
 --
+-- Name: retention_floor retention_floor_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.retention_floor
+    ADD CONSTRAINT retention_floor_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: scrub_registry scrub_registry_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.scrub_registry
+    ADD CONSTRAINT scrub_registry_pkey PRIMARY KEY (table_name, column_name);
+
+
+--
 -- Name: self_service_settings_changes self_service_settings_changes_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -17879,11 +23625,27 @@ ALTER TABLE ONLY iam_v2.site_checkout_grace_config
 
 
 --
+-- Name: site_data_retention site_data_retention_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.site_data_retention
+    ADD CONSTRAINT site_data_retention_pkey PRIMARY KEY (tenant_id, site_id);
+
+
+--
 -- Name: site_device_settings site_device_settings_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
 ALTER TABLE ONLY iam_v2.site_device_settings
     ADD CONSTRAINT site_device_settings_pkey PRIMARY KEY (tenant_id, site_id);
+
+
+--
+-- Name: site_guest_signin_network_policy site_guest_signin_network_policy_pkey; Type: CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.site_guest_signin_network_policy
+    ADD CONSTRAINT site_guest_signin_network_policy_pkey PRIMARY KEY (tenant_id, site_id);
 
 
 --
@@ -18215,6 +23977,22 @@ ALTER TABLE ONLY public.auth_throttle_buckets
 
 
 --
+-- Name: backup_key_holder_events backup_key_holder_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.backup_key_holder_events
+    ADD CONSTRAINT backup_key_holder_events_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: backup_key_holders backup_key_holders_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.backup_key_holders
+    ADD CONSTRAINT backup_key_holders_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: backup_records backup_records_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -18279,6 +24057,14 @@ ALTER TABLE ONLY public.guest_networks
 
 
 --
+-- Name: ledger_destination ledger_destination_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_destination
+    ADD CONSTRAINT ledger_destination_pkey PRIMARY KEY (singleton);
+
+
+--
 -- Name: network_apply_events network_apply_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -18335,11 +24121,67 @@ ALTER TABLE ONLY public.notification_providers
 
 
 --
+-- Name: operator_mfa_recovery_codes omrc_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.operator_mfa_recovery_codes
+    ADD CONSTRAINT omrc_unique UNIQUE (operator_id, code_mac);
+
+
+--
+-- Name: operator_account_retention_changes operator_account_retention_changes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.operator_account_retention_changes
+    ADD CONSTRAINT operator_account_retention_changes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: operator_account_retention operator_account_retention_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.operator_account_retention
+    ADD CONSTRAINT operator_account_retention_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: operator_mfa operator_mfa_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.operator_mfa
+    ADD CONSTRAINT operator_mfa_pkey PRIMARY KEY (operator_id);
+
+
+--
+-- Name: operator_mfa_recovery_codes operator_mfa_recovery_codes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.operator_mfa_recovery_codes
+    ADD CONSTRAINT operator_mfa_recovery_codes_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: operator_roles operator_roles_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.operator_roles
     ADD CONSTRAINT operator_roles_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: operator_session_policy_changes operator_session_policy_changes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.operator_session_policy_changes
+    ADD CONSTRAINT operator_session_policy_changes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: operator_session_policy operator_session_policy_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.operator_session_policy
+    ADD CONSTRAINT operator_session_policy_pkey PRIMARY KEY (id);
 
 
 --
@@ -18407,6 +24249,14 @@ ALTER TABLE ONLY public.pms_providers
 
 
 --
+-- Name: privacy_notice_versions pnv_one_per_content; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.privacy_notice_versions
+    ADD CONSTRAINT pnv_one_per_content UNIQUE (tenant_id, fingerprint);
+
+
+--
 -- Name: portal_certificates portal_certificates_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -18436,6 +24286,14 @@ ALTER TABLE ONLY public.portal_https_settings
 
 ALTER TABLE ONLY public.portal_tls_state
     ADD CONSTRAINT portal_tls_state_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: privacy_notice_versions privacy_notice_versions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.privacy_notice_versions
+    ADD CONSTRAINT privacy_notice_versions_pkey PRIMARY KEY (id);
 
 
 --
@@ -18562,6 +24420,20 @@ CREATE INDEX aet_outbox ON iam_v2.account_email_tokens USING btree (next_send_at
 
 
 --
+-- Name: agr_site; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX agr_site ON iam_v2.assisted_guest_requests USING btree (tenant_id, site_id, created_at DESC);
+
+
+--
+-- Name: agre_request; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX agre_request ON iam_v2.assisted_guest_request_events USING btree (request_id, at);
+
+
+--
 -- Name: anonymous_subject_credentials_subject; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
@@ -18653,6 +24525,20 @@ CREATE INDEX dld_site ON iam_v2.device_limit_disconnections USING btree (tenant_
 
 
 --
+-- Name: drc_site; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX drc_site ON iam_v2.data_retention_changes USING btree (tenant_id, site_id, changed_at DESC);
+
+
+--
+-- Name: drr_site; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX drr_site ON iam_v2.data_retention_runs USING btree (tenant_id, site_id, ran_at DESC);
+
+
+--
 -- Name: dsa_device; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
@@ -18671,6 +24557,20 @@ CREATE INDEX dsa_entitlement ON iam_v2.device_slot_actions USING btree (entitlem
 --
 
 CREATE INDEX eda_boundary_lookup ON iam_v2.entitlement_device_authorizations USING btree (entitlement_id, device_id, authorized_at);
+
+
+--
+-- Name: ej_site; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX ej_site ON iam_v2.erasure_journal USING btree (tenant_id, site_id, erased_at);
+
+
+--
+-- Name: ej_unique; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE UNIQUE INDEX ej_unique ON iam_v2.erasure_journal USING btree (erasure_ref, kind, subject_id, COALESCE(detail, ''::text));
 
 
 --
@@ -18779,6 +24679,20 @@ CREATE INDEX gda_release_rate ON iam_v2.guest_device_actions USING btree (entitl
 
 
 --
+-- Name: gde_site; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX gde_site ON iam_v2.guest_data_erasures USING btree (tenant_id, site_id, erased_at DESC);
+
+
+--
+-- Name: gdrr_site; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX gdrr_site ON iam_v2.guest_data_request_register USING btree (tenant_id, site_id, status, due_at);
+
+
+--
 -- Name: gnpm_one_default; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
@@ -18797,6 +24711,13 @@ CREATE UNIQUE INDEX gnr_one_live_per_network ON iam_v2.guest_network_replacement
 --
 
 CREATE INDEX gnr_site_state ON iam_v2.guest_network_replacements USING btree (tenant_id, site_id, state, created_at DESC);
+
+
+--
+-- Name: guest_signin_network_pauses_lookup; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX guest_signin_network_pauses_lookup ON iam_v2.guest_signin_network_pauses USING btree (tenant_id, site_id, guest_network_id, expires_at DESC);
 
 
 --
@@ -19171,6 +25092,13 @@ CREATE INDEX sign_in_attempts_expiry ON iam_v2.sign_in_attempts USING btree (occ
 
 
 --
+-- Name: sign_in_attempts_network_recent; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX sign_in_attempts_network_recent ON iam_v2.sign_in_attempts USING btree (tenant_id, site_id, guest_network_id, occurred_at DESC);
+
+
+--
 -- Name: sign_in_attempts_request; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
@@ -19203,6 +25131,13 @@ CREATE INDEX site_module_changes_lookup ON iam_v2.site_module_changes USING btre
 --
 
 CREATE UNIQUE INDEX spsg_one_current ON iam_v2.social_provider_secret_generations USING btree (tenant_id, provider_id) WHERE (superseded_at IS NULL);
+
+
+--
+-- Name: stay_events_by_stay; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX stay_events_by_stay ON iam_v2.stay_events USING btree (stay_id, received_at) WHERE (stay_id IS NOT NULL);
 
 
 --
@@ -19381,6 +25316,20 @@ CREATE INDEX auth_throttle_buckets_expiry ON public.auth_throttle_buckets USING 
 
 
 --
+-- Name: bkh_site_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX bkh_site_key ON public.backup_key_holders USING btree (tenant_id, site_id, public_key);
+
+
+--
+-- Name: bkhe_site; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX bkhe_site ON public.backup_key_holder_events USING btree (tenant_id, site_id, at DESC);
+
+
+--
 -- Name: dhcp_pools_network_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -19458,10 +25407,24 @@ CREATE UNIQUE INDEX notification_providers_tenant_channel_enabled_idx ON public.
 
 
 --
+-- Name: operator_account_retention_changes_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX operator_account_retention_changes_at ON public.operator_account_retention_changes USING btree (changed_at DESC);
+
+
+--
 -- Name: operator_roles_uniq; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE UNIQUE INDEX operator_roles_uniq ON public.operator_roles USING btree (operator_id, COALESCE(tenant_id, '00000000-0000-0000-0000-000000000000'::uuid), role);
+
+
+--
+-- Name: operator_session_policy_changes_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX operator_session_policy_changes_at ON public.operator_session_policy_changes USING btree (changed_at DESC);
 
 
 --
@@ -19587,7 +25550,7 @@ CREATE INDEX system_network_audit_revision_idx ON public.system_network_audit US
 -- Name: account_password_settings_changes account_password_settings_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER account_password_settings_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.account_password_settings_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.account_password_settings_changes_append_only();
+CREATE TRIGGER account_password_settings_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.account_password_settings_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.account_password_settings_changes_append_only();
 
 
 --
@@ -19601,7 +25564,7 @@ CREATE TRIGGER accounting_purge_runs_append_only BEFORE DELETE OR UPDATE ON iam_
 -- Name: accounting_retention_changes accounting_retention_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER accounting_retention_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.accounting_retention_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.accounting_retention_append_only();
+CREATE TRIGGER accounting_retention_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.accounting_retention_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.accounting_retention_append_only();
 
 
 --
@@ -19615,7 +25578,7 @@ CREATE TRIGGER ao_accounting BEFORE DELETE OR UPDATE ON iam_v2.accounting_record
 -- Name: entitlement_adjustments ao_adjust; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER ao_adjust BEFORE DELETE OR UPDATE ON iam_v2.entitlement_adjustments FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_reject_update_delete();
+CREATE TRIGGER ao_adjust BEFORE DELETE OR UPDATE ON iam_v2.entitlement_adjustments FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.trg_reject_update_delete();
 
 
 --
@@ -19636,21 +25599,35 @@ CREATE TRIGGER ao_postings BEFORE DELETE OR UPDATE ON iam_v2.pms_postings FOR EA
 -- Name: payment_transaction_events ao_ptx_events; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER ao_ptx_events BEFORE DELETE OR UPDATE ON iam_v2.payment_transaction_events FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_reject_update_delete_ptx_events();
+CREATE TRIGGER ao_ptx_events BEFORE DELETE OR UPDATE ON iam_v2.payment_transaction_events FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.trg_reject_update_delete_ptx_events();
 
 
 --
 -- Name: financial_recovery_holds ao_recovery_holds; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER ao_recovery_holds BEFORE DELETE OR UPDATE ON iam_v2.financial_recovery_holds FOR EACH ROW EXECUTE FUNCTION iam_v2.p4_recovery_hold_immutable();
+CREATE TRIGGER ao_recovery_holds BEFORE DELETE OR UPDATE ON iam_v2.financial_recovery_holds FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.p4_recovery_hold_immutable();
 
 
 --
 -- Name: posting_review_actions ao_review; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER ao_review BEFORE DELETE OR UPDATE ON iam_v2.posting_review_actions FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_reject_update_delete();
+CREATE TRIGGER ao_review BEFORE DELETE OR UPDATE ON iam_v2.posting_review_actions FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.trg_reject_update_delete();
+
+
+--
+-- Name: assisted_guest_request_events assisted_guest_request_events_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER assisted_guest_request_events_append_only BEFORE DELETE OR UPDATE ON iam_v2.assisted_guest_request_events FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.data_retention_append_only();
+
+
+--
+-- Name: assisted_guest_requests assisted_guest_requests_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER assisted_guest_requests_guard BEFORE DELETE OR UPDATE ON iam_v2.assisted_guest_requests FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.assisted_requests_guard();
 
 
 --
@@ -19664,7 +25641,7 @@ CREATE TRIGGER card_purchase_sweeps_append_only BEFORE DELETE OR UPDATE ON iam_v
 -- Name: card_reversal_reviews card_reversal_reviews_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER card_reversal_reviews_guard BEFORE DELETE OR UPDATE ON iam_v2.card_reversal_reviews FOR EACH ROW EXECUTE FUNCTION iam_v2.card_reversal_reviews_guard();
+CREATE TRIGGER card_reversal_reviews_guard BEFORE DELETE OR UPDATE ON iam_v2.card_reversal_reviews FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.card_reversal_reviews_guard();
 
 
 --
@@ -19678,7 +25655,21 @@ CREATE TRIGGER charge_gate BEFORE INSERT ON iam_v2.pms_postings FOR EACH ROW EXE
 -- Name: client_group_changes client_group_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER client_group_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.client_group_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.client_group_changes_append_only();
+CREATE TRIGGER client_group_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.client_group_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.client_group_changes_append_only();
+
+
+--
+-- Name: data_retention_changes data_retention_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER data_retention_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.data_retention_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.data_retention_append_only();
+
+
+--
+-- Name: data_retention_runs data_retention_runs_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER data_retention_runs_append_only BEFORE DELETE OR UPDATE ON iam_v2.data_retention_runs FOR EACH ROW EXECUTE FUNCTION iam_v2.data_retention_append_only();
 
 
 --
@@ -19692,14 +25683,14 @@ CREATE TRIGGER device_limit_disconnections_append_only BEFORE DELETE OR UPDATE O
 -- Name: device_settings_changes device_settings_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER device_settings_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.device_settings_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.device_settings_changes_append_only();
+CREATE TRIGGER device_settings_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.device_settings_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.device_settings_changes_append_only();
 
 
 --
 -- Name: device_slot_actions device_slot_actions_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER device_slot_actions_append_only BEFORE DELETE OR UPDATE ON iam_v2.device_slot_actions FOR EACH ROW EXECUTE FUNCTION iam_v2.device_slot_actions_append_only();
+CREATE TRIGGER device_slot_actions_append_only BEFORE DELETE OR UPDATE ON iam_v2.device_slot_actions FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.device_slot_actions_append_only();
 
 
 --
@@ -19710,6 +25701,27 @@ CREATE TRIGGER ent_guard BEFORE INSERT OR UPDATE ON iam_v2.entitlements FOR EACH
 
 
 --
+-- Name: erasure_journal erasure_journal_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER erasure_journal_append_only BEFORE DELETE OR UPDATE ON iam_v2.erasure_journal FOR EACH ROW EXECUTE FUNCTION iam_v2.data_retention_append_only();
+
+
+--
+-- Name: erasure_ledger erasure_ledger_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER erasure_ledger_guard BEFORE DELETE OR UPDATE ON iam_v2.erasure_ledger FOR EACH ROW EXECUTE FUNCTION iam_v2.ledger_guard();
+
+
+--
+-- Name: erasure_ledger erasure_ledger_no_truncate; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER erasure_ledger_no_truncate BEFORE TRUNCATE ON iam_v2.erasure_ledger FOR EACH STATEMENT EXECUTE FUNCTION iam_v2.ledger_guard();
+
+
+--
 -- Name: guest_access_accounts guest_access_account_removed_is_final; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
@@ -19717,10 +25729,24 @@ CREATE TRIGGER guest_access_account_removed_is_final BEFORE UPDATE OF enabled, u
 
 
 --
+-- Name: guest_data_erasures guest_data_erasures_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER guest_data_erasures_append_only BEFORE DELETE OR UPDATE ON iam_v2.guest_data_erasures FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.guest_data_erasures_append_only();
+
+
+--
+-- Name: guest_signin_network_policy_changes guest_signin_network_policy_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER guest_signin_network_policy_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.guest_signin_network_policy_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.guest_signin_network_policy_changes_append_only();
+
+
+--
 -- Name: guest_signin_protection_changes guest_signin_protection_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER guest_signin_protection_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.guest_signin_protection_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.guest_signin_protection_changes_append_only();
+CREATE TRIGGER guest_signin_protection_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.guest_signin_protection_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.guest_signin_protection_changes_append_only();
 
 
 --
@@ -19742,6 +25768,13 @@ CREATE TRIGGER imm_plan_rev BEFORE DELETE OR UPDATE ON iam_v2.service_plan_revis
 --
 
 CREATE TRIGGER imm_pms_rev BEFORE DELETE OR UPDATE ON iam_v2.pms_interface_revisions FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_reject_update_delete();
+
+
+--
+-- Name: ledger_meta ledger_meta_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER ledger_meta_guard BEFORE DELETE OR UPDATE ON iam_v2.ledger_meta FOR EACH ROW EXECUTE FUNCTION iam_v2.ledger_guard();
 
 
 --
@@ -20252,28 +26285,28 @@ CREATE TRIGGER p4_zz_posting_freshness_gate BEFORE INSERT ON iam_v2.pms_postings
 -- Name: entitlement_transfers p5_entitlement_transfer_controlled_writer; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER p5_entitlement_transfer_controlled_writer BEFORE INSERT OR DELETE OR UPDATE ON iam_v2.entitlement_transfers FOR EACH ROW EXECUTE FUNCTION iam_v2.p5_controlled_writer_only();
+CREATE TRIGGER p5_entitlement_transfer_controlled_writer BEFORE INSERT OR DELETE OR UPDATE ON iam_v2.entitlement_transfers FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.p5_controlled_writer_only();
 
 
 --
 -- Name: entitlement_transfers p5_entitlement_transfer_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER p5_entitlement_transfer_guard BEFORE INSERT OR DELETE OR UPDATE ON iam_v2.entitlement_transfers FOR EACH ROW EXECUTE FUNCTION iam_v2.p5_entitlement_transfer_guard();
+CREATE TRIGGER p5_entitlement_transfer_guard BEFORE INSERT OR DELETE OR UPDATE ON iam_v2.entitlement_transfers FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.p5_entitlement_transfer_guard();
 
 
 --
 -- Name: post_stay_profiles p5_post_stay_profile_controlled_writer; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER p5_post_stay_profile_controlled_writer BEFORE INSERT OR DELETE OR UPDATE ON iam_v2.post_stay_profiles FOR EACH ROW EXECUTE FUNCTION iam_v2.p5_controlled_writer_only();
+CREATE TRIGGER p5_post_stay_profile_controlled_writer BEFORE INSERT OR DELETE OR UPDATE ON iam_v2.post_stay_profiles FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.p5_controlled_writer_only();
 
 
 --
 -- Name: post_stay_profiles p5_post_stay_profile_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER p5_post_stay_profile_guard BEFORE INSERT OR DELETE OR UPDATE ON iam_v2.post_stay_profiles FOR EACH ROW EXECUTE FUNCTION iam_v2.p5_post_stay_profile_guard();
+CREATE TRIGGER p5_post_stay_profile_guard BEFORE INSERT OR DELETE OR UPDATE ON iam_v2.post_stay_profiles FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.p5_post_stay_profile_guard();
 
 
 --
@@ -20294,7 +26327,7 @@ CREATE TRIGGER p5_stay_link_guard BEFORE INSERT OR DELETE OR UPDATE ON iam_v2.st
 -- Name: guest_device_actions p6_guest_device_actions_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER p6_guest_device_actions_append_only BEFORE DELETE OR UPDATE ON iam_v2.guest_device_actions FOR EACH ROW EXECUTE FUNCTION iam_v2.p6_guest_device_actions_append_only();
+CREATE TRIGGER p6_guest_device_actions_append_only BEFORE DELETE OR UPDATE ON iam_v2.guest_device_actions FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.p6_guest_device_actions_append_only();
 
 
 --
@@ -20315,7 +26348,7 @@ CREATE TRIGGER p6_session_requires_authorized_binding BEFORE INSERT OR UPDATE OF
 -- Name: appliance_product_setting_changes p6_setting_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER p6_setting_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.appliance_product_setting_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.p6_setting_changes_append_only();
+CREATE TRIGGER p6_setting_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.appliance_product_setting_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.p6_setting_changes_append_only();
 
 
 --
@@ -20340,6 +26373,13 @@ CREATE TRIGGER p6_termination_evidence_matches_transition BEFORE INSERT ON iam_v
 
 
 --
+-- Name: auth_contexts p9_auth_context_privacy_notice; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER p9_auth_context_privacy_notice BEFORE INSERT OR UPDATE OF privacy_notice_version_id, privacy_notice_shown_at ON iam_v2.auth_contexts FOR EACH ROW EXECUTE FUNCTION public.stamp_privacy_notice();
+
+
+--
 -- Name: posting_attempts pa_oneway; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
@@ -20350,7 +26390,7 @@ CREATE TRIGGER pa_oneway BEFORE DELETE OR UPDATE ON iam_v2.posting_attempts FOR 
 -- Name: payment_account_conversion_changes pacc_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER pacc_append_only BEFORE DELETE OR UPDATE ON iam_v2.payment_account_conversion_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.p4_append_only_refuse();
+CREATE TRIGGER pacc_append_only BEFORE DELETE OR UPDATE ON iam_v2.payment_account_conversion_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.p4_append_only_refuse();
 
 
 --
@@ -20378,21 +26418,21 @@ CREATE TRIGGER payment_checkouts_guard BEFORE DELETE OR UPDATE ON iam_v2.payment
 -- Name: pms_answer_confirmations pms_answer_confirmations_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER pms_answer_confirmations_append_only BEFORE DELETE OR UPDATE ON iam_v2.pms_answer_confirmations FOR EACH ROW EXECUTE FUNCTION iam_v2.p4_append_only_refuse();
+CREATE TRIGGER pms_answer_confirmations_append_only BEFORE DELETE OR UPDATE ON iam_v2.pms_answer_confirmations FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.p4_append_only_refuse();
 
 
 --
 -- Name: pms_case_resolutions pms_case_resolutions_no_update; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER pms_case_resolutions_no_update BEFORE DELETE OR UPDATE ON iam_v2.pms_case_resolutions FOR EACH ROW EXECUTE FUNCTION iam_v2.pms_case_resolutions_append_only();
+CREATE TRIGGER pms_case_resolutions_no_update BEFORE DELETE OR UPDATE ON iam_v2.pms_case_resolutions FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.pms_case_resolutions_append_only();
 
 
 --
 -- Name: pms_connection_settings_changes pms_connection_settings_changes_no_update; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER pms_connection_settings_changes_no_update BEFORE DELETE OR UPDATE ON iam_v2.pms_connection_settings_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.pms_connection_settings_append_only();
+CREATE TRIGGER pms_connection_settings_changes_no_update BEFORE DELETE OR UPDATE ON iam_v2.pms_connection_settings_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.pms_connection_settings_append_only();
 
 
 --
@@ -20413,21 +26453,21 @@ CREATE TRIGGER pms_interface_financial_setting_changes_append_only BEFORE DELETE
 -- Name: pms_reconciliation_settings_changes pms_reconciliation_settings_changes_no_update; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER pms_reconciliation_settings_changes_no_update BEFORE DELETE OR UPDATE ON iam_v2.pms_reconciliation_settings_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.pms_reconciliation_settings_append_only();
+CREATE TRIGGER pms_reconciliation_settings_changes_no_update BEFORE DELETE OR UPDATE ON iam_v2.pms_reconciliation_settings_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.pms_reconciliation_settings_append_only();
 
 
 --
 -- Name: pms_review_expiry_settings_changes pms_review_expiry_settings_changes_no_update; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER pms_review_expiry_settings_changes_no_update BEFORE DELETE OR UPDATE ON iam_v2.pms_review_expiry_settings_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.pms_review_expiry_settings_append_only();
+CREATE TRIGGER pms_review_expiry_settings_changes_no_update BEFORE DELETE OR UPDATE ON iam_v2.pms_review_expiry_settings_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.pms_review_expiry_settings_append_only();
 
 
 --
 -- Name: pms_room_inventory_changes pms_room_inventory_changes_no_update; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER pms_room_inventory_changes_no_update BEFORE DELETE OR UPDATE ON iam_v2.pms_room_inventory_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.pms_room_inventory_append_only();
+CREATE TRIGGER pms_room_inventory_changes_no_update BEFORE DELETE OR UPDATE ON iam_v2.pms_room_inventory_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.pms_room_inventory_append_only();
 
 
 --
@@ -20441,7 +26481,7 @@ CREATE TRIGGER posting_presend_aborts_append_only BEFORE DELETE OR UPDATE ON iam
 -- Name: payment_provider_account_changes ppac_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER ppac_append_only BEFORE DELETE OR UPDATE ON iam_v2.payment_provider_account_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.p4_append_only_refuse();
+CREATE TRIGGER ppac_append_only BEFORE DELETE OR UPDATE ON iam_v2.payment_provider_account_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.p4_append_only_refuse();
 
 
 --
@@ -20466,17 +26506,24 @@ CREATE TRIGGER refund_access_terminations_append_only BEFORE DELETE OR UPDATE ON
 
 
 --
+-- Name: guest_data_request_register request_register_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER request_register_guard BEFORE DELETE OR UPDATE ON iam_v2.guest_data_request_register FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.request_register_guard();
+
+
+--
 -- Name: site_card_payment_setting_changes scpsc_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER scpsc_append_only BEFORE DELETE OR UPDATE ON iam_v2.site_card_payment_setting_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.p4_append_only_refuse();
+CREATE TRIGGER scpsc_append_only BEFORE DELETE OR UPDATE ON iam_v2.site_card_payment_setting_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.p4_append_only_refuse();
 
 
 --
 -- Name: self_service_settings_changes self_service_settings_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER self_service_settings_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.self_service_settings_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.self_service_settings_changes_append_only();
+CREATE TRIGGER self_service_settings_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.self_service_settings_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.self_service_settings_changes_append_only();
 
 
 --
@@ -20490,21 +26537,21 @@ CREATE TRIGGER sg_guard BEFORE DELETE OR UPDATE ON iam_v2.pms_interface_secret_g
 -- Name: site_module_changes site_module_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER site_module_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.site_module_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.site_module_changes_append_only();
+CREATE TRIGGER site_module_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.site_module_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.site_module_changes_append_only();
 
 
 --
 -- Name: site_payment_domain_changes spdc_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER spdc_append_only BEFORE DELETE OR UPDATE ON iam_v2.site_payment_domain_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.p4_append_only_refuse();
+CREATE TRIGGER spdc_append_only BEFORE DELETE OR UPDATE ON iam_v2.site_payment_domain_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.p4_append_only_refuse();
 
 
 --
 -- Name: stay_posting_blocks stay_posting_blocks_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER stay_posting_blocks_guard BEFORE DELETE OR UPDATE ON iam_v2.stay_posting_blocks FOR EACH ROW EXECUTE FUNCTION iam_v2.stay_posting_blocks_guard();
+CREATE TRIGGER stay_posting_blocks_guard BEFORE DELETE OR UPDATE ON iam_v2.stay_posting_blocks FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.stay_posting_blocks_guard();
 
 
 --
@@ -20518,14 +26565,14 @@ CREATE TRIGGER stay_posting_permission AFTER INSERT OR UPDATE OF status, externa
 -- Name: voucher_code_reveals voucher_code_reveals_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER voucher_code_reveals_append_only BEFORE DELETE OR UPDATE ON iam_v2.voucher_code_reveals FOR EACH ROW EXECUTE FUNCTION iam_v2.voucher_code_reveals_append_only();
+CREATE TRIGGER voucher_code_reveals_append_only BEFORE DELETE OR UPDATE ON iam_v2.voucher_code_reveals FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.voucher_code_reveals_append_only();
 
 
 --
 -- Name: voucher_code_settings_changes voucher_code_settings_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER voucher_code_settings_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.voucher_code_settings_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.voucher_code_settings_changes_append_only();
+CREATE TRIGGER voucher_code_settings_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.voucher_code_settings_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.voucher_code_settings_changes_append_only();
 
 
 --
@@ -20539,34 +26586,545 @@ CREATE TRIGGER voucher_issuance_gate BEFORE INSERT ON iam_v2.vouchers FOR EACH R
 -- Name: voucher_revocations voucher_revocations_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER voucher_revocations_append_only BEFORE DELETE OR UPDATE ON iam_v2.voucher_revocations FOR EACH ROW EXECUTE FUNCTION iam_v2.voucher_revocations_append_only();
+CREATE TRIGGER voucher_revocations_append_only BEFORE DELETE OR UPDATE ON iam_v2.voucher_revocations FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.voucher_revocations_append_only();
 
 
 --
 -- Name: walled_garden_settings_changes walled_garden_settings_changes_append_only; Type: TRIGGER; Schema: iam_v2; Owner: -
 --
 
-CREATE TRIGGER walled_garden_settings_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.walled_garden_settings_changes FOR EACH ROW EXECUTE FUNCTION iam_v2.walled_garden_settings_changes_append_only();
+CREATE TRIGGER walled_garden_settings_changes_append_only BEFORE DELETE OR UPDATE ON iam_v2.walled_garden_settings_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION iam_v2.walled_garden_settings_changes_append_only();
+
+
+--
+-- Name: account_password_settings_changes zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.account_password_settings_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: accounting_retention_changes zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.accounting_retention_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: appliance_product_setting_changes zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.appliance_product_setting_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: assisted_guest_request_events zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.assisted_guest_request_events FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: assisted_guest_requests zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.assisted_guest_requests FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: card_reversal_reviews zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.card_reversal_reviews FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: client_group_changes zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.client_group_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: data_retention_changes zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.data_retention_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: device_settings_changes zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.device_settings_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: device_slot_actions zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.device_slot_actions FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: entitlement_adjustments zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.entitlement_adjustments FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: entitlement_transfers zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.entitlement_transfers FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: financial_recovery_holds zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.financial_recovery_holds FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: guest_data_erasures zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.guest_data_erasures FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: guest_data_request_register zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.guest_data_request_register FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: guest_device_actions zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.guest_device_actions FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: guest_network_replacements zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.guest_network_replacements FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: guest_signin_device_passes zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.guest_signin_device_passes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: guest_signin_network_pauses zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.guest_signin_network_pauses FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: guest_signin_network_policy_changes zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.guest_signin_network_policy_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: guest_signin_protection_changes zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.guest_signin_protection_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: guest_signin_restrictions zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.guest_signin_restrictions FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: otp_code_reveals zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.otp_code_reveals FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: payment_account_conversion zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.payment_account_conversion FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: payment_account_conversion_changes zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.payment_account_conversion_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: payment_provider_account_changes zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.payment_provider_account_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: payment_provider_secret_generations zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.payment_provider_secret_generations FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: payment_transaction_events zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.payment_transaction_events FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: pms_answer_confirmations zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.pms_answer_confirmations FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: pms_case_resolutions zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.pms_case_resolutions FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: pms_connection_settings_changes zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.pms_connection_settings_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: pms_reconciliation_settings_changes zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.pms_reconciliation_settings_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: pms_review_expiry_settings_changes zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.pms_review_expiry_settings_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: pms_room_inventory_changes zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.pms_room_inventory_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: pms_roster_reconciliation_runs zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.pms_roster_reconciliation_runs FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: post_stay_profiles zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.post_stay_profiles FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: posting_review_actions zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.posting_review_actions FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: self_service_settings_changes zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.self_service_settings_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: site_account_password_settings zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.site_account_password_settings FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: site_accounting_retention zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.site_accounting_retention FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: site_card_payment_setting_changes zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.site_card_payment_setting_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: site_data_retention zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.site_data_retention FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: site_device_settings zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.site_device_settings FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: site_module_changes zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.site_module_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: site_payment_domain_changes zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.site_payment_domain_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: site_self_service_settings zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.site_self_service_settings FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: site_walled_garden_settings zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.site_walled_garden_settings FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: stay_posting_blocks zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.stay_posting_blocks FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: verification_access_grants zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.verification_access_grants FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: voucher_code_reveals zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.voucher_code_reveals FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: voucher_code_settings_changes zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.voucher_code_settings_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: voucher_revocations zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.voucher_revocations FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: vouchers zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.vouchers FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: walled_garden_settings_changes zz_scrub_guard; Type: TRIGGER; Schema: iam_v2; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON iam_v2.walled_garden_settings_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: backup_key_holder_events backup_key_holder_events_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER backup_key_holder_events_append_only BEFORE DELETE OR UPDATE ON public.backup_key_holder_events FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION public.backup_key_holder_events_append_only();
+
+
+--
+-- Name: backup_key_holders backup_key_holders_no_delete; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER backup_key_holders_no_delete BEFORE DELETE ON public.backup_key_holders FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION public.backup_key_holders_no_delete();
+
+
+--
+-- Name: operator_account_retention_changes operator_account_retention_changes_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER operator_account_retention_changes_append_only BEFORE DELETE OR UPDATE ON public.operator_account_retention_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION public.operator_account_retention_changes_append_only();
+
+
+--
+-- Name: operator_session_policy_changes operator_session_policy_changes_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER operator_session_policy_changes_append_only BEFORE DELETE OR UPDATE ON public.operator_session_policy_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION public.operator_session_policy_changes_append_only();
 
 
 --
 -- Name: operator_signin_protection_changes operator_signin_protection_changes_append_only; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER operator_signin_protection_changes_append_only BEFORE DELETE OR UPDATE ON public.operator_signin_protection_changes FOR EACH ROW EXECUTE FUNCTION public.operator_signin_protection_changes_append_only();
+CREATE TRIGGER operator_signin_protection_changes_append_only BEFORE DELETE OR UPDATE ON public.operator_signin_protection_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION public.operator_signin_protection_changes_append_only();
+
+
+--
+-- Name: operators operators_track_disabled; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER operators_track_disabled BEFORE INSERT OR UPDATE OF status ON public.operators FOR EACH ROW EXECUTE FUNCTION public.operators_track_disabled();
 
 
 --
 -- Name: portal_https_settings_changes portal_https_settings_changes_append_only; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER portal_https_settings_changes_append_only BEFORE DELETE OR UPDATE ON public.portal_https_settings_changes FOR EACH ROW EXECUTE FUNCTION public.portal_https_settings_changes_append_only();
+CREATE TRIGGER portal_https_settings_changes_append_only BEFORE DELETE OR UPDATE ON public.portal_https_settings_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) IS DISTINCT FROM 'on'::text)) EXECUTE FUNCTION public.portal_https_settings_changes_append_only();
+
+
+--
+-- Name: privacy_notice_versions privacy_notice_versions_append_only; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER privacy_notice_versions_append_only BEFORE DELETE OR UPDATE ON public.privacy_notice_versions FOR EACH ROW EXECUTE FUNCTION public.privacy_notice_versions_append_only();
+
+
+--
+-- Name: privacy_notice_versions privacy_notice_versions_no_truncate; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER privacy_notice_versions_no_truncate BEFORE TRUNCATE ON public.privacy_notice_versions FOR EACH STATEMENT EXECUTE FUNCTION public.privacy_notice_versions_append_only();
 
 
 --
 -- Name: accounting_records ts_insert_blocker; Type: TRIGGER; Schema: public; Owner: -
 --
 
+
+
+--
+-- Name: appliance_recovery_events zz_scrub_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON public.appliance_recovery_events FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: backup_key_holder_events zz_scrub_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON public.backup_key_holder_events FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: backup_key_holders zz_scrub_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON public.backup_key_holders FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: operator_account_retention zz_scrub_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON public.operator_account_retention FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: operator_account_retention_changes zz_scrub_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON public.operator_account_retention_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: operator_session_policy zz_scrub_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON public.operator_session_policy FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: operator_session_policy_changes zz_scrub_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON public.operator_session_policy_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: operator_signin_protection zz_scrub_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON public.operator_signin_protection FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: operator_signin_protection_changes zz_scrub_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON public.operator_signin_protection_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: portal_https_settings zz_scrub_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON public.portal_https_settings FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: portal_https_settings_changes zz_scrub_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON public.portal_https_settings_changes FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
+
+
+--
+-- Name: system_network_audit zz_scrub_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER zz_scrub_guard BEFORE DELETE OR UPDATE ON public.system_network_audit FOR EACH ROW WHEN ((current_setting('iam_v2.scrub'::text, true) = 'on'::text)) EXECUTE FUNCTION iam_v2.scrub_guard();
 
 
 --
@@ -20642,6 +27200,30 @@ ALTER TABLE ONLY iam_v2.appliance_product_setting_changes
 
 
 --
+-- Name: assisted_guest_request_anchors assisted_guest_request_anchors_request_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.assisted_guest_request_anchors
+    ADD CONSTRAINT assisted_guest_request_anchors_request_id_fkey FOREIGN KEY (request_id) REFERENCES iam_v2.assisted_guest_requests(id);
+
+
+--
+-- Name: assisted_guest_request_events assisted_guest_request_events_request_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.assisted_guest_request_events
+    ADD CONSTRAINT assisted_guest_request_events_request_id_fkey FOREIGN KEY (request_id) REFERENCES iam_v2.assisted_guest_requests(id);
+
+
+--
+-- Name: assisted_guest_request_records assisted_guest_request_records_request_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.assisted_guest_request_records
+    ADD CONSTRAINT assisted_guest_request_records_request_id_fkey FOREIGN KEY (request_id) REFERENCES iam_v2.assisted_guest_requests(id);
+
+
+--
 -- Name: auth_context_offers auth_context_offers_tenant_id_site_id_auth_context_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
 --
 
@@ -20655,6 +27237,14 @@ ALTER TABLE ONLY iam_v2.auth_context_offers
 
 ALTER TABLE ONLY iam_v2.auth_context_offers
     ADD CONSTRAINT auth_context_offers_tenant_id_site_id_package_revision_id_fkey FOREIGN KEY (tenant_id, site_id, package_revision_id) REFERENCES iam_v2.internet_package_revisions(tenant_id, site_id, id);
+
+
+--
+-- Name: auth_contexts auth_contexts_privacy_notice_version_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.auth_contexts
+    ADD CONSTRAINT auth_contexts_privacy_notice_version_id_fkey FOREIGN KEY (privacy_notice_version_id) REFERENCES public.privacy_notice_versions(id);
 
 
 --
@@ -21015,6 +27605,14 @@ ALTER TABLE ONLY iam_v2.guest_network_pms_map
 
 ALTER TABLE ONLY iam_v2.guest_principal_identities
     ADD CONSTRAINT guest_principal_identities_tenant_id_guest_principal_id_fkey FOREIGN KEY (tenant_id, guest_principal_id) REFERENCES iam_v2.guest_principals(tenant_id, id) ON DELETE CASCADE;
+
+
+--
+-- Name: guest_signin_device_passes guest_signin_device_passes_pause_id_fkey; Type: FK CONSTRAINT; Schema: iam_v2; Owner: -
+--
+
+ALTER TABLE ONLY iam_v2.guest_signin_device_passes
+    ADD CONSTRAINT guest_signin_device_passes_pause_id_fkey FOREIGN KEY (pause_id) REFERENCES iam_v2.guest_signin_network_pauses(id) ON DELETE CASCADE;
 
 
 --
@@ -21698,6 +28296,14 @@ ALTER TABLE ONLY public.auth_otps
 
 
 --
+-- Name: backup_key_holder_events backup_key_holder_events_holder_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.backup_key_holder_events
+    ADD CONSTRAINT backup_key_holder_events_holder_id_fkey FOREIGN KEY (holder_id) REFERENCES public.backup_key_holders(id);
+
+
+--
 -- Name: dhcp_pools dhcp_pools_guest_network_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -21735,6 +28341,22 @@ ALTER TABLE ONLY public.network_health_checks
 
 ALTER TABLE ONLY public.notification_providers
     ADD CONSTRAINT notification_providers_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) ON DELETE CASCADE;
+
+
+--
+-- Name: operator_mfa operator_mfa_operator_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.operator_mfa
+    ADD CONSTRAINT operator_mfa_operator_id_fkey FOREIGN KEY (operator_id) REFERENCES public.operators(id) ON DELETE CASCADE;
+
+
+--
+-- Name: operator_mfa_recovery_codes operator_mfa_recovery_codes_operator_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.operator_mfa_recovery_codes
+    ADD CONSTRAINT operator_mfa_recovery_codes_operator_id_fkey FOREIGN KEY (operator_id) REFERENCES public.operators(id) ON DELETE CASCADE;
 
 
 --
@@ -21949,6 +28571,69 @@ GRANT ALL ON FUNCTION iam_v2.allocate_p_number(p_tenant uuid, p_site uuid, p_int
 
 
 --
+-- Name: FUNCTION anonymise_device(p_device uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.anonymise_device(p_device uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION anonymise_guest_account(p_account uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.anonymise_guest_account(p_account uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION anonymise_guest_principal(p_principal uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.anonymise_guest_principal(p_principal uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION anonymise_stay(p_stay uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.anonymise_stay(p_stay uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION anonymised_accounts(p_tenant uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.anonymised_accounts(p_tenant uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION anonymised_entitlements(p_tenant uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.anonymised_entitlements(p_tenant uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION anonymised_mac(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.anonymised_mac() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION anonymised_principals(p_tenant uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.anonymised_principals(p_tenant uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION anonymised_token(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.anonymised_token() FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION apply_adjustment(p_ent uuid, p_field text, p_new text, p_actor uuid, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -21969,6 +28654,149 @@ GRANT ALL ON FUNCTION iam_v2.apply_entitlement_transition(p_ent uuid, p_to text,
 --
 
 REVOKE ALL ON FUNCTION iam_v2.apply_payment_callback_v2(p_tenant uuid, p_provider text, p_merchant uuid, p_client_ref text, p_provider_event_id text, p_event_type text, p_asserted_status text, p_provider_txn_ref text, p_evidence jsonb) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION assisted_apply_records(p_tenant uuid, p_site uuid, p_kinds text[], p_ids uuid[]); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.assisted_apply_records(p_tenant uuid, p_site uuid, p_kinds text[], p_ids uuid[]) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION assisted_class(p_subj text, p_inside boolean, p_claim_ok boolean, p_priv_ok boolean, p_state text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.assisted_class(p_subj text, p_inside boolean, p_claim_ok boolean, p_priv_ok boolean, p_state text) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION assisted_close(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_outcome text, p_reason text, p_result jsonb, p_event text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.assisted_close(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_outcome text, p_reason text, p_result jsonb, p_event text) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION assisted_context(p_tenant uuid, p_site uuid, p_request uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.assisted_context(p_tenant uuid, p_site uuid, p_request uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION assisted_device_state(p_devices uuid[], p_mac macaddr, p_tenant uuid, p_site uuid, p_allowed uuid[], p_stays uuid[], p_guests uuid[], p_p uuid[], p_a uuid[], p_ch uuid[]); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.assisted_device_state(p_devices uuid[], p_mac macaddr, p_tenant uuid, p_site uuid, p_allowed uuid[], p_stays uuid[], p_guests uuid[], p_p uuid[], p_a uuid[], p_ch uuid[]) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION assisted_device_tied(p_devices uuid[], p_mac macaddr, p_tenant uuid, p_site uuid, p_allowed uuid[], p_stays uuid[], p_p uuid[], p_a uuid[], p_ch uuid[]); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.assisted_device_tied(p_devices uuid[], p_mac macaddr, p_tenant uuid, p_site uuid, p_allowed uuid[], p_stays uuid[], p_p uuid[], p_a uuid[], p_ch uuid[]) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION assisted_device_whole(p_device uuid, p_mac macaddr, p_tenant uuid, p_site uuid, p_from timestamp with time zone, p_to timestamp with time zone); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.assisted_device_whole(p_device uuid, p_mac macaddr, p_tenant uuid, p_site uuid, p_from timestamp with time zone, p_to timestamp with time zone) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION assisted_record_detail(p_tenant uuid, p_site uuid, p_kind text, p_id uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.assisted_record_detail(p_tenant uuid, p_site uuid, p_kind text, p_id uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION assisted_request_anchors_json(p_tenant uuid, p_site uuid, p_request uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.assisted_request_anchors_json(p_tenant uuid, p_site uuid, p_request uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION assisted_request_close(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_outcome text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.assisted_request_close(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_outcome text, p_reason text) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION assisted_request_erase_run(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_reason text, p_confirm text, p_signature text, p_selected jsonb); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.assisted_request_erase_run(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_reason text, p_confirm text, p_signature text, p_selected jsonb) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION assisted_request_export_doc(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_reason text, p_confirm text, p_signature text, p_selected jsonb); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.assisted_request_export_doc(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_reason text, p_confirm text, p_signature text, p_selected jsonb) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION assisted_request_get(p_tenant uuid, p_site uuid, p_request uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.assisted_request_get(p_tenant uuid, p_site uuid, p_request uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.assisted_request_get(p_tenant uuid, p_site uuid, p_request uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION assisted_request_list(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.assisted_request_list(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.assisted_request_list(p_tenant uuid, p_site uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION assisted_request_open(p_tenant uuid, p_site uuid, p_actor text, p_purpose text, p_macs text[], p_from timestamp with time zone, p_to timestamp with time zone, p_anchors jsonb, p_requester text, p_method text, p_evidence text, p_att_identity boolean, p_att_device boolean, p_att_sole boolean, p_att_private boolean, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.assisted_request_open(p_tenant uuid, p_site uuid, p_actor text, p_purpose text, p_macs text[], p_from timestamp with time zone, p_to timestamp with time zone, p_anchors jsonb, p_requester text, p_method text, p_evidence text, p_att_identity boolean, p_att_device boolean, p_att_sole boolean, p_att_private boolean, p_reason text) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION assisted_request_review(p_tenant uuid, p_site uuid, p_request uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.assisted_request_review(p_tenant uuid, p_site uuid, p_request uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION assisted_request_review_json(p_tenant uuid, p_site uuid, p_request uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.assisted_request_review_json(p_tenant uuid, p_site uuid, p_request uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.assisted_request_review_json(p_tenant uuid, p_site uuid, p_request uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION assisted_requests_guard(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.assisted_requests_guard() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION assisted_review_signature(p_tenant uuid, p_site uuid, p_request uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.assisted_review_signature(p_tenant uuid, p_site uuid, p_request uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION assisted_validate_selection(p_tenant uuid, p_site uuid, p_request uuid, p_signature text, p_selected jsonb, p_erase boolean); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.assisted_validate_selection(p_tenant uuid, p_site uuid, p_request uuid, p_signature text, p_selected jsonb, p_erase boolean) FROM PUBLIC;
 
 
 --
@@ -22049,10 +28877,34 @@ GRANT ALL ON FUNCTION iam_v2.complete_sign_in_attempt(p_tenant uuid, p_site uuid
 
 
 --
+-- Name: FUNCTION data_retention_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.data_retention_get(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.data_retention_get(p_tenant uuid, p_site uuid) TO svc_scd;
+GRANT ALL ON FUNCTION iam_v2.data_retention_get(p_tenant uuid, p_site uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION data_retention_set(p_tenant uuid, p_site uuid, p_pms_stay_days integer, p_client_activity_days integer, p_inactive_identity_days integer, p_expired_record_days integer, p_audit_log_days integer, p_sign_in_attempt_days integer, p_log_days integer, p_staff_note_days integer, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.data_retention_set(p_tenant uuid, p_site uuid, p_pms_stay_days integer, p_client_activity_days integer, p_inactive_identity_days integer, p_expired_record_days integer, p_audit_log_days integer, p_sign_in_attempt_days integer, p_log_days integer, p_staff_note_days integer, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.data_retention_set(p_tenant uuid, p_site uuid, p_pms_stay_days integer, p_client_activity_days integer, p_inactive_identity_days integer, p_expired_record_days integer, p_audit_log_days integer, p_sign_in_attempt_days integer, p_log_days integer, p_staff_note_days integer, p_operator text, p_reason text) TO svc_edged;
+
+
+--
 -- Name: FUNCTION deauthorize_entitlement_device(p_ent uuid, p_device uuid, p_at timestamp with time zone, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
 --
 
 REVOKE ALL ON FUNCTION iam_v2.deauthorize_entitlement_device(p_ent uuid, p_device uuid, p_at timestamp with time zone, p_reason text) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION device_exclusive_to(p_device uuid, p_own_ind uuid[], p_principals uuid[], p_accounts uuid[], p_challenges uuid[]); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.device_exclusive_to(p_device uuid, p_own_ind uuid[], p_principals uuid[], p_accounts uuid[], p_challenges uuid[]) FROM PUBLIC;
 
 
 --
@@ -22112,6 +28964,34 @@ GRANT ALL ON FUNCTION iam_v2.entitlement_usage_bytes(p_ent uuid, p_at timestamp 
 
 
 --
+-- Name: FUNCTION erase_guest_records(p_tenant uuid, p_site uuid, p_kind text, p_id uuid, p_operator text, p_reason text, p_public_counts jsonb); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.erase_guest_records(p_tenant uuid, p_site uuid, p_kind text, p_id uuid, p_operator text, p_reason text, p_public_counts jsonb) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION event_payload_for_guests(p_payload jsonb, p_guests jsonb, p_keep boolean, p_iface uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.event_payload_for_guests(p_payload jsonb, p_guests jsonb, p_keep boolean, p_iface uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION expire_assisted_requests(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.expire_assisted_requests(p_tenant uuid, p_site uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION give_up_waiting_stay_events(p_tenant uuid, p_site uuid, p_before timestamp with time zone, p_only uuid[], p_limit integer); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.give_up_waiting_stay_events(p_tenant uuid, p_site uuid, p_before timestamp with time zone, p_only uuid[], p_limit integer) FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION grace_package_matches_policy(p_tenant uuid, p_site uuid, p_pkg_rev uuid, p_duration integer, p_down integer, p_up integer, p_quota bigint, p_dev_limit integer, p_dev_policy text); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -22136,6 +29016,58 @@ REVOKE ALL ON FUNCTION iam_v2.guest_access_account_removed_is_final() FROM PUBLI
 
 
 --
+-- Name: FUNCTION guest_data_erasures_append_only(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.guest_data_erasures_append_only() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION guest_data_export_records(p_tenant uuid, p_site uuid, p_kind text, p_id uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.guest_data_export_records(p_tenant uuid, p_site uuid, p_kind text, p_id uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION guest_data_find(p_tenant uuid, p_site uuid, p_query text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.guest_data_find(p_tenant uuid, p_site uuid, p_query text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.guest_data_find(p_tenant uuid, p_site uuid, p_query text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION guest_data_identifiers(p_tenant uuid, p_site uuid, p_kind text, p_id uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.guest_data_identifiers(p_tenant uuid, p_site uuid, p_kind text, p_id uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION guest_data_scope(p_tenant uuid, p_site uuid, p_kind text, p_id uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.guest_data_scope(p_tenant uuid, p_site uuid, p_kind text, p_id uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION guest_signin_confirm_device(p_tenant uuid, p_site uuid, p_pause uuid, p_mac macaddr, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.guest_signin_confirm_device(p_tenant uuid, p_site uuid, p_pause uuid, p_mac macaddr, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.guest_signin_confirm_device(p_tenant uuid, p_site uuid, p_pause uuid, p_mac macaddr, p_operator text, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION guest_signin_end_network_pause(p_tenant uuid, p_site uuid, p_pause uuid, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.guest_signin_end_network_pause(p_tenant uuid, p_site uuid, p_pause uuid, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.guest_signin_end_network_pause(p_tenant uuid, p_site uuid, p_pause uuid, p_operator text, p_reason text) TO svc_edged;
+
+
+--
 -- Name: FUNCTION guest_signin_gate(p_tenant uuid, p_site uuid, p_mac macaddr); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -22144,11 +29076,66 @@ GRANT ALL ON FUNCTION iam_v2.guest_signin_gate(p_tenant uuid, p_site uuid, p_mac
 
 
 --
+-- Name: FUNCTION guest_signin_network_gate(p_tenant uuid, p_site uuid, p_network uuid, p_mac macaddr); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.guest_signin_network_gate(p_tenant uuid, p_site uuid, p_network uuid, p_mac macaddr) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.guest_signin_network_gate(p_tenant uuid, p_site uuid, p_network uuid, p_mac macaddr) TO svc_scd;
+
+
+--
+-- Name: FUNCTION guest_signin_network_pause_devices(p_tenant uuid, p_site uuid, p_pause uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.guest_signin_network_pause_devices(p_tenant uuid, p_site uuid, p_pause uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.guest_signin_network_pause_devices(p_tenant uuid, p_site uuid, p_pause uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION guest_signin_network_policy_changes_append_only(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.guest_signin_network_policy_changes_append_only() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION guest_signin_network_policy_get(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.guest_signin_network_policy_get(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.guest_signin_network_policy_get(p_tenant uuid, p_site uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION guest_signin_network_policy_set(p_tenant uuid, p_site uuid, p_max integer, p_window integer, p_pause integer, p_operator text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.guest_signin_network_policy_set(p_tenant uuid, p_site uuid, p_max integer, p_window integer, p_pause integer, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.guest_signin_network_policy_set(p_tenant uuid, p_site uuid, p_max integer, p_window integer, p_pause integer, p_operator text, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION guest_signin_network_prune(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.guest_signin_network_prune() FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.guest_signin_network_prune() TO svc_scd;
+
+
+--
 -- Name: FUNCTION guest_signin_note_failure(p_tenant uuid, p_site uuid, p_mac macaddr, p_network uuid, p_network_name text, p_room text); Type: ACL; Schema: iam_v2; Owner: -
 --
 
 REVOKE ALL ON FUNCTION iam_v2.guest_signin_note_failure(p_tenant uuid, p_site uuid, p_mac macaddr, p_network uuid, p_network_name text, p_room text) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.guest_signin_note_failure(p_tenant uuid, p_site uuid, p_mac macaddr, p_network uuid, p_network_name text, p_room text) TO svc_scd;
+
+
+--
+-- Name: FUNCTION guest_signin_note_network_failure(p_tenant uuid, p_site uuid, p_network uuid, p_network_name text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.guest_signin_note_network_failure(p_tenant uuid, p_site uuid, p_network uuid, p_network_name text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.guest_signin_note_network_failure(p_tenant uuid, p_site uuid, p_network uuid, p_network_name text) TO svc_scd;
 
 
 --
@@ -22222,11 +29209,97 @@ GRANT ALL ON FUNCTION iam_v2.internet_package_deletion_blockers(p_tenant uuid, p
 
 
 --
+-- Name: FUNCTION is_anon_token(p text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.is_anon_token(p text) FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION issue_or_return_pms_context(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_stay uuid, p_device uuid, p_guest_network uuid, p_request uuid, p_ttl_seconds integer); Type: ACL; Schema: iam_v2; Owner: -
 --
 
 REVOKE ALL ON FUNCTION iam_v2.issue_or_return_pms_context(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_stay uuid, p_device uuid, p_guest_network uuid, p_request uuid, p_ttl_seconds integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.issue_or_return_pms_context(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_stay uuid, p_device uuid, p_guest_network uuid, p_request uuid, p_ttl_seconds integer) TO svc_scd;
+
+
+--
+-- Name: FUNCTION ledger_append(p_tenant uuid, p_site uuid, p_kind text, p_body jsonb); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.ledger_append(p_tenant uuid, p_site uuid, p_kind text, p_body jsonb) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.ledger_append(p_tenant uuid, p_site uuid, p_kind text, p_body jsonb) TO svc_scd;
+
+
+--
+-- Name: FUNCTION ledger_append_erasure(p_tenant uuid, p_site uuid, p_ref text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.ledger_append_erasure(p_tenant uuid, p_site uuid, p_ref text) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION ledger_confirm(p_hashes text[]); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.ledger_confirm(p_hashes text[]) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.ledger_confirm(p_hashes text[]) TO svc_edged;
+GRANT ALL ON FUNCTION iam_v2.ledger_confirm(p_hashes text[]) TO svc_scd;
+
+
+--
+-- Name: FUNCTION ledger_export(p_from bigint); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.ledger_export(p_from bigint) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.ledger_export(p_from bigint) TO svc_scd;
+
+
+--
+-- Name: FUNCTION ledger_guard(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.ledger_guard() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION ledger_hash(p_ledger uuid, p_seq bigint, p_prev text, p_kind text, p_tenant uuid, p_site uuid, p_at_us bigint, p_body text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.ledger_hash(p_ledger uuid, p_seq bigint, p_prev text, p_kind text, p_tenant uuid, p_site uuid, p_at_us bigint, p_body text) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION ledger_head(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.ledger_head() FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.ledger_head() TO svc_edged;
+GRANT ALL ON FUNCTION iam_v2.ledger_head() TO svc_scd;
+
+
+--
+-- Name: FUNCTION ledger_pending(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.ledger_pending() FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.ledger_pending() TO svc_edged;
+GRANT ALL ON FUNCTION iam_v2.ledger_pending() TO svc_scd;
+
+
+--
+-- Name: FUNCTION ledger_row_json(l iam_v2.erasure_ledger); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.ledger_row_json(l iam_v2.erasure_ledger) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION ledger_verify(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.ledger_verify() FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.ledger_verify() TO svc_scd;
 
 
 --
@@ -22259,6 +29332,13 @@ GRANT ALL ON FUNCTION iam_v2.lock_pms_interface_runtime(p_tenant uuid, p_site uu
 
 REVOKE ALL ON FUNCTION iam_v2.lock_stay(p_tenant uuid, p_site uuid, p_stay uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.lock_stay(p_tenant uuid, p_site uuid, p_stay uuid) TO svc_scd;
+
+
+--
+-- Name: FUNCTION mac_is_private(p_mac macaddr); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.mac_is_private(p_mac macaddr) FROM PUBLIC;
 
 
 --
@@ -23482,6 +30562,13 @@ GRANT ALL ON FUNCTION iam_v2.record_posting_review_action(p_posting uuid, p_acti
 
 
 --
+-- Name: FUNCTION redact_guest_text(p_payload jsonb, p_vals text[], p_search boolean); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.redact_guest_text(p_payload jsonb, p_vals text[], p_search boolean) FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION register_class_origin(p_tenant uuid, p_site uuid, p_session uuid, p_source_device uuid, p_bridge text, p_class_minor integer, p_epoch bigint, p_origin_up bigint, p_origin_down bigint, p_created_at timestamp with time zone); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -23495,6 +30582,89 @@ GRANT ALL ON FUNCTION iam_v2.register_class_origin(p_tenant uuid, p_site uuid, p
 
 REVOKE ALL ON FUNCTION iam_v2.request_full_resync(p_tenant uuid, p_site uuid, p_interface uuid, p_reason text) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.request_full_resync(p_tenant uuid, p_site uuid, p_interface uuid, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION request_register_answer(p_tenant uuid, p_site uuid, p_id uuid, p_actor text, p_status text, p_outcome text, p_note text, p_erasure_ref text, p_assisted_ref text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.request_register_answer(p_tenant uuid, p_site uuid, p_id uuid, p_actor text, p_status text, p_outcome text, p_note text, p_erasure_ref text, p_assisted_ref text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.request_register_answer(p_tenant uuid, p_site uuid, p_id uuid, p_actor text, p_status text, p_outcome text, p_note text, p_erasure_ref text, p_assisted_ref text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION request_register_extend(p_tenant uuid, p_site uuid, p_id uuid, p_actor text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.request_register_extend(p_tenant uuid, p_site uuid, p_id uuid, p_actor text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.request_register_extend(p_tenant uuid, p_site uuid, p_id uuid, p_actor text, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION request_register_guard(); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.request_register_guard() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION request_register_list(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.request_register_list(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.request_register_list(p_tenant uuid, p_site uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION request_register_open(p_tenant uuid, p_site uuid, p_actor text, p_kind text, p_received date, p_requester text, p_method text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.request_register_open(p_tenant uuid, p_site uuid, p_actor text, p_kind text, p_received date, p_requester text, p_method text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.request_register_open(p_tenant uuid, p_site uuid, p_actor text, p_kind text, p_received date, p_requester text, p_method text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION run_data_retention(p_tenant uuid, p_site uuid, p_batch integer); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.run_data_retention(p_tenant uuid, p_site uuid, p_batch integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.run_data_retention(p_tenant uuid, p_site uuid, p_batch integer) TO svc_scd;
+
+
+--
+-- Name: FUNCTION run_staff_note_retention(p_tenant uuid, p_site uuid, p_batch integer); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.run_staff_note_retention(p_tenant uuid, p_site uuid, p_batch integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.run_staff_note_retention(p_tenant uuid, p_site uuid, p_batch integer) TO svc_scd;
+
+
+--
+-- Name: FUNCTION same_guest(a_ext text, a_first text, a_last text, a_iface uuid, b_ext text, b_first text, b_last text, b_iface uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.same_guest(a_ext text, a_first text, a_last text, a_iface uuid, b_ext text, b_first text, b_last text, b_iface uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION same_guest_rows(p_guests uuid[], p_stays uuid[]); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.same_guest_rows(p_guests uuid[], p_stays uuid[]) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION scrub_registry_notes(p_tenant uuid, p_site uuid, p_cut timestamp with time zone, p_batch integer, p_placeholder text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.scrub_registry_notes(p_tenant uuid, p_site uuid, p_cut timestamp with time zone, p_batch integer, p_placeholder text) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION scrub_staff_label(p_old text, p_new text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.scrub_staff_label(p_old text, p_new text) FROM PUBLIC;
 
 
 --
@@ -23545,6 +30715,13 @@ GRANT ALL ON FUNCTION iam_v2.service_plan_deletion_blockers(p_tenant uuid, p_sit
 
 
 --
+-- Name: FUNCTION site_day_start(p_site uuid, p_day date); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.site_day_start(p_site uuid, p_day date) FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION site_module_changes_append_only(); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -23576,6 +30753,13 @@ GRANT ALL ON FUNCTION iam_v2.site_payment_domains_set(p_tenant uuid, p_site uuid
 
 
 --
+-- Name: FUNCTION site_today(p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.site_today(p_site uuid) FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION staff_release_device_slot(p_tenant uuid, p_site uuid, p_entitlement uuid, p_device uuid, p_operator uuid, p_operator_label text, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -23589,6 +30773,27 @@ GRANT ALL ON FUNCTION iam_v2.staff_release_device_slot(p_tenant uuid, p_site uui
 
 REVOKE ALL ON FUNCTION iam_v2.staff_require_device_signin(p_tenant uuid, p_site uuid, p_device uuid, p_operator uuid, p_operator_label text, p_reason text) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.staff_require_device_signin(p_tenant uuid, p_site uuid, p_device uuid, p_operator uuid, p_operator_label text, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION stay_absent_from_published_roster(p_stay uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.stay_absent_from_published_roster(p_stay uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION stay_guests_as_json(p_guests uuid[]); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.stay_guests_as_json(p_guests uuid[]) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION stay_named_guests(p_stay uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.stay_named_guests(p_stay uuid) FROM PUBLIC;
 
 
 --
@@ -23611,6 +30816,13 @@ REVOKE ALL ON FUNCTION iam_v2.supersede_entitlement_transition(p_target uuid, p_
 
 REVOKE ALL ON FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at timestamp with time zone, p_reason text) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at timestamp with time zone, p_reason text) TO svc_pmsd;
+
+
+--
+-- Name: FUNCTION text_names_any(p_text text, p_vals text[]); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.text_names_any(p_text text, p_vals text[]) FROM PUBLIC;
 
 
 --
@@ -23727,6 +30939,264 @@ GRANT ALL ON FUNCTION iam_v2.walled_garden_settings_set(p_tenant uuid, p_site uu
 
 
 --
+-- Name: FUNCTION assisted_reason_check(p_tenant uuid, p_site uuid, p_anchors jsonb, p_reason text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.assisted_reason_check(p_tenant uuid, p_site uuid, p_anchors jsonb, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.assisted_reason_check(p_tenant uuid, p_site uuid, p_anchors jsonb, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION assisted_request_close(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_outcome text, p_reason text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.assisted_request_close(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_outcome text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.assisted_request_close(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_outcome text, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION assisted_request_erase(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_reason text, p_confirm text, p_signature text, p_selected jsonb); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.assisted_request_erase(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_reason text, p_confirm text, p_signature text, p_selected jsonb) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.assisted_request_erase(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_reason text, p_confirm text, p_signature text, p_selected jsonb) TO svc_edged;
+
+
+--
+-- Name: FUNCTION assisted_request_export(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_reason text, p_confirm text, p_signature text, p_selected jsonb); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.assisted_request_export(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_reason text, p_confirm text, p_signature text, p_selected jsonb) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.assisted_request_export(p_tenant uuid, p_site uuid, p_request uuid, p_actor text, p_reason text, p_confirm text, p_signature text, p_selected jsonb) TO svc_edged;
+
+
+--
+-- Name: FUNCTION assisted_request_open(p_tenant uuid, p_site uuid, p_actor text, p_purpose text, p_macs text[], p_from timestamp with time zone, p_to timestamp with time zone, p_anchors jsonb, p_requester text, p_method text, p_evidence text, p_att_identity boolean, p_att_device boolean, p_att_sole boolean, p_att_private boolean, p_reason text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.assisted_request_open(p_tenant uuid, p_site uuid, p_actor text, p_purpose text, p_macs text[], p_from timestamp with time zone, p_to timestamp with time zone, p_anchors jsonb, p_requester text, p_method text, p_evidence text, p_att_identity boolean, p_att_device boolean, p_att_sole boolean, p_att_private boolean, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.assisted_request_open(p_tenant uuid, p_site uuid, p_actor text, p_purpose text, p_macs text[], p_from timestamp with time zone, p_to timestamp with time zone, p_anchors jsonb, p_requester text, p_method text, p_evidence text, p_att_identity boolean, p_att_device boolean, p_att_sole boolean, p_att_private boolean, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION assisted_request_reason_check(p_tenant uuid, p_site uuid, p_request uuid, p_reason text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.assisted_request_reason_check(p_tenant uuid, p_site uuid, p_request uuid, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.assisted_request_reason_check(p_tenant uuid, p_site uuid, p_request uuid, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION audit_clean_macs(p_tenant uuid, p_macs text[], p_ref text, p_since timestamp with time zone); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.audit_clean_macs(p_tenant uuid, p_macs text[], p_ref text, p_since timestamp with time zone) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION backup_key_holder_add(p_tenant uuid, p_site uuid, p_label text, p_public_key text, p_check_code_hash text, p_loss_acknowledged boolean, p_actor text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.backup_key_holder_add(p_tenant uuid, p_site uuid, p_label text, p_public_key text, p_check_code_hash text, p_loss_acknowledged boolean, p_actor text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.backup_key_holder_add(p_tenant uuid, p_site uuid, p_label text, p_public_key text, p_check_code_hash text, p_loss_acknowledged boolean, p_actor text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION backup_key_holder_confirm(p_tenant uuid, p_site uuid, p_id uuid, p_check_code_hash text, p_actor text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.backup_key_holder_confirm(p_tenant uuid, p_site uuid, p_id uuid, p_check_code_hash text, p_actor text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.backup_key_holder_confirm(p_tenant uuid, p_site uuid, p_id uuid, p_check_code_hash text, p_actor text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION backup_key_holder_remove(p_tenant uuid, p_site uuid, p_id uuid, p_actor text, p_reason text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.backup_key_holder_remove(p_tenant uuid, p_site uuid, p_id uuid, p_actor text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.backup_key_holder_remove(p_tenant uuid, p_site uuid, p_id uuid, p_actor text, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION backup_key_holder_tested(p_tenant uuid, p_site uuid, p_public_key text, p_actor text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.backup_key_holder_tested(p_tenant uuid, p_site uuid, p_public_key text, p_actor text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.backup_key_holder_tested(p_tenant uuid, p_site uuid, p_public_key text, p_actor text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION backup_key_recipients(p_tenant uuid, p_site uuid); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.backup_key_recipients(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.backup_key_recipients(p_tenant uuid, p_site uuid) TO svc_edged;
+GRANT ALL ON FUNCTION public.backup_key_recipients(p_tenant uuid, p_site uuid) TO svc_scd;
+
+
+--
+-- Name: FUNCTION guest_data_erase(p_tenant uuid, p_site uuid, p_kind text, p_id uuid, p_operator text, p_reason text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.guest_data_erase(p_tenant uuid, p_site uuid, p_kind text, p_id uuid, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.guest_data_erase(p_tenant uuid, p_site uuid, p_kind text, p_id uuid, p_operator text, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION guest_data_erase_core(p_tenant uuid, p_site uuid, p_kind text, p_id uuid, p_operator text, p_reason text, p_replay boolean, p_ref text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.guest_data_erase_core(p_tenant uuid, p_site uuid, p_kind text, p_id uuid, p_operator text, p_reason text, p_replay boolean, p_ref text) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION guest_data_export(p_tenant uuid, p_site uuid, p_kind text, p_id uuid); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.guest_data_export(p_tenant uuid, p_site uuid, p_kind text, p_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.guest_data_export(p_tenant uuid, p_site uuid, p_kind text, p_id uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION guest_data_reason_check(p_tenant uuid, p_site uuid, p_kind text, p_id uuid, p_reason text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.guest_data_reason_check(p_tenant uuid, p_site uuid, p_kind text, p_id uuid, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.guest_data_reason_check(p_tenant uuid, p_site uuid, p_kind text, p_id uuid, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION ledger_apply(p_entries jsonb, p_adopt boolean); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.ledger_apply(p_entries jsonb, p_adopt boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.ledger_apply(p_entries jsonb, p_adopt boolean) TO svc_scd;
+
+
+--
+-- Name: FUNCTION ledger_destination_get(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.ledger_destination_get() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.ledger_destination_get() TO svc_scd;
+
+
+--
+-- Name: FUNCTION ledger_destination_note(p_ok boolean, p_error text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.ledger_destination_note(p_ok boolean, p_error text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.ledger_destination_note(p_ok boolean, p_error text) TO svc_scd;
+
+
+--
+-- Name: FUNCTION ledger_destination_secret(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.ledger_destination_secret() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.ledger_destination_secret() TO svc_scd;
+
+
+--
+-- Name: FUNCTION ledger_destination_set(p_kind text, p_config jsonb, p_ct bytea, p_nonce bytea, p_key_id text, p_ver integer, p_by text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.ledger_destination_set(p_kind text, p_config jsonb, p_ct bytea, p_nonce bytea, p_key_id text, p_ver integer, p_by text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.ledger_destination_set(p_kind text, p_config jsonb, p_ct bytea, p_nonce bytea, p_key_id text, p_ver integer, p_by text) TO svc_scd;
+
+
+--
+-- Name: FUNCTION ledger_replay_answer(p_tenant uuid, p_site uuid, p_body jsonb); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.ledger_replay_answer(p_tenant uuid, p_site uuid, p_body jsonb) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION ledger_replay_assisted_closed(p_tenant uuid, p_site uuid, p_body jsonb); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.ledger_replay_assisted_closed(p_tenant uuid, p_site uuid, p_body jsonb) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION ledger_replay_erase(p_tenant uuid, p_site uuid, p_body jsonb); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.ledger_replay_erase(p_tenant uuid, p_site uuid, p_body jsonb) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION ledger_reset(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.ledger_reset() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.ledger_reset() TO svc_scd;
+
+
+--
+-- Name: FUNCTION operator_account_retention_changes_append_only(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.operator_account_retention_changes_append_only() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION operator_account_retention_get(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.operator_account_retention_get() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.operator_account_retention_get() TO svc_edged;
+
+
+--
+-- Name: FUNCTION operator_account_retention_set(p_disabled_account_days integer, p_operator text, p_reason text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.operator_account_retention_set(p_disabled_account_days integer, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.operator_account_retention_set(p_disabled_account_days integer, p_operator text, p_reason text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION operator_mfa_remove(p_operator uuid); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.operator_mfa_remove(p_operator uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.operator_mfa_remove(p_operator uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION operator_mfa_status(p_operator uuid); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.operator_mfa_status(p_operator uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.operator_mfa_status(p_operator uuid) TO svc_edged;
+
+
+--
+-- Name: FUNCTION operator_session_policy_changes_append_only(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.operator_session_policy_changes_append_only() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION operator_session_policy_get(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.operator_session_policy_get() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.operator_session_policy_get() TO svc_edged;
+
+
+--
+-- Name: FUNCTION operator_session_policy_set(p_idle_timeout_minutes integer, p_max_session_hours integer, p_operator text, p_reason text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.operator_session_policy_set(p_idle_timeout_minutes integer, p_max_session_hours integer, p_operator text, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.operator_session_policy_set(p_idle_timeout_minutes integer, p_max_session_hours integer, p_operator text, p_reason text) TO svc_edged;
+
+
+--
 -- Name: FUNCTION operator_signin_protection_changes_append_only(); Type: ACL; Schema: public; Owner: -
 --
 
@@ -23778,6 +31248,57 @@ REVOKE ALL ON FUNCTION public.operator_signin_throttle_limits(p_scope text, OUT 
 
 REVOKE ALL ON FUNCTION public.operator_signin_throttle_state(p_scope text, p_key_hash text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.operator_signin_throttle_state(p_scope text, p_key_hash text) TO svc_edged;
+
+
+--
+-- Name: FUNCTION operators_track_disabled(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.operators_track_disabled() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION privacy_notice_in_force(p_tenant uuid); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.privacy_notice_in_force(p_tenant uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION privacy_notice_versions_append_only(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.privacy_notice_versions_append_only() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION run_data_retention_public(p_tenant uuid, p_site uuid, p_batch integer); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.run_data_retention_public(p_tenant uuid, p_site uuid, p_batch integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.run_data_retention_public(p_tenant uuid, p_site uuid, p_batch integer) TO svc_scd;
+
+
+--
+-- Name: FUNCTION run_staff_retention(p_tenant uuid, p_site uuid); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.run_staff_retention(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.run_staff_retention(p_tenant uuid, p_site uuid) TO svc_scd;
+
+
+--
+-- Name: FUNCTION scrub_staff_label_public(p_old text, p_new text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.scrub_staff_label_public(p_old text, p_new text) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION stamp_privacy_notice(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.stamp_privacy_notice() FROM PUBLIC;
 
 
 --
@@ -23954,6 +31475,20 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE iam_v2.client_group_rules TO svc_edge
 
 GRANT SELECT ON TABLE iam_v2.client_groups TO svc_scd;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE iam_v2.client_groups TO svc_edged;
+
+
+--
+-- Name: TABLE data_retention_changes; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.data_retention_changes TO svc_edged;
+
+
+--
+-- Name: TABLE data_retention_runs; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.data_retention_runs TO svc_edged;
 
 
 --
@@ -24151,6 +31686,13 @@ GRANT UPDATE(grace_extensions_used) ON TABLE iam_v2.guest_access_accounts TO svc
 
 
 --
+-- Name: TABLE guest_data_erasures; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.guest_data_erasures TO svc_edged;
+
+
+--
 -- Name: TABLE guest_network_replacements; Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -24192,6 +31734,20 @@ GRANT UPDATE(attrs) ON TABLE iam_v2.guest_principal_identities TO svc_scd;
 --
 
 GRANT SELECT,INSERT ON TABLE iam_v2.guest_principals TO svc_scd;
+
+
+--
+-- Name: TABLE guest_signin_network_pauses; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.guest_signin_network_pauses TO svc_edged;
+
+
+--
+-- Name: TABLE guest_signin_network_policy_changes; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.guest_signin_network_policy_changes TO svc_edged;
 
 
 --
@@ -25003,10 +32559,129 @@ GRANT SELECT,INSERT,UPDATE ON TABLE public.auth_otps TO svc_scd;
 
 
 --
+-- Name: COLUMN auth_otps.id; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(id) ON TABLE public.auth_otps TO iam_v2_owner;
+
+
+--
+-- Name: COLUMN auth_otps.tenant_id; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(tenant_id) ON TABLE public.auth_otps TO iam_v2_owner;
+
+
+--
+-- Name: COLUMN auth_otps.destination; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(destination) ON TABLE public.auth_otps TO iam_v2_owner;
+
+
+--
 -- Name: TABLE auth_throttle_buckets; Type: ACL; Schema: public; Owner: -
 --
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.auth_throttle_buckets TO svc_scd;
+
+
+--
+-- Name: TABLE backup_key_holder_events; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT ON TABLE public.backup_key_holder_events TO svc_edged;
+
+
+--
+-- Name: COLUMN backup_key_holders.id; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(id) ON TABLE public.backup_key_holders TO svc_edged;
+
+
+--
+-- Name: COLUMN backup_key_holders.tenant_id; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(tenant_id) ON TABLE public.backup_key_holders TO svc_edged;
+
+
+--
+-- Name: COLUMN backup_key_holders.site_id; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(site_id) ON TABLE public.backup_key_holders TO svc_edged;
+
+
+--
+-- Name: COLUMN backup_key_holders.label; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(label) ON TABLE public.backup_key_holders TO svc_edged;
+
+
+--
+-- Name: COLUMN backup_key_holders.public_key; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(public_key) ON TABLE public.backup_key_holders TO svc_edged;
+
+
+--
+-- Name: COLUMN backup_key_holders.status; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(status) ON TABLE public.backup_key_holders TO svc_edged;
+
+
+--
+-- Name: COLUMN backup_key_holders.created_at; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(created_at) ON TABLE public.backup_key_holders TO svc_edged;
+
+
+--
+-- Name: COLUMN backup_key_holders.created_by; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(created_by) ON TABLE public.backup_key_holders TO svc_edged;
+
+
+--
+-- Name: COLUMN backup_key_holders.confirmed_at; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(confirmed_at) ON TABLE public.backup_key_holders TO svc_edged;
+
+
+--
+-- Name: COLUMN backup_key_holders.removed_at; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(removed_at) ON TABLE public.backup_key_holders TO svc_edged;
+
+
+--
+-- Name: COLUMN backup_key_holders.removed_by; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(removed_by) ON TABLE public.backup_key_holders TO svc_edged;
+
+
+--
+-- Name: COLUMN backup_key_holders.remove_reason; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(remove_reason) ON TABLE public.backup_key_holders TO svc_edged;
+
+
+--
+-- Name: COLUMN backup_key_holders.last_tested_at; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(last_tested_at) ON TABLE public.backup_key_holders TO svc_edged;
 
 
 --
@@ -25028,6 +32703,7 @@ GRANT SELECT ON TABLE public.dhcp_pools TO svc_netd;
 -- Name: TABLE dhcp_reservations; Type: ACL; Schema: public; Owner: -
 --
 
+GRANT SELECT ON TABLE public.dhcp_reservations TO iam_v2_owner;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.dhcp_reservations TO svc_edged;
 GRANT SELECT ON TABLE public.dhcp_reservations TO svc_netd;
 
@@ -25070,8 +32746,8 @@ GRANT SELECT,INSERT,UPDATE ON TABLE public.network_config_revisions TO svc_netd;
 -- Name: SEQUENCE network_config_revisions_seq_seq; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,USAGE ON SEQUENCE public.network_config_revisions_seq_seq TO svc_netd;
 GRANT SELECT,USAGE ON SEQUENCE public.network_config_revisions_seq_seq TO svc_edged;
+GRANT SELECT,USAGE ON SEQUENCE public.network_config_revisions_seq_seq TO svc_netd;
 
 
 --
@@ -25099,11 +32775,39 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.notification_providers TO svc_
 
 
 --
+-- Name: TABLE operator_account_retention_changes; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT ON TABLE public.operator_account_retention_changes TO svc_edged;
+
+
+--
+-- Name: TABLE operator_mfa; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.operator_mfa TO svc_scd;
+
+
+--
+-- Name: TABLE operator_mfa_recovery_codes; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.operator_mfa_recovery_codes TO svc_scd;
+
+
+--
 -- Name: TABLE operator_roles; Type: ACL; Schema: public; Owner: -
 --
 
 GRANT SELECT,DELETE ON TABLE public.operator_roles TO svc_scd;
 GRANT SELECT,INSERT,DELETE ON TABLE public.operator_roles TO svc_edged;
+
+
+--
+-- Name: TABLE operator_session_policy_changes; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT ON TABLE public.operator_session_policy_changes TO svc_edged;
 
 
 --
@@ -25213,6 +32917,27 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.sites TO svc_scd;
 
 
 --
+-- Name: COLUMN sites.id; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(id) ON TABLE public.sites TO iam_v2_owner;
+
+
+--
+-- Name: COLUMN sites.tenant_id; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(tenant_id) ON TABLE public.sites TO iam_v2_owner;
+
+
+--
+-- Name: COLUMN sites.timezone; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(timezone) ON TABLE public.sites TO iam_v2_owner;
+
+
+--
 -- Name: TABLE social_oauth_providers; Type: ACL; Schema: public; Owner: -
 --
 
@@ -25232,6 +32957,76 @@ GRANT UPDATE(client_secret) ON TABLE public.social_oauth_providers TO svc_scd;
 --
 
 GRANT SELECT,INSERT,UPDATE ON TABLE public.social_oauth_states TO svc_scd;
+
+
+--
+-- Name: COLUMN social_oauth_states.state; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(state) ON TABLE public.social_oauth_states TO iam_v2_owner;
+
+
+--
+-- Name: COLUMN social_oauth_states.tenant_id; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(tenant_id) ON TABLE public.social_oauth_states TO iam_v2_owner;
+
+
+--
+-- Name: COLUMN social_oauth_states.provider; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(provider) ON TABLE public.social_oauth_states TO iam_v2_owner;
+
+
+--
+-- Name: COLUMN social_oauth_states.client_ip; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(client_ip),UPDATE(client_ip) ON TABLE public.social_oauth_states TO iam_v2_owner;
+
+
+--
+-- Name: COLUMN social_oauth_states.client_mac; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(client_mac),UPDATE(client_mac) ON TABLE public.social_oauth_states TO iam_v2_owner;
+
+
+--
+-- Name: COLUMN social_oauth_states.user_agent; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(user_agent),UPDATE(user_agent) ON TABLE public.social_oauth_states TO iam_v2_owner;
+
+
+--
+-- Name: COLUMN social_oauth_states.created_at; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(created_at) ON TABLE public.social_oauth_states TO iam_v2_owner;
+
+
+--
+-- Name: COLUMN social_oauth_states.consumed_at; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(consumed_at) ON TABLE public.social_oauth_states TO iam_v2_owner;
+
+
+--
+-- Name: COLUMN social_oauth_states.code_verifier; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(code_verifier),UPDATE(code_verifier) ON TABLE public.social_oauth_states TO iam_v2_owner;
+
+
+--
+-- Name: COLUMN social_oauth_states.nonce; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(nonce),UPDATE(nonce) ON TABLE public.social_oauth_states TO iam_v2_owner;
 
 
 --
