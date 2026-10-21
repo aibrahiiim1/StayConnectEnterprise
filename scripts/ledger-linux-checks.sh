@@ -12,5 +12,5 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMG="${GO_IMAGE:-golang:1.25}"
 HOSTROOT="$(cygpath -m "$ROOT" 2>/dev/null || echo "$ROOT")"   # Git Bash on Windows needs the Windows spelling for -v
-MSYS_NO_PATHCONV=1 exec docker run --rm -v "$HOSTROOT:/src:ro" -e GOFLAGS=-mod=mod -e GOCACHE=/tmp/gocache -e GOMODCACHE=/tmp/gomod -w /src/data-plane "$IMG" \
-  sh -c 'cp -r /src /work && cd /work/data-plane && go test -count=1 -v ./internal/ledger 2>&1 | grep -E "^(--- |FAIL|ok|PASS|panic)"'
+MSYS_NO_PATHCONV=1 exec docker run --rm -v "$HOSTROOT:/src:ro" -e GOFLAGS=-mod=mod -v ledger-gocache:/tmp/gocache -v ledger-gomod:/tmp/gomod -e GOCACHE=/tmp/gocache -e GOMODCACHE=/tmp/gomod -w /src/data-plane "$IMG" \
+  sh -c 'cp -r /src /work && cd /work/data-plane && go test -count=1 -v ./internal/ledger 2>&1 | grep -E "^(--- |FAIL|ok|PASS|panic)|_test.go:[0-9]+:"'

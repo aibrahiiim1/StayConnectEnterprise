@@ -37,8 +37,8 @@ func fakeSys(t *testing.T) string {
 	link("dev/block/8:17", "../../devices/pci1/block/sdb/sdb1")
 	link("dev/block/253:0", "../../devices/virtual/block/dm-0")
 	link("dev/block/8:0", "../../devices/pci0/block/sda")
-	link("devices/virtual/block/dm-0/slaves/sda2", "../../../pci0/block/sda/sda2")
-	link("devices/virtual/block/dm-0/slaves/sdb1", "../../../pci1/block/sdb/sdb1")
+	link("devices/virtual/block/dm-0/slaves/sda2", "../../../../pci0/block/sda/sda2")
+	link("devices/virtual/block/dm-0/slaves/sdb1", "../../../../pci1/block/sdb/sdb1")
 	return root
 }
 
