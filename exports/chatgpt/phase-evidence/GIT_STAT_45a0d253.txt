@@ -1,0 +1,4 @@
+commit 45a0d253c46c7c62cc8e02d7cef69a060eea523f
+Date:   Wed Oct 21 16:29:59 2026 +0300
+
+    The change manifest names the T0240 delivery

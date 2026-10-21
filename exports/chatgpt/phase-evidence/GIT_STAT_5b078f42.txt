@@ -1,4 +1,0 @@
-commit 5b078f428c75ba572ca52d8d6890cf98d15a8fe4
-Date:   Wed Oct 21 13:02:40 2026 +0300
-
-    Governance: the delivery's change manifest
