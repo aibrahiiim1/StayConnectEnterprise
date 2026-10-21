@@ -28,14 +28,27 @@ const (
 // longNetworkRoutes are the requests that wait for netd to change the appliance's networking.
 var longNetworkRoutes = regexp.MustCompile(`^/edge/v1/network/(apply|validate|system/(apply|confirm|rollback|validate)|revisions/[^/]+/(confirm|rollback))$`)
 
-// routeTimeout bounds each request: the network applies at long, everything else at short.
+// ledgerRouteTimeout is what a request that commits to the erasure ledger may take. Every erasure, and every answered or closed request,
+// is written to the appliance AND to the secondary storage (a disk, an SFTP server or a bucket) before it is reported as done; over a
+// slow link that is seconds per copy, and the 15-second default made such an erasure fail (and roll back) although nothing was wrong
+// (found on PRE-LIVE against an SFTP server that took four seconds to answer each call).
+const ledgerRouteTimeout = 4 * time.Minute
+
+// ledgerRoutes are the requests that commit to the erasure ledger (they all go through ledgerQuery).
+var ledgerRoutes = regexp.MustCompile(`^/edge/v1/guest-data-rights/(erase|assisted/[^/]+/(erase|close)|register/[^/]+/answer)$`)
+
+// routeTimeout bounds each request: the network applies at long, the ledger commits at ledgerRouteTimeout, everything else at short.
 func routeTimeout(short, long time.Duration) func(http.Handler) http.Handler {
-	shortMW, longMW := middleware.Timeout(short), middleware.Timeout(long)
+	shortMW, longMW, ledgerMW := middleware.Timeout(short), middleware.Timeout(long), middleware.Timeout(ledgerRouteTimeout)
 	return func(next http.Handler) http.Handler {
-		s, l := shortMW(next), longMW(next)
+		s, l, g := shortMW(next), longMW(next), ledgerMW(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodPost && longNetworkRoutes.MatchString(r.URL.Path) {
 				l.ServeHTTP(w, r)
+				return
+			}
+			if r.Method == http.MethodPost && ledgerRoutes.MatchString(r.URL.Path) {
+				g.ServeHTTP(w, r)
 				return
 			}
 			s.ServeHTTP(w, r)

@@ -12,6 +12,7 @@ package main
 // requester reference and returns it once, as the hotel's own file of the request.
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -144,7 +145,7 @@ func (s *server) answerRegister(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusForbidden, "forbidden", "the request could not be attributed to an operator")
 		return
 	}
-	ctx, cancel := dbCtx(r)
+	ctx, cancel := context.WithTimeout(r.Context(), ledgerRouteTimeout) // the answer is committed to the ledger (see route_timeout.go)
 	defer cancel()
 	var doc []byte
 	if err := s.ledgerQuery(ctx, &doc, `SELECT iam_v2.request_register_answer($1::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7,$8,$9)::text`,

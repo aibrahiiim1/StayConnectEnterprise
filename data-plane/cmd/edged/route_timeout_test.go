@@ -26,6 +26,14 @@ func TestRouteTimeoutGivesNetworkAppliesTheirOwnBound(t *testing.T) {
 		"/edge/v1/network/guest-networks":           false,
 		"/edge/v1/network/apply/extra":              false,
 		"/edge/v1/operators":                        false,
+		// the requests that commit to the erasure ledger (two copies, one of them remote) get the ledger's bound
+		"/edge/v1/guest-data-rights/erase":               true,
+		"/edge/v1/guest-data-rights/assisted/abc/erase":  true,
+		"/edge/v1/guest-data-rights/assisted/abc/close":  true,
+		"/edge/v1/guest-data-rights/register/abc/answer": true,
+		"/edge/v1/guest-data-rights/export":              false,
+		"/edge/v1/guest-data-rights/assisted":            false,
+		"/edge/v1/guest-data-rights/register/abc/extend": false,
 	} {
 		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, path, nil))
 		if long && sawDeadline < time.Second {

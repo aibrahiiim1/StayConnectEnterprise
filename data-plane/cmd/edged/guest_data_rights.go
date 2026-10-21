@@ -17,9 +17,9 @@ package main
 // shown in the activity log only to holders of guest-data-rights.
 
 import (
-	"log/slog"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -28,7 +28,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-const guestDataEraseTimeout = time.Minute
+const guestDataEraseTimeout = ledgerRouteTimeout
 
 const guestDataSearchHeader = "X-Guest-Data-Search"
 
