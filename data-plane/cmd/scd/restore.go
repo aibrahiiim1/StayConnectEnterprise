@@ -96,18 +96,18 @@ func fileDigest(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func writeVerifiedMarker(name string, tables int) {
+func writeVerifiedMarker(name string, tables int) error {
 	full := filepath.Join(scdBackupDir, name)
 	fi, err := os.Stat(full)
 	if err != nil {
-		return
+		return fmt.Errorf("the backup could not be read to mark it verified: %w", err)
 	}
 	// NO DIGEST, NO MARKER. A marker that omitted it would be indistinguishable from a pre-digest one, and
 	// would be read as unverified anyway -- writing it would only mislead whoever read the file by hand.
 	sum, err := fileDigest(full)
 	if err != nil {
 		slog.Error("verification marker not written: the archive could not be digested", "backup", name, "err", err)
-		return
+		return fmt.Errorf("the backup could not be digested: %w", err)
 	}
 	b, _ := json.Marshal(verifiedRecord{
 		VerifiedAt: time.Now().UTC(), SizeBytes: fi.Size(), ModTime: fi.ModTime().UTC(),
@@ -116,7 +116,7 @@ func writeVerifiedMarker(name string, tables int) {
 	path := verifiedMarker(name)
 	if err := os.WriteFile(path, b, 0o640); err != nil {
 		slog.Error("verification marker not written", "backup", name, "err", err)
-		return
+		return fmt.Errorf("the verification marker could not be written: %w", err)
 	}
 	// HAND IT TO THE SERVICE GROUP, exactly as the dump itself is handed over.
 	//
@@ -130,6 +130,7 @@ func writeVerifiedMarker(name string, tables int) {
 			slog.Error("verification marker not handed to the service group", "backup", name, "err", err)
 		}
 	}
+	return nil
 }
 
 // readVerifiedMarker returns the record only if the archive on disk is still, byte for byte, the one that
@@ -617,11 +618,22 @@ func (s *server) runRestore(ctx context.Context, name, identity, by string, rec 
 	// A backup carries every record the hotel's retention periods had already anonymised since it was taken. The retention run
 	// (and the staff and note runs) put that right; running them before the appliance serves again means no expired identifier is
 	// visible for the hour it would otherwise take.
+	retentionDone := true
 	{
-		rctx, rcancel := context.WithTimeout(ctx, 10*time.Minute)
-		s.runDataRetention(rctx)
+		rctx, rcancel := context.WithTimeout(ctx, 30*time.Minute)
+		rerr := s.runDataRetentionComplete(rctx)
 		rcancel()
-		ok("retention_reapplied", "the retention periods were applied to the restored data before it was served")
+		if rerr != nil {
+			// Not reported as done: the backlog (or a failing function) is still there, the hourly run goes on with it, and the
+			// operator is told that expired identifiers may still be visible until it finishes.
+			retentionDone = false
+			slog.Warn("retention could not be completed on the restored data", "err", rerr)
+			steps = append(steps, restoreStep{Step: "retention_reapplied", OK: false,
+				Detail: "the retention periods were NOT fully applied to the restored data before it was served (" + tailLine(rerr.Error()) +
+					"); the hourly run continues with the rest, and expired personal data may be visible until it finishes"})
+		} else {
+			ok("retention_reapplied", "the retention periods were applied to the restored data, to the end of the backlog, before it was served")
+		}
 	}
 
 	// ---- 6b. keep exactly ONE database aside -----------------------------------------------------------
@@ -655,8 +667,11 @@ func (s *server) runRestore(ctx context.Context, name, identity, by string, rec 
 	s.startDependents(ctx)
 	ok("services", "the appliance is serving again")
 
-	s.finishRestore(in.Name, started, steps, true,
-		"restored from "+in.Name+"; the previous database is kept as "+aside)
+	summary := "restored from " + in.Name + "; the previous database is kept as " + aside
+	if !retentionDone {
+		summary += "; retention is still being applied to it (see the retention_reapplied step)"
+	}
+	s.finishRestore(in.Name, started, steps, true, summary)
 }
 
 // resetPool replaces scd's own database connections after the swap.

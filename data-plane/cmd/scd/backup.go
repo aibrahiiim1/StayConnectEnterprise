@@ -192,7 +192,10 @@ func (s *server) backupVerify(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// A SUCCESSFUL VERIFICATION IS RECORDED, because restore requires one. The marker names the size and
 		// mtime of the archive it vouches for, so a file replaced under the same name stops being verified.
-		writeVerifiedMarker(in.Name, tables)
+		if merr := writeVerifiedMarker(in.Name, tables); merr != nil {
+			res["ok"] = false
+			res["detail"] = "the backup loads, but it could not be marked verified, so it cannot be restored from the screen: " + merr.Error()
+		}
 	}
 	writeJSON(w, http.StatusOK, res)
 }

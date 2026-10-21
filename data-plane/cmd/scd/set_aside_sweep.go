@@ -109,12 +109,18 @@ func sweepPartials(dir string, now time.Time, maxAge time.Duration) int {
 	return n
 }
 
+// leftoverDirs are the folders an interrupted write can leave a .partial file in. scdBackupDir is where a crashed backup leaves its
+// full-size encrypted dump and configuration partials; the others are those of the earlier backups, the compliance archive and the ledger.
+func leftoverDirs() []string {
+	return []string{scdBackupDir, nightlyBackupDir, complianceArchiveDir, filepath.Dir(ledgerLocalPath)}
+}
+
 // runLeftovers is the hourly sweep of what a restore or an interrupted write leaves behind.
 func (s *server) runLeftovers(ctx context.Context) {
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	s.sweepSetAside(cctx)
-	for _, dir := range []string{nightlyBackupDir, filepath.Join(nightlyBackupDir, "backups", "db"), complianceArchiveDir, filepath.Dir(ledgerLocalPath)} {
+	for _, dir := range leftoverDirs() {
 		sweepPartials(dir, time.Now(), 24*time.Hour)
 	}
 }

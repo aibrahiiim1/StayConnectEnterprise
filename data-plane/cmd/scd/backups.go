@@ -278,7 +278,16 @@ func (s *server) takeBackup(ctx context.Context, o backupOpts) (*backupMeta, err
 	if err := writeMetaAtomically(meta); err != nil {
 		return nil, err
 	}
-	writeVerifiedMarker(name, tables)
+	if merr := writeVerifiedMarker(name, tables); merr != nil {
+		// Restore requires the marker: a backup without one is not a recovery point, and rotating now would discard an older one
+		// in its favour. It is discarded, and nothing is rotated.
+		for _, f := range []string{name, meta.EtcName, filepath.Base(metaPathFor(name)), name + ".verified"} {
+			if f != "" {
+				_ = os.Remove(filepath.Join(scdBackupDir, f))
+			}
+		}
+		return nil, fmt.Errorf("the backup could not be marked verified, so it was discarded and no older backup was touched: %w", merr)
+	}
 	s.rotateBackups()
 	forgetStoredCheck()
 	slog.Info("backup complete and verified", "backup", name, "kind", o.Kind, "tables", tables, "ledger_entries", meta.LedgerSeq)

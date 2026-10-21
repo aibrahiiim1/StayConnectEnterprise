@@ -40,37 +40,74 @@ func (s *server) runDataRetention(ctx context.Context) {
 	if s.db == nil || s.tenID == "" || s.siteID == "" {
 		return
 	}
-	// ONE FAILING PASS DOES NOT STOP THE OTHERS (GDPR audit C10). A function that fails is left out for the
-	// rest of this tick and logged; the others go on working off their backlog.
+	_, _ = s.retentionPasses(ctx, dataRetentionMaxPasses)
+	s.runStaffRetention(ctx)
+	s.runLeftovers(ctx)
+}
+
+// dataRetentionPassFn is the pass the loops call; a var so a test can stand in for the database.
+var dataRetentionPassFn = func(s *server, ctx context.Context, fn string) (int, error) { return s.dataRetentionPass(ctx, fn) }
+
+// retentionPasses runs the three retention functions in batches until a whole pass changes nothing, or maxPasses passes have run
+// (maxPasses <= 0: no limit, only ctx ends it). complete says the backlog is gone; err lists the functions that failed. ONE FAILING
+// FUNCTION DOES NOT STOP THE OTHERS (GDPR audit C10): it is left out for the rest of the run and logged.
+func (s *server) retentionPasses(ctx context.Context, maxPasses int) (complete bool, err error) {
 	failed := map[string]bool{}
-	for pass := 0; pass < dataRetentionMaxPasses; pass++ {
+	var failures []string
+	for pass := 0; maxPasses <= 0 || pass < maxPasses; pass++ {
 		changed := 0
 		for _, fn := range []string{"iam_v2.run_data_retention", "public.run_data_retention_public", "iam_v2.run_staff_note_retention"} {
 			if failed[fn] {
 				continue
 			}
-			n, err := s.dataRetentionPass(ctx, fn)
-			if err != nil {
+			n, perr := dataRetentionPassFn(s, ctx, fn)
+			if perr != nil {
 				if ctx.Err() != nil {
-					return
+					return false, errors.Join(append([]error{ctx.Err()}, errorsFrom(failures)...)...)
 				}
 				var pgErr *pgconn.PgError
-				if errors.As(err, &pgErr) && pgErr.Code == "42883" {
+				if errors.As(perr, &pgErr) && pgErr.Code == "42883" {
 					slog.Warn("data retention unavailable: this database predates the migration that adds it", "fn", fn)
 				} else {
-					slog.Warn("data retention run failed", "fn", fn, "err", err)
+					slog.Warn("data retention run failed", "fn", fn, "err", perr)
 				}
 				failed[fn] = true
+				failures = append(failures, fn+": "+perr.Error())
 				continue
 			}
 			changed += n
 		}
 		if changed == 0 {
-			break
+			return len(failures) == 0, errors.Join(errorsFrom(failures)...)
 		}
 	}
+	return false, errors.Join(errorsFrom(failures)...)
+}
+
+func errorsFrom(msgs []string) []error {
+	out := make([]error, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, errors.New(m))
+	}
+	return out
+}
+
+// runDataRetentionComplete is the run a RESTORE needs: it works the backlog off to the end (bounded only by ctx) and says whether it
+// got there, because a restored backup can hold more expired rows than one hourly tick is meant to take and the restore must not
+// report retention as reapplied while expired identifiers are still there to be served.
+func (s *server) runDataRetentionComplete(ctx context.Context) error {
+	if s.db == nil || s.tenID == "" || s.siteID == "" {
+		return nil
+	}
+	complete, err := s.retentionPasses(ctx, 0)
 	s.runStaffRetention(ctx)
-	s.runLeftovers(ctx)
+	if err != nil {
+		return err
+	}
+	if !complete {
+		return errors.New("the retention run did not reach the end of its backlog")
+	}
+	return nil
 }
 
 // runStaffRetention anonymises staff accounts disabled for longer than the appliance's setting and clears staff
