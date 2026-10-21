@@ -36,7 +36,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/backupcrypt"
 )
 
-// nightlyBackupDir is where stayconnect-site-backup writes. The restore test looks there too.
+// nightlyBackupDir is where the retired nightly site-backup job wrote (earlier backups). The restore test looks there too.
 var nightlyBackupDir = "/var/backups/stayconnect"
 
 // backupRecipients returns the keys to encrypt to, or nil when the hotel has not set encryption up (or the
@@ -83,13 +83,9 @@ func (s *server) backupRecipientKeys(ctx context.Context) ([]string, error) {
 	return keys, nil
 }
 
-// writeDump streams pg_dump through gzip -- and age, when recipients are given -- into dest.
-func writeDump(ctx context.Context, dest string, recipients []age.Recipient) error {
-	return writeDumpTee(ctx, dest, recipients, nil)
-}
-
-// writeDumpTee is writeDump that also hands the plain SQL to tee as it is produced (the daily backup loads it into a scratch
-// database to prove the backup can be restored, without ever writing the plain text to disk).
+// writeDumpTee streams pg_dump through gzip -- and age, when recipients are given -- into dest, and also hands the plain SQL to
+// tee as it is produced (the backup engine loads it into a scratch database to prove the backup can be restored, without ever
+// writing the plain text to disk).
 func writeDumpTee(ctx context.Context, dest string, recipients []age.Recipient, tee io.Writer) error {
 	f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -140,7 +136,7 @@ var errNotSQLBackup = errors.New("this is a nightly (pg_dump custom-format) back
 
 // backupFormat is what a backup holds once any encryption is removed. The two writers on this appliance do not
 // agree: an on-demand backup is gzip SQL text (writeDump), the nightly one is `pg_dump -Fc` encrypted as it
-// stands (stayconnect-site-backup.sh). The bytes, not the name, say which.
+// stands (the retired nightly site-backup job). The bytes, not the name, say which.
 type backupFormat int
 
 const (
@@ -281,7 +277,7 @@ func (s *server) backupKeyTest(w http.ResponseWriter, r *http.Request) {
 // newestEncryptedBackup is the most recent .age file among the on-demand and nightly database backups.
 func newestEncryptedBackup() string {
 	var cands []string
-	for _, pat := range []string{filepath.Join(scdBackupDir, "db-*.sql.gz.age"), filepath.Join(nightlyBackupDir, "site-*.dump.age")} {
+	for _, pat := range []string{filepath.Join(scdBackupDir, "db-*.sql.gz.age")} {
 		m, _ := filepath.Glob(pat)
 		cands = append(cands, m...)
 	}

@@ -59,8 +59,13 @@ func newDrill(t *testing.T) *drill {
 	restoreResultFile = filepath.Join(dir, "last-restore.json")
 	ledgerIndependence = func() func(string) error { return nil }
 	etcStayconnectDir = filepath.Join(dir, "etc")
+	oldStop, oldState, oldAdvance := stopService, serviceState, advanceMarker
+	stopService = func(context.Context, string) error { return nil }
+	serviceState = func(context.Context, string) string { return "inactive" }
+	advanceMarker = func(_ context.Context, gen int64, sha string) error { return writeMarker(gen, sha) }
 	t.Cleanup(func() {
 		scdBackupDir, maintenanceFile, restoreResultFile, ledgerIndependence, etcStayconnectDir = oldBackup, oldMaint, oldResult, oldInd, oldEtc
+		stopService, serviceState, advanceMarker = oldStop, oldState, oldAdvance
 	})
 	if err := os.MkdirAll(scdBackupDir, 0o750); err != nil {
 		t.Fatal(err)
@@ -225,24 +230,16 @@ func (d *drill) requestState(id string) string {
 // records the ledger head it contains.
 func (d *drill) takeBackup() string {
 	d.t.Helper()
-	ctx := context.Background()
-	d.stamp++
-	name, err := d.s.dumpTo(ctx, "db-"+time.Now().UTC().Format("20060102T150405Z")[:15]+fmt.Sprintf("%02d", d.stamp%100)+"Z.sql.gz")
+	time.Sleep(1100 * time.Millisecond) // backup names carry the second they were taken
+	// the same engine as every other backup; the drill key is a recipient through the identity, as a restoring key holder's is
+	meta, err := d.s.takeBackup(context.Background(), backupOpts{Kind: kindManual, By: "drill", Identity: d.id.String()})
 	if err != nil {
 		d.t.Fatalf("backup: %v", err)
 	}
-	tables := 0
-	fmt.Sscanf(d.str(`SELECT count(*)::text FROM information_schema.tables WHERE table_schema IN ('public','iam_v2')`), "%d", &tables)
-	writeVerifiedMarker(name, tables)
-	head, err := psqlLedgerHead(ctx, pgDatabase)
-	if err != nil || !head.Has {
-		d.t.Fatalf("ledger head of the live database: %+v %v", head, err)
+	if !meta.Restorable || meta.LedgerSeq == 0 {
+		d.t.Fatalf("backup note is missing its proof or the ledger head: %+v", meta)
 	}
-	meta := &dailyMeta{Kind: "daily", Name: name, TakenAt: time.Now().UTC(), Tables: tables, Restorable: true, LedgerID: head.Ledger, LedgerSeq: head.Seq, LedgerHash: head.Hash}
-	if err := writeMetaAtomically(meta); err != nil {
-		d.t.Fatal(err)
-	}
-	return name
+	return meta.Name
 }
 
 // restore runs the real restore and returns its recorded outcome.
@@ -254,7 +251,7 @@ func (d *drill) restore(name, identity string) map[string]any {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	d.s.runRestore(ctx, name, identity, rec, time.Now().UTC())
+	d.s.runRestore(ctx, name, identity, "drill", rec, time.Now().UTC())
 	b, err := os.ReadFile(restoreResultFile)
 	if err != nil {
 		d.t.Fatalf("no restore result: %v", err)
@@ -290,7 +287,7 @@ func (d *drill) stagingFromBackup(name, db string) {
 	if out, err := exec.Command("docker", "exec", pgContainer, "psql", "-U", pgUser, "-d", "postgres", "-tAc", "CREATE DATABASE "+db).CombinedOutput(); err != nil {
 		d.t.Fatalf("create: %s", out)
 	}
-	if out, err := loadBackupInto(ctx, filepath.Join(scdBackupDir, name), "", db); err != nil {
+	if out, err := loadBackupInto(ctx, filepath.Join(scdBackupDir, name), d.identity(), db); err != nil {
 		d.t.Fatalf("load: %v %s", err, tailLine(string(out)))
 	}
 	d.t.Cleanup(func() {
@@ -357,6 +354,32 @@ func TestDrill_RestoreFromAnOlderBackupWithBothLedgerCopies(t *testing.T) {
 	if got := d.str(`SELECT config->>'path' FROM public.ledger_destination`); got != d.ext {
 		t.Errorf("the secondary storage setting did not survive the restore: %q", got)
 	}
+	d.assertFinancialGuarantees(res, 1)
+}
+
+// assertFinancialGuarantees: what the retired financial-restore script guaranteed, now part of every restore. gen is the
+// marker generation this restore must have advanced to.
+func (d *drill) assertFinancialGuarantees(res map[string]any, gen int64) {
+	d.t.Helper()
+	for _, step := range []string{"quiesce", "financial_marker", "hypertables", "financial_recovery"} {
+		if ok, found, detail := stepOK(res, step); !found || !ok {
+			d.t.Errorf("restore step %s: found=%v ok=%v %s", step, found, ok, detail)
+		}
+	}
+	if got, err := readMarkerGeneration(); err != nil || got != gen {
+		d.t.Errorf("the restore marker is at generation %d (%v), want %d", got, err, gen)
+	}
+	if got := d.str(`SELECT coalesce(max(restore_generation),-1)::text FROM iam_v2.financial_epochs WHERE tenant_id=$1 AND site_id=$2`, d.tenant, d.site); got != fmt.Sprint(gen) {
+		d.t.Errorf("the database records restore generation %s, want %d", got, gen)
+	}
+	// money movement is HELD: the newest financial epoch is open (not released)
+	if got := d.str(`SELECT (released_at IS NULL)::text FROM iam_v2.financial_epochs WHERE tenant_id=$1 AND site_id=$2 ORDER BY epoch DESC LIMIT 1`, d.tenant, d.site); got != "true" {
+		d.t.Errorf("the site is not in financial recovery mode after the restore")
+	}
+	// the database-level grant Gate-P gives iam_v2_owner is still there (a dump cannot carry it)
+	if got := d.str(`SELECT has_database_privilege('iam_v2_owner', current_database(), 'CREATE')::text`); got != "true" {
+		d.t.Errorf("GRANT CREATE ON DATABASE was lost in the restore")
+	}
 }
 
 // LOCAL ONLY: the secondary storage is unplugged. The restore proceeds on the primary copy, because the backup and the live
@@ -369,7 +392,7 @@ func TestDrill_RestoreWithTheSecondaryStorageUnavailable(t *testing.T) {
 	if err := os.Rename(d.ext, d.ext+".unplugged"); err != nil {
 		t.Fatal(err)
 	}
-	res := d.restore(backup, "")
+	res := d.restore(backup, d.identity())
 	if res["ok"] != true {
 		t.Fatalf("a restore needs only one ledger copy: %v", res)
 	}

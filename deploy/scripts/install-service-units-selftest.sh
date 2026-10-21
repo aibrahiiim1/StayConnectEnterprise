@@ -200,17 +200,17 @@ fi
 # Central backup timer copied here would fire nightly against a database the appliance does not have.
 echo "== the Central-only units are never installed on an appliance =="
 c="$(new_tree central_units)"
-for u in stayconnect-ctrlapi.service stayconnect-cloud-admin.service stayconnect-central-backup.service          stayconnect-central-backup.timer stayconnect-site-backup.service; do
+for u in stayconnect-ctrlapi.service stayconnect-cloud-admin.service stayconnect-central-backup.service          stayconnect-central-backup.timer stayconnect-backup-cleanup.service; do
   cp "$DEPLOY/systemd/$u" "$c/src/systemd/" 2>/dev/null
 done
 printf '#!/bin/sh
 exit 0
-' > "$c/src/scripts/stayconnect-site-backup"
+' > "$c/src/scripts/stayconnect-backup-cleanup"
 SC_ROOT_PREFIX="$c/root" SC_BIN_DIR="$c/bin" SC_UNIT_DIR="$c/units" SC_ENV_DIR="$c/etc" SC_SKIP_SYSTEMD=1   bash "$INSTALLER" "$c/src" >"$c/out" 2>&1
 leaked="$(cd "$c/units" && ls stayconnect-ctrlapi.* stayconnect-cloud-admin.* stayconnect-central-backup.* 2>/dev/null)"
 if [ -n "$leaked" ]; then
   bad "Central units were installed on the appliance: $leaked"
-elif [ -f "$c/units/stayconnect-site-backup.service" ]; then
+elif [ -f "$c/units/stayconnect-backup-cleanup.service" ]; then
   ok "Central units are skipped; the appliance's own units in the same tree are installed"
 else
   bad "the appliance unit shipped next to the Central ones was not installed:"; sed 's/^/      /' "$c/out"
@@ -314,6 +314,38 @@ if printf '%s
   bad "a systemd specifier was emitted as an account name: useradd would be called with '%i'"
 else
   ok "a systemd specifier in User= is skipped, not turned into an account name"
+fi
+
+# ---------------------------------------------------------------- THE RETIRED SITE-BACKUP JOB IS REMOVED
+#
+# An appliance upgraded from a release that shipped the nightly site-backup job still has its units (the timer enabled) and helper.
+# The installer retires them -- and leaves the backups they wrote alone.
+echo "== the retired nightly site-backup job is removed, its backups kept =="
+r="$(new_tree retired_site_backup)"
+mkdir -p "$r/units/timers.target.wants" "$r/bin" "$r/earlier"
+echo "[Unit]" > "$r/units/stayconnect-site-backup.service"
+echo "[Timer]" > "$r/units/stayconnect-site-backup.timer"
+ln -s "$r/units/stayconnect-site-backup.timer" "$r/units/timers.target.wants/stayconnect-site-backup.timer" 2>/dev/null || true
+printf '#!/bin/sh\nexit 0\n' > "$r/bin/stayconnect-site-backup"; chmod 0755 "$r/bin/stayconnect-site-backup"
+echo "an earlier backup" > "$r/earlier/site-20260801-020000.dump"
+cp "$DEPLOY/systemd/stayconnect-backup-cleanup.service" "$r/src/systemd/"
+printf '#!/bin/sh
+exit 0
+' > "$r/src/scripts/stayconnect-backup-cleanup"
+SC_ROOT_PREFIX="$r/root" SC_BIN_DIR="$r/bin" SC_UNIT_DIR="$r/units" SC_ENV_DIR="$r/etc" SC_SKIP_SYSTEMD=1   bash "$INSTALLER" "$r/src" >"$r/out" 2>&1
+if [ -e "$r/units/stayconnect-site-backup.timer" ] || [ -e "$r/units/stayconnect-site-backup.service" ] || [ -L "$r/units/timers.target.wants/stayconnect-site-backup.timer" ]; then
+  bad "the retired site-backup units survived the install"
+elif [ -e "$r/bin/stayconnect-site-backup" ]; then
+  bad "the retired site-backup helper survived the install"
+elif [ ! -f "$r/earlier/site-20260801-020000.dump" ]; then
+  bad "an earlier backup was removed"
+else
+  ok "the retired site-backup job is removed; the backups it wrote are untouched"
+fi
+if SC_ROOT_PREFIX="$r/root" SC_BIN_DIR="$r/bin" SC_UNIT_DIR="$r/units" SC_ENV_DIR="$r/etc" SC_SKIP_SYSTEMD=1   bash "$INSTALLER" "$r/src" >"$r/out2" 2>&1; then
+  ok "a second install is a no-op (idempotent)"
+else
+  bad "a second install failed:"; sed 's/^/      /' "$r/out2"
 fi
 
 if [ "$fail" = "0" ]; then

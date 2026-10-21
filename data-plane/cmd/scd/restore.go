@@ -239,6 +239,8 @@ type restoreReq struct {
 	// Identity is a backup key holder's private key, needed for an encrypted backup. It lives in memory for
 	// the length of the restore and is never stored or logged.
 	Identity string `json:"identity"`
+	// By is the operator who asked (edged fills it from the signed-in session); it is recorded with the restore.
+	By string `json:"by"`
 }
 
 type restoreStep struct {
@@ -326,13 +328,13 @@ func (s *server) backupRestore(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer cancel()
 		defer restoreInFlight.Store(false)
-		s.runRestore(ctx, in.Name, in.Identity, rec, started)
+		s.runRestore(ctx, in.Name, in.Identity, in.By, rec, started)
 	}()
 }
 
 // runRestore performs the restore. It reports only durably: by the time it finishes, the HTTP request that
 // asked for it is long gone and edged has been restarted.
-func (s *server) runRestore(ctx context.Context, name, identity string, rec *verifiedRecord, started time.Time) {
+func (s *server) runRestore(ctx context.Context, name, identity, by string, rec *verifiedRecord, started time.Time) {
 	in := restoreReq{Name: name}
 	steps := []restoreStep{}
 	stamp := started.Format("20060102T150405Z")
@@ -395,11 +397,14 @@ func (s *server) runRestore(ctx context.Context, name, identity string, rec *ver
 	}
 
 	// ---- 1. a safety dump of the CURRENT state, before anything is touched ------------------------------
-	safety, err := s.dumpTo(ctx, "db-safety-"+stamp+".sql.gz")
+	// THE SAME ENGINE AS EVERY OTHER BACKUP: encrypted, proven restorable, noted. The restoring key holder's key is a recipient too,
+	// so a replacement appliance with no registered holder yet is still protected. No plaintext fallback exists.
+	safetyMeta, err := s.takeBackup(ctx, backupOpts{Kind: kindPreRestore, Reason: "before restoring " + in.Name, By: by, Identity: identity})
 	if err != nil {
 		fail("safety_backup", "the safety backup failed, so the restore was not attempted: "+err.Error())
 		return
 	}
+	safety := safetyMeta.Name
 	ok("safety_backup", safety)
 
 	// ---- 2. stop serving --------------------------------------------------------------------------------
@@ -470,9 +475,30 @@ func (s *server) runRestore(ctx context.Context, name, identity string, rec *ver
 	// Connections must be gone first or the rename is refused. The dependent services are stopped rather
 	// than merely disconnected, because a service that reconnects during the swap would reopen the database
 	// being renamed.
-	for _, svc := range dependentServices {
-		_ = exec.CommandContext(ctx, "systemctl", "stop", svc).Run()
+	//
+	// FINANCIAL GUARANTEES (restore_financial.go): the quiesce is PROVEN, not assumed, and the management marker is advanced before
+	// anything is replaced. Both happen here, while the live database is still the live database.
+	markerGen, err := readMarkerGeneration()
+	if err != nil {
+		dropStaging()
+		fail("financial_marker", "the restore marker could not be read, so the restore was not attempted: "+err.Error())
+		return
 	}
+	nextGen := markerGen + 1
+	if err := proveQuiesced(ctx); err != nil {
+		dropStaging()
+		s.startDependents(ctx)
+		fail("quiesce", "the restore was not attempted and nothing was replaced: "+err.Error())
+		return
+	}
+	ok("quiesce", "every service that can write financial state was stopped and proven stopped")
+	if err := advanceMarker(ctx, nextGen, rec.SHA256); err != nil {
+		dropStaging()
+		s.startDependents(ctx)
+		fail("financial_marker", "the restore was not attempted and nothing was replaced: "+err.Error())
+		return
+	}
+	ok("financial_marker", fmt.Sprintf("the restore marker was advanced from generation %d to %d before the swap", markerGen, nextGen))
 	if out, err := admin("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '" +
 		pgDatabase + "' AND pid <> pg_backend_pid()"); err != nil {
 		slog.Warn("could not terminate all connections before swap", "detail", tailLine(string(out)))
@@ -555,6 +581,28 @@ func (s *server) runRestore(ctx context.Context, name, identity string, rec *ver
 		return
 	}
 	ok("integrity", detail)
+
+	// ---- 6-fin. financial recovery: hypertables registered, and the restore recorded so money movement is HELD -----------
+	// Both failures roll the swap back. The marker has already advanced, so the appliance comes up holding money movement in either
+	// case, which is the safe direction.
+	if hdetail, herr := assertHypertables(ctx, pgDatabase); herr != nil {
+		rollback("hypertables", herr.Error()+" Money movement stays held.")
+		return
+	} else {
+		ok("hypertables", hdetail)
+	}
+	var backupTaken time.Time
+	if b, rerr := os.ReadFile(metaPathFor(in.Name)); rerr == nil {
+		var bm backupMeta
+		if json.Unmarshal(b, &bm) == nil {
+			backupTaken = bm.TakenAt
+		}
+	}
+	if rerr := recordSupportedRestore(ctx, pgDatabase, s.tenID, s.siteID, nextGen, rec.SHA256, backupTaken, by); rerr != nil {
+		rollback("financial_recovery", rerr.Error()+" Money movement stays held.")
+		return
+	}
+	ok("financial_recovery", "the restore is recorded: the site is in financial recovery mode and no money moves until an operator has reconciled what was in flight")
 
 	// ---- 6a. the missing copies of the ledger are rebuilt and synchronised ------------------------------------------
 	// The restored database now holds the whole ledger. The primary copy on the appliance and the secondary storage are

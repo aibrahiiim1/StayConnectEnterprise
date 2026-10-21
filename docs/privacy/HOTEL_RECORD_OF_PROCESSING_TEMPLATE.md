@@ -99,7 +99,7 @@ instead.
 | Usage detail (how much data each session used, sample by sample) | 365 days | ✏️ |
 | Staff activity log: IP address, browser and record details anonymised after | 730 days (2 years) | ✏️ |
 | Disabled staff accounts: email, name and password removed after | 730 days (2 years) | ✏️ |
-| Backups | 30 days; the newest 7 are kept whatever their age, and a backup you pin is kept until you unpin it | ✏️ |
+| Backups | The newest 7 are kept by default (*Backups → Scheduled backups → Backups kept*); each is replaced when a newer one has been verified | ✏️ |
 | System logs (web, address and service logs) | 14 days | ✏️ |
 | Staff notes (PMS case decisions, released devices, revoked post-stay access) removed after | 730 days (2 years) | ✏️ |
 
@@ -155,7 +155,7 @@ a new row here.
 | The sign-in companies you ticked (Google, Apple, Facebook, Microsoft) | They learn that the guest signed in here. The guest signs in on their page | Each social sign-in |
 | The payment companies you ticked (Stripe, Paymob) | Amount, package, a payment reference. **No** guest name or room. The guest types card details on their page | Each card payment |
 | Your PMS supplier, if connected | Room, reservation number and amount of each internet charge | Each room charge |
-| Backup location, if you ticked one in Step 2 | Encrypted backups | Nightly |
+| Backup location, if you ticked one in Step 2 | Encrypted backups | When you copy them |
 | Authorities | Only when the law requires it | On a lawful request |
 
 ### (e) Data sent outside the UK and EEA
@@ -184,7 +184,7 @@ removing everything that identifies the person. It checks every hour.
 Two more points:
 
 - **Backups** keep their copy for the period in Step 3. Data deleted in the live system can stay in a backup
-  until that backup expires. Your privacy notice should say so.
+  until that backup is replaced; a restore erases it again. Your privacy notice should say so.
 - **Financial records** (payments, refunds, room charges) are kept for the period the law sets, and are not
   removed automatically.
 
@@ -197,7 +197,7 @@ cannot reach the management network or each other.
 
 Some protections are yours to switch on or look after. Tick each one you have done:
 
-- [ ] At least one **backup key holder** is registered 🔍 *(Backups)*. Until then, backups are not encrypted.
+- [ ] At least one **backup key holder** is registered 🔍 *(Backups)*. Until then no backup is taken: backups are always encrypted.
 - [ ] **SSH** on the appliance is limited to trusted addresses, or switched off. It is open on the management
       network by default.
 - [ ] The appliance is in a **locked room or cabinet**. Its disk is not encrypted.

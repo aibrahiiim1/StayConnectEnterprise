@@ -38,7 +38,9 @@ import { formatBytes } from "@/lib/bytes";
 import { AccountingRetentionCard } from "./accounting-retention-card";
 import { DataRetentionCard } from "./data-retention-card";
 import { BackupKeyInput, BackupKeysCard } from "./backup-keys-card";
-import { DailyBackupCard, LedgerCard } from "./ledger-card";
+import { LedgerCard } from "./ledger-card";
+import { ScheduledBackupsCard } from "./scheduled-backups-card";
+import { SCHEDULE_SETTING_KEYS, backupKindLabel } from "@/lib/ledger-words";
 import { submitDownload } from "@/lib/backup-download";
 import {
   Archive, ShieldCheck, Download, RotateCcw, AlertTriangle, CheckCircle2, Loader2, HardDrive, ChevronRight,
@@ -47,6 +49,7 @@ import {
 type Artifact = {
   name: string; kind?: string; size_bytes: number; modified_at?: string;
   verified_at?: string | null; verified_tables?: number | null;
+  backup_kind?: string; reason?: string; by?: string;
 };
 type Maintenance = { active: boolean; reason?: string; since?: string; backup?: string; unknown?: boolean };
 type RestoreStep = { step: string; ok: boolean; detail?: string };
@@ -155,13 +158,13 @@ export default function BackupsPage() {
         icon={<Archive />}
         eyebrow="System"
         title="Backups"
-        description="A complete copy of this site’s data, taken nightly and on demand."
+        description="A complete copy of this site’s data: on a schedule you set, and on demand."
         help={
           <>
             <HelpSection title="Back up, verify, download, restore">
               <HelpList
                 items={[
-                  <><strong>Back up now</strong> writes a complete copy of this site&rsquo;s data to the appliance. It takes a moment and clients are not affected. A nightly job also takes one.</>,
+                  <><strong>Back up now</strong> writes a complete copy of this site&rsquo;s data to the appliance. It takes a few minutes and clients are not affected. Scheduled backups, if you switch them on, are taken the same way.</>,
                   <><strong>Verify</strong> proves a backup can actually be loaded back. Only a verified backup can be restored.</>,
                   <><strong>Download</strong> keeps a copy off the appliance. Only a site admin or the IT manager can download, and it asks for your password every time. Every download is recorded.</>,
                   <><strong>Restore</strong> replaces the current data with the backup. It asks for the backup&rsquo;s name typed out and your password.</>,
@@ -179,8 +182,8 @@ export default function BackupsPage() {
             </HelpSection>
             <HelpSection title="Storage & retention">
               <p>
-                The nightly sweep keeps the disk from filling up; the retention values decide how far back you can
-                recover. Each value has a unit, a default and an allowed range, and changing them is recorded against
+                The nightly sweep keeps the disk from filling up (it never deletes a backup that the backup settings keep); the retention
+                values decide how far back you can recover. Each value has a unit, a default and an allowed range, and changing them is recorded against
                 your account.
               </p>
               <p>
@@ -274,7 +277,7 @@ export default function BackupsPage() {
       {/* ---- encryption to the hotel's own keys (GDPR plan C5) --------------------------------------- */}
       <BackupKeysCard writable={writable} />
       <LedgerCard writable={writable} />
-      <DailyBackupCard writable={writable} />
+      <ScheduledBackupsCard writable={writable} />
 
       {/* ---- the outcome of the last restore, if there was one --------------------------------------- */}
       {lastRestore && <LastRestoreCard result={lastRestore} />}
@@ -293,7 +296,7 @@ export default function BackupsPage() {
           err ? null : <SkeletonRows rows={3} cols={4} />
         ) : artifacts.length === 0 ? (
           <EmptyState icon={<Archive />} title="No backups yet"
-            hint="The nightly job creates one, or use Back up now."
+            hint="Use Back up now, or switch on scheduled backups."
             action={writable ? <Button variant="secondary" size="sm" onClick={openBackup}>Back up now</Button> : undefined} />
         ) : (
           <Table>
@@ -312,9 +315,11 @@ export default function BackupsPage() {
                   <TD>
                     <div className="font-medium">{a.modified_at ? formatDate(a.modified_at) : a.name}</div>
                     <div className="break-all font-mono text-2xs text-muted-foreground">{a.name}</div>
+                    {(a.reason || a.by) && <div className="text-2xs text-muted-foreground">{[a.reason, a.by && `by ${a.by}`].filter(Boolean).join(" · ")}</div>}
                   </TD>
                   <TD>
                     <div className="flex flex-wrap gap-1">
+                      {a.backup_kind && <Badge tone="default">{backupKindLabel(a.backup_kind)}</Badge>}
                       {a.verified_at
                         ? <Badge tone="ok" dot>Verified</Badge>
                         : <Badge tone="default">Not checked</Badge>}
@@ -590,10 +595,12 @@ function StorageAndRetention({ writable }: { writable: boolean }) {
 
   const load = useCallback(async () => {
     try {
-      const [h, s] = await Promise.all([
+      const [h, s0] = await Promise.all([
         api.get<BackupHealth>("/backups/health"),
         api.get<BackupSettings>("/backups/settings"),
       ]);
+      // The backup schedule and counts belong to the Scheduled backups card; this section keeps the sweep's own values.
+      const s = { ...s0, retention: s0.retention.filter((x) => !(SCHEDULE_SETTING_KEYS as readonly string[]).includes(x.key)) };
       setHealth(h);
       setSettings(s);
       setEdits(Object.fromEntries(s.retention.map((x) => [x.key, String(x.value)])));

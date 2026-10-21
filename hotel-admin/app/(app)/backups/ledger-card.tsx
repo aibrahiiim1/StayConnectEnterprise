@@ -1,14 +1,13 @@
 "use client";
 
-// THE ERASURE LEDGER AND THE DAILY BACKUP (GDPR final mission).
+// THE ERASURE LEDGER (GDPR final mission).
 //
 // Every erasure is written to the appliance AND to a secondary storage the hotel sets up, before it is reported as done. The
 // secondary storage is required: until it is set up and verified, erasure requests are refused (nothing else is affected, and
 // guest internet access never is). This card sets it up, shows whether both copies are in step, and recovers from the secondary
-// storage when the appliance's own copy is behind or gone. Below it, the daily backup: encrypted, proven restorable when it is
-// taken, the newest seven kept.
+// storage when the appliance's own copy is behind or gone. The ledger does not depend on the scheduled-backup setting.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { Card, CardBody, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,13 +15,12 @@ import { Badge } from "@/components/ui/badge";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
-import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
-import { errMsg, formatDate } from "@/lib/utils";
-import { DatabaseBackup, HardDriveUpload, RefreshCw } from "lucide-react";
+import { errMsg } from "@/lib/utils";
+import { HardDriveUpload, RefreshCw } from "lucide-react";
 import { BackupKeyInput } from "./backup-keys-card";
 import {
-  STORAGE_KINDS, agoWords, dailyHeadline, kindLabel, ledgerHeadline, type DailyStatus, type LedgerStatus,
+  STORAGE_KINDS, agoWords, kindLabel, ledgerHeadline, type LedgerStatus,
 } from "@/lib/ledger-words";
 
 type Form = {
@@ -249,83 +247,6 @@ export function LedgerCard({ writable }: { writable: boolean }) {
       >
         <BackupKeyInput value={identity} onChange={setIdentity} />
       </ConfirmDialog>
-    </Card>
-  );
-}
-
-export function DailyBackupCard({ writable }: { writable: boolean }) {
-  const toast = useToast();
-  const [d, setD] = useState<DailyStatus | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
-  const [dialogErr, setDialogErr] = useState<string | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const load = useCallback(async () => {
-    try { const r = await api.get<DailyStatus>("/backups/daily"); setD(r && r.state ? { ...r, backups: r.backups ?? [], problems: r.problems ?? [] } : null); setErr(null); } catch (e) { setErr(errMsg(e)); }
-  }, []);
-  useEffect(() => { void load(); return () => { if (timer.current) clearTimeout(timer.current); }; }, [load]);
-  useEffect(() => {
-    if (d?.running) timer.current = setTimeout(() => void load(), 5000);
-    return () => { if (timer.current) clearTimeout(timer.current); };
-  }, [d, load]);
-
-  async function run({ password }: { password: string }) {
-    setDialogErr(null);
-    try {
-      await api.post("/backups/daily/run", { password });
-      setOpen(false);
-      toast.success("Backup started", "It is encrypted and proven restorable before it is kept. This takes a few minutes.");
-      await load();
-    } catch (e) { setDialogErr(e instanceof ApiError ? e.message : errMsg(e)); }
-  }
-
-  const head = dailyHeadline(d);
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2"><DatabaseBackup className="size-4" aria-hidden /> Daily backups</CardTitle>
-        <CardDescription>Taken every night on this appliance: the database and the configuration and keys, encrypted to the backup key holders and loaded into a scratch database to prove they restore.</CardDescription>
-      </CardHeader>
-      <CardBody className="space-y-3">
-        <ErrorBanner err={err} />
-        <Callout tone={head.tone === "ok" ? "success" : head.tone === "err" ? "danger" : "warning"} title={head.title}>{head.detail}</Callout>
-        {d && d.backups.length > 0 && (
-          <div className="overflow-x-auto">
-            <Table>
-              <THead><TR><TH>Taken</TH><TH>Size</TH><TH>Proven restorable</TH><TH>Ledger entries it holds</TH></TR></THead>
-              <TBody>
-                {d.backups.map((b) => (
-                  <TR key={b.name}>
-                    <TD>{formatDate(b.taken_at)}</TD>
-                    <TD>{(b.size_bytes / 1048576).toFixed(1)} MB</TD>
-                    <TD><Badge tone={b.restorable ? "ok" : "err"}>{b.restorable ? "yes" : "no"}</Badge></TD>
-                    <TD>{b.ledger_seq}</TD>
-                  </TR>
-                ))}
-              </TBody>
-            </Table>
-          </div>
-        )}
-        {d?.problems && d.problems.length > 0 && (
-          <Callout tone="danger" title="A stored backup changed">{d.problems.map((p) => `${p.name}: ${p.detail}`).join("; ")}</Callout>
-        )}
-        {writable && (
-          <Button variant="outline" disabled={!!d?.running || d?.state === "needs_key_holder"} onClick={() => { setDialogErr(null); setOpen(true); }}>
-            {d?.running ? "A backup is running…" : "Take a backup now"}
-          </Button>
-        )}
-      </CardBody>
-      <ConfirmDialog
-        open={open}
-        onOpenChange={(v) => { if (!v) setOpen(false); }}
-        title="Take a backup now?"
-        description="It is encrypted and checked like the nightly one, and counts among the daily backups kept."
-        confirmLabel="Take a backup"
-        error={dialogErr}
-        requirePassword
-        onConfirm={run}
-      />
     </Card>
   );
 }

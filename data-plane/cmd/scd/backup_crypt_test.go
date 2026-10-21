@@ -115,7 +115,7 @@ func TestOpenBackupNeedsTheRightKeyOnlyWhenEncrypted(t *testing.T) {
 	}
 }
 
-func TestNewestEncryptedBackupLooksInBothPlaces(t *testing.T) {
+func TestNewestEncryptedBackupLooksOnlyAtBackupsTheEngineMade(t *testing.T) {
 	a, b := t.TempDir(), t.TempDir()
 	oldA, oldB := scdBackupDir, nightlyBackupDir
 	scdBackupDir, nightlyBackupDir = a, b
@@ -125,12 +125,10 @@ func TestNewestEncryptedBackupLooksInBothPlaces(t *testing.T) {
 	}
 	os.WriteFile(filepath.Join(a, "db-1.sql.gz"), []byte("x"), 0o600) // clear: not a key test target
 	os.WriteFile(filepath.Join(a, "db-2.sql.gz.age"), []byte("x"), 0o600)
-	n := filepath.Join(b, "site-20261017-020000.dump.age")
-	os.WriteFile(n, []byte("x"), 0o600)
-	future := t0().AddDate(10, 0, 0)
-	os.Chtimes(n, future, future)
-	if got := newestEncryptedBackup(); got != n {
-		t.Fatalf("newest = %q, want the nightly one", got)
+	// an earlier nightly set is retired recovery material, not a key-test target
+	os.WriteFile(filepath.Join(b, "site-20261017-020000.dump.age"), []byte("x"), 0o600)
+	if got, want := newestEncryptedBackup(), filepath.Join(a, "db-2.sql.gz.age"); got != want {
+		t.Fatalf("newest = %q, want %q", got, want)
 	}
 }
 
@@ -174,7 +172,7 @@ func TestBackupKeyTestOpensTheNewestEncryptedBackup(t *testing.T) {
 	}
 }
 
-// THE NIGHTLY BACKUP IS NOT GZIP. stayconnect-site-backup.sh encrypts a raw `pg_dump -Fc` stream, so when the
+// THE NIGHTLY BACKUP IS NOT GZIP. the retired nightly site-backup job encrypted a raw `pg_dump -Fc` stream, so when the
 // newest encrypted backup is a nightly one the key test must still answer ok for the holder's key -- it used to
 // gzip-decode it and answer 500. Verify and restore, which load SQL text with psql, refuse it by name.
 func TestBackupKeyTestAcceptsANightlyCustomFormatDump(t *testing.T) {
@@ -194,7 +192,7 @@ func TestBackupKeyTestAcceptsANightlyCustomFormatDump(t *testing.T) {
 	gz.Close()
 	wa.Close()
 	fa.Close()
-	nightly := filepath.Join(b, "site-20261017-020000.dump.age")
+	nightly := filepath.Join(a, "db-20261017T020000Z.sql.gz.age")
 	fn, _ := os.Create(nightly)
 	wn, _ := backupcrypt.Encrypt(fn, rs)
 	io.WriteString(wn, "PGDMP\x01\x0e\x00\x04\x08\x01\x01\x01"+strings.Repeat("\x00", 200))

@@ -124,12 +124,14 @@ addresses on it could be read.
 *Could happen if:* a backup file is copied, downloaded or sent somewhere it should not be.
 
 **OneGate already:** encrypts every backup to your own key holders, so the appliance cannot read its own backups
-and neither can we; keeps backups 30 days; logs every backup download; reminds you every 6 months to test that a
-key holder can still restore one; takes one encrypted backup a night, proves it restores, and keeps the newest seven.
+and neither can we; logs every backup download; reminds you every 6 months to test that a key holder can still
+restore one; takes an encrypted backup when you ask, on a schedule if you switch one on, and always before a restore
+or an update, proves each one restores, and keeps the newest seven (a setting).
 
 **Yours:**
 
-- [ ] At least one **backup key holder** is registered 🔍 *(Backups)*. *Until then, backups are not encrypted.*
+- [ ] At least one **backup key holder** is registered 🔍 *(Backups)*. *Until then no backup can be taken: backups are always encrypted.*
+- [ ] **Scheduled backups** are switched on if you want them 🔍 *(Backups → Scheduled backups)*. They are off until you do.
 - [ ] Key holders keep their key safe (a password manager or a locked safe), and there are at least two.
 - [ ] The restore test is done when reminded.
 
@@ -162,7 +164,7 @@ every sign-in page, before the guest does anything; records which version each g
 - [ ] The privacy notice is completed and published 🔍 *(Portal settings → Content → Privacy notice)*, with no
       `[[...]]` left.
 - [ ] It names the code-sending, sign-in and payment companies you use.
-- [ ] It mentions that deleted data can remain in backups for up to 30 days, or longer in a backup you pin or when no newer backups are made.
+- [ ] It mentions that deleted data can remain in a backup until that backup is replaced (about the number of backups kept times the days between them, longer if no newer backups are made); a restore erases it again.
 
 **Result:** [ ] Low ⭐  [ ] Medium  [ ] High
 

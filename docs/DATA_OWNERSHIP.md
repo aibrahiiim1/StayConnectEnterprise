@@ -110,7 +110,7 @@ Consequences:
   see [privacy/GDPR_REMEDIATION_PLAN.md](privacy/GDPR_REMEDIATION_PLAN.md).
 - Retention: the guest and client records on the site are anonymised after the hotel's own retention
   settings (Hotel Admin → Data retention), the activity log and staff accounts after theirs, and database
-  backups after the backup settings (`DB_BACKUP_DAYS`, `SITE_BACKUP_DAYS`). Financial records are kept for the
+  backups after the backup settings (`BACKUP_KEEP` and `BACKUP_EVERY_DAYS` for scheduled and manual backups, `SAFETY_BACKUP_KEEP` for the ones taken before a change; counts, no age rule). Financial records are kept for the
   period the law requires and described in the guest-facing explanation below; the detail is in
   [privacy/GDPR_REMEDIATION_PLAN.md](privacy/GDPR_REMEDIATION_PLAN.md).
 - Cloud support staff see only activation, connection and licence state; to

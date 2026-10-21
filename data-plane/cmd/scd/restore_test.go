@@ -130,7 +130,7 @@ func TestTheDestructiveStepIsARenameAndComesLast(t *testing.T) {
 	}
 
 	order := []struct{ what, needle string }{
-		{"the safety dump", "s.dumpTo(ctx,"},
+		{"the safety dump", "s.takeBackup(ctx,"},
 		{"maintenance on", "maintenanceOn("},
 		{"the staging load", "identity, staging)"},
 		{"the rename aside", "RENAME TO \" + aside"},
@@ -163,7 +163,7 @@ func TestTheDestructiveStepIsARenameAndComesLast(t *testing.T) {
 
 func TestTheSafetyBackupIsTakenBeforeAnythingIsTouched(t *testing.T) {
 	s := restoreSequence(t)
-	safety := strings.Index(s, "s.dumpTo(ctx,")
+	safety := strings.Index(s, "s.takeBackup(ctx,")
 	firstDestructive := strings.Index(s, "ALTER DATABASE")
 	if safety < 0 || firstDestructive < 0 {
 		t.Fatal("the restore sequence could not be read")
@@ -446,7 +446,7 @@ func TestTheAccessRulesTravelWithTheRestore(t *testing.T) {
 	s := restoreSequence(t)
 
 	capture := strings.Index(s, "capturePrivileges(ctx, pgDatabase)")
-	dump := strings.Index(s, "s.dumpTo(ctx,")
+	dump := strings.Index(s, "s.takeBackup(ctx,")
 	apply := strings.Index(s, "applyPrivileges(ctx, pgDatabase")
 	swap := strings.Index(s, "RENAME TO \" + pgDatabase")
 	if capture < 0 || apply < 0 {
@@ -529,7 +529,7 @@ func TestColumnPrivilegesAreCarriedToo(t *testing.T) {
 	seq = seq[strings.Index(seq, "func (s *server) runRestore("):]
 	guard := strings.Index(seq, "unhandledPrivileges(ctx, pgDatabase)")
 	capture := strings.Index(seq, "capturePrivileges(ctx, pgDatabase)")
-	dump := strings.Index(seq, "s.dumpTo(ctx,")
+	dump := strings.Index(seq, "s.takeBackup(ctx,")
 	if guard < 0 {
 		t.Fatal("the restore does not refuse privilege kinds it cannot carry")
 	}

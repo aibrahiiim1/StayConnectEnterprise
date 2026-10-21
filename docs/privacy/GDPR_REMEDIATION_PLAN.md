@@ -139,7 +139,7 @@ Each value ships as a hotel setting with this default, following `OPERATIONAL_SE
 - **Hotel Admin → System → Backups → Backup encryption.** A site administrator adds a key holder; the appliance generates the age key pair, hands the private key over once (key file and printable recovery sheet) and keeps only the public key. The holder counts after the check code from the file or sheet is typed back, within an hour. The last active holder cannot be removed. Holders and their changes are recorded append-only.
 - **What is encrypted**: the nightly dump and `/etc` archive (seal keys included) and the on-demand and restore-safety dumps, as they are written, to every active holder. Until the first holder is confirmed, backups stay in the clear and the screen says so. If holders exist but cannot be read, the backup fails rather than fall back to plaintext.
 - **Opening a backup on the appliance** (Verify, Restore, restore test) asks for a holder's key, used in memory for that action only. Downloads stay encrypted. An engineer opens a nightly backup with `scd backup-crypt decrypt` (or any age tool).
-- **Restore-test reminder**: backup setting `RESTORE_TEST_MONTHS`, default 6; overdue shows a warning. On-demand dumps also get an age limit, `DB_BACKUP_DAYS` (default 30), beside the count limit.
+- **Restore-test reminder**: backup setting `RESTORE_TEST_MONTHS`, default 6; overdue shows a warning. (The age limit `DB_BACKUP_DAYS` that once sat beside the count limit is retired with the second backup mechanism: retention is counts only, D-R9.)
 - **New dependency**: `filippo.io/age` v1.2.1, the reference Go implementation of age (the format D-C5 named).
 
 ### D-F1, privacy notice: **A template the hotel completes**
@@ -401,6 +401,16 @@ The product is still in development: there is no paying customer and no live hot
   section I. Engineering decisions taken within that approval: erasure is refused (not queued) while either copy cannot be written;
   the secondary copy is encrypted to the backup key holders and never overwritten while it is ahead; the ledger starts again when an
   appliance changes customer.
+- **Backup consolidation (D-R9).** Product-Owner decision of 2026-10-21: the legacy nightly site-backup mechanism is retired as a separate
+  path and the encrypted backup system is the only one. **Scheduled backups are off by default** until an administrator switches them on
+  and configures them (Hotel Admin → Backups: on/off, hour, days between, backups kept, default seven, range 1-30); retention is counts
+  only, in two pools (scheduled and manual; the protective backups taken before a restore, a migration or a deployment). What those
+  protective steps need is **not** switched off with the schedule: the pre-restore backup, the mandatory pre-change backup in
+  `scripts/edge-migrate.sh`, the financial marker and recovery mode, the Erasure Ledger and the rollback artefacts. The financial
+  guarantees of the retired restore script (proven quiesce, marker before the swap, hypertable assertion, database-level grant,
+  recovery-mode record) are part of the one restore. The earlier nightly sets and un-noted dumps are preserved and removed only by an
+  administrator, with a password and a typed confirmation, once a verified new-kind backup exists. Built as described in
+  [../BACKUP_AND_RESTORE.md](../BACKUP_AND_RESTORE.md).
 
 ### Still open
 

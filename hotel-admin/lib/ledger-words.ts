@@ -15,17 +15,36 @@ export type LedgerStatus = {
   };
 };
 
-export type DailyStatus = {
-  state: "ok" | "waiting" | "attention" | "needs_key_holder" | string;
+export type BackupKind = "scheduled" | "manual" | "pre-change" | "pre-restore";
+
+export type BackupStatus = {
+  state: "ok" | "off" | "waiting" | "attention" | "needs_key_holder" | string;
   message: string;
-  keep: number;
-  hour: number;
   key_holders: boolean;
   running?: boolean;
   last_error?: string;
-  backups: { name: string; size_bytes: number; taken_at: string; tables: number; restorable: boolean; ledger_seq: number; etc_files: number }[];
+  last_attempt?: string;
+  schedule: { enabled: boolean; hour: number; every_days: number; keep: number; safety_keep: number; next: string | null };
+  backups: { name: string; kind: BackupKind; reason?: string; by?: string; size_bytes: number; taken_at: string; tables: number; restorable: boolean; ledger_seq: number; etc_files: number }[];
   problems: { name: string; detail: string }[];
+  earlier: {
+    count: number; size_bytes: number; unencrypted: number; oldest: string | null;
+    sets: { name: string; kind: string; taken: string; size_bytes: number; encrypted: boolean; restorable_here: boolean }[];
+  };
 };
+
+/** What each kind of backup is, in the words of the person reading the list. */
+export const BACKUP_KIND_LABELS: Record<string, string> = {
+  scheduled: "Scheduled",
+  manual: "Manual",
+  "pre-change": "Before a change",
+  "pre-restore": "Before a restore",
+  earlier: "Earlier backup",
+};
+export const backupKindLabel = (k?: string) => BACKUP_KIND_LABELS[k ?? ""] ?? "Backup";
+
+/** The settings Hotel Admin shows on the Scheduled backups card (the rest of the retention file belongs to the sweep). */
+export const SCHEDULE_SETTING_KEYS = ["BACKUP_ENABLED", "BACKUP_HOUR", "BACKUP_EVERY_DAYS", "BACKUP_KEEP", "SAFETY_BACKUP_KEEP"] as const;
 
 export const STORAGE_KINDS: { value: "dir" | "sftp" | "s3"; label: string; hint: string }[] = [
   { value: "dir", label: "External disk or network share", hint: "A folder on a USB or SATA disk, or on a network share (NAS) that is mounted on the appliance. It must not be on the appliance’s own disk." },
@@ -56,15 +75,19 @@ export function ledgerHeadline(s: LedgerStatus | null): Headline {
   }
 }
 
-export function dailyHeadline(d: DailyStatus | null): Headline {
+export function backupHeadline(d: BackupStatus | null): Headline {
   if (!d) return { tone: "warn", title: "Checking…", detail: "" };
+  const at = `${String(d.schedule.hour).padStart(2, "0")}:00`;
+  const every = d.schedule.every_days === 1 ? "every day" : `every ${d.schedule.every_days} days`;
   switch (d.state) {
     case "ok":
-      return { tone: "ok", title: "Daily backups are running", detail: `The newest ${d.keep} are kept, each encrypted and proven restorable when it is taken.` };
+      return { tone: "ok", title: "Scheduled backups are running", detail: `A backup is taken ${every} at or after ${at}. The newest ${d.schedule.keep} are kept, each encrypted and proven restorable when it is taken.` };
+    case "off":
+      return { tone: "warn", title: "Scheduled backups are off", detail: "Switch them on below to have a backup taken on a schedule. Manual backups work now, and the backups a restore, a migration or a deployment take first are always taken, whatever this says." };
     case "waiting":
-      return { tone: "warn", title: "Waiting for the first backup", detail: `It is taken after ${String(d.hour).padStart(2, "0")}:00 each night.` };
+      return { tone: "warn", title: "Waiting for the first scheduled backup", detail: `It is taken ${every} at or after ${at}.` };
     case "needs_key_holder":
-      return { tone: "err", title: "A backup key holder is required", detail: "Daily backups are always encrypted. Add a backup key holder above and the first backup runs that night." };
+      return { tone: "err", title: "A backup key holder is required", detail: "Backups are always encrypted. Add a backup key holder above; until then no backup can be taken, scheduled or manual." };
     default:
       return { tone: "warn", title: "Needs attention", detail: d.message || (d.problems.length ? "A stored backup no longer matches its checksum." : "") };
   }

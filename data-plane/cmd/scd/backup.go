@@ -21,7 +21,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -31,8 +33,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-
-	"github.com/stayconnect/enterprise/data-plane/internal/backupcrypt"
 )
 
 // scdBackupDir is a var rather than a const so tests can point it at a temporary directory. Nothing in the
@@ -58,29 +58,46 @@ const (
 // either in the clear or encrypted to the hotel's keys (.age, migration 0129).
 var safeBackupName = regexp.MustCompile(`^db-(safety-)?[0-9TZ]{1,24}\.sql\.gz(\.age)?$`)
 
-// backupRun takes a compressed logical dump of the site database, encrypted to the hotel's backup keys once
-// they are set up (backup_crypt.go).
+// backupRunReq says why a backup is wanted. edged sends "manual" and the operator's name; a controlled migration or deployment
+// (scd backup-now, on the socket only root can reach) sends "pre-change" and a reason.
+type backupRunReq struct {
+	Kind   string `json:"kind"`
+	Reason string `json:"reason"`
+	By     string `json:"by"`
+}
+
+// backupRun takes one backup with the one engine (backups.go): encrypted as it is written, loaded into a scratch database to prove
+// it restores, and recorded in a note. It answers when the backup is complete and verified.
 func (s *server) backupRun(w http.ResponseWriter, r *http.Request) {
-	started := time.Now().UTC()
-	// NOT r.Context(). A backup writes a file; if the caller's connection times out mid-dump the command is
-	// killed and a half-written archive is left to be cleaned up. It also cannot be retried usefully, because
-	// the caller has already given up. Its own deadline, independent of whoever asked.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Minute)
-	defer cancel()
-	name, err := s.dumpTo(ctx, "db-"+started.Format("20060102T150405Z")+".sql.gz")
-	if err != nil {
-		slog.Error("database backup failed", "err", err)
-		httpErr(w, http.StatusInternalServerError, "the database backup did not complete: "+err.Error())
+	var in backupRunReq
+	_ = json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&in)
+	if in.Kind == "" {
+		in.Kind = kindManual
+	}
+	// Only the kinds an operator or a controlled change may ask for; a scheduled or pre-restore backup is the appliance's own.
+	if in.Kind != kindManual && in.Kind != kindPreChange {
+		httpErr(w, http.StatusBadRequest, "a backup on request is manual or pre-change")
 		return
 	}
-	fi, err := os.Stat(filepath.Join(scdBackupDir, name))
+	if in.Kind == kindPreChange && len(strings.TrimSpace(in.Reason)) < 4 {
+		httpErr(w, http.StatusBadRequest, "a pre-change backup needs a reason (what is about to change)")
+		return
+	}
+	started := time.Now().UTC()
+	// NOT r.Context(): its own deadline, independent of whoever asked, so a caller giving up cannot leave a half-written backup.
+	ctx := context.WithoutCancel(r.Context())
+	meta, err := s.runBackupTracked(ctx, backupOpts{Kind: in.Kind, Reason: in.Reason, By: in.By})
 	if err != nil {
-		httpErr(w, http.StatusInternalServerError, "the completed dump could not be measured")
+		code := http.StatusInternalServerError
+		if errors.Is(err, errNoBackupKeyHolder) {
+			code = http.StatusConflict
+		}
+		writeJSON(w, code, map[string]any{"error": "backup_failed", "message": "the backup did not complete: " + err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"name": name, "size_bytes": fi.Size(), "started_at": started,
-		"encrypted": strings.HasSuffix(name, backupcrypt.Suffix),
+		"name": meta.Name, "size_bytes": meta.SizeBytes, "started_at": started, "encrypted": true, "kind": meta.Kind,
+		"restorable": meta.Restorable, "ledger_seq": meta.LedgerSeq, "tables": meta.Tables, "etc_files": meta.EtcFiles,
 	})
 }
 
@@ -227,56 +244,4 @@ func tailLine(s string) string {
 		return last[:300] + "…"
 	}
 	return last
-}
-
-// dumpTo writes a compressed logical dump under the given name and returns the name it was written under:
-// "<name>.age" when the hotel's backup keys are set up, because the dump is then encrypted to them as it is
-// written (backup_crypt.go).
-//
-// THE ONE WAY TO TAKE A BACKUP. An operator's backup and the safety copy a restore takes are both produced
-// here -- same flags, same .partial discipline, same empty-dump check, same ownership, same encryption. A
-// second implementation of "take a backup" is the one that turns out to differ on the day it matters.
-func (s *server) dumpTo(ctx context.Context, name string) (string, error) {
-	if err := os.MkdirAll(scdBackupDir, 0o750); err != nil {
-		return "", fmt.Errorf("the backup directory could not be created: %w", err)
-	}
-	recipients, err := s.backupRecipients(ctx)
-	if err != nil {
-		return "", err
-	}
-	if len(recipients) > 0 {
-		name += backupcrypt.Suffix
-	}
-	dest := filepath.Join(scdBackupDir, name)
-	partial := dest + ".partial"
-
-	// Written to .partial and renamed only on success, so an interrupted dump is never left behind looking
-	// like a backup somebody could restore from.
-	if err := writeDump(ctx, partial, recipients); err != nil {
-		_ = os.Remove(partial)
-		return "", err
-	}
-	if err := os.Rename(partial, dest); err != nil {
-		_ = os.Remove(partial)
-		return "", fmt.Errorf("the completed dump could not be moved into place")
-	}
-	fi, err := os.Stat(dest)
-	if err != nil {
-		return "", fmt.Errorf("the completed dump could not be measured")
-	}
-	// gzip of nothing still exits 0, so an empty dump is a failure wearing a success's clothes.
-	if fi.Size() < 1024 {
-		_ = os.Remove(dest)
-		return "", fmt.Errorf("the dump was empty and has been discarded")
-	}
-	// READABLE BY THE OPERATOR SURFACE. scd writes as root; edged serves the download as the unprivileged
-	// service user. Mode 0640 alone left the file root:root, so the download answered 500 -- the group has to
-	// be the service group as well as the mode being group-readable.
-	_ = os.Chmod(dest, 0o640)
-	if gid, ok := serviceGroupID(); ok {
-		if err := os.Chown(dest, 0, gid); err != nil {
-			slog.Warn("backup written but not group-readable by the operator surface", "err", err)
-		}
-	}
-	return name, nil
 }

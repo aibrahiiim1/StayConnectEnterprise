@@ -59,9 +59,11 @@ The annex has three parts:
 
 ### Restoring availability and access in a timely manner
 
-- A **daily encrypted backup** of the database and of the configuration and keys, taken on the Appliance, each proven restorable
-  when it is taken (loaded into a scratch database), checked against its checksum every day, with the newest seven kept (a
-  Controller setting). It is never taken unencrypted.
+- **One encrypted backup system** on the Appliance: the database and the configuration and keys, each backup proven restorable when it
+  is taken (loaded into a scratch database) and checked against its checksum every day. Scheduled backups are **off until the
+  Controller switches them on**; when on, the newest seven are kept by default (a Controller setting, counts only). A backup is taken
+  on request, and always before a restore, a migration or a deployment, whatever the schedule says. It is never taken unencrypted: with
+  no key holder no backup is taken.
 - The **erasure ledger**: every erasure and every closed data-protection request is recorded in an append-only, hash-chained ledger
   (no guest data in it) that is written in the same transaction and made durable in **two independent copies** outside the database
   (on the Appliance and in a secondary storage the Controller sets up) before the erasure is reported as done. After a restore it is

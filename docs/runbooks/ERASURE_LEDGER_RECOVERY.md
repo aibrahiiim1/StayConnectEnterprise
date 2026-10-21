@@ -60,7 +60,7 @@ from before), while the secondary kept erasures the appliance no longer knows.
 
 ## 4. Replacing the appliance (or rebuilding it after a disaster)
 
-You need: **a backup** of the old appliance (a daily backup file copied off it; the hotel's own offsite copy), **a backup key holder's key**,
+You need: **a backup** of the old appliance (a backup file copied off it; the hotel's own offsite copy), **a backup key holder's key**,
 and **the secondary storage** (same disk, share, server or bucket, with its credentials).
 
 1. Install and enrol the new appliance as usual (it starts with an empty database and its own new, empty ledger).

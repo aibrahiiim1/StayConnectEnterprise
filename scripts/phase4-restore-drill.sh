@@ -191,10 +191,10 @@ eq "a vanished management marker is treated as an unsupported restore" "RECOVERY
   "$(Q "SELECT iam_v2.p4_reconcile_financial_epoch_v2('$T','$S','$IDENT2',0,false);")"
 
 # ---------------------------------------------------------------- the tool itself
-if bash -n "$ROOT/deploy/scripts/stayconnect-financial-restore.sh"    && bash -n "$ROOT/deploy/scripts/stayconnect-site-backup.sh"; then
-  ok "the supported backup and restore tools parse"
+if bash -n "$ROOT/deploy/scripts/stayconnect-financial-restore.sh"; then
+  ok "the transitional financial-restore tool parses"
 else
-  no "the supported backup and restore tools parse" "syntax error"
+  no "the transitional financial-restore tool parses" "syntax error"
 fi
 if grep -q 'no TPM' "$ROOT/deploy/scripts/stayconnect-financial-restore.sh"; then
   ok "the tool records the absence of hardware anti-rollback rather than implying it"
@@ -212,7 +212,6 @@ fi
 echo
 echo "== the supported restore flow (pinned anchor, proven quiesce, marker vs /etc) =="
 TOOL="$ROOT/deploy/scripts/stayconnect-financial-restore.sh"
-BACKUP="$ROOT/deploy/scripts/stayconnect-site-backup.sh"
 W="$(mktemp -d)"; trap 'rm -rf "$W"' RETURN 2>/dev/null || true
 
 # The REAL trust anchor shape: a raw 32-byte Ed25519 public key, exactly as the assignment registry pins it.
@@ -238,9 +237,8 @@ openssl pkeyutl -sign -inkey "$W/other.pem" -rawin -in "$W/m.json" -out "$W/othe
 
 # Host shims. The restore tool targets a Linux appliance where python3 and pg_dump are present; this
 # drill also runs on a developer workstation whose Git Bash PATH has neither. The shims make the drill
-# deterministic on both WITHOUT changing what the tool does: python3 forwards to whatever python exists,
-# and pg_dump writes a stand-in artefact so the /etc-exclusion check -- the thing actually under test --
-# still runs. Neither shim touches the verification, the quiesce or the marker logic.
+# deterministic on both WITHOUT changing what the tool does: python3 forwards to whatever python exists.
+# Neither shim touches the verification, the quiesce or the marker logic.
 mkdir -p "$W/bin"
 # `command -v` is not enough on Windows: the Microsoft Store ships a zero-byte python3 alias that
 # resolves but does not run. Ask it for its version instead.
@@ -248,32 +246,6 @@ if ! python3 --version >/dev/null 2>&1; then
   printf '#!/usr/bin/env bash\nexec python "$@"\n' > "$W/bin/python3"
   chmod +x "$W/bin/python3"
 fi
-# The pg_dump stand-in is installed UNCONDITIONALLY, in its own directory used only by the backup-script
-# block below. On a Linux runner a real pg_dump exists but would try to reach a local socket -- this drill's
-# database lives in a container -- so using it there would test the runner's socket rather than the thing
-# under test, which is whether the /etc archive excludes the financial marker.
-mkdir -p "$W/pgstub"
-# The stubs stand in for a real PostgreSQL. The backup script now asks BOTH tools for their version before
-# it writes anything -- because on the development appliance the host client is 14 while the server is 16,
-# and a dump taken by the wrong client is not a backup. A stub that answers no version question would make
-# this drill test a code path the appliance never takes.
-cat > "$W/pgstub/pg_dump" <<'PGSTUB'
-#!/usr/bin/env bash
-case "${1:-}" in --version) echo "pg_dump (PostgreSQL) 16.3"; exit 0;; esac
-prev=""
-for a in "$@"; do
-  if [ "$prev" = "-f" ]; then printf 'stand-in dump' > "$a"; fi
-  prev="$a"
-done
-exit 0
-PGSTUB
-cat > "$W/pgstub/psql" <<'PSQLSTUB'
-#!/usr/bin/env bash
-# Answers only the one question the backup asks before dumping.
-case "$*" in *server_version*) echo "16.3";; esac
-exit 0
-PSQLSTUB
-chmod +x "$W/pgstub/pg_dump" "$W/pgstub/psql"
 export PATH="$W/bin:$PATH"
 
 run_tool() {  # run_tool <anchor> <manifest> <extra args...>
@@ -393,21 +365,14 @@ else
 fi
 
 # ---------------------------------------------------------------- the marker vs the /etc backup domain
-mkdir -p "$W/etcroot/stayconnect"
-echo '{"restore_generation": 7}' > "$W/etcroot/stayconnect/financial-restore-generation.json"
-echo 'identity' > "$W/etcroot/stayconnect/identity.key"
-out="$(PATH="$W/pgstub:$PATH" STAYCONNECT_BACKUP_DIR="$W/backups" STAYCONNECT_ETC_DIR="$W/etcroot/stayconnect" \
-  bash "$BACKUP" 2>&1 || true)"
-TGZ="$(ls "$W/backups"/*-etc.tgz 2>/dev/null | head -1)"
-if [ -n "$TGZ" ] && ! tar tzf "$TGZ" | grep -q 'financial-restore-generation.json'; then
-  ok "the /etc backup excludes the financial restore marker"
+# The nightly site-backup script that used to prove this here is retired: there is one backup system (scd). Its configuration archive
+# leaves the marker out, and that is proven against the real code by data-plane/cmd/scd (TestConfigurationArchiveIsEncryptedAnd
+# LeavesTheFinancialMarkerOut). This drill checks that the exclusion is still in the code the appliance runs.
+SCDSRC="$ROOT/data-plane/cmd/scd/backups.go"
+if grep -q 'financialMarker' "$SCDSRC" && grep -q 'TestConfigurationArchiveIsEncryptedAndLeavesTheFinancialMarkerOut' "$ROOT/data-plane/cmd/scd/backups_test.go"; then
+  ok "the configuration backup excludes the financial restore marker, and a test holds it there"
 else
-  no "the /etc backup excludes the marker" "$(printf '%s' "$out" | tail -2 | tr '\n' ' ')"
-fi
-if [ -n "$TGZ" ] && tar tzf "$TGZ" | grep -q 'identity.key'; then
-  ok "the /etc backup still contains everything else it always did"
-else
-  no "the /etc backup still contains identity material" "identity.key missing from the archive"
+  no "the configuration backup excludes the marker" "the exclusion or its test is missing from scd"
 fi
 
 echo

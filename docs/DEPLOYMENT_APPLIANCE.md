@@ -145,7 +145,7 @@ locally) and fence manually.
 Pilot-verified on a modest VM: 2 vCPU / 4 GB / 40 GB serves a mid-size site
 (hundreds of concurrent devices; scd's nft/tc ops are O(1) per session).
 Postgres and accounting growth are bounded by license retention limits;
-nightly backups need headroom for one extra dump generation.
+backups (scheduled, if switched on, and the ones taken before a restore, a migration or a deployment) need headroom for the kept generations.
 
 ## 9. Phase 19 — Networking
 

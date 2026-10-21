@@ -110,13 +110,17 @@ the swap**, so the restored data is never served un-erased:
 
 An encrypted secondary copy needs a **backup key holder's key** to be read (the same key that opens the backups). The local copy needs none.
 
-## 7. The daily backup
+## 7. The backups
 
-Every night (the hour is a setting) scd takes **one** backup of the database and of `/etc/stayconnect` (configuration and keys, without
-the financial restore marker), both encrypted to the key holders as they are written. It is **not taken without a key holder**. The dump
+There is **one** backup system (scd; [../BACKUP_AND_RESTORE.md](../BACKUP_AND_RESTORE.md)). A backup is of the database and of `/etc/stayconnect`
+(configuration and keys, without the financial restore marker), both encrypted to the key holders as they are written. It is **not taken
+without a key holder**. **Scheduled backups are off until the hotel switches them on** (hour and days between are settings); a backup is
+also taken on request, and always before a restore, a migration or a deployment. **The ledger does not depend on any of that switch:** it
+is written to both copies at the moment of every erasure whether or not a backup is ever taken. The dump
 is verified while it is made: the same stream is loaded into a scratch database, which must accept it without one error and hold the
 tables and an intact ledger. The note beside it records the SHA-256 of what is stored and the ledger head it contains. The newest *N*
-(the database-backups setting, default 7) are kept; older sets are removed only after a newer one verified. Each day the stored files are
+(the backups-kept setting, default 7, counts only; the protective backups are a separate small pool) are kept; older sets are removed only after
+a newer one verified. Backups made by the retired nightly job are kept until an administrator removes them. Each day the stored files are
 checked against their notes, so silent corruption is found while other days remain.
 
 ## 8. Limits, stated plainly

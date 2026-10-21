@@ -19,7 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// The Backups screen's relays to scd for the erasure ledger and the daily backup: who may do what, what is forwarded (and what is
+// The Backups screen's relays to scd for the erasure ledger and the one backup system: who may do what, what is forwarded (and what is
 // not), and that credentials never reach the activity log.
 
 type ledgerScdCall struct {
@@ -147,9 +147,10 @@ func TestIntegration_LedgerAdmin_RecoveryAndBackupOnRequestNeedThePassword(t *te
 	f := newAPI(t, "site_admin")
 	scd, rec := fakeLedgerSCD(t)
 	f.app.scd = scd
+	rec.reply["/v1/backup/run"] = `{"name":"db-20261021T020000Z.sql.gz.age","size_bytes":4096,"restorable":true,"kind":"manual"}`
 	for _, tc := range []struct{ method, path, scdPath string }{
 		{"POST", "/backups/ledger/recover", "/v1/ledger/recover"},
-		{"POST", "/backups/daily/run", "/v1/backup/daily/run"},
+		{"POST", "/backups/run", "/v1/backup/run"},
 	} {
 		if st, _ := f.do(t, tc.method, tc.path, map[string]any{"identity": "AGE-SECRET-KEY-1X"}); st == 200 {
 			t.Errorf("%s was allowed without the password", tc.path)
@@ -165,10 +166,55 @@ func TestIntegration_LedgerAdmin_RecoveryAndBackupOnRequestNeedThePassword(t *te
 	if c := rec.last("/v1/ledger/recover"); c == nil || c.Body["identity"] != "AGE-SECRET-KEY-1X" || len(c.Body) != 1 {
 		t.Errorf("recover body = %+v", c)
 	}
+	// a backup on request is the one engine's manual backup, attributed to the person who asked
+	if c := rec.last("/v1/backup/run"); c == nil || c.Body["kind"] != "manual" || c.Body["by"] == nil || c.Body["by"] == "" {
+		t.Errorf("run body = %+v", c)
+	}
 	// the key is never logged
 	var n int
 	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM public.audit_log WHERE payload::text LIKE '%AGE-SECRET-KEY%'`).Scan(&n); err != nil || n != 0 {
 		t.Errorf("a backup key reached the activity log: %d %v", n, err)
+	}
+}
+
+func TestIntegration_BackupOnRequestWithNoKeyHolderIsRefusedPlainly(t *testing.T) {
+	f := newAPI(t, "site_admin")
+	scd, rec := fakeLedgerSCD(t)
+	f.app.scd = scd
+	rec.code["/v1/backup/run"] = 409
+	rec.reply["/v1/backup/run"] = `{"error":"backup_failed","message":"no backup key holder is set up"}`
+	st, out := f.do(t, "POST", "/backups/run", map[string]any{"password": f.password})
+	if st != 409 {
+		t.Fatalf("status = %d %v", st, out)
+	}
+}
+
+func TestIntegration_EarlierBackupsGoOnlyWithPasswordAndTypedConfirmation(t *testing.T) {
+	f := newAPI(t, "site_admin")
+	scd, rec := fakeLedgerSCD(t)
+	f.app.scd = scd
+	rec.reply["/v1/backup/earlier/remove"] = `{"removed_sets":2,"removed_bytes":10}`
+	// no password
+	if st, _ := f.do(t, "POST", "/backups/earlier/remove", map[string]any{"confirm": earlierBackupsConfirmation}); st == 200 {
+		t.Error("allowed without the password")
+	}
+	// wrong confirmation
+	if st, _ := f.do(t, "POST", "/backups/earlier/remove", map[string]any{"confirm": "yes", "password": f.password}); st != 400 {
+		t.Errorf("a wrong confirmation = %d", st)
+	}
+	if rec.last("/v1/backup/earlier/remove") != nil {
+		t.Fatal("a refused request reached scd")
+	}
+	st, out := f.do(t, "POST", "/backups/earlier/remove", map[string]any{"confirm": earlierBackupsConfirmation, "password": f.password})
+	if st != 200 || out["removed_sets"] != float64(2) {
+		t.Fatalf("remove = %d %v", st, out)
+	}
+	if c := rec.last("/v1/backup/earlier/remove"); c == nil || c.Body["by"] == nil {
+		t.Errorf("the remover was not named: %+v", c)
+	}
+	var n int
+	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM public.audit_log WHERE action='backup.earlier_removed'`).Scan(&n); err != nil || n != 1 {
+		t.Errorf("audit entries = %d %v", n, err)
 	}
 }
 
@@ -181,9 +227,9 @@ func TestIntegration_LedgerAdmin_StatusIsRelayedAsItIs(t *testing.T) {
 	if st != 200 || out["state"] != "attention" || out["erasure_available"] != false {
 		t.Fatalf("status = %d %v", st, out)
 	}
-	rec.reply["/v1/backup/daily"] = `{"state":"ok","keep":7}`
-	if st, out := f.do(t, "GET", "/backups/daily", nil); st != 200 || out["keep"] != float64(7) {
-		t.Fatalf("daily = %d %v", st, out)
+	rec.reply["/v1/backup/status"] = `{"enabled":false,"keep":7}`
+	if st, out := f.do(t, "GET", "/backups/status", nil); st != 200 || out["keep"] != float64(7) {
+		t.Fatalf("status = %d %v", st, out)
 	}
 }
 

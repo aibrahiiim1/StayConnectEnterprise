@@ -613,6 +613,15 @@ func main() {
 	}
 	// `scd backup-crypt ...` encrypts the nightly backup to the hotel's keys, and decrypts one for an engineer
 	// restoring it (backup_crypt.go). One implementation for every backup the appliance writes.
+	if len(os.Args) > 1 && os.Args[1] == "backup-now" {
+		os.Exit(backupNowMain(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "backup-restore" {
+		os.Exit(backupRestoreMain(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "marker-advance" {
+		os.Exit(markerAdvanceMain(os.Args[2:]))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "backup-crypt" {
 		os.Exit(backupCryptMain(os.Args[2:]))
 	}
@@ -1023,8 +1032,8 @@ func main() {
 	r.Post("/v1/ledger/destination/probe", s.ledgerDestinationProbe)
 	r.Post("/v1/ledger/recover", s.ledgerRecover)
 	r.Post("/v1/backup/run", s.backupRun)
-	r.Get("/v1/backup/daily", s.dailyBackupStatus)
-	r.Post("/v1/backup/daily/run", s.dailyBackupRunNow)
+	r.Get("/v1/backup/status", s.backupStatus)
+	r.Post("/v1/backup/earlier/remove", s.earlierBackupsRemove)
 	r.Post("/v1/backup/verify", s.backupVerify)
 	r.Post("/v1/backup/key-test", s.backupKeyTest)
 	// THE DESTRUCTIVE ONE. edged performs the password step-up, the permission check and the audit record
@@ -1242,7 +1251,7 @@ func main() {
 	// site's retention settings.
 	go s.dataRetentionLoop(rootCtx)
 	go s.ledgerLoop(rootCtx)
-	go s.dailyBackupLoop(rootCtx)
+	go s.backupLoop(rootCtx)
 	// SYSTEM-LOG RETENTION (log_retention.go, migration 0134): the appliance's logs follow the site's log period.
 	go s.logRetentionLoop(rootCtx)
 

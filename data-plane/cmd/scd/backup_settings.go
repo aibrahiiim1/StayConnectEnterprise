@@ -28,10 +28,12 @@ import (
 )
 
 const (
-	retentionConf  = "/etc/stayconnect/backup-retention.conf"
 	sweepTimerUnit = "stayconnect-backup-cleanup.timer"
 	timerOverride  = "/etc/systemd/system/" + sweepTimerUnit + ".d/override.conf"
 )
+
+// retentionConf is the file Hotel Admin writes the backup and retention settings to; a var so tests can use a temporary one.
+var retentionConf = "/etc/stayconnect/backup-retention.conf"
 
 // retentionSetting is one knob with everything an operator needs to set it responsibly: what it means, its
 // unit, its default, and the bounds it is held to.
@@ -53,16 +55,18 @@ var retentionSchema = []retentionSetting{
 		Explains: "Previous builds of each service, kept so a bad deployment can be rolled back. Below two there is nothing to roll back to."},
 	{Key: "KEEP_RELEASES", Label: "Hotel Admin releases", Unit: "releases", Default: 5, Min: 2, Max: 30,
 		Explains: "Previous Hotel Admin bundles, on top of the current and previous ones, which are never removed."},
-	{Key: "KEEP_DB", Label: "Database backups", Unit: "backups", Default: 7, Min: 1, Max: 365,
-		Explains: "How many database backups to retain. The newest is always kept regardless of this number."},
-	// AN AGE LIMIT AS WELL AS A COUNT (GDPR plan C5). A count alone keeps a quiet site's last seven backups
-	// for ever -- and with them guest data the retention settings have long since anonymised in the live
-	// database. The newest is still always kept.
-	{Key: "DB_BACKUP_DAYS", Label: "Database backups: keep for", Unit: "days", Default: 30, Min: 1, Max: 3650,
-		Explains: "Database backups older than this are removed by the nightly sweep, even within the number above. The newest is always kept."},
-	// THE DAILY BACKUP (GDPR final mission): when it is taken. It is encrypted and verified; how many are kept is KEEP_DB.
-	{Key: "DAILY_BACKUP_HOUR", Label: "Daily backup: hour of the day", Unit: "o'clock", Default: 2, Min: 0, Max: 23,
-		Explains: "The appliance takes its daily encrypted backup at or after this hour (the appliance's own clock). The number of daily backups kept is the database backups setting above."},
+	// BACKUPS (one system, one policy). The schedule is OFF until an administrator switches it on; what a restore, a migration or a
+	// deployment takes first is taken whatever it says. Counts only: there is no age rule beside them to contradict.
+	{Key: "BACKUP_ENABLED", Label: "Scheduled backups", Unit: "0 = off, 1 = on", Default: 0, Min: 0, Max: 1,
+		Explains: "Off until you switch it on. When on, the appliance takes an encrypted backup on the schedule below. Manual backups, and the backups a restore, a migration or a deployment take first, do not depend on it."},
+	{Key: "BACKUP_HOUR", Label: "Scheduled backups: hour of the day", Unit: "o'clock", Default: 2, Min: 0, Max: 23,
+		Explains: "The scheduled backup is taken at or after this hour (the appliance's own clock)."},
+	{Key: "BACKUP_EVERY_DAYS", Label: "Scheduled backups: every", Unit: "days", Default: 1, Min: 1, Max: 7,
+		Explains: "How many days between scheduled backups. A backup taken by hand counts: the next scheduled one comes this many days after the newest."},
+	{Key: "BACKUP_KEEP", Label: "Backups kept", Unit: "backups", Default: 7, Min: 1, Max: 30,
+		Explains: "How many scheduled and manual backups to keep. The newest is always kept; older ones go only after a newer one has been verified. With a schedule of N days, the oldest backup is about (this number x N) days old, and an erased guest can be in it for that long."},
+	{Key: "SAFETY_BACKUP_KEEP", Label: "Safety backups kept", Unit: "backups", Default: 3, Min: 2, Max: 20,
+		Explains: "The backups taken automatically before a restore, a migration or a deployment: how many of the newest to keep."},
 	// THE DATABASE SET ASIDE BY A RESTORE (GDPR final mission). A restore keeps the database it replaced so the restore can
 	// be undone -- and that copy holds everything the restored one was cleaned of, including guests erased since. It is
 	// removed after this many days; undoing a restore is possible until then.
@@ -70,13 +74,6 @@ var retentionSchema = []retentionSetting{
 		Explains: "A restore keeps the database it replaced so it can be undone. That copy still holds data erased or anonymised since, so it is removed after this many days."},
 	{Key: "KEEP_CONFIG", Label: "Configuration backups", Unit: "copies", Default: 3, Min: 1, Max: 30,
 		Explains: "Saved copies of configuration files taken before a change."},
-	// THE NIGHTLY SITE BACKUPS (/var/backups/stayconnect, decision D-H). They were never removed: every night
-	// added a database dump and a full copy of /etc/stayconnect. A set is removed only when it is older than
-	// SITE_BACKUP_DAYS AND not among the SITE_BACKUP_KEEP newest; the floor of seven is the Product Owner's.
-	{Key: "SITE_BACKUP_DAYS", Label: "Nightly site backups: keep for", Unit: "days", Default: 30, Min: 1, Max: 3650,
-		Explains: "Nightly site backups older than this are removed by the nightly sweep, except the newest ones kept below."},
-	{Key: "SITE_BACKUP_KEEP", Label: "Nightly site backups: always keep the newest", Unit: "backups", Default: 7, Min: 7, Max: 365,
-		Explains: "This many of the most recent nightly site backups are never removed, however old they are."},
 	// THE RESTORE-TEST REMINDER (decision D-C5). Backups are encrypted to the hotel's own keys, and the
 	// appliance cannot tell whether those keys still exist. So Hotel Admin asks, this often, for a key holder to
 	// prove it by opening the newest backup; an overdue or failed test is a warning on the Backups screen.

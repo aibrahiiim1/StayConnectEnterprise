@@ -139,6 +139,9 @@ func newSCDClient(socket string) *scdClient {
 var longSCDPaths = map[string]time.Duration{
 	"/v1/backup/run":    20 * time.Minute,
 	"/v1/backup/verify": 25 * time.Minute,
+	// The status re-reads every stored backup against its checksum, and removing earlier backups does the same first.
+	"/v1/backup/status":         3 * time.Minute,
+	"/v1/backup/earlier/remove": 5 * time.Minute,
 	// The erasure ledger: a commit writes two copies and reads both back; recovery and a first copy can take longer.
 	"/v1/ledger/prepare":           60 * time.Second,
 	"/v1/ledger/commit":            2 * time.Minute,
