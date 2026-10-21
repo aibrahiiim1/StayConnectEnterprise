@@ -462,7 +462,7 @@
     "rollback_rehearsal_occurred": true,
     "corrected_software_deployed": true,
     "deployed_head_on_appliance": "MIXED -- see deployed_runtime_services; there is no single deployed head",
-    "deployed_head_note": "PRE-LIVE 172.21.60.25, re-read live on 2026-10-21 after the GDPR and backup-consolidation deployment (branch delivery/gdpr, T0239). THE APPLIANCE RUNS BINARIES FROM SEVERAL COMMITS and this field names none, because naming one would misdescribe the others. Per binary: netd dc32a52c; scd 5fd5407b; edged 3d84ff92; pmsd f65abebc; portald f65abebc; acctd dc32a52c; the helpers keybootstrap fa32e3df, sitemigrate and svc-run 29a6b21f. Every one of these commits is contained in branch delivery/gdpr (PR #219). All read out of the INSTALLED bytes with vcs.modified=false and -tags=stayconnect_production on the six services.",
+    "deployed_head_note": "PRE-LIVE 172.21.60.25, re-read live on 2026-10-21 after the merged master (PR #219, 3e30b393) was rebuilt and redeployed (T0240). THE APPLIANCE RUNS BINARIES FROM SEVERAL COMMITS and this field names none, because naming one would misdescribe the others. Per binary: netd dc32a52c; scd 3e30b393; edged 3e30b393; pmsd 3e30b393; portald 3e30b393; acctd dc32a52c; the helpers keybootstrap fa32e3df, sitemigrate and svc-run 29a6b21f. Every one of these commits is contained in master. All read out of the INSTALLED bytes with vcs.modified=false and -tags=stayconnect_production on the six services.",
     "live_increment9_revalidated": true,
     "live_increment9_revalidated_on": "2026-08-11",
     "live_increment9_revalidation_verdicts": {
@@ -856,16 +856,16 @@
     "dhcp_ownership_evidence_monitored_deployed_note": "DEPLOYED AND VERIFIED LIVE 2026-09-01 (T0109). netd health carries an ownership_evidence block filled by a fresh lease read on every request; the operational checker returns OK on the real socket and refuses when the socket is absent; the enforcement-plane gate consults it. Kea's hourly lease-file cleanup, which had failed every hour since 2026-08-28, has run cleanly since the repair with zero PID failures.",
     "hotel_admin_runtime_identity": {
       "_note": "THE UI IS NOT THE BINARIES. deployed_head_on_appliance names the commit whose build produced the nine SERVICE binaries; it says nothing about the Hotel Admin bundle, which is built and shipped separately and is routinely left untouched by a backend deployment. Recording one head for both is how a UI five days older than the backend was reported as current. These fields are read from the bundle's own hotel-admin-release.json on the appliance, never inferred.",
-      "source_commit": "5fd5407b2cda1cab025ea2df3ddd56d74eb1c8dc",
-      "build_id": "yqMlf3AqopSi_VDDNyWRp",
-      "release": "20261021-094102",
-      "previous_release": "20261021-090759",
-      "artifact_sha256": "4f10f2d8662fc65c13db7a1d490fc39fcc91c07f2db837bca52babd62a2e2bd8",
+      "source_commit": "3e30b3939548630b5ffd2d86c626ee547c844e42",
+      "build_id": "nGGxSHBUtBGJD5IhZ0y2Q",
+      "release": "20261021-130129",
+      "previous_release": "20261021-094102",
+      "artifact_sha256": "78219dc49204583f58c185814f8d9bceb4d1359bd686a00e88d66d5624f90a75",
       "build_flags": "none -- the release manifest records build_flags {}; the capability contract carries no build flags",
       "contract_version": "1",
-      "deployed_at": "2026-10-21 by deploy-hotel-admin.sh package from a clean clone of 5fd5407b / install on the appliance (GDPR and backup consolidation).",
-      "verified_at": "2026-10-21, read back from the installed release manifest (source_state clean, source_commit 5fd5407b2cda, BUILD_ID yqMlf3AqopSi_VDDNyWRp); /opt/stayconnect/hotel-admin -> releases/hotel-admin/20261021-094102.",
-      "rollback": "hotel-admin.previous -> releases/hotel-admin/20261021-090759 (b7c3bbc0, BUILD_ID x5nJIRymN3HNhFgmr3-oD, the same day's first build of this delivery)."
+      "deployed_at": "2026-10-21 by deploy-hotel-admin.sh package from a clean clone of merged master 3e30b393 / install on the appliance (T0240).",
+      "verified_at": "2026-10-21, read back from the installed release manifest (source_commit 3e30b3939548, BUILD_ID nGGxSHBUtBGJD5IhZ0y2Q); /opt/stayconnect/hotel-admin -> releases/hotel-admin/20261021-130129.",
+      "rollback": "hotel-admin.previous -> releases/hotel-admin/20261021-094102 (5fd5407b, BUILD_ID yqMlf3AqopSi_VDDNyWRp)."
     },
     "hotel_admin_deployment_contract": "PERMANENT RULE for every Hotel Admin release. (1) Exactly ONE servable release: /opt/stayconnect/hotel-admin is a symlink to a verified release under the managed releases directory - never a plain directory, which is what an install-by-copying leaves behind and what removes all provenance. (2) Every bundle carries hotel-admin-release.json recording source commit, BUILD_ID, release timestamp, the capability flags and their values, and the artifact checksum; packaging FAILS if the source commit cannot be identified or the contract is not satisfied. (3) Installation verifies the candidate - checksum, manifest, required routes, and that the flags were really inlined - BEFORE switching, and smoke-tests the live endpoint AFTER, proving the served BUILD_ID and that every required operator surface answers; a failure restores the previous verified release. (4) A rollback target must satisfy the same contract: an obsolete UI that would remove PMS, Service Plan or Package management is archive evidence, never an executable rollback, and the previous pointer is CLEARED rather than left aimed at one. (5) Release selection is explicit and provenance-verified - never by mtime, filename or 'latest-looking' directory. (6) Historical releases are retained under the archive directory, unreachable by Caddy, systemd or either pointer.",
     "hotel_admin_operator_endpoint_verified": true,
@@ -925,12 +925,12 @@
     "pms_published_generation_note": "THREE DIFFERENT COUNTERS HAVE ALL BEEN ABBREVIATED 'gen' AND MUST NOT BE CONFLATED. pms_interface_runtime.published_resync_generation is the RESYNC generation, bumped once per resync cycle: 300, read passively 2026-09-16 after the T0149 deployment. pms_interface_runtime.runtime_generation is a monotonic runtime-row counter bumped on every state write, which is why it is orders of magnitude larger: 74452. pms_interface_revisions.revision_no is the pinned Interface REVISION: 3, unchanged. The move followed the pmsd restart the T0149 deployment caused: the connector reconnected and requested its own resync, publishing generation 299 over 464 records at 2026-09-16T14:04:36Z and reaching 300 on the next cycle. No operator command and no configuration change; resync_command_id is NULL. HISTORICAL (do not read as current): 282 belongs to the 2026-09-15 restart, 209 to the migration-0065 closure, and 206-208 to the 2026-09-08T11:45Z restart sequence.",
     "deployed_runtime_head": "MIXED -- see deployed_runtime_services; there is no single deployed head",
     "deployed_runtime_services": {
-      "_note": "Per service: sha256 of the installed binary, the commit its own bytes name, and the build tag. Read back from /opt/stayconnect/bin on PRE-LIVE 172.21.60.25 on 2026-10-21 after the GDPR and backup-consolidation deployment (branch delivery/gdpr, T0239). The appliance carries no Go toolchain, so the Go build stamp was read directly out of the artifact.",
+      "_note": "Per service: sha256 of the installed binary, the commit its own bytes name, and the build tag. Read back from /opt/stayconnect/bin on PRE-LIVE 172.21.60.25 on 2026-10-21 after the merged master was redeployed (PR #219, T0240). The appliance carries no Go toolchain, so the Go build stamp was read directly out of the artifact.",
       "netd": "1095ff33baacea030294ae9f70f7a95c4a47acb3072037ae18f097104fad40f7  (dc32a52c94d3, tags=stayconnect_production, vcs.modified=false)",
-      "scd": "a948255f545e7f18c86f94b13e4153851429f10ae722b22acec52a8517c7544a  (5fd5407b2cda, tags=stayconnect_production, vcs.modified=false)",
-      "edged": "98f3af604e13b2dc9d78cf4e151cde2e51769dd26e2f2c2dee47a72b3f2eca63  (3d84ff92f5e0, tags=stayconnect_production, vcs.modified=false)",
-      "pmsd": "f7c8f97c5fa08b71757fce016b0ab9f5c49c677d63b2c93709a0fb6a7a795a9e  (f65abebc0eb0, tags=stayconnect_production, vcs.modified=false)",
-      "portald": "d7584013fc9d31d9f0a48c18853e0289e4caffb3ca3817e72c7738cf68330531  (f65abebc0eb0, tags=stayconnect_production, vcs.modified=false)",
+      "scd": "0b6fc2406d6ee21f5291d8716d74d062bf32435beedc50d0c8739f08e2ca855b  (3e30b3939548, tags=stayconnect_production, vcs.modified=false)",
+      "edged": "0eaa55d16ea8aa52b1a97630c0e60cdc8bc90ea6ff736681f53e52a0d2754408  (3e30b3939548, tags=stayconnect_production, vcs.modified=false)",
+      "pmsd": "dce9d93acc81304689756bbbbfc27323bf5c6363b5caa8d9d1ee04b97486b9a3  (3e30b3939548, tags=stayconnect_production, vcs.modified=false)",
+      "portald": "7a21fedc21dcee4912d5b2ffa3c6e8232f97cce5eb7ffb93171fa36482f38fc5  (3e30b3939548, tags=stayconnect_production, vcs.modified=false)",
       "acctd": "0f7606364776998a0f38dd6f77613849abd234a72a831adcbb51f05f3d2fa406  (dc32a52c94d3, tags=stayconnect_production, vcs.modified=false)",
       "keybootstrap": "578967a883e91c65d9133eee0d9519a7fe93a1bb95b3b18e00ec592af038fd3b  (fa32e3dfb435, tags=stayconnect_production, vcs.modified=false)",
       "sitemigrate": "28cb0aff8dc9fb880f6192c06222ebdb4601be5edbd65a5d6c31253affd1039d  (29a6b21fcf69, helper, no build tag, vcs.modified=false; unchanged by this delivery)",
@@ -1099,7 +1099,7 @@
       "not_performed": "No sync, resync or routing control was activated: each would generate PMS traffic or change PMS configuration, which this mission explicitly excludes. Their presence, labelling and authorization were verified without invoking them. No .23 access, no financial traffic, no migration, no topology change, no Root-CA change, no Go-Live."
     },
     "deployed_runtime_provenance_verified_at": "2026-10-21",
-    "deployed_runtime_provenance_verification": "Verified live on PRE-LIVE 172.21.60.25 on 2026-10-21 (UTC), after the GDPR and backup-consolidation deployment. For each service binary: sha256 of the installed file, and the vcs.revision and vcs.modified values read out of that same file. All six services carry -tags=stayconnect_production and vcs.modified=false; DEPLOYED_BINARIES.sha256 verifies 6/6.",
+    "deployed_runtime_provenance_verification": "Verified live on PRE-LIVE 172.21.60.25 on 2026-10-21 (UTC), after the merged master was redeployed. For each service binary: sha256 of the installed file, and the vcs.revision and vcs.modified values read out of that same file. All six services carry -tags=stayconnect_production and vcs.modified=false; DEPLOYED_BINARIES.sha256 verifies 6/6.",
     "rollback_artifact_provenance": {
       "audited_at": "2026-09-21",
       "finding": "17 of the 36 retained rollback artifacts in /opt/stayconnect/bin were built WITHOUT -tags stayconnect_production and so carry the development build profile; most carry no vcs stamp either. Four were produced by the guest-pilot mission (the *.bak-untagged files and portald.bak-landingerror) and thirteen predate it, from before scripts/build-appliance-binaries.sh existed. Until this closure every one of them was selectable by an operator typing a suffix, and binary-rollback.sh would have installed it, verified the digest and reported success -- truthfully about identity, and silent about profile.",
@@ -1277,7 +1277,7 @@
     "prelive_phase4_flag_posture": "PRE-LIVE 172.21.60.25 since 2026-09-30 (D47): scd runs STAYCONNECT_PHASE4_MASTER, _PAYMENT, _PAYMENT_PROVIDER, _POSTING, _FINANCIAL_REVIEW, _OUTBOX_WORKER and _PMS_TRANSMIT; pmsd runs _MASTER, _OUTBOX_WORKER and _PMS_TRANSMIT; edged runs _MASTER, _POSTING and _FINANCIAL_REVIEW. STAYCONNECT_PAYMENT_LIVE_ALLOWED is set nowhere. Real PMS postings ever: one (T0204, USD 1.00, PA OK). Payment-provider traffic ever: none.",
     "phase4_flags_off_scope": "phase4_flags_off records the DELIVERED REPOSITORY configuration (no file in the tree enables a Phase-4 flag; scripts/ci/phase4-dark-check.sh asserts it). It is not a statement about the PRE-LIVE environment, whose posture is recorded in prelive_phase4_flag_posture."
   },
-  "latest_transition_id": "T0239",
+  "latest_transition_id": "T0240",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1772,19 +1772,19 @@
     "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
   },
   "current_delivery": {
-    "kind": "GDPR_CLOSURE_AND_BACKUP_CONSOLIDATION_DEPLOYED_TO_PRE_LIVE",
+    "kind": "GDPR_CLOSURE_AND_BACKUP_CONSOLIDATION_MERGED_AND_REDEPLOYED_TO_PRE_LIVE",
     "decision": "D64 (the GDPR programme, migrations 0127-0149) and D65 (one backup system, 2026-10-21).",
-    "decision_note": "Deployed to PRE-LIVE for Product Owner testing (T0239). Not merged until the four gates pass.",
-    "manifest": "docs/manifests/GdprBackupConsolidation-change-manifest.md",
-    "base": "18e34e900bf41924c4220bc3e552466995b136d3",
-    "base_note": "Master after the merge of PR #218 (T0238).",
-    "head": "d8640d21",
-    "head_note": "The last content commit of branch delivery/gdpr when T0239 was written. Governance commits follow it.",
-    "transition": "T0239",
-    "previous_delivery": "T0238",
+    "decision_note": "PR #219 merged to master as 3e30b393 after all four gates passed on the tested head; the merged master is deployed to PRE-LIVE (T0240).",
+    "manifest": "docs/manifests/GdprBackupConsolidationMerge-change-manifest.md",
+    "base": "3e30b3939548630b5ffd2d86c626ee547c844e42",
+    "base_note": "Master after the merge of PR #219 (T0240).",
+    "head": "3e30b393",
+    "head_note": "No content commit: governance only. The merged delivery's last content commit is ac643c59.",
+    "transition": "T0240",
+    "previous_delivery": "T0239",
     "pr": 219,
-    "pr_state": "OPEN -- the four gates and the protected merge are authorised by the mission; po-merge-approved is applied only to the tested head",
-    "note": "T0239. PRE-LIVE runs netd dc32a52c; scd 5fd5407b; edged 3d84ff92; pmsd f65abebc; portald f65abebc; acctd dc32a52c; keybootstrap fa32e3df; Admin Console release 20261021-094102 (5fd5407b); migrations through 0149. One encrypted backup system; the legacy nightly job is retired. Go-Live not authorised.",
+    "pr_state": "PR #219 MERGED as 3e30b393; the closure record is the next pull request",
+    "note": "T0240. PRE-LIVE runs netd dc32a52c; scd, edged, pmsd, portald 3e30b393; acctd dc32a52c; keybootstrap fa32e3df; Admin Console release 20261021-130129 (3e30b393); migrations through 0149. One encrypted backup system; scheduled backups OFF; the erasure ledger's secondary storage is not configured until the hotel sets one up. Go-Live not authorised.",
     "branch": "delivery/gdpr"
   },
   "onboarding_reconciliation": {

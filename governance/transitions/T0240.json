@@ -1,0 +1,46 @@
+{
+  "transition_id": "T0240",
+  "seq": 240,
+  "timestamp": "2026-10-21T16:25:00+03:00",
+  "timestamp_derivation": "Computed from the workstation clock (UTC+3) after GitHub merged PR #219 and after the merged master was rebuilt, redeployed and read back on PRE-LIVE, and before the commit that introduces this receipt.",
+  "record_type": "GDPR_CLOSURE_AND_BACKUP_CONSOLIDATION_MERGED_AND_REDEPLOYED_TO_PRE_LIVE",
+  "authorisation": "The Product Owner's 'Final Backup Consolidation and Delivery' mission of 2026-10-21 (D65), which authorised the protected merge and deployment to PRE-LIVE; po-merge-authorization succeeded on the tested head and all four gates passed on it. It did NOT authorise Go-Live, Central deployment or a legal GDPR claim.",
+  "merge": {
+    "pull_request": 219,
+    "merge_commit": "3e30b3939548630b5ffd2d86c626ee547c844e42",
+    "merged_at": "2026-10-21",
+    "parents": [
+      "18e34e900bf41924c4220bc3e552466995b136d3",
+      "ac643c59be19"
+    ],
+    "tested_head": "ac643c59be19",
+    "gates": "FULL CHECK on the tested head: Project Governance, Phase 3 Software, Phase 4 Financial Core and Phase 5 Post-Stay and Transfer all success.",
+    "tree": "The merge commit's tree is identical to the tree of the tested head (07a8123b783e)."
+  },
+  "found_at_the_last_gate": "The Phase 4 browser suite failed on four specs. One was a real defect: the remember-this-device box read document.cookie without a guard, which throws in a sandboxed frame or a cookie-blocking captive browser, aborting the portal's sign-in setup (no method chips, voucher tab only). It is guarded, the E2E fixture regenerated, and three stale browser expectations were updated for the accessible names.",
+  "deployment_provenance": "PRE-LIVE 172.21.60.25 rebuilt from a clean clone of merged master and read back on 2026-10-21 from the installed bytes: scd 0b6fc2406d6e, edged 0eaa55d16ea8, pmsd dce9d93acc81, portald 7a21fedc21dc, each naming revision 3e30b3939548 with tags=stayconnect_production, vcs.modified=false; netd and acctd dc32a52c unchanged; keybootstrap fa32e3df unchanged (built from a commit contained in master); DEPLOYED_BINARIES 6/6 OK. Admin Console release 20261021-130129 (3e30b3939548, BUILD_ID nGGxSHBUtBGJD5IhZ0y2Q, package sha256 78219dc49204), previous 20261021-094102. Schema 0149 (unchanged). Services active, console and portal answer.",
+  "rollback": "Binaries: <svc>.bak-pre-3e30b393-20261021T130108Z in /opt/stayconnect/bin (scd, edged, pmsd, portald; the 5fd5407b/3d84ff92/f65abebc binaries of T0239 are the next older backups), deploy-bins.sh restores a service that does not come up. Console: hotel-admin.previous -> releases/hotel-admin/20261021-094102. Database: unchanged by this deployment; the encrypted pre-0127 dump and the pre-change backup of T0239 remain.",
+  "cleanup": "Removed from PRE-LIVE: the acceptance operator acceptance-gdpr@onegate.invalid with its authenticator and recovery rows and role grants, the SFTP test destination row (the erasure ledger's secondary storage is therefore NOT configured and an erasure is refused until the hotel sets one up), /root/stage-gdpr and the two source directories and incoming-ha this delivery added. Scheduled backups are set back to OFF (the default). The SFTP test container on the workstation is removed. Retained on purpose: every backup, the encrypted pre-0127 dump, the bak-pre binaries and releases the retention policy keeps.",
+  "not_verified": "Real phones on the guest Wi-Fi; a real hotel key holder's participation (the acceptance backup key holder is temporary and cannot be removed as the last active holder: the hotel must register its own holder and then remove it); the hotel's real independent secondary storage; a full destructive restore on PRE-LIVE (it would put the site into financial recovery mode; the disposable-database drill covers it).",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0239."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "3e30b3939548630b5ffd2d86c626ee547c844e42",
+  "base_note": "Master after the merge of PR #219; this record's lineage is built on it.",
+  "head": "3e30b393",
+  "head_note": "No content commit: governance only. The merged delivery's last content commit is ac643c59.",
+  "previous_delivery": "T0239",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
