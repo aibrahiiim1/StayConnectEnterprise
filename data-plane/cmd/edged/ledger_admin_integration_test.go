@@ -152,13 +152,18 @@ func TestIntegration_LedgerAdmin_RecoveryAndBackupOnRequestNeedThePassword(t *te
 		{"POST", "/backups/ledger/recover", "/v1/ledger/recover"},
 		{"POST", "/backups/run", "/v1/backup/run"},
 	} {
-		if st, _ := f.do(t, tc.method, tc.path, map[string]any{"identity": "AGE-SECRET-KEY-1X"}); st == 200 {
+		body := map[string]any{"identity": "AGE-SECRET-KEY-1X"}
+		if tc.path == "/backups/run" {
+			body = map[string]any{} // a backup on request takes only the password
+		}
+		if st, _ := f.do(t, tc.method, tc.path, body); st == 200 {
 			t.Errorf("%s was allowed without the password", tc.path)
 		}
 		if rec.last(tc.scdPath) != nil {
 			t.Errorf("%s reached scd without the password", tc.path)
 		}
-		if st, out := f.do(t, tc.method, tc.path, map[string]any{"identity": "AGE-SECRET-KEY-1X", "password": f.password}); st != 200 {
+		body["password"] = f.password
+		if st, out := f.do(t, tc.method, tc.path, body); st != 200 {
 			t.Errorf("%s = %d %v", tc.path, st, out)
 		}
 	}
@@ -194,6 +199,10 @@ func TestIntegration_EarlierBackupsGoOnlyWithPasswordAndTypedConfirmation(t *tes
 	scd, rec := fakeLedgerSCD(t)
 	f.app.scd = scd
 	rec.reply["/v1/backup/earlier/remove"] = `{"removed_sets":2,"removed_bytes":10}`
+	var before int
+	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM public.audit_log WHERE action='backup.earlier_removed'`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
 	// no password
 	if st, _ := f.do(t, "POST", "/backups/earlier/remove", map[string]any{"confirm": earlierBackupsConfirmation}); st == 200 {
 		t.Error("allowed without the password")
@@ -213,8 +222,8 @@ func TestIntegration_EarlierBackupsGoOnlyWithPasswordAndTypedConfirmation(t *tes
 		t.Errorf("the remover was not named: %+v", c)
 	}
 	var n int
-	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM public.audit_log WHERE action='backup.earlier_removed'`).Scan(&n); err != nil || n != 1 {
-		t.Errorf("audit entries = %d %v", n, err)
+	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM public.audit_log WHERE action='backup.earlier_removed'`).Scan(&n); err != nil || n != before+1 {
+		t.Errorf("audit entries = %d (was %d) %v", n, before, err)
 	}
 }
 

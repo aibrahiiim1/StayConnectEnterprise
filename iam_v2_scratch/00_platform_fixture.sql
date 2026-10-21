@@ -219,6 +219,106 @@ CREATE TABLE IF NOT EXISTS public.operator_signin_throttle (
   locked_until      timestamptz,
   PRIMARY KEY (scope, key_hash)
 );
+-- Tables the migrations after the original fixture created and integration tests or queries reference (fixture parity, tools/check-fixture-parity.py).
+-- Each is the migration's own definition, copied unchanged, so a query that selects one of their columns finds it here exactly as on an appliance.
+CREATE TABLE IF NOT EXISTS public.backup_key_holders (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id         uuid NOT NULL,
+  site_id           uuid NOT NULL,
+  label             text NOT NULL CONSTRAINT bkh_label CHECK (length(btrim(label)) BETWEEN 1 AND 80),
+  public_key        text NOT NULL CONSTRAINT bkh_public_key CHECK (public_key ~ '^age1[02-9ac-hj-np-z]{58}$'),
+  status            text NOT NULL DEFAULT 'PENDING' CONSTRAINT bkh_status CHECK (status IN ('PENDING', 'ACTIVE', 'REMOVED')),
+  check_code_hash   text CONSTRAINT bkh_check CHECK (check_code_hash IS NULL OR check_code_hash ~ '^[0-9a-f]{64}$'),
+  loss_acknowledged boolean NOT NULL CONSTRAINT bkh_loss_ack CHECK (loss_acknowledged),
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  created_by        text NOT NULL CONSTRAINT bkh_created_by CHECK (length(btrim(created_by)) BETWEEN 1 AND 200),
+  confirmed_at      timestamptz,
+  removed_at        timestamptz,
+  removed_by        text,
+  remove_reason     text,
+  last_tested_at    timestamptz,
+  CONSTRAINT bkh_active_confirmed CHECK (status = 'PENDING' OR confirmed_at IS NOT NULL OR status = 'REMOVED'),
+  CONSTRAINT bkh_removed CHECK ((status = 'REMOVED') = (removed_at IS NOT NULL))
+);
+CREATE TABLE IF NOT EXISTS public.backup_key_holder_events (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id  uuid NOT NULL,
+  site_id    uuid NOT NULL,
+  holder_id  uuid NOT NULL REFERENCES public.backup_key_holders (id),
+  event      text NOT NULL CONSTRAINT bkhe_event CHECK (event IN ('added', 'confirmed', 'removed', 'restore_tested')),
+  actor      text NOT NULL CONSTRAINT bkhe_actor CHECK (length(btrim(actor)) BETWEEN 1 AND 200),
+  reason     text,
+  at         timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.ledger_destination (
+  singleton       boolean PRIMARY KEY DEFAULT true CONSTRAINT ledger_dest_one CHECK (singleton),
+  kind            text NOT NULL CONSTRAINT ledger_dest_kind CHECK (kind IN ('dir', 'sftp', 's3')),
+  config          jsonb NOT NULL,
+  secret_ct       bytea,
+  secret_nonce    bytea,
+  secret_key_id   text,
+  secret_ver      integer,
+  configured_by   text NOT NULL,
+  configured_at   timestamptz NOT NULL DEFAULT now(),
+  verified_at     timestamptz,
+  last_ok_at      timestamptz,
+  last_error      text,
+  last_error_at   timestamptz
+);
+CREATE TABLE IF NOT EXISTS public.operator_mfa (
+  operator_id    uuid PRIMARY KEY REFERENCES public.operators (id) ON DELETE CASCADE,
+  key_id         text NOT NULL CONSTRAINT om_key_id CHECK (length(key_id) BETWEEN 1 AND 64),
+  nonce          bytea NOT NULL,
+  ciphertext     bytea NOT NULL,
+  cipher_version integer NOT NULL CONSTRAINT om_cipher CHECK (cipher_version = 1),
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  confirmed_at   timestamptz,
+  last_used_step bigint
+);
+CREATE TABLE IF NOT EXISTS public.operator_mfa_recovery_codes (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  operator_id uuid NOT NULL REFERENCES public.operators (id) ON DELETE CASCADE,
+  code_mac    text NOT NULL CONSTRAINT omrc_mac CHECK (code_mac ~ '^[0-9a-f]{64}$'),
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  used_at     timestamptz,
+  CONSTRAINT omrc_unique UNIQUE (operator_id, code_mac)
+);
+CREATE TABLE IF NOT EXISTS public.operator_session_policy_changes (
+  id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  changed_by         text NOT NULL CONSTRAINT osesspc_actor CHECK (length(btrim(changed_by)) > 0),
+  change_reason      text NOT NULL CONSTRAINT osesspc_reason CHECK (length(btrim(change_reason)) > 0),
+  old_values         jsonb,
+  new_values         jsonb NOT NULL,
+  new_config_version bigint NOT NULL,
+  changed_at         timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.privacy_notice_versions (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id      uuid NOT NULL,
+  fingerprint    text NOT NULL CONSTRAINT pnv_fingerprint CHECK (fingerprint ~ '^[0-9a-f]{64}$'),
+  privacy_text   text,
+  privacy_url    text,
+  terms_url      text,
+  first_shown_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT pnv_one_per_content UNIQUE (tenant_id, fingerprint)
+);
+CREATE TABLE IF NOT EXISTS public.system_network_audit (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    actor             TEXT        NOT NULL,          -- operator email/id (or 'system')
+    actor_id          UUID,                          -- operator id when known
+    source_ip         TEXT,                          -- client IP that requested it
+    action            TEXT        NOT NULL CHECK (action IN ('validate','apply','confirm','rollback','auto_rollback')),
+    target            TEXT        NOT NULL CHECK (target IN ('wan','lan','both')),
+    previous_config   JSONB,
+    requested_config  JSONB,
+    validation_result JSONB,
+    apply_result      TEXT,
+    confirm_result    TEXT,
+    rollback_result   TEXT,
+    failure_reason    TEXT,
+    backup_path       TEXT,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 INSERT INTO public.appliances(id, tenant_id, site_id, serial, name) VALUES
   ('44444444-4444-4444-4444-444444444444','11111111-1111-1111-1111-111111111111',
    '22222222-2222-2222-2222-222222222222','APP-FIXTURE-0001','fixture-appliance')

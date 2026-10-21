@@ -550,7 +550,7 @@ ledger_add 0098_selftest_fails
 # arguments run as separate transactions in the same session, so the DELETE is committed BEFORE the unlock.
 docker exec -d "$C" psql -U postgres -d "$DB" \
   -c "SELECT pg_advisory_lock($LKEY7M)" \
-  -c "SELECT pg_sleep(25)" \
+  -c "SELECT pg_sleep(40)" \
   -c "DELETE FROM public.schema_migrations WHERE version='0096_selftest_predecessor'" \
   -c "SELECT pg_advisory_unlock($LKEY7M)" >/dev/null 2>&1
 # WAIT UNTIL THE LOCK IS ACTUALLY HELD, NOT FOR A FIXED SECOND. `docker exec -d` returns before its psql has
@@ -653,6 +653,11 @@ if [ "$rc" = 4 ] && ! applied && echo "$out" | grep -q "database was NOT changed
 else no "the migration ran (or failed differently) without a backup" "rc=$rc $out"; fi
 rm -f "$WORK/backup.fail"
 # a down is backed up too, and refused without one
+cat > "$MIGDIR/0099_selftest_noop.down.sql" <<'SQL'
+BEGIN;
+DROP TABLE IF EXISTS iam_v2.edge_selftest_marker;
+COMMIT;
+SQL
 out="$(run_apply)"
 : > "$WORK/backup.log"; : > "$WORK/backup.fail"
 out="$(run_down --ack-down I_UNDERSTAND_LIVE_SITE_DOWN_MIGRATION)"; rc=$?
@@ -662,6 +667,7 @@ rm -f "$WORK/backup.fail"; : > "$WORK/backup.log"
 out="$(run_down --ack-down I_UNDERSTAND_LIVE_SITE_DOWN_MIGRATION)"
 if ! applied && grep -q -- '--reason rolling back migration 0099_selftest_noop' "$WORK/backup.log"; then ok "a live down-migration took the pre-change backup first"
 else no "the down did not take the backup first" "$out"; fi
+rm -f "$MIGDIR/0099_selftest_noop.down.sql"
 # there is no way to skip it, and a disposable database does not need one
 if grep -qiE 'skip-?(prechange|backup)|--no-backup' "$RUNNER"; then no "the runner has a way to skip the pre-change backup" ""
 else ok "no option exists to skip the pre-change backup"; fi

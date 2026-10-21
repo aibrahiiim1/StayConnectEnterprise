@@ -152,6 +152,25 @@ deploy/scripts/stayconnect-financial-restore.sh --dump /var/backups/stayconnect/
   --manifest /var/backups/stayconnect/site-<stamp>.manifest.json --tenant <tenant-uuid> --site <site-uuid>
 ```
 
+### Upgrading an appliance that predates backup encryption (migration 0129)
+
+The mandatory pre-change backup is taken by the **running** `scd` for the **registered** key holders. An appliance older than migration
+0129 has neither -- its `scd` has no `backup-now` and the database has no key register -- so the first upgrade across 0129 cannot use
+them, and a plain dump is not an acceptable stand-in. The bootstrap is a one-time, **encrypted** dump with the new binary's offline
+tool, to a one-time recipient whose private key never touches the appliance:
+
+```sh
+# on a trusted workstation: a one-time key pair (age-keygen); keep bootstrap.key, send only the public key line
+# on the appliance, with the NEW scd binary copied to /root/scd-new (it is not installed yet):
+echo "<the age1... public key>" > /root/bootstrap.pub
+docker exec stayconnect-pg pg_dump -U stayconnect -d stayconnect_site --no-owner --no-privileges | gzip   | /root/scd-new backup-crypt encrypt -R /root/bootstrap.pub - /opt/stayconnect/backups/db/pre-0129-bootstrap-$(date -u +%Y%m%dT%H%M%SZ).sql.gz.age
+```
+
+Prove it restores (decrypt with the private key on the workstation and load it into a scratch database), then apply the migrations with
+`scripts/edge-migrate.sh` and the pre-change command pointed at a wrapper that only checks that this fresh, proven dump exists
+(`EDGE_PRECHANGE_BACKUP`); from the moment the new `scd` runs and a key holder is registered, every later change uses `scd backup-now`.
+Nothing else about the runner changes, and there is no flag to skip the backup.
+
 ### Policy
 
 - Schedule: **the hotel's choice, off by default** (see above). Protective backups are always taken.
