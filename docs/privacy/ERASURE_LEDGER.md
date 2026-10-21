@@ -125,8 +125,18 @@ checked against their notes, so silent corruption is found while other days rema
   from the only copy available, is invisible. The dual write exists to make that nearly impossible; it cannot make it impossible.
 * The hash chain proves integrity, not authorship: someone who can write the secondary storage **and** knows the (public) key holder
   keys could forge a longer chain. The threat model is failure, not a malicious storage administrator.
-* The hourly copy of requests that are still **open** is not in the ledger (they hold who asked); a restore brings back an open request
-  as it was at the backup.
+* Requests that are still **open** are not in the ledger (they hold who asked); a restore brings back an open request as it was at
+  the backup, and it is closed again by whoever answers it.
 * An erasure interrupted in the last instant (the process dies between the two copies and the commit) is completed at the next
   reconciliation rather than rolled back.
 * The ledger is per appliance. Moving an appliance to another customer does not carry it: see DATA_OWNERSHIP.md section 10.
+
+## 9. How it is verified (all repeatable)
+
+| What | How |
+|---|---|
+| the chain, the assessment, both copies, the stores | `go test ./internal/ledger` (and `scripts/ledger-linux-checks.sh` for the mount-table and block-device walk, on Linux) |
+| SFTP and S3 against real servers | `scripts/ledger-destinations-compat.sh` (OpenSSH's SFTP, Scality CloudServer) |
+| the database side, as the real runtime roles | the appliance integration suites on a factory-clean schema (`TestIntegration_Ledger_*`, `TestIntegration_RestoreReplay_*`, `TestIntegrationLedger_*`), including a whole erasure as `svc_edged` and the reconciliation as `svc_scd` |
+| the real restore, end to end | `scripts/ledger-restore-drill.sh`: both copies; the secondary unplugged; the secondary alone; forked copies; nothing trustworthy; an interrupted write; a copy cut short; a backup older than the ledger; a replacement appliance |
+| rollback | migration 0148 down, then up again, with data and a non-empty ledger (the ledger tables stay; the 0147 journal functions come back) |
