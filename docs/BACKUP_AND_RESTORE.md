@@ -166,10 +166,21 @@ echo "<the age1... public key>" > /root/bootstrap.pub
 docker exec stayconnect-pg pg_dump -U stayconnect -d stayconnect_site --no-owner --no-privileges | gzip   | /root/scd-new backup-crypt encrypt -R /root/bootstrap.pub - /opt/stayconnect/backups/db/pre-0129-bootstrap-$(date -u +%Y%m%dT%H%M%SZ).sql.gz.age
 ```
 
-Prove it restores (decrypt with the private key on the workstation and load it into a scratch database), then apply the migrations with
-`scripts/edge-migrate.sh` and the pre-change command pointed at a wrapper that only checks that this fresh, proven dump exists
-(`EDGE_PRECHANGE_BACKUP`); from the moment the new `scd` runs and a key holder is registered, every later change uses `scd backup-now`.
-Nothing else about the runner changes, and there is no flag to skip the backup.
+Prove it restores (decrypt with the private key on the workstation and load it into a scratch TimescaleDB database), rehearse the migrations
+and the Gate-P reconcile on a copy that keeps its privileges (see below), then apply them. From the moment the new `scd` runs and a key holder
+is registered, every later change starts with `scd backup-now`. Nothing about the runner changes, and there is no flag to skip its backup.
+(Done once on PRE-LIVE on 2026-10-21 for 0126 -> 0149, with `scripts/edge-migrate.sh`'s check satisfied for the iam_v2-only migrations by this
+dump through `EDGE_PRECHANGE_BACKUP`; the public-schema migrations were applied by hand.)
+
+### Controlled changes: what is enforced and what is a step
+
+- **Enforced:** `scripts/edge-migrate.sh` takes a `pre-change` backup before it changes a live site, and refuses without one. A restore takes its
+  `pre-restore` backup first. Neither depends on the schedule.
+- **A step, not a check:** public-schema migrations cannot be applied by the runner (its executor holds no CREATE on schema public, by design), so
+  they are applied by hand (a superuser `psql` plus the `schema_migrations` row, then the Gate-P reconcile). Run
+  `/opt/stayconnect/bin/scd backup-now --reason "<what is about to change>"` first, and rehearse on a copy that keeps its privileges
+  (`pg_dump -Fc | pg_restore` into a scratch database: a copy taken `--no-privileges` loses the access rules the Gate-P assertions check).
+  The same applies to a deployment: take the backup before the binaries move.
 
 ### Policy
 

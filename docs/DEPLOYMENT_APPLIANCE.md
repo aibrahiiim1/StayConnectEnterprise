@@ -41,7 +41,7 @@ synchronization transport is an **OPEN architecture decision** (see §7 and
 | `kea-dhcp4` / `unbound` | client-network DHCP/DNS | bound to 10.20.0.1 |
 | `nftables` | `inet stayconnect` ruleset | see §3 |
 | `stayconnect-caddy` | TLS for the Admin Console on the **mgmt IP only** | internal CA (`local_certs`) unless the site has real names |
-| backup agent (timer) | nightly `pg_dump` → `backup_records` | [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md) §1 |
+| backup system (in `scd`) | one encrypted engine: scheduled (off until switched on), manual, and before every restore, migration and deployment | [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md) §1 |
 | monitoring | scd/edged Prometheus endpoints, loopback | scraped locally; nothing is sent to Central as telemetry |
 | software updates | no on-appliance update agent | staged binary rollout via the deployment procedure |
 
