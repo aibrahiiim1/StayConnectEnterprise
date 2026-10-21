@@ -64,8 +64,8 @@ test("collapsing hides labels and headings, keeps every destination, and flips t
 
   await expect(expandBtn(page)).toBeVisible();
   await expect(expandBtn(page)).toHaveAttribute("aria-expanded", "false");
-  // Section headings are gone from the column entirely -- not merely hidden, not relocated.
-  await expect(desktopAside(page).getByText("Hotel", { exact: true })).toHaveCount(0);
+  // Section headings are no longer painted: they stay for screen readers (visually hidden), so the groups keep their names.
+  await expect(desktopAside(page).getByText("Hotel", { exact: true })).toHaveClass(/sr-only/);
   // But no destination was removed: the labels are still the accessible names, merely not painted.
   expect(await desktopAside(page).getByRole("link").count()).toBe(before);
   await expect(desktopAside(page).getByRole("link", { name: "Internet packages" })).toHaveCount(1);

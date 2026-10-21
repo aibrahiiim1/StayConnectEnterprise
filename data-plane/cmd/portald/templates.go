@@ -1252,7 +1252,8 @@ const landingHTML = `<!doctype html>
       const rememberBox = document.getElementById('remember-device-box');
       if (rememberEl && rememberBox) {
         rememberEl.hidden = !canRemember;
-        rememberBox.checked = /(?:^|; )og_remember=1(?:;|$)/.test(document.cookie);
+        // A browser that blocks cookies (a sandboxed frame, a locked-down captive browser) throws on the read; the box is then simply unticked.
+        try { rememberBox.checked = /(?:^|; )og_remember=1(?:;|$)/.test(document.cookie); } catch (e) {}
         rememberBox.addEventListener('change', function () {
           try {
             document.cookie = 'og_remember=' + (rememberBox.checked ? '1' : '') + '; path=/; SameSite=Lax; Secure' +
