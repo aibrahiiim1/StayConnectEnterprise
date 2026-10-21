@@ -86,7 +86,8 @@ export default function NewGuestNetworkPage() {
   const [captivePortal, setCaptivePortal] = useState(true);
   const [internetAccess, setInternetAccess] = useState(true);
   const [nat, setNat] = useState(true);
-  const [clientIsolation, setClientIsolation] = useState(false);
+  // On by default for a new network (GDPR audit A3): one client must not reach another's device.
+  const [clientIsolation, setClientIsolation] = useState(true);
 
   // apply flow
   const [created, setCreated] = useState<{ id: string; bridge_name: string; portal_url: string } | null>(null);
@@ -395,7 +396,7 @@ export default function NewGuestNetworkPage() {
           {step === 0 && (
             <>
               <Field label="Name" required>
-                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Client Wi-Fi" autoFocus />
+                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Client Wi-Fi" />
               </Field>
               <Field label="Description" hint="Optional. Shown under the name in the list.">
                 <Input value={description} onChange={(e) => setDescription(e.target.value)} />

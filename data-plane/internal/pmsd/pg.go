@@ -81,6 +81,8 @@ func (r *pgRepo) LoadInterface(ctx context.Context, tenantID, siteID, interfaceI
 	var resync *bool
 	var credMode string
 	var providerCfg string
+	var tlsOn *bool
+	var tlsPin string
 	err := r.pool.QueryRow(ctx, `SELECT pi.tenant_id::text, pi.site_id::text, pi.id::text, pi.connector_kind,
 		pi.lifecycle_state, COALESCE(pi.current_revision_id::text,''),
 		COALESCE(pr.id::text,''), COALESCE(pr.source_timezone,''), COALESCE(pr.config->>'endpoint',''),
@@ -91,14 +93,15 @@ func (r *pgRepo) LoadInterface(ctx context.Context, tenantID, siteID, interfaceI
 		(pr.config->>'heartbeat_timeout_ms')::bigint, (pr.config->>'feed_freshness_ms')::bigint,
 		(pr.config->>'complete_sync_ms')::bigint, (pr.config->>'resync_supported')::boolean,
 		COALESCE(pr.config->'auth'->>'credential_mode',''),
-		COALESCE((pr.config->'provider')::text,'')
+		COALESCE((pr.config->'provider')::text,''),
+		(pr.config->'tls'->>'enabled')::boolean, COALESCE(pr.config->'tls'->>'cert_sha256','')
 		FROM iam_v2.pms_interfaces pi
 		LEFT JOIN iam_v2.pms_interface_revisions pr
 		  ON pr.tenant_id=pi.tenant_id AND pr.site_id=pi.site_id AND pr.pms_interface_id=pi.id AND pr.id=pi.current_revision_id
 		WHERE pi.tenant_id=$1 AND pi.site_id=$2 AND pi.id=$3`, tenantID, siteID, interfaceID).
 		Scan(&i.TenantID, &i.SiteID, &i.ID, &i.ConnectorKind, &i.LifecycleState, &i.CurrentRevisionID,
 			&rev.ID, &rev.SourceTimezone, &rev.Endpoint, &readOnly, &normVer,
-			&dialMs, &readMs, &writeMs, &hbIntMs, &hbToMs, &freshMs, &syncMs, &resync, &credMode, &providerCfg)
+			&dialMs, &readMs, &writeMs, &hbIntMs, &hbToMs, &freshMs, &syncMs, &resync, &credMode, &providerCfg, &tlsOn, &tlsPin)
 	if err != nil {
 		return Interface{}, Revision{}, SecretGeneration{}, err
 	}
@@ -117,6 +120,8 @@ func (r *pgRepo) LoadInterface(ctx context.Context, tenantID, siteID, interfaceI
 	rev.FeedFreshnessBound = msDur(freshMs)
 	rev.CompleteSyncBound = msDur(syncMs)
 	rev.CredentialMode = credMode
+	rev.TLS = tlsOn != nil && *tlsOn
+	rev.TLSCertSHA256 = tlsPin
 	if providerCfg != "" {
 		rev.ProviderConfig = []byte(providerCfg)
 	}

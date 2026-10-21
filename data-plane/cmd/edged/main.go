@@ -16,6 +16,8 @@
 //	edged serve                             — run the API (default)
 //	edged seed-admin --email E --password P — create/update the first
 //	                                          site_admin (bootstrap)
+//	edged reset-mfa --email E               — remove an operator's
+//	                                          authenticator (break-glass)
 package main
 
 import (
@@ -36,6 +38,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/posting"
+	"github.com/stayconnect/enterprise/data-plane/internal/reqlog"
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
 	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
@@ -57,11 +60,13 @@ type cfg struct {
 
 func loadCfg() cfg {
 	return cfg{
-		Addr:         envOr("EDGED_ADDR", "127.0.0.1:8090"),
-		DBURL:        envOr("EDGED_DB_URL", "postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect_site?sslmode=disable"),
-		SCDSocket:    envOr("EDGED_SCD_SOCKET", "/run/stayconnect/scd.sock"),
-		IdentityDir:  envOr("EDGED_IDENTITY_DIR", "/etc/stayconnect/identity"),
-		CookieSecure: os.Getenv("EDGED_COOKIE_SECURE") == "true",
+		Addr:        envOr("EDGED_ADDR", "127.0.0.1:8090"),
+		DBURL:       envOr("EDGED_DB_URL", "postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect_site?sslmode=disable"),
+		SCDSocket:   envOr("EDGED_SCD_SOCKET", "/run/stayconnect/scd.sock"),
+		IdentityDir: envOr("EDGED_IDENTITY_DIR", "/etc/stayconnect/identity"),
+		// Secure unless explicitly switched off (GDPR plan C10): the console is served over HTTPS, and a browser
+		// treats http://localhost as secure, so only a deliberate plain-HTTP setup needs EDGED_COOKIE_SECURE=false.
+		CookieSecure: os.Getenv("EDGED_COOKIE_SECURE") != "false",
 	}
 }
 
@@ -73,13 +78,23 @@ func envOr(k, d string) string {
 }
 
 type server struct {
-	db       *pgxpool.Pool
-	scd      *scdClient
+	db *pgxpool.Pool
+	// dbDefaultPassword warns while the database accepts its default superuser password (GDPR audit C5).
+	dbDefaultPassword *defaultDBPasswordCheck
+	scd               *scdClient
+	// ledgerC commits every erasure to both copies of the erasure ledger before it is reported (ledger_commit.go).
+	ledgerC  ledgerClient
 	netd     *netdClient
 	sessions *sessionStore
+	// pending holds the "password accepted, code not yet entered" sign-ins; mfa is the authenticator service
+	// (operator_mfa.go, 0132).
+	pending  pendingSignins
+	mfa      mfaService
 	tenantID string
 	siteID   string
 	secure   bool
+	// reads records who opened or searched guest data (guest_data_reads.go, plan F8), off the request path.
+	reads *readRecorder
 
 	// surfaces records every resource mountResource actually mounted on THIS appliance, so the admin can ask
 	// rather than infer it from build-time flags. See capabilities.go.
@@ -129,6 +144,12 @@ func main() {
 		case "seed-admin":
 			if err := runSeedAdmin(os.Args[2:]); err != nil {
 				slog.Error("seed-admin failed", "err", err)
+				os.Exit(1)
+			}
+			return
+		case "reset-mfa":
+			if err := runResetMFA(os.Args[2:]); err != nil {
+				slog.Error("reset-mfa failed", "err", err)
 				os.Exit(1)
 			}
 			return
@@ -199,16 +220,19 @@ func main() {
 	}
 
 	s := &server{
-		db:       pool,
-		scd:      newSCDClient(c.SCDSocket),
-		netd:     newNetdClient(envOr("EDGED_NETD_SOCKET", "/run/stayconnect/netd.sock")),
-		sessions: newSessionStore(12 * time.Hour),
-		tenantID: c.TenantID,
-		siteID:   c.SiteID,
-		secure:   c.CookieSecure,
-		surfaces: newMountedSurfaces(),
-		modCache: &moduleCache{},
+		dbDefaultPassword: newDefaultDBPasswordCheck(pool.Config().ConnConfig.Host, pool.Config().ConnConfig.Port),
+		db:                pool,
+		scd:               newSCDClient(c.SCDSocket),
+		netd:              newNetdClient(envOr("EDGED_NETD_SOCKET", "/run/stayconnect/netd.sock")),
+		sessions:          newSessionStore(sessionStoreCap),
+		tenantID:          c.TenantID,
+		siteID:            c.SiteID,
+		secure:            c.CookieSecure,
+		surfaces:          newMountedSurfaces(),
+		modCache:          &moduleCache{},
 	}
+	s.mfa = scdMFA{scd: s.scd, db: pool}
+	s.ledgerC = &scdLedger{c: s.scd}
 
 	// Phase 2 DARK Hotel-Admin commerce. Config from env (all flags default OFF); nil repository while the
 	// master flag is OFF (zero Phase-2 SQL). Fail closed if the master flag is set without a wired repo
@@ -341,10 +365,14 @@ func main() {
 	// startup backoff own recovery), so it cannot fight the service manager.
 	go s.healthMonitorLoop(rootCtx)
 
+	s.reads = newReadRecorder(s.writeReadEntry)
+	go s.reads.run(rootCtx, time.Second)
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
+	// No path, query or client address in the request log (reqlog; GDPR audit 2026-10-19).
+	r.Use(reqlog.Middleware)
 	r.Use(middleware.Recoverer)
 	// 15 s for every request but the network applies, which wait for netd (route_timeout.go).
 	r.Use(routeTimeout(defaultRequestTimeout, networkApplyTimeout))
@@ -354,14 +382,23 @@ func main() {
 		r.Use(sameOrigin)
 		r.Get("/health", s.health)
 		r.Post("/auth/login", s.login)
+		// The second step: set up the authenticator, or enter its code (operator_mfa.go, 0132).
+		r.Post("/auth/login/enrol", s.loginEnrol)
+		r.Post("/auth/login/code", s.loginCode)
 		// logout needs the caller's session and ends only that one (operator_signin.go).
 		r.Post("/auth/logout", s.logout)
 
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
+			r.Use(s.recordGuestDataReads)
 			r.Get("/auth/whoami", s.whoami)
+			// The idle warning's "Stay signed in": a request that counts as activity, and nothing else.
+			r.Get("/auth/keepalive", s.keepalive)
 			// The operator's own password: the current one is a step-up; every session is ended (N-8).
 			r.Post("/auth/password", s.changeOwnPassword)
+			// The operator's own two-step sign-in: its state, and a new set of recovery codes (step-up).
+			r.Get("/auth/mfa", s.getOwnMFA)
+			r.Post("/auth/mfa/recovery-codes", s.newOwnRecoveryCodes)
 
 			// ALWAYS-PRESENT SURFACES THAT DO NOT GO THROUGH mountResource.
 			//
@@ -430,6 +467,20 @@ func main() {
 				r.Use(s.resourcePermission("backups"))
 				r.Mount("/", s.accountingRetentionRoutes())
 			})
+			// GUEST-DATA RETENTION (data_retention_admin.go, migration 0127): shortening a period anonymises
+			// history on the next run, so the same "backups" key.
+			r.Route("/data-retention", func(r chi.Router) {
+				r.Use(s.resourcePermission("backups"))
+				r.Mount("/", s.dataRetentionRoutes())
+			})
+			// BACKUP KEY HOLDERS (backup_keys.go, migration 0129): backups are encrypted to the hotel's own keys.
+			// Under "backups": readers see the state, site administrators manage the holders and run the test.
+			r.Route("/backup-keys", func(r chi.Router) {
+				r.Use(s.resourcePermission("backups"))
+				r.Mount("/", s.backupKeysRoutes())
+			})
+			// GUEST DATA RIGHTS (guest_data_rights.go, migration 0128): look up, export and erase one guest.
+			mountResource(r, s, "guest-data-rights", s.guestDataRightsRoutes)
 			// USAGE EXPLORER. Read-only investigation over durable accounting and session data; see
 			// resources_usage.go. Under the "sessions" role because it is the same live-access state that
 			// resource already governs, rather than a new row in the role matrix.
@@ -596,6 +647,11 @@ func main() {
 	shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutCtx)
+	// The reads still waiting (a search's last keystroke) are written before edged exits.
+	select {
+	case <-s.reads.done:
+	case <-shutCtx.Done():
+	}
 }
 
 // mountResource wires a resource router under its permission key: reads

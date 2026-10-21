@@ -22,6 +22,8 @@ type edgeOperator struct {
 	CreatedAt   time.Time `json:"created_at"`
 	// MustChangePassword: the operator's next sign-in can only set a new password (0119).
 	MustChangePassword bool `json:"must_change_password"`
+	// TwoStepEnrolled: an authenticator is set up (0132). Without one, the next sign-in sets one up.
+	TwoStepEnrolled bool `json:"two_step_enrolled"`
 }
 
 // isValidEdgeRole accepts site_admin plus every role in the rolePerms matrix
@@ -42,12 +44,51 @@ func (s *server) operatorsRoutes() http.Handler {
 	r.Get("/signin-protection", s.getSigninProtection)
 	r.Put("/signin-protection", s.setSigninProtection)
 	r.Get("/signin-protection/changes", s.listSigninProtectionChanges)
+	// Admin Console session limits (0132): idle and absolute, the same rules as sign-in protection.
+	r.Get("/session-policy", s.getSessionPolicy)
+	r.Put("/session-policy", s.setSessionPolicy)
+	r.Get("/session-policy/changes", s.listSessionPolicyChanges)
+	// How long a disabled account is kept before it is anonymised (0138, GDPR audit B4).
+	r.Get("/account-retention", s.getAccountRetention)
+	r.Put("/account-retention", s.setAccountRetention)
 	r.Post("/", s.createEdgeOperator)
 	r.Delete("/{id}", s.disableEdgeOperator)
 	r.Post("/{id}/set-password", s.setEdgeOperatorPassword)
+	r.Post("/{id}/reset-mfa", s.resetEdgeOperatorMFA)
 	r.Post("/{id}/roles", s.addEdgeOperatorRole)
 	r.Delete("/{id}/roles/{role}", s.removeEdgeOperatorRole)
 	return r
+}
+
+// confirmYourPassword is the step-up for changing a staff account (GDPR audit B7): creating one, resetting its
+// password, disabling it, and adding or removing a role all ask the administrator for their own password first.
+// The field is your_password because "password" in these bodies is the colleague's new one.
+func (s *server) confirmYourPassword(w http.ResponseWriter, r *http.Request, yours string) bool {
+	if !s.reauth(r, yours) {
+		s.reauthRefused(w, r, "your password is required to change a staff account")
+		return false
+	}
+	return true
+}
+
+// operatorIDParam is the {id} of an /operators/{id}/... route in canonical form (lower-case, hyphenated), or a
+// 400. Every "not yourself" check compares it with the session's operator id, which the database wrote in that
+// form: an upper-case or braced spelling of one's own id is the same row to Postgres, and compared raw it slipped
+// past "cannot disable / reset / demote yourself".
+func operatorIDParam(w http.ResponseWriter, r *http.Request) (string, bool) {
+	id, ok := canonicalUUID(chi.URLParam(r, "id"))
+	if !ok {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "invalid operator id")
+	}
+	return id, ok
+}
+
+// canonicalUUID accepts only the hyphenated 8-4-4-4-12 form and returns it lower-case.
+func canonicalUUID(s string) (string, bool) {
+	if !uuidRe.MatchString(s) {
+		return "", false
+	}
+	return strings.ToLower(s), true
 }
 
 func (s *server) loadEdgeOperator(ctx context.Context, id string) (*edgeOperator, error) {
@@ -73,7 +114,7 @@ func (s *server) listEdgeOperators(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.db.Query(ctx, `
         SELECT o.id, o.email, COALESCE(o.display_name,''), o.status, o.created_at,
                COALESCE(array_agg(r.role ORDER BY r.role) FILTER (WHERE r.role IS NOT NULL), '{}'::text[]),
-               o.must_change_password
+               o.must_change_password, (SELECT m.enrolled FROM public.operator_mfa_status(o.id) m)
           FROM operators o
           LEFT JOIN operator_roles r ON r.operator_id = o.id
          GROUP BY o.id
@@ -87,7 +128,8 @@ func (s *server) listEdgeOperators(w http.ResponseWriter, r *http.Request) {
 	var out []edgeOperator
 	for rows.Next() {
 		var op edgeOperator
-		if err := rows.Scan(&op.ID, &op.Email, &op.DisplayName, &op.Status, &op.CreatedAt, &op.Roles, &op.MustChangePassword); err != nil {
+		if err := rows.Scan(&op.ID, &op.Email, &op.DisplayName, &op.Status, &op.CreatedAt, &op.Roles, &op.MustChangePassword,
+			&op.TwoStepEnrolled); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
 			return
 		}
@@ -103,7 +145,8 @@ func (s *server) createEdgeOperator(w http.ResponseWriter, r *http.Request) {
 		Password    string `json:"password"`
 		Role        string `json:"role"`
 		// RequireChange: the new operator must choose their own password at first sign-in (0119).
-		RequireChange bool `json:"require_change"`
+		RequireChange bool   `json:"require_change"`
+		YourPassword  string `json:"your_password"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
@@ -123,6 +166,9 @@ func (s *server) createEdgeOperator(w http.ResponseWriter, r *http.Request) {
 	}
 	if !isValidEdgeRole(in.Role) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "invalid role")
+		return
+	}
+	if !s.confirmYourPassword(w, r, in.YourPassword) {
 		return
 	}
 
@@ -186,9 +232,22 @@ func (s *server) createEdgeOperator(w http.ResponseWriter, r *http.Request) {
 // disableEdgeOperator soft-deletes: status='disabled' and every live session
 // is destroyed. Self-disable is refused to avoid locking yourself out.
 func (s *server) disableEdgeOperator(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id, ok := operatorIDParam(w, r)
+	if !ok {
+		return
+	}
 	if sess := sessFrom(r.Context()); sess != nil && sess.OperatorID == id {
 		jsonErr(w, http.StatusConflict, "conflict", "cannot disable yourself")
+		return
+	}
+	var in struct {
+		YourPassword string `json:"your_password"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
+		return
+	}
+	if !s.confirmYourPassword(w, r, in.YourPassword) {
 		return
 	}
 	ctx, cancel := dbCtx(r)
@@ -204,6 +263,7 @@ func (s *server) disableEdgeOperator(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.sessions.destroyOperator(id)
+	s.pending.dropOperator(id) // a password step taken before the change must not complete after it
 	s.audit(r, "operator.disabled", "operator", id, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -214,10 +274,14 @@ func (s *server) disableEdgeOperator(w http.ResponseWriter, r *http.Request) {
 // choose their own password at the next sign-in. An operator changes their OWN password at POST
 // /edge/v1/auth/password, which asks for the current one; resetting yourself here would skip that.
 func (s *server) setEdgeOperatorPassword(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id, ok := operatorIDParam(w, r)
+	if !ok {
+		return
+	}
 	var in struct {
 		Password      string `json:"password"`
 		RequireChange bool   `json:"require_change"`
+		YourPassword  string `json:"your_password"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
@@ -226,6 +290,9 @@ func (s *server) setEdgeOperatorPassword(w http.ResponseWriter, r *http.Request)
 	if sess := sessFrom(r.Context()); sess != nil && sess.OperatorID == id {
 		jsonErr(w, http.StatusConflict, "use_change_password",
 			"Change your own password with Change my password, which asks for your current password.")
+		return
+	}
+	if !s.confirmYourPassword(w, r, in.YourPassword) {
 		return
 	}
 	ctx, cancel := dbCtx(r)
@@ -256,6 +323,7 @@ func (s *server) setEdgeOperatorPassword(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	s.sessions.destroyOperator(id)
+	s.pending.dropOperator(id) // a password step taken before the change must not complete after it
 	_ = s.throttleClear(ctx, scopeAccount, strings.ToLower(strings.TrimSpace(email)))
 	_ = s.throttleClear(ctx, scopeReauth, id)
 	s.audit(r, "operator.password_reset", "operator", id, map[string]any{
@@ -265,9 +333,13 @@ func (s *server) setEdgeOperatorPassword(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *server) addEdgeOperatorRole(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id, ok := operatorIDParam(w, r)
+	if !ok {
+		return
+	}
 	var in struct {
-		Role string `json:"role"`
+		Role         string `json:"role"`
+		YourPassword string `json:"your_password"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
@@ -275,6 +347,9 @@ func (s *server) addEdgeOperatorRole(w http.ResponseWriter, r *http.Request) {
 	}
 	if !isValidEdgeRole(in.Role) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "invalid role")
+		return
+	}
+	if !s.confirmYourPassword(w, r, in.YourPassword) {
 		return
 	}
 	ctx, cancel := dbCtx(r)
@@ -301,12 +376,16 @@ func (s *server) addEdgeOperatorRole(w http.ResponseWriter, r *http.Request) {
 	}
 	// Cached session roles are stale now; force a re-login for that operator.
 	s.sessions.destroyOperator(id)
+	s.pending.dropOperator(id) // a password step taken before the change must not complete after it
 	s.audit(r, "operator.role_added", "operator", id, map[string]any{"role": in.Role})
 	writeJSON(w, http.StatusCreated, map[string]string{"operator_id": id, "role": in.Role})
 }
 
 func (s *server) removeEdgeOperatorRole(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id, ok := operatorIDParam(w, r)
+	if !ok {
+		return
+	}
 	role := chi.URLParam(r, "role")
 	if !isValidEdgeRole(role) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "invalid role")
@@ -314,6 +393,16 @@ func (s *server) removeEdgeOperatorRole(w http.ResponseWriter, r *http.Request) 
 	}
 	if sess := sessFrom(r.Context()); sess != nil && sess.OperatorID == id && role == "site_admin" {
 		jsonErr(w, http.StatusConflict, "conflict", "cannot remove your own site_admin role")
+		return
+	}
+	var in struct {
+		YourPassword string `json:"your_password"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
+		return
+	}
+	if !s.confirmYourPassword(w, r, in.YourPassword) {
 		return
 	}
 	ctx, cancel := dbCtx(r)
@@ -330,6 +419,7 @@ func (s *server) removeEdgeOperatorRole(w http.ResponseWriter, r *http.Request) 
 	}
 	// Permissions shrank — kill any cached sessions so the change bites now.
 	s.sessions.destroyOperator(id)
+	s.pending.dropOperator(id) // a password step taken before the change must not complete after it
 	s.audit(r, "operator.role_removed", "operator", id, map[string]any{"role": role})
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -7,7 +7,7 @@ import {
   ArrowRightLeft, Ban, ChevronDown, Download, Pause, Play, Power, RefreshCw, Trash2,
 } from "lucide-react";
 import {
-  api, ApiError, withStepUp, type ActivityEvent, type ApplianceDetail, type LicenseRow,
+  api, ApiError, withStepUp, type ActivityEvent, type ApplianceDetail, type LicenseRow, type RequestOptions,
 } from "@/lib/api";
 import { Card, CardBody, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -65,10 +65,10 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
   const [emergency, setEmergency] = useState(false);
   const [fileBusy, setFileBusy] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: RequestOptions) => {
     setRefreshing(true);
     try {
-      setA(await api.get<ApplianceDetail>(`/cloud/v1/appliances/${id}`));
+      setA(await api.get<ApplianceDetail>(`/cloud/v1/appliances/${id}`, opts));
       setUpdatedAt(Date.now());
       setErr(null);
     } catch (e) {

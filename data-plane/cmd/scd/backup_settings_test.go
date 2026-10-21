@@ -17,15 +17,15 @@ func TestRetentionDefaultsMatchTheSweepsOwn(t *testing.T) {
 	// absent, which is the state of a freshly onboarded appliance, so the schema has to agree with it or the
 	// operator reads values the appliance is not using.
 	want := map[string]int{
-		"KEEP_BINARIES": 5, "KEEP_RELEASES": 5, "KEEP_DB": 7,
-		"KEEP_CONFIG": 3, "DISK_WARN": 80, "DISK_CRIT": 90,
-		"SITE_BACKUP_DAYS": 30, "SITE_BACKUP_KEEP": 7,
+		"KEEP_BINARIES": 5, "KEEP_RELEASES": 5, "KEEP_CONFIG": 3, "DISK_WARN": 80, "DISK_CRIT": 90,
+		"RESTORE_TEST_MONTHS": 6, "SET_ASIDE_DAYS": 14, "BACKUP_ENABLED": 0, "BACKUP_HOUR": 2, "BACKUP_EVERY_DAYS": 1,
+		"BACKUP_KEEP": 7, "SAFETY_BACKUP_KEEP": 3,
 	}
 	for _, s := range retentionSchema {
 		if want[s.Key] != s.Default {
 			t.Errorf("%s defaults to %d here and %d in stayconnect-backup-cleanup", s.Key, s.Default, want[s.Key])
 		}
-		if s.Min < 1 || s.Max <= s.Min {
+		if s.Min < 0 || s.Max <= s.Min {
 			t.Errorf("%s has nonsensical bounds %d..%d", s.Key, s.Min, s.Max)
 		}
 		if s.Unit == "" || s.Explains == "" {
@@ -47,15 +47,34 @@ func TestRecoveryFloorsCannotBeSetToZero(t *testing.T) {
 	if byKey["KEEP_RELEASES"].Min < 2 {
 		t.Error("releases may be reduced below two")
 	}
-	if byKey["KEEP_DB"].Min < 1 {
-		t.Error("database backups may be set to zero")
+	if byKey["BACKUP_KEEP"].Min < 1 {
+		t.Error("backups may be set to zero")
 	}
-	// D-H: the seven newest nightly site backups are always kept; the floor is the Product Owner's.
-	if byKey["SITE_BACKUP_KEEP"].Min < 7 {
-		t.Error("the newest-site-backups floor may be set below seven")
+	// the backups a restore, a migration or a deployment take first: at least two are always kept
+	if byKey["SAFETY_BACKUP_KEEP"].Min < 2 {
+		t.Error("the safety backups floor may be set below two")
 	}
-	if byKey["SITE_BACKUP_DAYS"].Min < 1 {
-		t.Error("site backups may be removed the day they are taken")
+}
+
+// SCHEDULED BACKUPS ARE OFF UNTIL AN ADMINISTRATOR SWITCHES THEM ON, and the retention is one count with a safe ceiling: no age rule.
+func TestScheduledBackupsAreOffByDefaultAndRetentionIsOneCount(t *testing.T) {
+	byKey := map[string]retentionSetting{}
+	for _, s := range retentionSchema {
+		byKey[s.Key] = s
+	}
+	if byKey["BACKUP_ENABLED"].Default != 0 {
+		t.Fatal("scheduled backups are on by default")
+	}
+	if byKey["BACKUP_KEEP"].Default != 7 || byKey["BACKUP_KEEP"].Max > 60 {
+		t.Errorf("backups kept: default %d, ceiling %d (want 7 and a safe ceiling)", byKey["BACKUP_KEEP"].Default, byKey["BACKUP_KEEP"].Max)
+	}
+	for _, retired := range []string{"KEEP_DB", "DB_BACKUP_DAYS", "SITE_BACKUP_DAYS", "SITE_BACKUP_KEEP", "DAILY_BACKUP_HOUR"} {
+		if _, ok := byKey[retired]; ok {
+			t.Errorf("%s still exists beside the one retention policy", retired)
+		}
+	}
+	if got := readBackupSettings(); got.Enabled || got.Keep != 7 || got.SafetyKeep != 3 || got.EveryDays != 1 || got.Hour != 2 {
+		t.Errorf("settings with no file = %+v", got)
 	}
 }
 
@@ -67,8 +86,8 @@ func TestReadRetentionUsesDefaultsWhenTheFileIsAbsent(t *testing.T) {
 		t.Fatalf("read %d settings, want %d", len(got), len(retentionSchema))
 	}
 	for _, s := range got {
-		if s.Value == 0 {
-			t.Errorf("%s resolved to 0 with no file present; it should carry its default", s.Key)
+		if s.Value != s.Default {
+			t.Errorf("%s resolved to %d with no file present; it should carry its default %d", s.Key, s.Value, s.Default)
 		}
 	}
 }
@@ -94,7 +113,7 @@ func TestConfLineParsingIgnoresWhatItShould(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "conf")
 	if err := os.WriteFile(f, []byte(
-		"# a comment\n\nKEEP_DB=14\nKEEP_BINARIES=\"9\"\n  DISK_WARN = 75 # trailing\nNOT_A_SETTING=1\nKEEP_DB=broken\n",
+		"# a comment\n\nBACKUP_KEEP=14\nKEEP_BINARIES=\"9\"\n  DISK_WARN = 75 # trailing\nNOT_A_SETTING=1\nBACKUP_KEEP=broken\n",
 	), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -104,10 +123,10 @@ func TestConfLineParsingIgnoresWhatItShould(t *testing.T) {
 		val      string
 		matching bool
 	}{
-		{"KEEP_DB=14", "KEEP_DB", "14", true},
+		{"BACKUP_KEEP=14", "BACKUP_KEEP", "14", true},
 		{`KEEP_BINARIES="9"`, "KEEP_BINARIES", "9", true},
 		{"  DISK_WARN = 75 # trailing", "DISK_WARN", "75", true},
-		{"KEEP_DB=broken", "", "", false},
+		{"BACKUP_KEEP=broken", "", "", false},
 		{"# a comment", "", "", false},
 	} {
 		m := reConfLine.FindStringSubmatch(line.in)

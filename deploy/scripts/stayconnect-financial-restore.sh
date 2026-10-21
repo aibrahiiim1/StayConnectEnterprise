@@ -1,4 +1,17 @@
 #!/usr/bin/env bash
+# stayconnect-financial-restore.sh — TRANSITIONAL: restores a pg_dump -Fc set (the retired nightly site-backup format) by hand.
+#
+# RETIRED AS THE SUPPORTED RESTORE PATH (GDPR final mission: one backup system). The supported restore is Hotel Admin -> Backups
+# (scd), which now carries every guarantee this script was written to provide: the proven quiesce, the management marker advanced
+# before the swap, the TimescaleDB hypertable assertion, the database-level grant, and the financial-recovery record that holds
+# money movement. It restores the ENCRYPTED backups the one backup system takes. This script remains only so the earlier nightly sets
+# (/var/backups/stayconnect, pg_dump custom format, listed in Hotel Admin as earlier backups) can still be restored by hand until an
+# administrator removes them. It is DARK: wired into no timer or service. Its manifest-signature authorization is not part of the
+# supported path; the supported path's authorization is the password step-up, a digest-bound verified backup and the enforced
+# financial recovery mode (documented in docs/BACKUP_AND_RESTORE.md).
+#
+# (Original description follows.)
+#
 # stayconnect-financial-restore.sh — the SUPPORTED site-database restore.
 #
 # docs/BACKUP_AND_RESTORE.md §1 described the restore as `pg_restore -d stayconnect_site <dump>` into the
@@ -28,7 +41,7 @@
 # present.
 #
 # THE MARKER. Advanced BEFORE the restore, so a crash mid-restore still leaves it ahead and the next startup
-# still holds money movement. It is excluded from the /etc backup (see stayconnect-site-backup.sh), because
+# still holds money movement. It is excluded from the /etc backup (see writeEtcArchive in scd), because
 # an /etc archive containing it would roll it back and silence the very detector it exists to be.
 #
 # WHAT PROTECTS THE MARKER: ownership and file permissions, and nothing else. There is no TPM, no secure
@@ -44,8 +57,8 @@ MARKER="$MARKER_DIR/financial-restore-generation.json"
 TRUST_ANCHOR="${SCD_ASSIGNMENT_REGISTRY_ROOT:-/etc/stayconnect/assignment-registry-root.pub}"
 # HOW THIS SCRIPT REACHES THE DATABASE IS NOT THIS SCRIPT'S DECISION ANY MORE.
 #
-# It used to be, and it was wrong in three ways at once, all three of which stayconnect-site-backup.sh had
-# already been corrected for: it defaulted the ROLE to `stayconnect_site`, which is the DATABASE name and
+# It used to be, and it was wrong in three ways at once, all three of which the retired site-backup
+# job had already been corrected for: it defaulted the ROLE to `stayconnect_site`, which is the DATABASE name and
 # not a role that exists here; it called the HOST psql and pg_restore, which on this appliance do not exist
 # at all -- PostgreSQL runs in a container and the host carries no client; and it would have accepted a
 # svc_* role that cannot read every schema.

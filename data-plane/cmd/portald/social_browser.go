@@ -109,7 +109,8 @@ const openBrowserHTML = guestHead + `
   <h1 class="page-title">{{index .T "social.browser.title"}}</h1>
   <p class="page-lead">{{.Lead}}</p>
   {{if .Address}}<p class="page-lead"><strong id="portal-address" dir="ltr">{{.Address}}</strong></p>
-  <div class="actions"><button class="btn" type="button" id="copy-address" data-copied="{{index .T "social.browser.copied"}}">{{index .T "social.browser.copy"}}</button></div>{{end}}
+  <div class="actions"><button class="btn" type="button" id="copy-address" data-copied="{{index .T "social.browser.copied"}}">{{index .T "social.browser.copy"}}</button></div>
+  <p class="sc-vh" id="copy-status" role="status" aria-live="polite"></p>{{end}}
   <div class="actions"><a class="btn btn--outline" href="/">{{index .T "social.browser.other"}}</a></div>
 </div>` + guestFoot + `
 </main>
@@ -118,8 +119,14 @@ const openBrowserHTML = guestHead + `
 (function () {
   var b = document.getElementById('copy-address');
   var a = document.getElementById('portal-address');
+  var s = document.getElementById('copy-status');
   if (!b || !a) return;
-  function done() { b.textContent = b.getAttribute('data-copied'); }
+  // The button says Copied; the status line says it to a screen reader, which does not re-read a button.
+  function done() {
+    var c = b.getAttribute('data-copied');
+    b.textContent = c;
+    if (s) { s.textContent = ''; setTimeout(function () { s.textContent = c; }, 50); }
+  }
   function fallback() {
     var t = document.createElement('textarea');
     t.value = a.textContent; t.setAttribute('readonly', ''); t.style.position = 'fixed'; t.style.opacity = '0';

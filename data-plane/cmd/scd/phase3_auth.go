@@ -484,6 +484,20 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 			notVerifiedRetryAfter(w, at.Result, "restricted", gate.RemainingSeconds)
 			return
 		}
+		// THE NETWORK PAUSE (migration 0136, GDPR audit A4). Changing the MAC defeats the device rule above, so
+		// many wrong room sign-ins on one network pause room sign-in there; a device staff confirmed as a genuine
+		// guest is let through. Answered exactly like a device restriction, and not counted.
+		ngate, nerr := p.protection.CheckNetwork(ctx, p.srv.tenID, p.srv.siteID, dev.GuestNetwork, dev.MAC)
+		if nerr != nil {
+			at.Result = signinattempt.ServiceUnavailable
+			notVerified(w, at.Result, "network_pause_unreadable: "+nerr.Error())
+			return
+		}
+		if ngate.Restricted {
+			at.Result = signinattempt.RateLimited
+			notVerifiedRetryAfter(w, at.Result, "network_paused", ngate.RemainingSeconds)
+			return
+		}
 	}
 
 	// A REQUEST THE SITE'S MODE DOES NOT ACCEPT -- a reservation number on a surname site, a surname and a

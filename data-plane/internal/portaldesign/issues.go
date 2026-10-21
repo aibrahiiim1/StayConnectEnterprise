@@ -30,8 +30,9 @@ type Severity string
 const (
 	// SeverityError is content the portal will not serve. A design carrying one is refused on save.
 	SeverityError Severity = "error"
-	// SeverityWarning is content the portal serves in a changed form (for example with !important removed)
-	// that an operator should know about but does not have to fix.
+	// SeverityWarning is content the portal serves in a changed form (for example with !important removed), or
+	// serves as written but with a consequence (an image loaded from an outside host, an unfinished privacy
+	// notice), that an operator should know about but does not have to fix.
 	SeverityWarning Severity = "warning"
 )
 

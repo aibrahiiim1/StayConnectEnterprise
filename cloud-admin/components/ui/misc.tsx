@@ -155,24 +155,31 @@ export function MonoId({
   }
 
   return (
-    <Tooltip content={<span className="break-all font-mono">{title ? `${title}: ${value}` : value}</span>}>
-      <button
-        type="button"
-        onClick={copy}
-        className={cn(
-          "group inline-flex items-center gap-1 rounded border border-border bg-surface px-1.5 py-0.5",
-          "font-mono text-2xs text-muted-foreground transition-colors hover:text-foreground",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
-          className,
-        )}
-      >
-        {short}
-        {copied ? (
-          <Check className="size-3 text-success" />
-        ) : (
-          <Copy className="size-3 opacity-0 transition-opacity group-hover:opacity-60" />
-        )}
-      </button>
-    </Tooltip>
+    <>
+      <Tooltip content={<span className="break-all font-mono">{title ? `${title}: ${value}` : value}</span>}>
+        <button
+          type="button"
+          onClick={copy}
+          // The name says what the button does and still contains the visible text (WCAG 2.5.3).
+          aria-label={`Copy ${title ? title.toLowerCase() : "value"} ${short}`}
+          className={cn(
+            "group inline-flex items-center gap-1 rounded border border-border bg-surface px-1.5 py-0.5",
+            "font-mono text-2xs text-muted-foreground transition-colors hover:text-foreground",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+            className,
+          )}
+        >
+          {short}
+          {copied ? (
+            <Check className="size-3 text-success" aria-hidden />
+          ) : (
+            <Copy className="size-3 opacity-0 transition-opacity group-hover:opacity-60" aria-hidden />
+          )}
+        </button>
+      </Tooltip>
+      {/* The check mark is visual only; this tells a screen reader the copy happened. Always rendered, so the
+          region exists before its content changes. */}
+      <span role="status" aria-live="polite" className="sr-only">{copied ? "Copied" : ""}</span>
+    </>
   );
 }

@@ -7,14 +7,14 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, itemsOf, withStepUp, type ApplianceRow, type Items, type Site } from "@/lib/api";
 import { DialogForm } from "@/components/ui/dialog";
-import { Field, Input, Select } from "@/components/ui/input";
+import { Field, Input, Select, useFieldErrors } from "@/components/ui/input";
 import { Callout } from "@/components/ui/error-banner";
 import { useToast } from "@/components/ui/toast";
 import {
-  DEFAULT_TERMS, LicenseTermsFields, termsBody, termsProblem, withSuggestedModules, type TermsDraft,
+  DEFAULT_TERMS, LicenseTermsFields, termsBody, termsIssue, withSuggestedModules, type TermsDraft, type TermsField,
 } from "@/components/license-terms";
 import {
-  PlacementFields, emptyPlacement, placementBody, placementProblem, placementSiteType, type Placement,
+  PlacementFields, emptyPlacement, placementBody, placementIssue, placementSiteType, type Placement, type PlacementField,
 } from "@/components/placement-fields";
 import { useModuleCatalog } from "@/lib/modules";
 
@@ -55,14 +55,17 @@ export function ActivateDialog({
   const [err, setErr] = useState<unknown>(null);
   const { catalog } = useModuleCatalog();
   const siteType = placementSiteType(placement);
+  const fields = useFieldErrors<PlacementField | TermsField>();
+  const clearFields = fields.clear;
 
   useEffect(() => {
     if (open) {
       setPlacement(emptyPlacement(heldGone ? "" : heldId));
       setTerms(DEFAULT_TERMS);
       setErr(null);
+      clearFields();
     }
-  }, [open, heldId, heldGone]);
+  }, [open, heldId, heldGone, clearFields]);
 
   // A new license starts from the site type's suggested modules until the operator changes them by hand.
   useEffect(() => {
@@ -74,11 +77,13 @@ export function ActivateDialog({
       setErr(HOLDS_OTHER_CUSTOMER);
       return;
     }
-    const problem = placementProblem(placement) ?? termsProblem(terms);
-    if (problem) {
-      setErr(problem);
+    const issue = placementIssue(placement) ?? termsIssue(terms);
+    if (issue) {
+      setErr(null);
+      fields.fail({ [issue.field]: issue.message });
       return;
     }
+    fields.clear();
     setBusy(true);
     setErr(null);
     try {
@@ -128,10 +133,12 @@ export function ActivateDialog({
           value={placement}
           onChange={setPlacement}
           lockedCustomer={heldId && !heldGone ? { id: heldId, name: heldName } : undefined}
+          errorFor={fields.error}
+          idFor={fields.id}
         />
       </Section>
       <Section title="License">
-        <LicenseTermsFields value={terms} onChange={setTerms} siteType={siteType} />
+        <LicenseTermsFields value={terms} onChange={setTerms} siteType={siteType} errorFor={fields.error} idFor={fields.id} />
       </Section>
     </DialogForm>
   );
@@ -157,6 +164,7 @@ export function SetLicenseDialog({
   const current = appliance.license;
   const hasLicense = !!current && current.state !== "none";
   const { catalog } = useModuleCatalog();
+  const fields = useFieldErrors<TermsField | "reason">();
 
   useEffect(() => {
     if (!open) return;
@@ -177,6 +185,7 @@ export function SetLicenseDialog({
     });
     setReason("");
     setErr(null);
+    fields.clear();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -185,11 +194,13 @@ export function SetLicenseDialog({
   }, [open, hasLicense, catalog, appliance.site_type]);
 
   async function submit() {
-    const problem = termsProblem(terms) ?? (reason.trim() ? null : "Enter a reason; it is recorded in the audit log.");
-    if (problem) {
-      setErr(problem);
+    const issue = termsIssue(terms) ?? (reason.trim() ? null : { field: "reason" as const, message: "Enter a reason; it is recorded in the audit log." });
+    if (issue) {
+      setErr(null);
+      fields.fail({ [issue.field]: issue.message });
       return;
     }
+    fields.clear();
     setBusy(true);
     setErr(null);
     try {
@@ -223,9 +234,9 @@ export function SetLicenseDialog({
       error={err}
       onSubmit={submit}
     >
-      <LicenseTermsFields value={terms} onChange={setTerms} siteType={appliance.site_type} />
-      <Field label="Reason" required hint="Recorded in the audit log.">
-        <Input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} placeholder="e.g. annual renewal" />
+      <LicenseTermsFields value={terms} onChange={setTerms} siteType={appliance.site_type} errorFor={fields.error} idFor={fields.id} />
+      <Field label="Reason" required hint="Recorded in the audit log." error={fields.error("reason")}>
+        <Input id={fields.id("reason")} value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} placeholder="e.g. annual renewal" />
       </Field>
     </DialogForm>
   );
@@ -254,12 +265,15 @@ export function MoveDialog({
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
+  const fields = useFieldErrors<"site" | "reason">();
+  const clearFields = fields.clear;
 
   useEffect(() => {
     if (!open) return;
     setSiteId("");
     setReason("");
     setErr(null);
+    clearFields();
     setSites(null);
     if (!customerId) {
       setSites([]);
@@ -270,16 +284,17 @@ export function MoveDialog({
       // takes no appliance.
       .then((r) => setSites(itemsOf(r).filter((s) => s.status !== "archived" && s.id !== appliance.site_id)))
       .catch((e) => { setSites([]); setErr(e); });
-  }, [open, customerId, appliance.site_id]);
+  }, [open, customerId, appliance.site_id, clearFields]);
 
   async function submit() {
-    const problem =
-      (siteId ? null : "Choose the site it moves to.") ??
-      (reason.trim() ? null : "Enter a reason; it is recorded in the audit log.");
-    if (problem) {
-      setErr(problem);
+    if (!siteId || !reason.trim()) {
+      setErr(null);
+      fields.fail(!siteId
+        ? { site: "Choose the site it moves to." }
+        : { reason: "Enter a reason; it is recorded in the audit log." });
       return;
     }
+    fields.clear();
     setBusy(true);
     setErr(null);
     try {
@@ -317,6 +332,7 @@ export function MoveDialog({
       busy={busy}
       error={err}
       disabled={noOtherSite}
+      disabledReason="To continue, the customer needs another active site."
       onSubmit={submit}
     >
       <Field
@@ -332,8 +348,9 @@ export function MoveDialog({
             )}
           </>
         ) : undefined}
+        error={fields.error("site")}
       >
-        <Select value={siteId} disabled={sites === null || noOtherSite} onChange={(e) => setSiteId(e.target.value)}>
+        <Select id={fields.id("site")} value={siteId} disabled={sites === null || noOtherSite} onChange={(e) => setSiteId(e.target.value)}>
           <option value="">{sites === null ? "Loading…" : "Choose a site…"}</option>
           {(sites ?? []).map((s) => (
             <option key={s.id} value={s.id}>{s.name}</option>
@@ -344,8 +361,8 @@ export function MoveDialog({
       <p className="text-caption text-muted-foreground">
         To give it to another customer, retire it, factory-reset it and activate it for that customer.
       </p>
-      <Field label="Reason" required hint="Recorded in the audit log.">
-        <Input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} />
+      <Field label="Reason" required hint="Recorded in the audit log." error={fields.error("reason")}>
+        <Input id={fields.id("reason")} value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} />
       </Field>
     </DialogForm>
   );

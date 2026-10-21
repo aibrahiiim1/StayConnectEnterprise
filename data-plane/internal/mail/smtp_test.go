@@ -24,6 +24,8 @@ func TestSMTPConfigValidation(t *testing.T) {
 		{Host: "h", Port: 587, Security: SMTPStartTLS, Username: "u", FromAddress: "a@b.c"},
 		{Host: "h", Port: 587, Security: SMTPStartTLS, Password: "p", FromAddress: "a@b.c"},
 		{Host: "h", Port: 587, Security: SMTPStartTLS, FromAddress: "not an address"},
+		// B9: plain SMTP to a public address.
+		{Host: "8.8.8.8", Port: 25, Security: SMTPNone, FromAddress: "a@b.c"},
 	}
 	for i, c := range bad {
 		if ValidateSMTPConfig(c) == "" {
@@ -147,4 +149,31 @@ func TestPasswordAuthRefusesAPlaintextHop(t *testing.T) {
 	if r, _ := a.Next([]byte("Password:"), true); string(r) != "p" {
 		t.Fatal("LOGIN password step")
 	}
+}
+
+// B9: a host NAME that is accepted when saved is still refused at send time when the address it reaches is not
+// on this network, before a single SMTP byte is exchanged.
+func TestSMTPNoneRefusesAPublicServerAtConnect(t *testing.T) {
+	if msg := ValidateSMTPConfig(SMTPConfig{Host: "10.0.0.5", Port: 25, Security: SMTPNone, FromAddress: "a@b.c"}); msg != "" {
+		t.Fatalf("a private relay was refused: %s", msg)
+	}
+	m, err := NewSMTP(SMTPConfig{Host: "mail.example.com", Port: 25, Security: SMTPNone, FromAddress: "wifi@example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, server := net.Pipe()
+	defer server.Close()
+	m.Dialer = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return publicConn{client}, nil
+	}
+	err = m.Send(context.Background(), Message{To: "guest@example.com", Subject: "s", Text: "t"})
+	if err == nil || !strings.Contains(err.Error(), "only for a mail server on this network") {
+		t.Fatalf("plain SMTP to a public address = %v", err)
+	}
+}
+
+type publicConn struct{ net.Conn }
+
+func (publicConn) RemoteAddr() net.Addr {
+	return &net.TCPAddr{IP: net.ParseIP("203.0.113.9"), Port: 25}
 }

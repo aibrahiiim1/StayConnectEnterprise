@@ -2,7 +2,8 @@
 
 > The runbook for OneGate Central, the vendor half: licensing, activation and fleet status
 > ([CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md)). Central runs on its own host; appliances reach it
-> by name (`sc-central.echofusion.com`, CLAUDE.md §0D) and only ever for licensing (CLAUDE.md §0E).
+> by name (`sc-central.echofusion.com`, CLAUDE.md §0D) and only ever for licensing (CLAUDE.md §0E). Staff use the
+> console at `central.onegate.getsemantics.com` (§3).
 > Appliance counterpart: [DEPLOYMENT_APPLIANCE.md](DEPLOYMENT_APPLIANCE.md).
 >
 > **Everything here is a script in `deploy/scripts/`.** A Central host is built from a release and nothing
@@ -47,7 +48,7 @@
 | **cloud-admin** | `stayconnect-cloud-admin.service` → `node server.js` in `/opt/stayconnect/cloud-admin-current`, user `stayconnect`, `127.0.0.1:3000`, sandboxed, 512 MB cap. Node ≥ 18.17 at `/usr/bin/node` (built with 20). |
 | **Postgres + Redis** | [`deploy/compose/central-infra.yml`](../deploy/compose/central-infra.yml), project `stayconnect-central`: `sc-central-pg` (`timescale/timescaledb:2.16.1-pg16`) and `sc-central-redis` (`redis:7-alpine`, password, AOF), both on 127.0.0.1 only, passwords from `/opt/stayconnect/central/secrets/{db_password,redis_password}`. **No NATS.** |
 | **Caddy** | `stayconnect-caddy.service` (from `deploy/caddy/stayconnect-caddy.central.service`), user `caddy`, config rendered from the [`Caddyfile.central`](../deploy/caddy/Caddyfile.central) template. The apt package's own `caddy.service` is masked. |
-| **Database backup** | `stayconnect-central-backup.timer` (daily, 02:15) runs `central-backup.sh`: `pg_dump -Fc` to `/opt/stayconnect/backups/db/central-<stamp>-scheduled.dump` (0600), proven readable before it counts. The installer runs it once immediately. **Local only** — see §9. |
+| **Database backup** | `stayconnect-central-backup.timer` (daily, 02:15) runs `central-backup.sh`: `pg_dump -Fc` to `/opt/stayconnect/backups/db/central-<stamp>-scheduled.dump.age` (0600), proven readable before it counts, then encrypted with `age` to the public keys in `/etc/stayconnect/backup-recipients.txt` (`age1…`, `ssh-ed25519` or `ssh-rsa`; while that file does not exist the dump stays a plain `.dump` and the run warns; once it exists, a dump that cannot be encrypted to it, or a file with no usable key, fails the backup). The installer runs it once immediately. **Local only** — see §9. |
 | **Backup retention** | `stayconnect-backup-cleanup.timer` (daily) and every backup run apply `/etc/stayconnect/backup-retention.conf` (`KEEP_DB` dumps, newest never deleted, `backup-retention.pins` never deleted; also rollback binaries and console releases) and write `/opt/stayconnect/backup-retention-status.json` — what *System → Backup health* (`GET /cloud/v1/backup-health`) shows. |
 | **Observability** | optional, separate: [`deploy/observability`](../deploy/observability) (Prometheus scrapes ctrlapi's loopback-only `/metrics`). Not installed by `central-install.sh`. |
 
@@ -72,6 +73,11 @@ it cannot drift from what appliances are told to dial. Central initiates **no** 
   **Moving Central is a DNS change** — no appliance knows an IP.
 - The console may have its own name(s) (`--admin-name`), so it can later sit behind MFA/VPN without that
   becoming a dependency of a site's connectivity. Those names become `CTRLAPI_ALLOW_ORIGINS`.
+- **`central.onegate.getsemantics.com`** is the staff address of the console (Product Owner, 2026-10-19). It is
+  given as `--admin-name central.onegate.getsemantics.com`, so it joins the Caddy site addresses, the certificate
+  names and `CTRLAPI_ALLOW_ORIGINS`; appliances keep `sc-central.echofusion.com`. **Not configured yet:** it needs
+  a DNS record pointing at the Central host, a certificate that covers it (`internal` adds it to the SANs; `acme`
+  needs the name publicly reachable), and a Central redeploy, each with the Product Owner's go-ahead.
 - **:443 certificate**, two modes (`--tls`):
   - `internal` (default, what the first Central uses): Central's own TLS CA in `/opt/stayconnect/central/tls`
     issues the certificate (`central-mint-tls.sh`); appliances trust that CA (`install-central-trust.sh`).
@@ -129,7 +135,7 @@ docker-compose-v2, Caddy's apt repo, NodeSource 20).
 tar -xzf onegate-central-<sha>.tar.gz
 export CENTRAL_ADMIN_PASSWORD='…'                 # or be prompted; never on the command line
 sudo -E bash onegate-central-<sha>/deploy/scripts/central-install.sh --mode new \
-     --admin-email ops@example.com [--admin-name admin.example.com] [--extra-names 203.0.113.10] \
+     --admin-email ops@example.com [--admin-name central.onegate.getsemantics.com] [--extra-names 203.0.113.10] \
      [--tls internal|acme --acme-email ops@example.com] [--install-prereqs] [--dry-run]
 ```
 
@@ -251,7 +257,10 @@ docker exec sc-central-pg psql -U stayconnect -d postgres -c "DROP DATABASE stay
 docker exec sc-central-pg psql -U stayconnect -d postgres -c "CREATE DATABASE stayconnect"
 docker exec sc-central-pg psql -U stayconnect -d stayconnect -c "CREATE EXTENSION IF NOT EXISTS timescaledb"
 docker exec sc-central-pg psql -U stayconnect -d stayconnect -c "SELECT timescaledb_pre_restore()"
-docker exec -i sc-central-pg pg_restore -U stayconnect -d stayconnect < /opt/stayconnect/backups/db/central-<stamp>-pre-<sha12>.dump
+# Encrypted (.dump.age): decrypt with a backup key holder's private key, which is never on Central.
+age -d -i <private key file> /opt/stayconnect/backups/db/central-<stamp>-pre-<sha12>.dump.age   | docker exec -i sc-central-pg pg_restore -U stayconnect -d stayconnect
+# A dump written before any backup key was configured (.dump) restores directly:
+# docker exec -i sc-central-pg pg_restore -U stayconnect -d stayconnect < /opt/stayconnect/backups/db/central-<stamp>-pre-<sha12>.dump
 docker exec sc-central-pg psql -U stayconnect -d stayconnect -c "SELECT timescaledb_post_restore()"
 docker exec sc-central-pg psql -U stayconnect -d stayconnect -tAc "SELECT count(*) FROM timescaledb_information.hypertables"
 bash /opt/stayconnect/central/tooling/deploy/scripts/central-deploy.sh rollback     # the binary that matches

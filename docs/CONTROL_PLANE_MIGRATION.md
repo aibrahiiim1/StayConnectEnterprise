@@ -85,6 +85,10 @@ Fleet telemetry is sanitized: **0 telemetry rows** contain room/voucher/email.
 The migrated cloud DB carries historical guest rows from the co-located era
 (legacy, not new runtime writes); the runtime path writes no guest PII centrally.
 
+> **Superseded (note added 2026-10-17).** The statement above is a record of this phase. Those historical
+> guest rows no longer exist: Central migration 0046 dropped the client-domain tables and 0047 dropped the
+> `legacy_archive` schema ([DATA_OWNERSHIP.md §7](DATA_OWNERSHIP.md#7-central-client-domain-tables-are-gone)).
+
 ## Carryover hardening (this phase)
 
 - **A — DHCP one source of truth:** the WAN/LAN *System Network* page shows DHCP

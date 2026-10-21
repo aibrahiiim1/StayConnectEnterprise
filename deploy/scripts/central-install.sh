@@ -121,7 +121,7 @@ install_prereqs() {
   . /etc/os-release
   case "$ID" in ubuntu|debian) ;; *) die "--install-prereqs supports Ubuntu/Debian only (this is $ID)";; esac
   run apt-get update -q
-  run env DEBIAN_FRONTEND=noninteractive apt-get install -y -q ca-certificates curl gnupg openssl python3 ufw iproute2 debian-keyring debian-archive-keyring apt-transport-https
+  run env DEBIAN_FRONTEND=noninteractive apt-get install -y -q ca-certificates curl gnupg openssl python3 ufw iproute2 debian-keyring debian-archive-keyring apt-transport-https age
   if ! command -v docker >/dev/null; then
     run env DEBIAN_FRONTEND=noninteractive apt-get install -y -q docker.io
   fi
@@ -246,6 +246,10 @@ DBQ_OK=0; [ "$DRY_RUN" = 0 ] && DBQ_OK=1
 KEY_VENDOR="$SC_ETC/vendor-license.key"
 KEY_ASSIGN="$SC_ETC/assignment-signing.key"
 KEY_REG="$SC_ETC/assignment-registry-root.key"
+# Console two-step sign-in (0052, GDPR plan C10): seals each operator's authenticator secret. Carried by a
+# restore when the bundle has it; created otherwise. ctrlapi reads it from CTRLAPI_OPERATOR_MFA_KEY (this path
+# by default) and refuses every console sign-in without it.
+KEY_MFA="$SC_ETC/operator-mfa.key"
 PKI_ROOT_CRT="$SC_ETC/pki/root-ca.crt"
 PKI_INT_CRT="$SC_ETC/pki/intermediate-ca.crt"
 PKI_INT_KEY="$SC_ETC/pki/intermediate-ca.key"
@@ -449,6 +453,13 @@ else
   if [ "$n" = 3 ]; then say "appliance CA exists — kept (root $(cert_fpr "$PKI_ROOT_CRT" | cut -c1-23)…)"
   else say "the appliance Root/Intermediate CA is created by ctrlapi on its first start (step 11)"; fi
 fi
+# The same helper central-deploy.sh uses (central-lib.sh): created when absent, never replaced, 0600 root.
+had_mfa_key=0; [ -s "$KEY_MFA" ] && had_mfa_key=1
+ensure_mfa_key "$CTRLAPI_BIN_PATH" "$KEY_MFA" || die "the console two-step sign-in key $KEY_MFA could not be created"
+if [ "$had_mfa_key" = 0 ] && [ "$MODE" = restore ]; then
+  warn "the bundle had no console two-step sign-in key: a NEW one was created. Operators who had set up an
+    authenticator cannot sign in until it is reset: ctrlapi reset-mfa --email <them> --reason \"restored without key\""
+fi
 case "$TLS_MODE" in internal|acme) ;; *) die "--tls must be internal or acme" ;; esac
 [ "$TLS_MODE" = acme ] || [ "$DRY_RUN" = 1 ] || [ -s "$CENTRAL_TLS_DIR/ca.crt" ] || die "--tls internal but no Central TLS CA at $CENTRAL_TLS_DIR"
 
@@ -579,6 +590,11 @@ else
     done
     PRE_ROOT="$(sha256_of "$PKI_ROOT_CRT")"; PRE_INT="$(sha256_of "$PKI_INT_CRT")"
   fi
+  # A carried two-step sign-in key must open the carried authenticators (a key created just now cannot, and the
+  # warning above says what to do about that).
+  if [ "$had_mfa_key" = 1 ]; then
+    check_mfa_key "$CTRLAPI_BIN_PATH" "$KEY_MFA" || die "the console two-step sign-in key $KEY_MFA failed its check (above)"
+  fi
   unit_restart_noblock stayconnect-ctrlapi
   ctrlapi_ready 90 || { journalctl -u stayconnect-ctrlapi -n 60 --no-pager >&2 || true; die "ctrlapi did not become ready"; }
   if [ "$MODE" = restore ]; then
@@ -654,6 +670,7 @@ else
 fi
 # Log file first, owned by caddy: `caddy validate` as root would otherwise create it root-owned.
 [ -f /var/log/caddy/central.log ] || run install -o caddy -g caddy -m 0640 /dev/null /var/log/caddy/central.log
+install_central_access_log_rotation
 run caddy validate --config "$CADDYFILE_PATH" --adapter caddyfile
 unit_restart_noblock stayconnect-caddy
 
@@ -666,7 +683,9 @@ if [ "$DRY_RUN" = 1 ]; then say "DRY-RUN would run stayconnect-central-backup.se
 else
   systemctl start stayconnect-central-backup.service \
     || { journalctl -u stayconnect-central-backup -n 20 --no-pager >&2 || true; die "the first database backup failed"; }
-  say "first backup: $(ls -1t "$CENTRAL_DB_BACKUPS"/central-*.dump 2>/dev/null | head -1)"
+  say "first backup: $(ls -1t "$CENTRAL_DB_BACKUPS"/central-*.dump "$CENTRAL_DB_BACKUPS"/central-*.dump.age 2>/dev/null | head -1)"
+  backup_recipients_usable "$SC_ETC/backup-recipients.txt" \
+    || warn "database backups are NOT encrypted until $SC_ETC/backup-recipients.txt lists an age or SSH public key (age-keygen on the restorer's machine; the private key never comes here)"
 fi
 
 # ================================================================= 14. public trust, provenance, smoke

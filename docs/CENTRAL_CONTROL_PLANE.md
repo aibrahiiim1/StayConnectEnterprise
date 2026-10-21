@@ -7,7 +7,8 @@ this file wins. Product-Owner mission "Central Control Plane refactor & activati
 
 ## 1. What Central is — and is not
 
-Central is the vendor's cloud-hosted **licensing, appliance-activation and fleet-status** system. It answers five
+Central is the vendor's cloud-hosted **licensing, appliance-activation and fleet-status** system (staff console:
+`central.onegate.getsemantics.com`; appliances use `sc-central.echofusion.com`). It answers five
 questions: *who is the customer, which site and appliance, is it activated, what does its licence allow, and is it
 healthy right now.*
 
@@ -172,7 +173,7 @@ role and a recent password re-entry (step-up), and so does every change to a Cen
 customer users: create, role, status, password, delete); login and re-authentication are rate-limited per client
 address, and failed attempts are audited within a budget (5 per address, 300 overall, per minute). Every console
 request re-reads its operator: disabling, demoting, removing or re-passwording someone ends their open sessions at
-their next request, and a sign-in lasts at most `central_security_settings.operator_session_max_hours` (default 24,
+their next request, and a sign-in lasts at most `central_security_settings.operator_session_max_hours` (default 12 since migration 0052,
 1–168, System → Team, audited) however active it is. In production ctrlapi refuses to start with the operator
 listener on every interface (unless `CTRLAPI_ALLOW_PUBLIC_LISTEN=true`) or with `CTRLAPI_COOKIE_SECURE=false`;
 console writes from a foreign Origin are refused. The signed appliance routes are rate-limited per address before
@@ -191,7 +192,9 @@ code, `message` an operator sentence the console shows verbatim. Login, re-authe
 rate-limited per client address, which ctrlapi derives itself (the TCP peer, or the loopback proxy's `X-Real-IP`).
 
 ### Authentication
-`POST /v1/auth/login` · `POST /v1/auth/logout` · `GET /v1/auth/whoami` → `{operator_id,email,display_name,roles[],is_super_admin,customer_id|null,customer_name|null,permissions[]}` · `POST /v1/auth/reauth`
+`POST /v1/auth/login` → `{second_step: "code"|"enrol"}` and a five-minute `sc_signin` cookie, no session · `POST /v1/auth/login/enrol` → `{secret, otpauth_uri}` (first sign-in) · `POST /v1/auth/login/code {code}` → the session and the whoami shape (first sign-in adds `recovery_codes`) · `POST /v1/auth/logout` · `GET /v1/auth/whoami` → `{operator_id,email,display_name,roles[],is_super_admin,customer_id|null,customer_name|null,permissions[]}` · `POST /v1/auth/reauth` · `GET /v1/auth/mfa` · `POST /v1/auth/mfa/recovery-codes` (SU)
+
+Two-step sign-in (migration 0052, GDPR plan C10): every account signs in with its password and the 6-digit code of an authenticator app (TOTP), or a single-use recovery code. The secret is sealed under `CTRLAPI_OPERATOR_MFA_KEY` (default `/etc/stayconnect/operator-mfa.key`, created by `central-install.sh`, carried by the export bundle); without the key every sign-in is refused. Sessions end after `operator_idle_minutes` without activity (default 30; the whoami poll is not activity) and `operator_session_max_hours` after sign-in (default 12). An administrator resets a colleague's second step with `POST /cloud/v1/team/{id}/mfa-reset` or `POST /cloud/v1/customers/{id}/users/{uid}/mfa-reset` (SU, reason, never one's own); the last one is reset with `ctrlapi reset-mfa --email E --reason R`.
 
 ### Overview
 `GET /cloud/v1/overview` →

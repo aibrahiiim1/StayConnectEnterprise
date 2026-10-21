@@ -1,0 +1,64 @@
+{
+  "transition_id": "T0239",
+  "seq": 239,
+  "timestamp": "2026-10-21T13:02:00+03:00",
+  "timestamp_derivation": "Computed from the workstation clock (UTC+3) when this receipt was written, after the deployment and live verification it records and before the commit that introduces it.",
+  "record_type": "GDPR_CLOSURE_AND_BACKUP_CONSOLIDATION_DEPLOYED_TO_PRE_LIVE",
+  "authorisation": "D64 and D65 (2026-10-21) under the Product Owner's 'Final Backup Consolidation and Delivery' mission and the GDPR missions before it, including appliance migrations 0127-0149, the protected merge and deployment to PRE-LIVE; the standing PRE-LIVE deployment decision. It did NOT authorise Go-Live, Central deployment or a legal GDPR claim.",
+  "delivery": {
+    "pull_request": 219,
+    "branch": "delivery/gdpr",
+    "base": "18e34e900bf41924c4220bc3e552466995b136d3",
+    "pr_state": "OPEN until the four gates pass and the protected merge; the merge is authorised by the mission, applied by the po-merge-approved label on the tested head"
+  },
+  "delivered": [
+    "ONE BACKUP SYSTEM (D65): scd's encrypted engine for scheduled, manual, pre-change and pre-restore backups (age to the key holders as written, verified by loading the same stream into a scratch database, noted with kind/reason/ledger head), counts-only rotation in two pools, settings BACKUP_ENABLED (off by default), BACKUP_HOUR, BACKUP_EVERY_DAYS, BACKUP_KEEP (7), SAFETY_BACKUP_KEEP (3), an Earlier backups panel with administrator-only removal, Hotel Admin Scheduled backups card, edged relays, scd backup-now / backup-restore / marker-advance.",
+    "The legacy nightly site-backup job retired: units and helper removed by the installer, its backups preserved as earlier backups; the retention sweep never deletes a database backup.",
+    "The restore carries the financial guarantees of the retired script: proven quiesce, marker advanced before the swap (systemd-run), hypertable assertion, database-level grant carried across, recovery-mode record; scripts/edge-migrate.sh takes a mandatory pre-change backup on a live site.",
+    "The GDPR programme (D64): retention anonymisation, export/erase, assisted requests and the request register, encrypted backups, authenticator sign-in, the dual erasure ledger and its restore, migrations 0127-0148.",
+    "Migration 0149 (found live): an index so the hourly retention run finds a stay's events without reading the whole table."
+  ],
+  "found_during_live_verification": [
+    "The retention run took 160 s on 374,000 stay events (no index on stay_events.stay_id) against a 30 s statement timeout: migration 0149 makes a batch of 500 stays take seven seconds.",
+    "edged's HTTP client capped every scd call at 15 s, so a backup and a verification that scd completes in 15-40 s were reported as failed: the default is now applied per call.",
+    "An SFTP server's password and the operator's step-up password were both 'password', so password authentication to the secondary storage could not work: sftp_password.",
+    "An erasure over a slow secondary storage hit the 15 s request timeout and edged's 5 s lock wait behind scd's ledger check: ledger routes now have four minutes, the lock wait is 45 s, a busy ledger is a plain refusal.",
+    "The status screen re-read every stored backup on each refresh: cached for 20 minutes. Hotel Admin's production build failed on a lint error the tests and tsc do not see (autoFocus).",
+    "keybootstrap must run at deploy for the new authenticator key, or scd refuses ALL Hotel Admin sign-in (operator_totp_dek.key)."
+  ],
+  "verified_on_prelive": {
+    "migrations": "0127-0149 applied after a rehearsal on a streamed copy of the live database (ACLs kept) and Gate-P reconcile; schema_migrations tops out at 0149.",
+    "backups": "A manual backup, a pre-change backup (scd backup-now, as edge-migrate.sh calls it) and a scheduled backup were each taken, encrypted, proven restorable (222 tables, ledger head) and noted; Verify through edged loads one into a scratch database; the scheduled path was proven by ageing the manual note's time (restored afterwards).",
+    "settings": "Scheduled backups off by default; saving needs the password; out-of-range values and a wrong password are refused.",
+    "earlier_backups": "39 earlier backups listed (all unencrypted nightly sets and old dumps) and untouched; removal refused without the typed confirmation and without the password.",
+    "ledger": "The secondary storage on an independent host (SFTP server on the workstation 172.21.60.20:2222): erasure of a test account committed to both copies and reported with its reference; the secondary stopped -> the next erasure refused (409) with nothing erased and guest internet unaffected; restarted -> in step again.",
+    "restore_plumbing": "scd marker-advance through systemd-run reads the real marker and refuses a non-advance (marker untouched at generation 2); a transient unit can write /etc/stayconnect, scd's own sandbox cannot. A full destructive restore was NOT run on PRE-LIVE (it would put the site into financial recovery mode); the disposable-database drill covers it (all nine ledger scenarios plus the financial guarantees).",
+    "console": "Hotel Admin sign-in with the second step (enrol, then code) works; Backups screen served; 38/38 operator surfaces.",
+    "services": "scd, edged, pmsd, portald, netd, acctd, caddy, hotel-admin active; Protel interface ACTIVE; portal answers.",
+    "not_verified": "Real phones on the guest Wi-Fi; a real hotel key holder's participation (the acceptance holder is temporary); the hotel's real independent secondary storage."
+  },
+  "deployment_provenance": "PRE-LIVE 172.21.60.25 read back on 2026-10-21 from the installed bytes: scd 5fd5407b (sha256 a948255f545e), edged 3d84ff92 (98f3af604e13), pmsd f65abebc (f7c8f97c5fa0), portald f65abebc (d7584013fc9d), netd dc32a52c and acctd dc32a52c unchanged, keybootstrap fa32e3df (578967a883e9); all -tags=stayconnect_production, vcs.modified=false; DEPLOYED_BINARIES 6/6 OK. Admin Console release 20261021-094102 (5fd5407b, BUILD_ID yqMlf3AqopSi_VDDNyWRp, previous 20261021-090759). Schema 0149. The installer retired stayconnect-site-backup; Caddyfile.edge, sysctl and the postgres log flags applied. Every commit named here is contained in branch delivery/gdpr.",
+  "rollback": "Binaries: <svc>.bak-pre-<sha>-<ts> in /opt/stayconnect/bin (scd, edged, pmsd, portald, keybootstrap), deploy-bins.sh restores a service that does not come up. Console: hotel-admin.previous -> releases/hotel-admin/20261021-090759. Database: the encrypted pre-0127 dump /opt/stayconnect/backups/db/pre-0127-bootstrap-*.sql.gz.age (opens with the bootstrap key held on the workstation, verified restorable) and the pre-change backup taken live; migrations 0127-0149 each have a .down. Units/Caddy/sysctl/compose: copies in /root/stage-gdpr/unitbak-*, infra.yml.bak-pre-gdpr-*.",
+  "temporary_artifacts": "Acceptance operator acceptance-gdpr@onegate.invalid, the acceptance backup key holder (private key held on the workstation, to be replaced by the hotel's own holder), the SFTP test server and the destination setting are removed or reset at closure (T0240).",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0238."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "18e34e900bf41924c4220bc3e552466995b136d3",
+  "base_note": "Master after the merge of PR #218 (T0238).",
+  "head": "d8640d21",
+  "head_note": "The last CONTENT commit of branch delivery/gdpr at the time of this receipt; governance commits follow it.",
+  "previous_delivery": "T0238",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

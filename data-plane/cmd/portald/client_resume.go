@@ -8,9 +8,11 @@ package main
 // never from the browser) and, if so, draws one Connect button. Connect mints an ordinary auth context and the
 // existing journey continues: join a live entitlement, or choose a package.
 //
-// The cookie is Secure whenever it is set over TLS (cookies.go); on the HTTP fallback it cannot be, because a
-// captive portal is reached over plain HTTP before the device has any access. The credential is bound
-// server-side to the device and carries 256 bits; its value to anyone else is nil.
+// HTTPS ONLY (GDPR audit B10). The cookie is set, and honoured, only over the portal's own HTTPS listener, where
+// it is Secure (cookies.go). On the plain-HTTP fallback a long-lived credential would cross the guest network in
+// clear text, so there the device is simply not remembered and the guest signs in as usual. Signing out and
+// "Not you?" still revoke a credential an older portal stored over HTTP. The credential is bound server-side to
+// the device and carries 256 bits.
 
 import (
 	"bytes"
@@ -39,6 +41,9 @@ type welcomeView struct {
 
 // setClientResumeCookie keeps the remembered-device credential for `days` (the site's setting at issue).
 func setClientResumeCookie(w http.ResponseWriter, r *http.Request, token string, days int) {
+	if r == nil || r.TLS == nil {
+		return
+	}
 	if days <= 0 {
 		days = clientResumeDefaultDays
 	}
@@ -52,6 +57,54 @@ func clearClientResumeCookie(w http.ResponseWriter, r *http.Request) {
 	clearPortalCookie(w, r, clientResumeCookie)
 }
 
+// rememberCookie is the guest's own choice, "Remember this device" ticked on the sign-in page (GDPR audit B10,
+// D-B10). A session cookie the page sets; it carries no identifier.
+const rememberCookie = "og_remember"
+
+// rememberMethods are the sign-ins the box is offered for: a verified code or an identity provider (templates.go
+// shows it, and the sentence explaining it, exactly where one of these is enabled). The box is a choice made on
+// the page, kept in a session cookie, so without this a tick given while a code sign-in was on offer carried over
+// to a voucher, account or room sign-in that never offered it.
+var rememberMethods = map[string]bool{"OTP": true, "SOCIAL": true}
+
+// guestAskedToRemember reports whether this sign-in may keep a remembered-device credential: it is one the box
+// is offered for, the guest ticked the box -- on the sign-in page (the cookie) or on the message-link page (the
+// form field) -- and the request is over HTTPS.
+func guestAskedToRemember(r *http.Request, method string) bool {
+	if r == nil || r.TLS == nil || !rememberMethods[method] {
+		return false
+	}
+	if r.Method == http.MethodPost && r.PostFormValue("remember") == "1" {
+		return true
+	}
+	c, err := r.Cookie(rememberCookie)
+	return err == nil && c.Value == "1"
+}
+
+// revokeResume asks scd to revoke a resume credential, best effort.
+func (h *handler) revokeResume(ctx context.Context, token string) {
+	if h.scd == nil {
+		return
+	}
+	body, _ := json.Marshal(map[string]string{"resume_token": token})
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix/v1/sessions/resume-revoke", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if resp, err := h.scd.Do(req); err == nil {
+		resp.Body.Close()
+	} else {
+		slog.Warn("scd resume revoke", "err", err)
+	}
+}
+
+// rememberedToken is the credential the Welcome-back line and Connect may use: over HTTPS only.
+func (h *handler) rememberedToken(r *http.Request) string {
+	if r.TLS == nil {
+		return ""
+	}
+	return h.resumeToken(r)
+}
+
+// resumeToken reads the cookie whatever the transport, for revoking it.
 func (h *handler) resumeToken(r *http.Request) string {
 	c, err := r.Cookie(clientResumeCookie)
 	if err != nil || c.Value == "" || len(c.Value) > 128 {
@@ -80,7 +133,7 @@ func (h *handler) resumeCall(ctx context.Context, path string, ip net.IP, mac st
 // means no greeting, and the normal sign-in page is the correct fallback. Nothing is minted here; Connect
 // resolves the device properly before anything is decided.
 func (h *handler) welcomeFor(r *http.Request, mac string) *welcomeView {
-	token := h.resumeToken(r)
+	token := h.rememberedToken(r)
 	if token == "" || mac == "" {
 		return nil
 	}
@@ -107,7 +160,7 @@ func (h *handler) welcomeFor(r *http.Request, mac string) *welcomeView {
 
 // POST /auth/resume -- "Connect" on the Welcome-back line.
 func (h *handler) authResume(w http.ResponseWriter, r *http.Request) {
-	token := h.resumeToken(r)
+	token := h.rememberedToken(r)
 	if token == "" {
 		h.landing(w, r, msgPleaseSignIn)
 		return

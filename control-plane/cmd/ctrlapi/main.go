@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"flag"
 	"fmt"
@@ -15,11 +16,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/stayconnect/enterprise/control-plane/internal/api"
 	"github.com/stayconnect/enterprise/control-plane/internal/applianceauth"
 	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
+	"github.com/stayconnect/enterprise/control-plane/internal/audit"
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 	"github.com/stayconnect/enterprise/control-plane/internal/config"
 	"github.com/stayconnect/enterprise/control-plane/internal/db"
@@ -52,11 +55,19 @@ func main() {
 			err = runGenRegistryKey(os.Args[2:])
 		case "assignment-key":
 			err = runAssignmentKey(os.Args[2:])
+		case "gen-mfa-key":
+			err = runGenMFAKey(os.Args[2:])
+		case "reset-mfa":
+			err = runResetMFA(os.Args[2:])
+		case "unlock-signin":
+			err = runUnlockSignin(os.Args[2:])
+		case "check-mfa-key":
+			err = runCheckMFAKey(os.Args[2:])
 		case "serve", "":
 			goto serve
 		default:
 			fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", os.Args[1])
-			fmt.Fprintf(os.Stderr, "usage: ctrlapi [serve | seed-admin | gen-vendor-key | gen-assignment-key | gen-registry-key | assignment-key verify-only|revoke]\n")
+			fmt.Fprintf(os.Stderr, "usage: ctrlapi [serve | seed-admin | gen-vendor-key | gen-assignment-key | gen-registry-key | assignment-key verify-only|revoke | gen-mfa-key | check-mfa-key | reset-mfa | unlock-signin]\n")
 			os.Exit(2)
 		}
 		if err != nil {
@@ -168,7 +179,8 @@ func serve() {
 	// Housekeeping, every minute: a retirement never acknowledged within policy becomes
 	// terminal_delivery_failed + a security alert (credentials are NOT revoked); an elapsed replacement
 	// window raises an alert; and, hourly, assignment-fetch log rows older than 30 days are deleted and
-	// certificates superseded by a rotation more than a day ago are recorded as revoked.
+	// certificates superseded by a rotation more than a day ago are recorded as revoked, and Central's own
+	// records are removed or anonymised at the end of their retention periods (migration 0054).
 	go func() {
 		t := time.NewTicker(60 * time.Second)
 		defer t.Stop()
@@ -200,6 +212,11 @@ func serve() {
 						slog.Warn("superseded certificate revocation failed", "err", err)
 					} else if n > 0 {
 						slog.Info("superseded appliance certificates revoked", "count", n)
+					}
+					if done, err := api.ApplyRetention(rootCtx, tb); err != nil {
+						slog.Warn("data retention failed", "err", err)
+					} else if len(done) > 0 {
+						slog.Info("data retention applied", "done", done)
 					}
 				}
 			}
@@ -254,6 +271,19 @@ func serve() {
 		slog.Warn("appliance CA unavailable — PKI/mTLS disabled", "path", intKeyPath, "err", err)
 	}
 
+	// CONSOLE TWO-STEP SIGN-IN (0052, GDPR plan C10). Without the key no operator can sign in: the console
+	// refuses rather than letting a password alone through. central-install.sh creates it; the export bundle
+	// carries it, so moving Central keeps everyone's authenticator.
+	mfaKeyPath := envOrDefault("CTRLAPI_OPERATOR_MFA_KEY", defaultMFAKeyPath)
+	var mfaSvc *auth.MFA
+	if raw, err := auth.LoadMFAKeyFile(mfaKeyPath); err != nil {
+		slog.Error("console two-step sign-in key missing -- every console sign-in will be refused",
+			"path", mfaKeyPath, "err", err, "hint", "run: ctrlapi gen-mfa-key --out "+mfaKeyPath)
+	} else if mfaSvc, err = auth.NewMFA(pool, raw); err != nil {
+		slog.Error("console two-step sign-in key unusable -- every console sign-in will be refused", "path", mfaKeyPath, "err", err)
+		mfaSvc = nil
+	}
+
 	handler := apihttp.NewRouter(apihttp.Deps{
 		DB:            pool,
 		Redis:         rdb,
@@ -269,6 +299,7 @@ func serve() {
 		AllowOrigins:  cfg.AllowOrigins,
 		CookieSecure:  cfg.CookieSecure,
 		PortalTLS:     ptls,
+		MFA:           mfaSvc,
 	})
 
 	srv := &http.Server{
@@ -494,6 +525,195 @@ func runSeedAdmin(args []string) error {
 		return err
 	}
 
-	slog.Info("seeded platform admin", "email", *email, "id", id)
+	slog.Info("seeded platform admin", "id", id) // the id, not the email: the journal is outside retention (GDPR audit C6)
+	return nil
+}
+
+// defaultMFAKeyPath is where central-install.sh puts the console two-step sign-in key.
+const defaultMFAKeyPath = "/etc/stayconnect/operator-mfa.key"
+
+// runGenMFAKey writes a new 32-byte console two-step sign-in key (0052). It refuses to overwrite one: replacing
+// the key makes every operator's authenticator unreadable, and every operator would need a reset.
+func runGenMFAKey(args []string) error {
+	fs := flag.NewFlagSet("gen-mfa-key", flag.ExitOnError)
+	out := fs.String("out", defaultMFAKeyPath, "where to write the key (0600)")
+	_ = fs.Parse(args)
+	if _, err := os.Stat(*out); err == nil {
+		return fmt.Errorf("%s already exists; refusing to replace it (every operator would have to set up their authenticator again)", *out)
+	}
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(*out, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(key); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	slog.Info("console two-step sign-in key written", "path", *out)
+	return nil
+}
+
+// runResetMFA removes one operator's authenticator from Central's own command line (0052): the break-glass for
+// the last platform administrator, when nobody is left to reset them in the console. The operator's sessions
+// end, and they set up a new authenticator at their next sign-in. Audited as user.mfa_reset.
+func runResetMFA(args []string) error {
+	fs := flag.NewFlagSet("reset-mfa", flag.ExitOnError)
+	email := fs.String("email", "", "the operator's email")
+	reason := fs.String("reason", "", "why (recorded in the audit log)")
+	_ = fs.Parse(args)
+	if strings.TrimSpace(*email) == "" || len(strings.TrimSpace(*reason)) < 4 {
+		return fmt.Errorf("--email and --reason (at least 4 characters) are required")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	pool, err := db.Open(ctx, cfg.DBURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	var id string
+	if err := pool.QueryRow(ctx, `SELECT id::text FROM operators WHERE lower(email) = lower($1)`, strings.TrimSpace(*email)).Scan(&id); err != nil {
+		return fmt.Errorf("no operator %q: %w", *email, err)
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	had, err := auth.ResetMFA(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	if err := auth.EndOperatorSessions(ctx, tx, id); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	audit.System(ctx, pool, "user.mfa_reset", "operator", id, map[string]any{
+		"reason": strings.TrimSpace(*reason), "had_authenticator": had, "via": "command line"})
+	slog.Info("two-step sign-in reset; a new authenticator is set up at the next sign-in", "id", id, "had_authenticator", had)
+	return nil
+}
+
+// runUnlockSignin lifts every wrong-password lock on one sign-in name, from every address, from Central's own
+// command line (0056, Product-Owner decision D-R1): the way back in for an administrator locked out when nobody
+// is left to reset them in the console. The name need not have an account -- locks on unknown names are kept
+// exactly like real ones -- so it is cleared either way. Audited as user.signin_unlocked.
+//
+// The lock rows are keyed by an HMAC under the two-step sign-in key, so the key is read as ctrlapi reads it
+// (CTRLAPI_OPERATOR_MFA_KEY); without one, the plain-hash names a keyless ctrlapi writes are cleared instead.
+func runUnlockSignin(args []string) error {
+	fs := flag.NewFlagSet("unlock-signin", flag.ExitOnError)
+	email := fs.String("email", "", "the sign-in name (email) to unlock")
+	reason := fs.String("reason", "", "why (recorded in the audit log)")
+	_ = fs.Parse(args)
+	if strings.TrimSpace(*email) == "" || len(strings.TrimSpace(*reason)) < 4 {
+		return fmt.Errorf("--email and --reason (at least 4 characters) are required")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	pool, err := db.Open(ctx, cfg.DBURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	var mfa *auth.MFA
+	keyPath := envOrDefault("CTRLAPI_OPERATOR_MFA_KEY", defaultMFAKeyPath)
+	if raw, kerr := auth.LoadMFAKeyFile(keyPath); kerr != nil {
+		slog.Warn("two-step sign-in key unreadable: clearing the locks a keyless ctrlapi writes", "path", keyPath, "err", kerr)
+	} else if mfa, err = auth.NewMFA(pool, raw); err != nil {
+		return err
+	}
+	id, n, err := unlockSignin(ctx, pool, mfa, *email, *reason)
+	if err != nil {
+		return err
+	}
+	slog.Info("sign-in locks cleared", "id", id, "cleared", n)
+	return nil
+}
+
+// unlockSignin clears every lock on email and audits it. The audit row names the account by its id and never
+// carries the email; for a name with no account it names no account.
+func unlockSignin(ctx context.Context, pool *pgxpool.Pool, mfa *auth.MFA, email, reason string) (id string, n int64, err error) {
+	n, err = auth.ClearSigninLocks(ctx, pool, mfa.SigninName(email))
+	if err != nil {
+		return "", 0, err
+	}
+	_ = pool.QueryRow(ctx, `SELECT id::text FROM operators WHERE lower(email) = lower($1)`, strings.TrimSpace(email)).Scan(&id)
+	audit.System(ctx, pool, "user.signin_unlocked", "operator", id, map[string]any{
+		"reason": strings.TrimSpace(reason), "locks_cleared": n, "via": "command line"})
+	return id, n, nil
+}
+
+// runCheckMFAKey proves the console two-step sign-in key before a release depends on it (central-deploy.sh runs it
+// with the NEW binary before switching releases, and central-install.sh after creating or carrying the key):
+//
+//	ctrlapi check-mfa-key [--key <path>] [--no-db]
+//
+// It fails when the key is missing or malformed, or -- unless --no-db -- when the database holds confirmed
+// authenticators and the key opens none of them (a wrong key would refuse every operator who set up the app).
+// The database is CTRLAPI_DB_URL, as for every subcommand.
+func runCheckMFAKey(args []string) error {
+	fs := flag.NewFlagSet("check-mfa-key", flag.ExitOnError)
+	keyPath := fs.String("key", envOrDefault("CTRLAPI_OPERATOR_MFA_KEY", defaultMFAKeyPath), "the key file")
+	noDB := fs.Bool("no-db", false, "check the file only, not against the enrolled authenticators")
+	_ = fs.Parse(args)
+	raw, err := auth.LoadMFAKeyFile(*keyPath)
+	if err != nil {
+		return fmt.Errorf("console two-step sign-in key: %w (create one with: ctrlapi gen-mfa-key --out %s)", err, *keyPath)
+	}
+	if *noDB {
+		m, err := auth.NewMFA(nil, raw)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("console two-step sign-in key %s loads (key id %s); not checked against the database\n", *keyPath, m.KeyID())
+		return nil
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	pool, err := db.Open(ctx, cfg.DBURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	m, err := auth.NewMFA(pool, raw)
+	if err != nil {
+		return err
+	}
+	opened, unreadable, err := m.CheckKey(ctx)
+	if errors.Is(err, auth.ErrMFAWrongKey) {
+		return fmt.Errorf("%s (key id %s) opens none of the %d confirmed authenticators: it is not the key they were set up "+
+			"with. Restore the right key file; do not replace it", *keyPath, m.KeyID(), unreadable)
+	}
+	if err != nil {
+		return err
+	}
+	if unreadable > 0 {
+		slog.Warn("some authenticators were set up under another key and cannot be used until reset (ctrlapi reset-mfa)",
+			"unreadable", unreadable)
+	}
+	fmt.Printf("console two-step sign-in key %s is good (key id %s): opens %d of %d confirmed authenticators\n",
+		*keyPath, m.KeyID(), opened, opened+unreadable)
 	return nil
 }

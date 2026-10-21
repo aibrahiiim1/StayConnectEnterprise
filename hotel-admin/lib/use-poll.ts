@@ -2,6 +2,8 @@
 
 import { useEffect, useRef } from "react";
 
+import { inBackground } from "@/lib/api";
+
 /**
  * usePoll -- run `fn` every `ms` while the tab is VISIBLE.
  *
@@ -12,8 +14,12 @@ import { useEffect, useRef } from "react";
  *
  * The first load is the caller's; this only schedules the repeats. `fn` is read through a ref, so a new closure
  * each render does not restart the timer. `enabled: false` stops polling without unmounting anything.
+ *
+ * A poll is not the operator doing something, so every request it makes is marked background (inBackground)
+ * and does not keep the session from going idle. Return the promise from `fn` -- `() => load()`, not
+ * `() => void load()` -- so requests made after an await inside it are marked too.
  */
-export function usePoll(fn: () => void, ms: number, { enabled = true }: { enabled?: boolean } = {}) {
+export function usePoll(fn: () => unknown, ms: number, { enabled = true }: { enabled?: boolean } = {}) {
   const latest = useRef(fn);
   useEffect(() => {
     latest.current = fn;
@@ -23,10 +29,10 @@ export function usePoll(fn: () => void, ms: number, { enabled = true }: { enable
     if (!enabled) return;
     const hidden = () => typeof document !== "undefined" && document.hidden;
     const iv = window.setInterval(() => {
-      if (!hidden()) latest.current();
+      if (!hidden()) inBackground(latest.current);
     }, ms);
     const onVisibility = () => {
-      if (!hidden()) latest.current();
+      if (!hidden()) inBackground(latest.current);
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => {

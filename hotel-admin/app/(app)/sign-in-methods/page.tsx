@@ -26,8 +26,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, ListResp, Whoami } from "@/lib/api";
+import type { PortalHTTPSDoc } from "@/lib/portal-https";
+import { typedSignInOn } from "@/lib/sign-in-methods";
 import { canRead, canWrite } from "@/lib/roles";
 import { GuestSignInProtectionCard } from "@/components/guest-signin-protection";
+import { NetworkPauseSettingsCard, NetworkPausesNotice } from "@/components/guest-signin-network-pause";
 import { CodeRequestsCard } from "@/components/code-requests";
 import { EmailAccountsSettingsCard } from "@/components/email-accounts-settings";
 import { roomSignInImpaired, useRoomSignInReadiness } from "@/components/room-sign-in-readiness";
@@ -35,7 +38,7 @@ import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/compon
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Select } from "@/components/ui/input";
-import { ErrorBanner } from "@/components/ui/error-banner";
+import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { PageHeader, PageShell } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Skeleton, Switch } from "@/components/ui/misc";
@@ -114,6 +117,8 @@ export default function SignInMethodsPage() {
   const [cfg, setCfg] = useState<AuthMethods | null>(null);
   const [notify, setNotify] = useState<NotifyProvider[]>([]);
   const [social, setSocial] = useState<SocialProvider[]>([]);
+  // Whether the sign-in page is served over HTTPS yet (GDPR audit A3). null: unknown, nothing is shown.
+  const [httpsActive, setHttpsActive] = useState<boolean | null>(null);
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState<string | null>(null);
   // Whether Room sign-in can serve a guest right now. Only a one-line warning is shown here — the detail is on
@@ -138,6 +143,12 @@ export default function SignInMethodsPage() {
         const n = await api.get<ListResp<NotifyProvider>>("/notification-providers");
         setNotify(n.data ?? []);
       } catch { /* readiness unknown; rendered as such */ }
+    }
+    if (roles !== null && canRead("portal-https", roles)) {
+      try {
+        const d = await api.get<PortalHTTPSDoc>("/portal-https");
+        setHttpsActive(typeof d?.state?.https_active === "boolean" ? d.state.https_active : null);
+      } catch { /* unknown; no warning rather than a wrong one */ }
     }
     if (socialMod && roles !== null && canRead("social-providers", roles)) {
       try {
@@ -246,6 +257,20 @@ export default function SignInMethodsPage() {
         <ReadOnlyNotice>Your role can see which sign-in methods are offered but not change them.</ReadOnlyNotice>
       )}
       <ErrorBanner err={err} className="mb-0" />
+
+      {/* A running network pause is shown where staff manage sign-in (GDPR audit A4). */}
+      {hospitality && roles !== null && canRead("guest-signin-restrictions", roles) && (
+        <NetworkPausesNotice canAct={canWrite("guest-signin-restrictions", roles)} />
+      )}
+
+      {httpsActive === false && typedSignInOn(cfg) && (
+        <Callout tone="warning" title="Sign-ins are not encrypted yet">
+          The client sign-in page is still served over plain HTTP, because the portal has no HTTPS certificate yet. Until
+          it has, what clients type to sign in (room and name, passwords, codes) crosses the client network unencrypted,
+          and another device on that network could read it. Keep client isolation on for client networks, and finish{" "}
+          <Link href="/portal-https" className="underline">Portal HTTPS</Link> before clients rely on these methods.
+        </Callout>
+      )}
 
       <div className="grid gap-4 md:grid-cols-2">
         <MethodCard
@@ -451,6 +476,7 @@ export default function SignInMethodsPage() {
       {/* Sign-in protection counts wrong ROOM details (it is enforced on Room sign-in only), so it belongs to
           Hospitality and is neither shown nor asked for on a site without it. */}
       {hospitality && <GuestSignInProtectionCard canWrite={mayChangeProtection} />}
+      {hospitality && <NetworkPauseSettingsCard canWrite={mayChangeProtection} />}
     </PageShell>
   );
 }
@@ -532,7 +558,7 @@ function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
             max={REMEMBER_DAYS_MAX}
             defaultValue={REMEMBER_DAYS_DEFAULT}
             readOnly={!writable || busy}
-            explanation="After a client verifies a code or an identity provider on a device, that device can reconnect without another code for this long. 0 = always ask."
+            explanation="After a client verifies a code or an identity provider on a device, that device can reconnect without another code for this long. Only over the portal's HTTPS address: without HTTPS, devices are not remembered. 0 = always ask."
           />
           {storedOff && (
             <p className="text-xs text-warning-subtle-foreground md:col-span-2" role="status">

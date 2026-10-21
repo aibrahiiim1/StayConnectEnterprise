@@ -74,7 +74,7 @@ export const CodeEditor = React.forwardRef<
         <div
           ref={gutter}
           aria-hidden
-          className="select-none overflow-hidden border-r border-border bg-surface/60 px-2 py-2 text-right leading-5 text-muted-foreground/60"
+          className="select-none overflow-hidden border-r border-border bg-surface/60 px-2 py-2 text-right leading-5 text-muted-foreground"
           style={{ height: `${minRows * 1.25 + 1}rem` }}
         >
           {Array.from({ length: lines }, (_, i) => (
@@ -101,7 +101,7 @@ export const CodeEditor = React.forwardRef<
             if (gutter.current) gutter.current.scrollTop = e.currentTarget.scrollTop;
           }}
           data-language={language}
-          className="min-w-0 flex-1 resize-none bg-transparent px-3 py-2 leading-5 outline-none placeholder:text-muted-foreground/60"
+          className="min-w-0 flex-1 resize-none bg-transparent px-3 py-2 leading-5 outline-none placeholder:text-muted-foreground"
           style={{ height: `${minRows * 1.25 + 1}rem`, tabSize: 2 }}
         />
       </div>

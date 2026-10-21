@@ -14,6 +14,8 @@
 //	BASE   http://127.0.0.1:8080           the ctrlapi HTTP listener
 //	MTLS   https://127.0.0.1:9443          the mTLS appliance listener
 //	PA / PASS                              a platform_admin (see: ctrlapi seed-admin)
+//	OPERATOR_TOTP_KEYRING                  where the tool keeps the authenticator secrets of the operators it
+//	                                       set up (internal/opsignin; default in the user's config directory)
 //	PG_EXEC "docker exec -i sc-central-pg" how to run psql against Central's database (for time travel)
 //
 // Prints PASS:<n> / FAIL:<n> and exits non-zero on any failure.
@@ -41,6 +43,7 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/activation"
 	"github.com/stayconnect/enterprise/control-plane/internal/applianceauth"
 	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
+	"github.com/stayconnect/enterprise/control-plane/internal/opsignin"
 )
 
 var (
@@ -52,6 +55,8 @@ var (
 	run    = fmt.Sprintf("%d", time.Now().Unix()%100000)
 	npass  = 0
 	nfail  = 0
+
+	keyring *opsignin.Keyring
 )
 
 func env(k, d string) string {
@@ -88,6 +93,11 @@ type appliance struct {
 }
 
 func main() {
+	var err error
+	if keyring, err = opsignin.Open(opsignin.DefaultKeyringPath()); err != nil {
+		fmt.Println("  FAIL:", err)
+		os.Exit(1)
+	}
 	op := login(pa)
 	reauth(op)
 
@@ -464,8 +474,8 @@ func activateBody(customerID, newCustomer, siteID, newSite string) []byte {
 func login(email string) *http.Client {
 	jar, _ := cookiejar.New(nil)
 	cl := &http.Client{Jar: jar, Timeout: 30 * time.Second}
-	if code, body := do(cl, "POST", "/v1/auth/login", jb(map[string]string{"email": email, "password": pass})); code != 200 {
-		bad("login %s: HTTP %d %s", email, code, trunc(body))
+	if err := keyring.SignIn(cl, base, email, pass); err != nil {
+		bad("login %s: %s", email, trunc(err.Error()))
 	}
 	return cl
 }

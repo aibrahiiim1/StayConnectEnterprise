@@ -68,7 +68,7 @@ func TestFacebookAuthorizeURL(t *testing.T) {
 	q := u.Query()
 	for k, want := range map[string]string{
 		"client_id": "app", "redirect_uri": "https://portal/auth/social/callback",
-		"response_type": "code", "state": "state-abc", "scope": "email public_profile",
+		"response_type": "code", "state": "state-abc", "scope": "email",
 	} {
 		if q.Get(k) != want {
 			t.Errorf("query[%s] = %q, want %q", k, q.Get(k), want)
@@ -102,7 +102,7 @@ func TestFacebookExchangeSuccess(t *testing.T) {
 	if got, want := meQ.Get("appsecret_proof"), appSecretProof("fb-at-1", "fb-app-secret"); got != want || len(got) != 64 {
 		t.Errorf("appsecret_proof = %q, want %q", got, want)
 	}
-	if meQ.Get("fields") != "id,name,email,picture" {
+	if meQ.Get("fields") != "id,email" {
 		t.Errorf("fields = %q", meQ.Get("fields"))
 	}
 	if meQ.Get("access_token") != "" {

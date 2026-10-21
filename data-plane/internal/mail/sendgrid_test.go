@@ -98,3 +98,49 @@ func TestSendGridConstructorValidation(t *testing.T) {
 		t.Error("missing from_address should fail")
 	}
 }
+
+// Every request carries tracking_settings with each tracker explicitly false: an omitted block, or an omitted
+// false, leaves the decision to the SendGrid account's defaults.
+func TestSendGridDisablesTracking(t *testing.T) {
+	var raw map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &raw); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	sg, err := NewSendGrid("SG.testkey", "noreply@hotel.com", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sg.Endpoint = srv.URL
+	if err := sg.Send(context.Background(), Message{To: "guest@example.com", Subject: "s", Text: "t"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	ts, ok := raw["tracking_settings"].(map[string]any)
+	if !ok {
+		t.Fatalf("tracking_settings missing: %v", raw)
+	}
+	want := map[string][]string{
+		"click_tracking":        {"enable", "enable_text"},
+		"open_tracking":         {"enable"},
+		"subscription_tracking": {"enable"},
+		"ganalytics":            {"enable"},
+	}
+	for tracker, flags := range want {
+		block, ok := ts[tracker].(map[string]any)
+		if !ok {
+			t.Errorf("%s missing", tracker)
+			continue
+		}
+		for _, f := range flags {
+			if v, present := block[f]; !present || v != false {
+				t.Errorf("%s.%s = %v (present=%v), want explicit false", tracker, f, v, present)
+			}
+		}
+	}
+}

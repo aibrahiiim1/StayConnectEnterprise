@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -23,6 +24,10 @@ type authDeps struct {
 	Secure bool // set true in prod to add Secure on cookies
 	// Failures bounds how many failed sign-ins / step-ups are written to the audit log (ratebudget).
 	Failures *ratebudget.Budget
+	// MFA is the authenticator service (auth/mfa.go, 0052). nil refuses every sign-in: fail closed.
+	MFA *auth.MFA
+	// NewSession creates the console session; nil means Store.Create (Redis). Tests supply their own.
+	NewSession func(context.Context, auth.Session) (*auth.Session, error)
 }
 
 // auditFailure records a failed sign-in or step-up, within the failure budget: at most 5 per client address
@@ -66,6 +71,28 @@ type whoamiResp struct {
 	CustomerID   *string  `json:"customer_id"`
 	CustomerName *string  `json:"customer_name"`
 	Permissions  []string `json:"permissions"`
+
+	// Session timing, so the console can warn before a sign-in ends (WCAG 2.2.1). Additive, and omitted when
+	// unknown. idle_expires_at moves with each request that counts as activity (whoami does not);
+	// absolute_expires_at never moves. server_time lets the console correct for its own clock.
+	IdleExpiresAt     *time.Time `json:"idle_expires_at,omitempty"`
+	AbsoluteExpiresAt *time.Time `json:"absolute_expires_at,omitempty"`
+	ServerTime        *time.Time `json:"server_time,omitempty"`
+}
+
+// withSessionTiming adds the session's idle and absolute expiry times, as the session policy computed them.
+func withSessionTiming(resp whoamiResp, s *auth.Session, now time.Time) whoamiResp {
+	if !s.IdleExpiresAt.IsZero() {
+		idle := s.IdleExpiresAt.UTC()
+		resp.IdleExpiresAt = &idle
+	}
+	if !s.AbsoluteExpiresAt.IsZero() {
+		abs := s.AbsoluteExpiresAt.UTC()
+		resp.AbsoluteExpiresAt = &abs
+	}
+	n := now.UTC()
+	resp.ServerTime = &n
+	return resp
 }
 
 func (d authDeps) describe(ctx context.Context, s *auth.Session) whoamiResp {
@@ -99,9 +126,18 @@ func (d authDeps) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if d.signinLocked(w, r, req.Email, "") {
+		return
+	}
+
 	op, err := d.Repo.FindByEmail(r.Context(), req.Email)
 	if err != nil || op.Status != "active" || op.PasswordHash == "" {
-		// Constant response for bad email vs bad password vs disabled; the audit row says which.
+		// Constant response for bad email vs bad password vs disabled; the audit row says which. The time is the same
+		// too: a password is checked against a decoy, so the response time does not tell which names have an account.
+		if errors.Is(auth.SpendPasswordCheck(req.Password), auth.ErrBusy) {
+			api.Fail(w, r, http.StatusServiceUnavailable, "busy", "Central is busy checking other sign-ins. Try again in a moment.")
+			return
+		}
 		reason, opID := "unknown email", ""
 		if err == nil {
 			opID = op.ID
@@ -110,7 +146,10 @@ func (d authDeps) login(w http.ResponseWriter, r *http.Request) {
 				reason = "no password set"
 			}
 		}
-		d.auditFailure(r, "auth.login_failed", opID, map[string]any{"email": req.Email, "reason": reason})
+		d.auditFailure(r, "auth.login_failed", opID, map[string]any{"reason": reason})
+		if d.signinFailed(w, r, req.Email, opID) {
+			return
+		}
 		api.Fail(w, r, http.StatusUnauthorized, api.CodeUnauthenticated, "invalid credentials")
 		return
 	}
@@ -119,40 +158,18 @@ func (d authDeps) login(w http.ResponseWriter, r *http.Request) {
 			api.Fail(w, r, http.StatusServiceUnavailable, "busy", "Central is busy checking other sign-ins. Try again in a moment.")
 			return
 		}
-		d.auditFailure(r, "auth.login_failed", op.ID, map[string]any{"email": req.Email, "reason": "wrong password"})
+		d.auditFailure(r, "auth.login_failed", op.ID, map[string]any{"reason": "wrong password"})
+		if d.signinFailed(w, r, req.Email, op.ID) {
+			return
+		}
 		api.Fail(w, r, http.StatusUnauthorized, api.CodeUnauthenticated, "invalid credentials")
 		return
 	}
+	d.signinSucceeded(r, req.Email)
 
-	sess, err := d.Store.Create(r.Context(), auth.Session{
-		OperatorID:      op.ID,
-		Email:           op.Email,
-		DisplayName:     op.DisplayName,
-		IsSuperAdmin:    op.IsSuperAdmin,
-		DefaultTenantID: op.DefaultTenant,
-		Roles:           op.Roles,
-	})
-	if err != nil {
-		api.Fail(w, r, http.StatusInternalServerError, api.CodeInternal, "session create failed")
-		return
-	}
-	if d.DB != nil {
-		_, _ = d.DB.Exec(r.Context(), `UPDATE operators SET last_login_at=now() WHERE id=$1`, op.ID)
-		audit.Emit(r.Context(), d.DB, audit.Entry{ActorType: "operator", ActorID: op.ID, TenantID: op.DefaultTenant,
-			Action: "auth.login_succeeded", TargetType: "operator", TargetID: op.ID,
-			IP: clientip.From(r), UserAgent: r.UserAgent()})
-	}
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     auth.SessionCookieName,
-		Value:    sess.Token,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   d.Secure,
-		SameSite: http.SameSiteLaxMode,
-		Expires:  sess.ExpiresAt,
-	})
-	writeJSON(w, http.StatusOK, d.describe(r.Context(), sess))
+	// THE PASSWORD IS ONE OF TWO STEPS (0052): no session yet. The authenticator code opens it
+	// (auth_mfa_handlers.go).
+	d.beginSecondStep(w, r, op)
 }
 
 // reauth re-verifies the CURRENT session operator's password. Licence and activation writes (and every
@@ -171,6 +188,9 @@ func (d authDeps) reauth(w http.ResponseWriter, r *http.Request) {
 		api.Fail(w, r, http.StatusBadRequest, api.CodeBadRequest, "password required")
 		return
 	}
+	if d.signinLocked(w, r, s.Email, s.OperatorID) {
+		return
+	}
 	op, err := d.Repo.FindByID(r.Context(), s.OperatorID)
 	if err != nil || op.Status != "active" || op.PasswordHash == "" {
 		d.auditFailure(r, "auth.reauth_failed", s.OperatorID, map[string]any{"reason": "operator not active"})
@@ -183,9 +203,13 @@ func (d authDeps) reauth(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.auditFailure(r, "auth.reauth_failed", s.OperatorID, map[string]any{"reason": "wrong password"})
+		if d.signinFailed(w, r, s.Email, s.OperatorID) {
+			return
+		}
 		api.Fail(w, r, http.StatusUnauthorized, api.CodeUnauthenticated, "reauthentication failed")
 		return
 	}
+	d.signinSucceeded(r, s.Email)
 	if c, err := r.Cookie(auth.SessionCookieName); err == nil {
 		api.MarkReauth(d.Store.R, c.Value)
 	}
@@ -215,5 +239,5 @@ func (d authDeps) whoami(w http.ResponseWriter, r *http.Request) {
 		api.Fail(w, r, http.StatusUnauthorized, api.CodeUnauthenticated, "not authenticated")
 		return
 	}
-	writeJSON(w, http.StatusOK, d.describe(r.Context(), s))
+	writeJSON(w, http.StatusOK, withSessionTiming(d.describe(r.Context(), s), s, time.Now()))
 }

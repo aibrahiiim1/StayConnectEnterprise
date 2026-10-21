@@ -563,6 +563,40 @@ func (s *server) walledGardenRoutes() http.Handler {
 
 // ----- local audit log ----------------------------------------------------------------
 
+// guestAuditResources: the trail entries that name a guest, by action prefix, and the screen whose read
+// permission shows them (GDPR audit B6; final check D3). What was searched for is client data too, so the
+// guest_data entries follow guest-data-rights.
+var guestAuditResources = []struct{ prefix, resource string }{
+	{"guest_data.", "guest-data-rights"},
+	{"guest_account.", "guest-accounts"},
+	{"guest_signin_", "guest-signin-attempts"},
+	{"network.dhcp.reservation.", "network"},
+	{"client_device.", "sessions"},
+	{"session.", "sessions"},
+	{"poststay.", "pms-stay-identity"},
+	{"stay.", "pms-stay-identity"},
+}
+
+// hiddenGuestAuditPrefixes lists the prefixes whose guest details these roles may not see.
+func hiddenGuestAuditPrefixes(roles []string) []string {
+	out := []string{}
+	for _, g := range guestAuditResources {
+		if !permFor(roles, g.resource, permRead) {
+			out = append(out, g.prefix)
+		}
+	}
+	return out
+}
+
+func guestAuditHidden(action string, hidden []string) bool {
+	for _, p := range hidden {
+		if strings.HasPrefix(action, p) {
+			return true
+		}
+	}
+	return false
+}
+
 type auditRow struct {
 	TS         time.Time       `json:"ts"`
 	ActorType  string          `json:"actor_type"`
@@ -622,12 +656,27 @@ func (s *server) auditRoutes() http.Handler {
 		bind := func(v any) int { args = append(args, v); return len(args) }
 		period := ` WHERE tenant_id = $1`
 
+		// GUEST DETAILS IN THE TRAIL FOLLOW THE SCREEN THEY CAME FROM (GDPR audit B6; final check D3). An entry
+		// about a guest -- an account, a device, a stay, a sign-in -- names them in its target or its details. A
+		// role that cannot read that screen sees that the action happened, when, and who did it; not whom it was
+		// about, and neither a search nor the actor filter matches on it -- otherwise actor=<a MAC or an e-mail>
+		// would confirm that guest's presence, and when, through the matches and the per-action counts.
+		var roles []string
+		if sess := sessFrom(req.Context()); sess != nil {
+			roles = sess.Roles
+		}
+		hidden := hiddenGuestAuditPrefixes(roles)
+		hiddenLike := make([]string, len(hidden))
+		for i, h := range hidden {
+			hiddenLike[i] = likeEscape(h) + "%"
+		}
+
 		// ONE PLACEHOLDER, REFERENCED TWICE. On a sign-in the operator is the TARGET, not the actor, so an
 		// actor search that only looked at actor_id would miss every login on the appliance -- which is the
 		// most common thing anyone searches for.
 		if v := qv.Get("actor"); v != "" {
-			n := bind(v)
-			period += fmt.Sprintf(` AND (actor_id = $%d OR target_id = $%d)`, n, n)
+			n, h := bind(v), bind(hiddenLike)
+			period += fmt.Sprintf(` AND (actor_id = $%[1]d OR (target_id = $%[1]d AND NOT action LIKE ANY($%[2]d)))`, n, h)
 		}
 		if v := qv.Get("from"); v != "" {
 			if t, err := time.Parse(time.RFC3339, v); err == nil {
@@ -665,9 +714,10 @@ func (s *server) auditRoutes() http.Handler {
 					titled = append(titled, c)
 				}
 			}
-			n, m := bind(likePattern(search)), bind(titled)
-			where += fmt.Sprintf(` AND (action ILIKE $%[1]d OR actor_id ILIKE $%[1]d OR target_id ILIKE $%[1]d
-			    OR target_type ILIKE $%[1]d OR host(ip) ILIKE $%[1]d OR action = ANY($%[2]d))`, n, m)
+			n, m, h := bind(likePattern(search)), bind(titled), bind(hiddenLike)
+			where += fmt.Sprintf(` AND (action ILIKE $%[1]d OR actor_id ILIKE $%[1]d
+			    OR (target_id ILIKE $%[1]d AND NOT action LIKE ANY($%[3]d))
+			    OR target_type ILIKE $%[1]d OR host(ip) ILIKE $%[1]d OR action = ANY($%[2]d))`, n, m, h)
 		}
 
 		ctx, cancel := dbCtx(req)
@@ -692,6 +742,12 @@ func (s *server) auditRoutes() http.Handler {
 				slog.Error("audit scan failed", "err", err)
 				jsonErr(w, http.StatusInternalServerError, "internal", "the audit trail could not be read")
 				return
+			}
+			if guestAuditHidden(a.Action, hidden) {
+				a.TargetID = nil
+				if len(a.Payload) > 0 {
+					a.Payload = json.RawMessage(`{"details_hidden":true}`)
+				}
 			}
 			out = append(out, a)
 		}

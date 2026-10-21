@@ -78,7 +78,7 @@ describe("the list", () => {
     render(<ClientGroupsPage />);
     expect(await screen.findByText(/can see the client groups but not change them/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Add group/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: /^Delete$/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Delete\b/ })).toBeNull();
   });
 
   it("summarises every rule kind", () => {
@@ -166,10 +166,10 @@ describe("deleting a group", () => {
     }));
     render(<ClientGroupsPage />);
     await screen.findByText("Partners");
-    fireEvent.click(screen.getByRole("button", { name: /^Delete$/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Delete\b/ }));
     const dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText(/^Reason/), { target: { value: "ended" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: /^Delete$/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Delete\b/ }));
     expect(await within(dialog).findByText(/this group is the audience of: PARTNERWIFI, PARTNERPLUS\. Change those packages first\./)).toBeInTheDocument();
     expect(del).toHaveBeenCalledWith("/client-groups/g-par", { reason: "ended" });
     // Still listed: nothing was deleted.
@@ -181,9 +181,9 @@ describe("deleting a group", () => {
     del.mockImplementation(() => { routes([]); return Promise.resolve(undefined); });
     render(<ClientGroupsPage />);
     await screen.findByText("Partners");
-    fireEvent.click(screen.getByRole("button", { name: /^Delete$/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Delete\b/ }));
     const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("button", { name: /^Delete$/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Delete\b/ }));
     await waitFor(() => expect(del).toHaveBeenCalledWith("/client-groups/g-par", undefined));
     expect(await screen.findByText("No client groups yet")).toBeInTheDocument();
   });

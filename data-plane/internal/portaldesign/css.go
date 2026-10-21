@@ -44,6 +44,9 @@ type finding struct {
 type cssSan struct {
 	found          []finding
 	stripImportant bool
+	// selectors is the chain of style-rule selectors enclosing the declaration being read (more than one with
+	// CSS nesting); at-rules are not on it.
+	selectors []string
 }
 
 func (c *cssSan) errorf(format string, a ...any) {
@@ -318,7 +321,47 @@ func (c *cssSan) rule(prelude, body string, depth int) string {
 		c.errorf("the selector %q %s", clip(prelude), bad)
 		return ""
 	}
-	return prelude + " {\n" + c.declarations(body, depth+1) + "\n}"
+	c.selectors = append(c.selectors, prelude)
+	inner := c.declarations(body, depth+1)
+	c.selectors = c.selectors[:len(c.selectors)-1]
+	return prelude + " {\n" + inner + "\n}"
+}
+
+// focusSelector is the enclosing selector that styles a focused element, or "".
+func (c *cssSan) focusSelector() string {
+	for i := len(c.selectors) - 1; i >= 0; i-- {
+		if strings.Contains(strings.ToLower(decodeCSSEscapes(c.selectors[i])), ":focus") {
+			return c.selectors[i]
+		}
+	}
+	return ""
+}
+
+// hidesOutline says whether an outline declaration takes the focus ring away: none, hidden, zero width, or a
+// transparent colour.
+func hidesOutline(name, value string) bool {
+	v := strings.ToLower(strings.Join(strings.Fields(decodeCSSEscapes(value)), " "))
+	zero := func(w string) bool {
+		if w == "" || !(w[0] == '.' || (w[0] >= '0' && w[0] <= '9')) {
+			return false
+		}
+		return strings.TrimLeft(strings.TrimRight(w, "pxemrchvwi%"), "0.") == ""
+	}
+	switch name {
+	case "outline":
+		for _, w := range strings.Fields(v) {
+			if w == "none" || w == "hidden" || w == "transparent" || zero(w) {
+				return true
+			}
+		}
+	case "outline-style":
+		return v == "none" || v == "hidden"
+	case "outline-width":
+		return zero(v)
+	case "outline-color":
+		return v == "transparent"
+	}
+	return false
 }
 
 // declarations sanitises a declaration list, which (with CSS nesting) may also hold nested rules.
@@ -399,6 +442,11 @@ func (c *cssSan) declaration(d string) string {
 	}
 	if strings.TrimSpace(value) == "" {
 		return ""
+	}
+	// A FOCUS RING TAKEN AWAY. Served as written -- the portal's guard sheet keeps its own ring on every focused
+	// control whatever this says -- but the operator is told, because on their own markup nothing keeps it.
+	if sel := c.focusSelector(); sel != "" && hidesOutline(name, value) {
+		c.warnf("%s: %s on %q removes the focus outline that keyboard users follow; the portal still draws its own focus ring on links, buttons and fields", name, clip(value), clip(sel))
 	}
 	return rawName + ": " + value
 }

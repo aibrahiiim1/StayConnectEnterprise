@@ -25,6 +25,10 @@ func TestFailedLoginsAreAuditedWithinABudget(t *testing.T) {
 	if err := pool.QueryRow(ctx, `INSERT INTO operators (email, password_hash, status) VALUES ('ops@central.test',$1,'active') RETURNING id::text`, hash).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
+	// The account lockout (0053) is raised out of the way: this test is about the audit budget, not the lock.
+	if _, err := pool.Exec(ctx, `UPDATE central_security_settings SET signin_lock_failures = 20 WHERE id`); err != nil {
+		t.Fatal(err)
+	}
 	d := authDeps{Repo: &auth.Repo{DB: pool}, DB: pool, Failures: ratebudget.New(5, 300, time.Minute)}
 	post := func(body, ip string) int {
 		req := httptest.NewRequest(http.MethodPost, "/v1/auth/login", strings.NewReader(body))
@@ -51,5 +55,11 @@ func TestFailedLoginsAreAuditedWithinABudget(t *testing.T) {
 	}
 	if unknown != 1 {
 		t.Fatalf("an unknown-email failure must be audited too, got %d", unknown)
+	}
+	// What was typed is not kept: an unknown name may be anyone's address, and a known one is the actor id.
+	var typed int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action LIKE 'auth.%' AND payload::text LIKE '%@central.test%'`).Scan(&typed)
+	if typed != 0 {
+		t.Fatalf("%d sign-in audit entries hold a typed email address", typed)
 	}
 }

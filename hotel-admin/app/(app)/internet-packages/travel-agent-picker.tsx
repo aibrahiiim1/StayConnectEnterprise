@@ -146,6 +146,9 @@ export function TravelAgentPicker({
           {options.map((a, i) => {
             const on = isSelected(a.name);
             return (
+              // The keyboard is the combobox input's (onKeyDown above, aria-activedescendant): options are never
+              // focused, so a key handler here could not fire. The click is the pointer path only.
+              // eslint-disable-next-line jsx-a11y/click-events-have-key-events
               <li
                 key={a.name}
                 role="option"
@@ -164,6 +167,8 @@ export function TravelAgentPicker({
             );
           })}
           {canAddTyped && (
+            // Same as the options above: the input owns the keyboard.
+            // eslint-disable-next-line jsx-a11y/click-events-have-key-events
             <li
               role="option"
               aria-selected={false}

@@ -49,11 +49,15 @@ func newSigninAPI(t *testing.T, roles ...string) *signinFixture {
 	r.Route("/edge/v1", func(r chi.Router) {
 		r.Use(sameOrigin)
 		r.Post("/auth/login", s.login)
+		r.Post("/auth/login/enrol", s.loginEnrol)
+		r.Post("/auth/login/code", s.loginCode)
 		r.Post("/auth/logout", s.logout)
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
 			r.Get("/auth/whoami", s.whoami)
 			r.Post("/auth/password", s.changeOwnPassword)
+			r.Get("/auth/mfa", s.getOwnMFA)
+			r.Post("/auth/mfa/recovery-codes", s.newOwnRecoveryCodes)
 			mountResource(r, s, "operators", s.operatorsRoutes)
 			mountResource(r, s, "backup-download", s.backupDownloadRoutes)
 		})
@@ -81,6 +85,8 @@ type resp struct {
 	raw    string
 	header http.Header
 	cookie string
+	// pending is the "password accepted" cookie of a first sign-in step (0132).
+	pending string
 }
 
 func (sf *signinFixture) call(t *testing.T, method, path, ip, cookie string, body any, extra map[string]string) resp {
@@ -104,6 +110,10 @@ func (sf *signinFixture) call(t *testing.T, method, path, ip, cookie string, bod
 	if cookie != "" {
 		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: cookie})
 	}
+	if p := extra["pending"]; p != "" {
+		req.AddCookie(&http.Cookie{Name: pendingSigninCookie, Value: p})
+		delete(extra, "pending")
+	}
 	for k, v := range extra {
 		req.Header.Set(k, v)
 	}
@@ -119,14 +129,48 @@ func (sf *signinFixture) call(t *testing.T, method, path, ip, cookie string, bod
 		if c.Name == sessionCookie && c.MaxAge >= 0 && c.Value != "" {
 			out.cookie = c.Value
 		}
+		if c.Name == pendingSigninCookie && c.MaxAge >= 0 && c.Value != "" {
+			out.pending = c.Value
+		}
 	}
 	return out
 }
 
-func (sf *signinFixture) login(t *testing.T, email, pw, ip string) resp {
+// passwordStep is the first sign-in step alone: on success it answers which second step comes, and opens no session.
+func (sf *signinFixture) passwordStep(t *testing.T, email, pw, ip string) resp {
 	sf.track(scopeAccount, email)
 	sf.track(scopeIP, ip)
 	return sf.call(t, "POST", "/auth/login", ip, "", map[string]any{"email": email, "password": pw}, nil)
+}
+
+// codeStep sends a code with the "password accepted" cookie.
+func (sf *signinFixture) codeStep(t *testing.T, pending, code, ip string) resp {
+	return sf.call(t, "POST", "/auth/login/code", ip, "", map[string]any{"code": code}, map[string]string{"pending": pending})
+}
+
+// login signs in the way a person does: the password, then -- setting up the authenticator the first time --
+// the code the phone shows. It answers the final response, or the password step's when that one refused.
+func (sf *signinFixture) login(t *testing.T, email, pw, ip string) resp {
+	t.Helper()
+	first := sf.passwordStep(t, email, pw, ip)
+	if first.code != 200 {
+		return first
+	}
+	var id string
+	if err := sf.pool.QueryRow(context.Background(), `SELECT id::text FROM operators WHERE lower(email)=lower($1)`, email).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	sf.track(scopeMFA, id)
+	switch first.body["second_step"] {
+	case "enrol":
+		if e := sf.call(t, "POST", "/auth/login/enrol", ip, "", nil, map[string]string{"pending": first.pending}); e.code != 200 {
+			t.Fatalf("set-up step = %d %s", e.code, e.raw)
+		}
+	case "code":
+	default:
+		t.Fatalf("password step answered %s", first.raw)
+	}
+	return sf.codeStep(t, first.pending, sf.mfa.codeFor(id), ip)
 }
 
 // age moves a counter's clock back by d: the test's way of letting time pass.
@@ -356,7 +400,7 @@ func TestIntegrationMustChangePassword_ConfinesTheSessionUntilChanged(t *testing
 	email := fmt.Sprintf("newop-%d@test.local", time.Now().UnixNano())
 	const first = "chosen-by-admin-1"
 	if r := admin.call(t, "POST", "/operators", ip, admin.sessTok, map[string]any{
-		"email": email, "password": first, "role": "hotel_it_manager", "require_change": true}, nil); r.code != 201 ||
+		"email": email, "password": first, "role": "hotel_it_manager", "require_change": true, "your_password": admin.password}, nil); r.code != 201 ||
 		r.body["must_change_password"] != true {
 		t.Fatalf("create: %d %s", r.code, r.raw)
 	}
@@ -420,7 +464,7 @@ func TestIntegrationAdminResetAndDisableEndTheOperatorsSessions(t *testing.T) {
 	admin := newSigninAPI(t, "site_admin")
 	ip := testIP()
 	email := fmt.Sprintf("colleague-%d@test.local", time.Now().UnixNano())
-	cr := admin.call(t, "POST", "/operators", ip, admin.sessTok, map[string]any{"email": email, "password": "colleague-pass-1", "role": "hotel_it_manager"}, nil)
+	cr := admin.call(t, "POST", "/operators", ip, admin.sessTok, map[string]any{"email": email, "password": "colleague-pass-1", "role": "hotel_it_manager", "your_password": admin.password}, nil)
 	if cr.code != 201 {
 		t.Fatalf("create: %d %s", cr.code, cr.raw)
 	}
@@ -434,7 +478,20 @@ func TestIntegrationAdminResetAndDisableEndTheOperatorsSessions(t *testing.T) {
 		admin.login(t, email, "wrong-wrong-wrong", ip)
 		admin.age(t, scopeAccount, email, time.Minute)
 	}
-	if r := admin.call(t, "POST", "/operators/"+id+"/set-password", ip, admin.sessTok, map[string]any{"password": "reset-by-admin-22"}, nil); r.code != 204 {
+	// B7: changing a colleague's account asks for the administrator's own password.
+	if r := admin.call(t, "POST", "/operators/"+id+"/set-password", ip, admin.sessTok, map[string]any{"password": "reset-by-admin-22"}, nil); r.code != 401 {
+		t.Fatalf("a reset without the administrator's password: %d %s", r.code, r.raw)
+	}
+	if r := admin.call(t, "POST", "/operators/"+id+"/roles", ip, admin.sessTok, map[string]any{"role": "site_admin", "your_password": "not-it-at-all"}, nil); r.code != 401 {
+		t.Fatalf("a role was added with a wrong password: %d %s", r.code, r.raw)
+	}
+	if r := admin.call(t, "POST", "/operators/"+id+"/roles", ip, admin.sessTok, map[string]any{"role": "front_office_operator", "your_password": admin.password}, nil); r.code != 201 {
+		t.Fatalf("add role: %d %s", r.code, r.raw)
+	}
+	if r := admin.call(t, "DELETE", "/operators/"+id+"/roles/front_office_operator", ip, admin.sessTok, map[string]any{"your_password": admin.password}, nil); r.code != 204 {
+		t.Fatalf("remove role: %d %s", r.code, r.raw)
+	}
+	if r := admin.call(t, "POST", "/operators/"+id+"/set-password", ip, admin.sessTok, map[string]any{"password": "reset-by-admin-22", "your_password": admin.password}, nil); r.code != 204 {
 		t.Fatalf("reset: %d %s", r.code, r.raw)
 	}
 	if r := admin.call(t, "GET", "/auth/whoami", ip, lr.cookie, nil, nil); r.code != 401 {
@@ -447,7 +504,10 @@ func TestIntegrationAdminResetAndDisableEndTheOperatorsSessions(t *testing.T) {
 	if r := admin.call(t, "POST", "/operators/"+admin.operator+"/set-password", ip, admin.sessTok, map[string]any{"password": "my-own-new-pass"}, nil); r.code != 409 {
 		t.Fatalf("an administrator reset their own password without the current one: %d", r.code)
 	}
-	if r := admin.call(t, "DELETE", "/operators/"+id, ip, admin.sessTok, nil, nil); r.code != 204 {
+	if r := admin.call(t, "DELETE", "/operators/"+id, ip, admin.sessTok, map[string]any{}, nil); r.code != 401 {
+		t.Fatalf("disabled without the administrator's password: %d %s", r.code, r.raw)
+	}
+	if r := admin.call(t, "DELETE", "/operators/"+id, ip, admin.sessTok, map[string]any{"your_password": admin.password}, nil); r.code != 204 {
 		t.Fatalf("disable: %d %s", r.code, r.raw)
 	}
 	if r := admin.call(t, "GET", "/auth/whoami", ip, l2.cookie, nil, nil); r.code != 401 {

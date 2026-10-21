@@ -1,11 +1,11 @@
 "use client";
 
-// HOW LONG USAGE DETAIL IS KEPT (migration 0122, Product-Owner decision D-H).
+// HOW LONG USAGE DETAIL IS KEPT (migration 0122, Product-Owner decision D-H; default 365 days since 0131, GDPR C2).
 //
 // The appliance records every client session's traffic as a series of small samples. Totals per package and per
 // session are kept for good; this setting only decides how long the per-sample DETAIL is kept. The default is
-// Unlimited, and Unlimited means nothing is ever removed. A number of days lets the appliance remove, once an
-// hour, detail older than that -- only of sessions that have ended and packages that have finished. Shortening
+// 365 days; the administrator may choose another number of days, or Unlimited, which means nothing is ever
+// removed. A number of days lets the appliance remove, once an hour, detail older than that -- only of sessions that have ended and packages that have finished. Shortening
 // it removes history for good, so it asks for a reason and the password, and every change and every removal is
 // recorded and listed here.
 
@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { useToast } from "@/components/ui/toast";
 import { formatDate } from "@/lib/utils";
+import { useEditFocus } from "@/lib/use-edit-focus";
 
 type PurgeRun = { ran_at: string; retention_days: number; records_deleted: number };
 type RetentionResp = {
@@ -38,6 +39,7 @@ export function AccountingRetentionCard({ writable }: { writable: boolean }) {
   const [data, setData] = useState<RetentionResp | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   const [editing, setEditing] = useState(false);
+  const { triggerRef, panelRef } = useEditFocus(editing);
   const [unlimited, setUnlimited] = useState(true);
   const [draft, setDraft] = useState("");
   const [reason, setReason] = useState("");
@@ -86,9 +88,9 @@ export function AccountingRetentionCard({ writable }: { writable: boolean }) {
             <div className="text-emphasis">Usage detail kept for</div>
             <p className="text-caption text-muted-foreground">
               How long the appliance keeps the detailed traffic samples behind each client session. Totals per
-              package and per session are always kept. Default Unlimited: nothing is removed. With a number of days
-              ({RETENTION_MIN_DAYS} to {RETENTION_MAX_DAYS}), detail older than that is removed once an hour, only
-              for sessions that have ended and packages that have finished. Removed detail cannot be brought back.
+              package and per session are always kept. Default 365 days. With a number of days ({RETENTION_MIN_DAYS} to{" "}
+              {RETENTION_MAX_DAYS}), detail older than that is removed once an hour, only for sessions that have ended
+              and packages that have finished; Unlimited removes nothing. Removed detail cannot be brought back.
             </p>
             {lastRun && (
               <p className="text-caption text-muted-foreground">
@@ -100,7 +102,7 @@ export function AccountingRetentionCard({ writable }: { writable: boolean }) {
           <div className="flex items-center gap-2">
             <Badge tone="neutral">{data ? retentionLabel(current) : "—"}</Badge>
             {writable && !editing && data && (
-              <Button size="sm" variant="outline" onClick={() => {
+              <Button ref={triggerRef} size="sm" variant="outline" onClick={() => {
                 setUnlimited(current == null); setDraft(String(current ?? 365)); setEditing(true);
               }}>Change</Button>
             )}
@@ -108,7 +110,7 @@ export function AccountingRetentionCard({ writable }: { writable: boolean }) {
         </div>
         <ErrorBanner err={err} />
         {editing && (
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div ref={panelRef} className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-2 sm:col-span-3">
               <label className="flex items-center gap-2 text-sm">
                 <input type="radio" name="accounting-retention" checked={unlimited} onChange={() => setUnlimited(true)} />

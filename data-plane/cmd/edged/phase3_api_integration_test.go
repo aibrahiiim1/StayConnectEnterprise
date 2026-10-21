@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/stayconnect/enterprise/data-plane/internal/ledger"
 )
 
 // Real HTTP + real PostgreSQL 16 contract tests for the Phase-3 Hotel-Admin mutations. These exist because a
@@ -114,6 +115,11 @@ type apiFixture struct {
 	operator string
 	password string
 	sessTok  string
+	// mfa stands in for scd's authenticator service (operator_mfa_fake_test.go).
+	mfa *fakeMFA
+	// ledger is the erasure ledger the fixture's erasures are committed to (ledger_fixture_integration_test.go).
+	ledger  *ledger.Store
+	ledgerC *storeLedger
 }
 
 // newAPI builds the REAL Phase-3 routes with the real auth middleware, backed by a disposable database and a
@@ -193,6 +199,11 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 	}
 
 	s := &server{db: p, sessions: newSessionStore(2 * time.Hour), tenantID: f.tenant, siteID: f.site}
+	f.mfa = newFakeMFA(p)
+	s.mfa = f.mfa
+	f.ledger = sharedLedger(t, p)
+	f.ledgerC = &storeLedger{st: f.ledger}
+	s.ledgerC = f.ledgerC
 	// The commerce repository, wired exactly as main.go wires it. Publishing a checkout-grace policy derives
 	// the service plan and package revisions that express it, so this is not optional plumbing: without it the
 	// route these tests exercise would answer 503 and every assertion below would be about a fixture gap
@@ -206,6 +217,8 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 	r.Route("/edge/v1", func(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
+			// As main.go: a no-op until a test gives the server a read recorder (guest_data_reads_integration_test.go).
+			r.Use(s.recordGuestDataReads)
 			mountResource(r, s, "checkout-grace", s.checkoutGraceConfigRoutes)
 			mountResource(r, s, "operational-alerts", s.operationalAlertsRoutes)
 			mountResource(r, s, "pms-stays", s.pmsStaysRoutes)
@@ -267,6 +280,18 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 				r.Use(s.resourcePermission("backups"))
 				r.Mount("/", s.accountingRetentionRoutes())
 			})
+			r.Route("/data-retention", func(r chi.Router) {
+				r.Use(s.resourcePermission("backups"))
+				r.Mount("/", s.dataRetentionRoutes())
+			})
+			mountResource(r, s, "guest-data-rights", s.guestDataRightsRoutes)
+			mountResource(r, s, "pms-reconciliation", s.pmsReconciliationRoutes)
+			r.Route("/backup-keys", func(r chi.Router) {
+				r.Use(s.resourcePermission("backups"))
+				r.Mount("/", s.backupKeysRoutes())
+			})
+			// The Backups surface itself, for the erasure ledger and the daily backup relays (ledger_admin.go).
+			mountResource(r, s, "backups", s.backupsRoutes)
 		})
 	})
 	f.srv = httptest.NewServer(r)

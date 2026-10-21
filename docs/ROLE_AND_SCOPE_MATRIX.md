@@ -39,7 +39,7 @@ the keys are unchanged, [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md)). Legen
 
 | /edge/v1 resource | site_admin | hotel_it_manager | front_office_operator | guest_relations_operator | voucher_operator | payments_operator | site_viewer |
 |---|---|---|---|---|---|---|---|
-| operators (staff) | W | **–** | – | – | – | – | – |
+| operators (staff) | W | **R** | – | – | – | – | – |
 | license (view/upload) | W | W | R | R | – | R | R |
 | guest-access-plans | W | W | R | R | – | R | R |
 | vouchers | W | W | **W** | **W** | **W** | R | R |
@@ -76,6 +76,7 @@ the keys are unchanged, [PRODUCT_TERMINOLOGY.md](PRODUCT_TERMINOLOGY.md)). Legen
 | reports | R | R | R | R | – | R | R |
 | backups | W | R | R | R | – | – | R |
 | backup-download | W | W | – | – | – | – | – |
+| guest-data-rights (look up, export and erase one guest) | W | W | – | – | – | – | – |
 
 **usage** is the Usage explorer: the sessions a role already reads, summed per room, account, voucher or
 device. It is read-only for every role. **commercial-packages** is Internet packages and Service plans; the
@@ -100,6 +101,17 @@ database dump off the appliance: **site_admin and the IT manager only**, the ope
 (a single-use ticket valid for 60 seconds), and both the authorization and the download are audited. Every
 other role that reads backups sees the list and cannot download. Until 2026-10-16 every role with `backups`
 **R** could download without a password; this row and the code changed together.
+
+**guest-data-rights** (Product-Owner decision D-C4, 2026-10-17) is GDPR access, portability and erasure for one
+guest: look the guest up, download everything held about them as a JSON file that staff hand over after checking
+the guest's identity, or erase them (anonymise, decision D-C3). What a request covers follows whose record it is
+(decision D-R5, [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md) section 8): a reservation's own data, or one person's own
+account, identity and exclusive devices, never the access several people share. A staff-supervised *assisted
+request* (same key) can hand over or anonymise the records the database establishes as the requester's, never another
+person's; the rest is the hotel's to handle by hand, outside the product. **site_admin and the IT manager only**; every
+export and erasure asks for the operator's password and a reason and is audited by record id or erasure
+reference, never by name or address. Erasure is refused while the guest's stay is open in the PMS, their access
+is live or a device is online. There is no guest self-service.
 
 **The four guest sign-in keys (Room sign-in, in the Hotel module) are four keys on purpose, and none implies another.**
 

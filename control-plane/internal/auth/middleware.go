@@ -31,6 +31,8 @@ func ContextWithSession(ctx context.Context, s *Session) context.Context { retur
 type SessionBackend interface {
 	Get(ctx context.Context, token string) (*Session, error)
 	Destroy(ctx context.Context, token string) error
+	// Touch records activity (LastSeenAt) on a session that passed the policy (0052).
+	Touch(ctx context.Context, s *Session) error
 }
 
 // RequireAuth extracts the sc_session cookie and attaches the Session to the request context.
@@ -71,9 +73,24 @@ func RequireAuth(store SessionBackend, checker SessionChecker) func(http.Handler
 				}
 				sess = fresh
 			}
+			if CountsAsActivity(r) {
+				_ = store.Touch(r.Context(), sess)
+			}
 			next.ServeHTTP(w, r.WithContext(withSession(r.Context(), sess)))
 		})
 	}
+}
+
+// BackgroundHeader marks a request the console sent on its own, from a timer -- a list refreshing itself every
+// 30 seconds, the sign-in-ending check -- rather than because the person did something. The appliance's Admin
+// Console uses the same name and value.
+const BackgroundHeader = "X-OneGate-Background"
+
+// CountsAsActivity reports whether a request moves the idle limit. Background requests do not: counting them
+// would keep every open tab signed in for ever, and the idle limit would never fire. whoami never counts,
+// whoever sends it.
+func CountsAsActivity(r *http.Request) bool {
+	return r.URL.Path != "/v1/auth/whoami" && r.Header.Get(BackgroundHeader) != "1"
 }
 
 // jsonErr writes the standard StayConnect error envelope. Codes here are

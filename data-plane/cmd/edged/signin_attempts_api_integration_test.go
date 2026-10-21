@@ -15,6 +15,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -109,7 +110,14 @@ func TestIntegration_SignInAttemptsAPI_ACredentialReadIsAudited(t *testing.T) {
 	before := f.auditCount(t, "guest_signin_attempt.credentials_viewed")
 	// scd is not wired in this fixture, so the proxy hop fails — which is exactly the case the audit must
 	// still cover. The status is unimportant here; the record is the assertion.
-	f.doRaw(t, http.MethodGet, "/guest-signin-credentials/"+id, nil)
+	// B8: without the operator's password nothing is revealed, and nothing is fetched.
+	if st, _ := f.doRaw(t, http.MethodPost, "/guest-signin-credentials/"+id, map[string]any{"password": "not-the-password"}); st != http.StatusUnauthorized {
+		t.Fatalf("a reveal with a wrong password = %d, want 401", st)
+	}
+	if st, _ := f.doRaw(t, http.MethodGet, "/guest-signin-credentials/"+id, nil); st != http.StatusMethodNotAllowed {
+		t.Fatalf("the old GET reveal still answers: %d", st)
+	}
+	f.doRaw(t, http.MethodPost, "/guest-signin-credentials/"+id, map[string]any{"password": f.password})
 	after := f.auditCount(t, "guest_signin_attempt.credentials_viewed")
 	if after != before+1 {
 		t.Fatalf("credential reads recorded: %d, want one more than %d", after, before)
@@ -153,7 +161,8 @@ func TestIntegration_SignInAttemptsAPI_CredentialResponsesAreNotCacheable(t *tes
 	f := newAPI(t)
 	id := f.seedAttempt(t, "412", "CREDENTIAL_MISMATCH")
 
-	req, err := http.NewRequest(http.MethodGet, f.srv.URL+"/edge/v1/guest-signin-credentials/"+id, nil)
+	req, err := http.NewRequest(http.MethodPost, f.srv.URL+"/edge/v1/guest-signin-credentials/"+id,
+		strings.NewReader(`{"password":`+strconv.Quote(f.password)+`}`))
 	if err != nil {
 		t.Fatal(err)
 	}

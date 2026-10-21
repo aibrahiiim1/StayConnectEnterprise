@@ -260,10 +260,14 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
                     <TD className="whitespace-nowrap text-end">
                       {canAct && row.status === "ACTIVE" ? (
                         <div className="flex justify-end gap-1.5">
-                          <Button size="sm" variant="secondary" onClick={() => setDialog({ kind: "reset", row })}>
+                          <Button size="sm" variant="secondary"
+                            aria-label={`Reset PIN, ${row.normalized_room_number ? `room ${row.normalized_room_number}` : "no room"}`}
+                            onClick={() => setDialog({ kind: "reset", row })}>
                             Reset PIN
                           </Button>
-                          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setDialog({ kind: "revoke", row })}>
+                          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive"
+                            aria-label={`End access, ${row.normalized_room_number ? `room ${row.normalized_room_number}` : "no room"}`}
+                            onClick={() => setDialog({ kind: "revoke", row })}>
                             End access
                           </Button>
                         </div>

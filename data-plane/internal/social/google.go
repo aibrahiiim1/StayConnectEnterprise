@@ -46,7 +46,8 @@ const (
 	defaultGoogleAuthBase = "https://accounts.google.com/o/oauth2/v2/auth"
 	defaultGoogleTokenURL = "https://oauth2.googleapis.com/token"
 	defaultGoogleJWKSURL  = "https://www.googleapis.com/oauth2/v3/certs"
-	defaultGoogleScope    = "openid email profile"
+	// openid and email give the verified email and the subject: all a guest sign-in keeps (GDPR plan C9).
+	defaultGoogleScope = "openid email"
 )
 
 // googleIssuers are the two issuer spellings Google documents for its id_tokens.

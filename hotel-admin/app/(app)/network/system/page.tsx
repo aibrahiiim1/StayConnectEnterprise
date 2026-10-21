@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  api, SysNetState, SysNetProposal, SysNetValidateResp,
+  api, inBackground, SysNetState, SysNetProposal, SysNetValidateResp,
   SysNetApplyResp, SysNetAudit,
 } from "@/lib/api";
 import { Card, CardBody, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -118,7 +118,7 @@ export default function NetworkSettingsPage() {
     const tick = () => {
       const left = Math.max(0, deadlineUnix - Math.floor(Date.now() / 1000));
       setCountdown(left);
-      if (left <= 0) { if (timer.current) clearInterval(timer.current); load(); }
+      if (left <= 0) { if (timer.current) clearInterval(timer.current); void inBackground(load); }
     };
     tick(); timer.current = setInterval(tick, 1000);
   }

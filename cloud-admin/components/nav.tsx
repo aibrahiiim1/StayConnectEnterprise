@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
-  BadgeCheck, Building2, GlobeLock, HardDrive, KeyRound, LayoutDashboard, LogOut, PanelLeftClose, PanelLeftOpen,
+  BadgeCheck, Building2, GlobeLock, HardDrive, KeyRound, LayoutDashboard, LogOut, Smartphone, PanelLeftClose, PanelLeftOpen,
   ScrollText, Server, Settings2, ShieldAlert, Users,
 } from "lucide-react";
 import { BySemantics, OneGateLockup } from "@/components/brand";
@@ -49,6 +49,7 @@ export function activeNavHref(path: string): string | null {
 const DETAIL_LABEL: Record<string, string> = { "/customers": "Customer", "/appliances": "Appliance" };
 
 export function crumbs(pathname: string): { parent?: { href: string; label: string }; label: string } {
+  if (pathname === "/account/security" || pathname.startsWith("/account/security/")) return { label: "Two-step sign-in" };
   const sys = SYSTEM_PAGES.find((p) => pathname === p.href || pathname.startsWith(p.href + "/"));
   if (sys) return { parent: { href: "/system", label: "System" }, label: sys.label };
   const href = activeNavHref(pathname);
@@ -164,9 +165,10 @@ export function Nav({
       <div className={cn("border-t border-sidebar-border", collapsed ? "p-2" : "p-2.5")}>
         {collapsed ? (
           <Tooltip side="right" content={<span className="font-medium">{email ?? "—"}</span>}>
-            <div
-              tabIndex={0}
-              role="img"
+            {/* A button only so the tooltip with the full address can be reached from the keyboard; it does
+                nothing when pressed. */}
+            <button
+              type="button"
               aria-label={`Signed in as ${email ?? "unknown"}`}
               className={cn(
                 "mx-auto flex size-8 items-center justify-center rounded-full bg-sidebar-accent",
@@ -175,7 +177,7 @@ export function Nav({
               )}
             >
               {(email ?? "?").slice(0, 2)}
-            </div>
+            </button>
           </Tooltip>
         ) : (
           <div className="flex items-center gap-2.5 rounded-md px-2 py-1.5">
@@ -196,6 +198,26 @@ export function Nav({
           </div>
         )}
 
+        {(() => {
+          // The operator's own two-step sign-in (0052).
+          const twoStep = (
+            <Link
+              href="/account/security"
+              onClick={onNavigate}
+              aria-label={collapsed ? "Two-step sign-in" : undefined}
+              className={cn(
+                "mt-1 flex w-full items-center rounded-md text-sm text-sidebar-foreground/85",
+                "transition-colors hover:bg-sidebar-accent/60 hover:text-white",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
+                collapsed ? "h-10 justify-center px-0" : "gap-2.5 px-2.5 py-1.5",
+              )}
+            >
+              <Smartphone className="size-4 shrink-0 text-sidebar-muted" />
+              <span className={cn(collapsed ? "sr-only" : undefined)}>Two-step sign-in</span>
+            </Link>
+          );
+          return collapsed ? <Tooltip content="Two-step sign-in" side="right">{twoStep}</Tooltip> : twoStep;
+        })()}
         {(() => {
           const signOut = (
             <button

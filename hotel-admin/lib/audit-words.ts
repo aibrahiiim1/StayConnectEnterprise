@@ -27,6 +27,7 @@ export type AuditWords = {
 
 export type AuditCategory =
   | "Sign-in & access"
+  | "Client data"
   | "Client Portal"
   | "Internet offering"
   | "Hotel"
@@ -36,7 +37,7 @@ export type AuditCategory =
   | "Diagnostics";
 
 export const AUDIT_CATEGORIES: AuditCategory[] = [
-  "Sign-in & access", "Client Portal", "Internet offering", "Hotel",
+  "Sign-in & access", "Client data", "Client Portal", "Internet offering", "Hotel",
   "Networks", "Licence & cloud", "Backups", "Diagnostics",
 ];
 
@@ -81,6 +82,10 @@ const WORDS: Record<string, AuditWords> = {
     title: "Required a new password at sign-in", category: "Sign-in & access", severity: "security",
     note: "The password used was shorter than the policy, so it must be replaced before the console can be used.",
   },
+  "operator.account_retention_changed": {
+    title: "Changed how long disabled staff accounts are kept", category: "Sign-in & access", severity: "security",
+    note: "After this period a disabled account's email, name, password and authenticator are removed.",
+  },
   "operator.signin_protection_changed": { title: "Changed Admin Console sign-in protection", category: "Sign-in & access", severity: "security" },
   "session.disconnected": {
     title: "Disconnected a client device", category: "Sign-in & access", severity: "change",
@@ -89,6 +94,24 @@ const WORDS: Record<string, AuditWords> = {
   "guest_signin_attempt.credentials_viewed": {
     title: "Viewed what a client typed at sign-in", category: "Sign-in & access", severity: "security",
     note: "The details a client entered are only revealed on request, and every reveal is recorded here.",
+  },
+  // Who looked at a client's data (GDPR plan F8): opening one record, and every search of a client list.
+  "guest_data.viewed": {
+    title: "Opened a client's record", category: "Client data", severity: "notice",
+    note: "Opening one client's account, device, session, stay, sign-in attempt or usage is recorded, so the hotel can show who looked at whose data. Opening the same record again within 10 minutes is not recorded twice.",
+  },
+  "guest_data.searched": {
+    title: "Searched client data", category: "Client data", severity: "notice",
+    note: "Every search of a client list is recorded with what was searched for. A search typed letter by letter is one entry.",
+  },
+  "guest_data.exported": {
+    title: "Exported a client's data", category: "Client data", severity: "security",
+    note: "Everything held about one client, downloaded to hand over on their request.",
+  },
+  "guest_data.erased": { title: "Erased a client's data", category: "Client data", severity: "security" },
+  "guest_data.erase_refused": {
+    title: "An erasure was refused", category: "Client data", severity: "notice",
+    note: "The client was still in-house, signed in or online, so nothing was erased.",
   },
   "guest_signin_restriction.release": {
     title: "Released a device from sign-in protection", category: "Sign-in & access", severity: "change",
@@ -209,6 +232,7 @@ function categoryFromPrefix(action: string): AuditCategory {
     case "license": case "cloud": case "renewal_started": case "renewal_succeeded": case "hotel_admin_cert":
       return "Licence & cloud";
     case "backup": return "Backups";
+    case "guest_data": return "Client data";
     case "health": return "Diagnostics";
     default: return "Sign-in & access";
   }

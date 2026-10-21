@@ -5,217 +5,213 @@
 > central `stayconnect` DB. Client PII therefore stays inside the site even
 > in backup form.
 
-## 1. Site DB backup (per appliance)
+## 1. Site DB backup (per appliance): one backup system
 
-### What
+An appliance has **one** backup system: the engine in `scd` (`data-plane/cmd/scd/backups.go`), configured and used from
+**Hotel Admin → Backups**. There is one format, one retention policy and one restore. The nightly `stayconnect-site-backup` job
+and its plain `pg_dump -Fc` sets are **retired** (see *Earlier backups* below); there is no plaintext fallback.
 
-- `pg_dump -Fc` (custom format) of `stayconnect_site`;
-- `/etc/stayconnect/` (identity keypair, **license files** `current.json` /
-  `state.json` / `revoked.json`, env files, and the **generated network
-  revisions** under `/etc/stayconnect/generated/network/` — see below);
-- optionally the Caddy internal CA material.
+### What a backup is
 
-**Phase 19 networking is covered by the existing site-DB backup.** The site DB
-is the source of truth for client networks/VLANs/DHCP: the `network_interfaces`,
-`guest_networks`, `dhcp_pools`, `dhcp_reservations`, `network_config_revisions`,
-`network_apply_events` and `network_health_checks` tables are all in the
-`stayconnect_site` `pg_dump`, and the added `sessions` columns
-(`guest_network_id`/`vlan_id`/`ingress_interface`/`gateway_ip`) come with the
-`sessions` table. The rendered artifacts under
-`/etc/stayconnect/generated/network/revision-NNNNNN/` are reproducible from the
-DB (netd re-renders on apply), so they need no separate backup — but the `tar` of
-`/etc/stayconnect` above captures them anyway, which speeds recovery by keeping
-the last active revision's bundle on hand ([EDGE_NETWORKING.md](EDGE_NETWORKING.md)).
+Every backup, whatever its kind, is the same thing:
 
-### How
+- **The database**, `db-<stamp>.sql.gz.age` (or `db-safety-<stamp>…` for the one a restore takes first): a plain-SQL dump,
+  gzip-compressed and **encrypted with [age](https://age-encryption.org) to every backup key holder as it is written** -- nothing plain
+  touches the disk.
+- **The configuration and keys**, `etc-<stamp>.tgz.age`: `/etc/stayconnect` (identity, licence, service environment, the seal keys, the
+  generated network revisions), **without** the financial restore marker (see below).
+- **A note**, `db-<stamp>.meta.json` (plain, no personal data): the **kind** and the reason, who asked, the SHA-256 of what is
+  stored, the number of tables, and **the ledger head the backup contains** (which a restore uses to tell whether a copy of the erasure
+  ledger is complete).
+- **Proof it restores.** The same SQL stream that is being encrypted is loaded into a scratch database, which must accept it without
+  one error and hold the appliance's tables and an intact erasure ledger. A backup that fails is discarded, and the backup is marked
+  verified (`db-….verified`) so the Backups screen can restore it.
+- **Never without a key holder.** With no holder a backup is not taken (the screen says why); a backup is never written in the clear.
 
-`deploy/scripts/stayconnect-site-backup.sh` is the supported backup script. It runs nightly from
-`stayconnect-site-backup.timer`, and can be run by hand at any time:
+### The four kinds, and what depends on the schedule
+
+| Kind | When | Depends on the *Scheduled backups* switch? |
+|---|---|---|
+| **Scheduled** | on the schedule you set | **Yes -- and it is OFF by default** |
+| **Manual** | *Take a backup now* (password step-up) | No |
+| **Before a change** (`pre-change`) | `scd backup-now`, run first by `scripts/edge-migrate.sh` for every live-site migration and rollback, and by deployments | **No -- mandatory** |
+| **Before a restore** (`pre-restore`) | the first step of every restore | **No -- mandatory** |
+
+**Scheduled backups are off until an administrator switches them on** (Hotel Admin → Backups → *Scheduled backups*). The switch controls
+only the schedule. It does **not** disable any protection: a restore always takes its safety backup, a live migration or rollback
+refuses to run without a fresh verified backup (`edge-migrate.sh` exits 4), the financial marker and recovery mode always apply, the
+Erasure Ledger is always kept in two places, and the binary and UI rollback artefacts are always kept by the sweep.
+
+### Settings (Hotel Admin → Backups → Scheduled backups; stored in `/etc/stayconnect/backup-retention.conf`)
+
+| Setting | Default | Range | Meaning |
+|---|---|---|---|
+| `BACKUP_ENABLED` | **0 (off)** | 0–1 | scheduled backups on/off |
+| `BACKUP_HOUR` | 2 | 0–23 | a scheduled backup is taken at or after this hour (appliance clock) |
+| `BACKUP_EVERY_DAYS` | 1 | 1–7 | days between scheduled backups; a manual backup counts |
+| `BACKUP_KEEP` | **7** | 1–30 | scheduled + manual backups kept |
+| `SAFETY_BACKUP_KEEP` | 3 | 2–20 | protective backups kept: before a change, before a restore |
+
+Saving needs the password and is audited. **Retention is counts only** -- no age rule beside them to contradict them. Rotation keeps
+the newest of each pool, removes older sets (dump, configuration archive, note, marker) only after a newer backup verified, and **never
+touches a file that has no note**. An erased guest can remain in the oldest backup for about `BACKUP_KEEP × BACKUP_EVERY_DAYS` days;
+the restore re-applies the ledger so they are erased again ([privacy/ERASURE_LEDGER.md](privacy/ERASURE_LEDGER.md)). Each day every kept
+file is re-checked against the digest in its note; a mismatch is shown on the Backups screen while other backups remain.
+
+The retention sweep (`stayconnect-backup-cleanup`) is **not** a second retention policy: it keeps the disk from filling with binaries,
+releases and config backups, reports the backups, and **never deletes a database backup**.
+
+### Encryption to the hotel's own keys (GDPR plan C5, decision D-C5)
+
+Hotel Admin → Backups → *Backup encryption* registers **backup key holders**. Every backup is encrypted to every active holder's public
+key as it is written.
+
+- **The appliance holds public keys only.** It can write backups and never read them back. Adding a holder generates the key pair on the
+  appliance and hands the private key over **once**, as a key file and a printable recovery sheet; the appliance keeps no copy. The holder
+  counts only after the **check code** printed in both is typed back. There is no escrow: the supplier holds no key either.
+- **Several holders.** Any one holder's key opens a backup alone. Removing a holder stops new backups being encrypted to it; backups
+  taken earlier still open with it. The last active holder cannot be removed.
+- **Opening a backup on the appliance** (Verify, Restore, and the restore test) asks for a holder's key, used in memory for that one
+  action and never stored or logged. A wrong key is refused before a restore touches anything.
+- **A restore's own safety backup is encrypted to the registered holders and also to the restoring holder's key**, so a replacement
+  appliance with no registered holder yet is still protected. There is no plaintext fallback.
+- **Restore test.** Hotel Admin asks every `RESTORE_TEST_MONTHS` (default 6) for a holder to prove their key opens the newest backup.
+- **Downloads stay encrypted.** The file downloaded is the encrypted file.
+- **An appliance moved to another hotel** encrypts only to the holders of the site it now serves (migration 0144); a previous owner's
+  holders are never used.
+- **A restore keeps the current key holders.** Before the restored database is swapped in, the live register is copied into it: a holder
+  removed since the backup stays removed, and a holder the live register does not know is removed by the restore. If the register cannot
+  be carried, nothing is replaced.
+- **If every key is lost**, the encrypted backups cannot be read by anyone. Live data is unaffected; add a new holder and new backups
+  work at once.
+
+To open a backup by hand, a holder supplies their key file (standard age format, so `age -d -i <key-file>` also works off the appliance):
 
 ```sh
-deploy/scripts/stayconnect-site-backup.sh
+/opt/stayconnect/bin/scd backup-crypt decrypt -i <key-file> /opt/stayconnect/backups/db/db-<stamp>.sql.gz.age - | gunzip | less
 ```
 
-> **THE NIGHTLY TIMER NOW EXISTS. It did not when this section first described it.** This text used to
-> open "A backup agent (cron/systemd timer on the appliance) runs", and there was none: nothing under
-> `deploy/` invoked the script and no cron entry existed. The only backup-related unit was
-> `stayconnect-backup-cleanup`, which *prunes* artefacts and creates none. So every backup the appliance
-> had ever had was taken by a human typing the command, while the Policy block below stated a nightly
-> schedule.
->
-> `deploy/systemd/stayconnect-site-backup.{service,timer}` closes that. **02:10 local time**, not UTC,
-> because the policy is "a low-traffic hour in the site's timezone" and a site's quiet hour is a property
-> of where the site is. That is comfortably before the 03:30 retention cleanup, so a night's backup exists
-> before retention runs and the newest full backup the cleanup protects is the one just taken.
-> `Persistent=true`, so an appliance powered off overnight takes its backup when it returns rather than
-> skipping a day in silence.
->
-> **The script remains the guard, not the unit.** It refuses on its own -- no resolvable role, a client
-> older than the server, an empty dump, and an `/etc` archive containing the financial restore marker, which
-> it verifies by listing the archive rather than trusting the `--exclude`. `Type=oneshot` with no `Restart=`:
-> a failed backup is a fact for an operator to see in the journal, and a retry loop on a full disk makes the
-> disk worse.
->
-> **Installation needs no list.** `install-service-units.sh` derives every `/opt/stayconnect/bin` helper from
-> the units being installed and REFUSES the whole install if one has no source -- a rule that exists because
-> `stayconnect-backup-cleanup.service` was once absent from a hand-written list, failed `203/EXEC` nightly
-> for weeks, and filled the root filesystem until PostgreSQL could not write `postmaster.pid` and the site
-> went down. The new unit is picked up by that same mechanism, which
-> `install-service-units-selftest.sh` asserts.
+### Restore (site): Hotel Admin → Backups → Restore
 
-The script is the two commands this section always described, implemented, plus the one exclusion that only
-matters once Phase 4 exists:
+Only a verified backup can be restored; the restore needs the password, the backup's name typed out, and a holder's key. The same code
+serves `scd backup-restore --name <backup> --identity-file <key-file>` when Hotel Admin itself cannot be used. It runs these steps, each
+shown in the result (`/run/stayconnect/last-restore.json`), and **nothing is replaced until the data has loaded, been checked and the
+services are proven stopped**:
+
+1. **privileges** -- the live database's ownership and access rules (including the database-level `GRANT CREATE ON DATABASE` Gate-P gives
+   `iam_v2_owner`, which a dump never carries) are captured.
+2. **ledger_prepare** -- every erasure the live database knows is made durable outside it.
+3. **safety_backup** -- a `pre-restore` backup of the current state (same engine, encrypted, proven restorable).
+4. **maintenance**, **load** (into a staging database), **key_holders**, **ledger_storage**, **ledger** (the Erasure Ledger is applied to
+   the *staging* data -- see below).
+5. **quiesce** -- every service that can write financial state (`edged`, `pmsd`, `acctd`, `portald`) is stopped and then **proven stopped**
+   (`systemctl is-active`); one that is still running, or whose state cannot be read, aborts the restore with nothing replaced.
+6. **financial_marker** -- the management marker `/etc/stayconnect/financial-restore-generation.json` is advanced **before** the swap
+   (written by `scd marker-advance` in a transient systemd unit, because `scd` itself cannot write `/etc/stayconnect`), so a crash
+   mid-restore still leaves the next start holding money movement.
+7. **swap** -- the live database is renamed aside, the staging database renamed in.
+8. **privileges** (again) -- everything captured in step 1 is reinstated and compared; any difference rolls the swap back.
+9. **integrity**, then **hypertables** (TimescaleDB's hypertables must be *registered*, not merely shaped: an unregistered one refuses every
+   write) and **financial_recovery** (`iam_v2.p4_record_supported_restore`: the site enters `FINANCIAL_RECOVERY_MODE`). A failure of any of
+   these renames the original database back.
+10. **ledger_synced**, **retention_reapplied**, **housekeeping**, **services**.
+
+After a restore, client internet access runs normally and **money movement is held** until an operator reconciles every item that was in
+flight when the backup was taken (Hotel Admin → Financial recovery). Nothing is replayed automatically.
+
+> **The financial restore marker is deliberately NOT backed up.** It counts how many times THIS appliance has been restored. Its whole
+> purpose is to survive a database restore and keep counting forward, so that a restored database can be recognised as older than the
+> appliance knows it should be. A configuration archive containing it would roll it back and the detector would go quiet exactly when it is
+> needed. `writeEtcArchive` excludes it (a test holds it there). It is `0644` and root-owned: root-owned so only root can advance it,
+> world-readable because `edged` runs unprivileged and evaluates it; a `0600` marker once disarmed the detector (measured on PRE-LIVE).
+> If an older configuration archive is ever restored, the marker is BEHIND the database and migration 0025 holds money movement rather than
+> assuming which record is right. The marker is protected by file ownership and permissions only; there is no TPM or monotonic counter in
+> this appliance profile and none is claimed.
+
+**Authorization of a restore.** The retired command-line tool required a manifest signed at Central. The supported restore replaces that
+with the password step-up, a digest-bound verified backup (the restore refuses a file whose contents no longer match what was verified)
+and the **enforced** financial recovery mode. This is a documented change of the authorization model, not an omission.
+
+### Earlier backups (what the retired mechanisms left behind)
+
+Before there was one system there were two. The retired nightly job wrote `pg_dump -Fc` sets (`site-<stamp>.dump`, its
+`.meta.json` and `site-<stamp>-etc.tgz`, optionally `.age`) to `/var/backups/stayconnect`, and older on-demand dumps and restore safety
+dumps in `/opt/stayconnect/backups/db` have no note. They are **earlier backups**:
+
+- never deleted automatically -- not by rotation, not by the retention sweep;
+- listed on the Backups screen with their size and whether they are encrypted;
+- an earlier **dump** that was verified can still be restored from the list; a **nightly set** is a custom-format archive the Backups
+  restore cannot load, and is restored by hand (below) until it is removed;
+- removed only by an administrator (**password + typed confirmation `remove earlier backups`**, audited), and only once a verified
+  scheduled or manual backup exists and every stored backup still matches its checksum -- so removing the old never leaves less than there was.
+
+By-hand restore of a nightly set (`stayconnect-financial-restore.sh` is kept only for this; it is dark and not wired to anything):
 
 ```sh
-OUT=/var/backups/stayconnect/site-$(date +%Y%m%d-%H%M%S).dump
-pg_dump -Fc -U stayconnect_site stayconnect_site -f "$OUT"
-tar czf "${OUT%.dump}-etc.tgz" --exclude=financial-restore-generation.json /etc/stayconnect
+deploy/scripts/stayconnect-financial-restore.sh --dump /var/backups/stayconnect/site-<stamp>.dump \
+  --manifest /var/backups/stayconnect/site-<stamp>.manifest.json --tenant <tenant-uuid> --site <site-uuid>
 ```
 
-> **The financial restore marker is deliberately NOT backed up.**
-> `/etc/stayconnect/financial-restore-generation.json` counts how many times THIS appliance has been
-> restored. Its whole purpose is to survive a database restore and keep counting forward, so that a restored
-> database can be recognised as older than the appliance knows it should be. An `/etc` archive that
-> contained it would roll it back on restore, and the restored database would then match it perfectly — the
-> rollback detector would go quiet at exactly the moment it is needed. The backup script verifies the
-> exclusion rather than trusting the flag, and refuses to produce an archive that contains it.
->
-> Migration 0025 also detects the opposite direction. If an `/etc` archive taken before this change is ever
-> restored, the marker will be BEHIND the database, the two records will disagree about this appliance's
-> restore history, and money movement is held until an operator establishes which is right.
+### Upgrading an appliance that predates backup encryption (migration 0129)
 
-**`backup_records` is written by the OTHER backup path, not by this script.** The table exists (migration
-0001) and `POST /edge/v1/backups` — the Admin Console path, which produces `db-<stamp>.sql.gz` through scd —
-records every run in it with `status running→ok/failed` and `kind scheduled|manual|pre_migration`. That is
-what the backups page shows.
+The mandatory pre-change backup is taken by the **running** `scd` for the **registered** key holders. An appliance older than migration
+0129 has neither -- its `scd` has no `backup-now` and the database has no key register -- so the first upgrade across 0129 cannot use
+them, and a plain dump is not an acceptable stand-in. The bootstrap is a one-time, **encrypted** dump with the new binary's offline
+tool, to a one-time recipient whose private key never touches the appliance:
 
-`stayconnect-site-backup.sh` never touches the database, so **a run of the sanctioned shell backup leaves no
-`backup_records` row and does not appear on the backups page.** This section previously said "Every run is
-recorded", which was true of one path and not of the one it was describing. The two paths are genuinely
-different artefacts: the shell script produces `site-<stamp>.dump` (pg_dump custom format) plus an `/etc`
-archive and a metadata file, which is what `stayconnect-financial-restore.sh` consumes; the API path
-produces a gzipped SQL dump that only the scd restore endpoint accepts. Neither tool accepts the other's
-output.
+```sh
+# on a trusted workstation: a one-time key pair (age-keygen); keep bootstrap.key, send only the public key line
+# on the appliance, with the NEW scd binary copied to /root/scd-new (it is not installed yet):
+echo "<the age1... public key>" > /root/bootstrap.pub
+docker exec stayconnect-pg pg_dump -U stayconnect -d stayconnect_site --no-owner --no-privileges | gzip   | /root/scd-new backup-crypt encrypt -R /root/bootstrap.pub - /opt/stayconnect/backups/db/pre-0129-bootstrap-$(date -u +%Y%m%dT%H%M%SZ).sql.gz.age
+```
 
-The reference to a `backup` telemetry kind is also historical: Central is licensing-only and the telemetry
-tables were dropped by migration 0045, so no fleet view reports backup health from telemetry.
+Prove it restores (decrypt with the private key on the workstation and load it into a scratch TimescaleDB database), rehearse the migrations
+and the Gate-P reconcile on a copy that keeps its privileges (see below), then apply them. From the moment the new `scd` runs and a key holder
+is registered, every later change starts with `scd backup-now`. Nothing about the runner changes, and there is no flag to skip its backup.
+(Done once on PRE-LIVE on 2026-10-21 for 0126 -> 0149, with `scripts/edge-migrate.sh`'s check satisfied for the iam_v2-only migrations by this
+dump through `EDGE_PRECHANGE_BACKUP`; the public-schema migrations were applied by hand.)
+
+### Controlled changes: what is enforced and what is a step
+
+- **Enforced:** `scripts/edge-migrate.sh` takes a `pre-change` backup before it changes a live site, and refuses without one. A restore takes its
+  `pre-restore` backup first. Neither depends on the schedule.
+- **A step, not a check:** public-schema migrations cannot be applied by the runner (its executor holds no CREATE on schema public, by design), so
+  they are applied by hand (a superuser `psql` plus the `schema_migrations` row, then the Gate-P reconcile). Run
+  `/opt/stayconnect/bin/scd backup-now --reason "<what is about to change>"` first, and rehearse on a copy that keeps its privileges
+  (`pg_dump -Fc | pg_restore` into a scratch database: a copy taken `--no-privileges` loses the access rules the Gate-P assertions check).
+  The same applies to a deployment: take the backup before the binaries move.
 
 ### Policy
 
-- Schedule: nightly, low-traffic hour in the site's timezone. **IMPLEMENTED** by
-  `stayconnect-site-backup.timer` at 02:10 local, `Persistent=true`.
-- Retention: keep 7 daily + 4 weekly on the appliance; prune by age and by
-  the license's retention limits for the underlying data.
-- Off-box copies go to **site-controlled** storage (NAS/SFTP on the site
-  network) — never to StayConnect cloud storage (PII boundary,
-  [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md)).
-- ~~HA pairs: back up on the current primary only (replication covers the secondary); the agent checks VRRP
-  state before running.~~ **NOT APPLICABLE AND NOT IMPLEMENTABLE TODAY.** There is no HA: decision ARCH-04
-  is ACTIVE and records that HA failover under the approved two-NIC architecture is not designed,
-  implemented or accepted, and the HA-sync transport is an open architecture decision. There is no
-  keepalived, no VRRP and no agent anywhere in the tree, so there is no VRRP state to check and no secondary
-  to skip.
+- Schedule: **the hotel's choice, off by default** (see above). Protective backups are always taken.
+- Retention: counts, in two pools (7 scheduled+manual, 3 protective, by default). No age rule.
+- Off-box copies go to **site-controlled** storage (NAS/SFTP on the site network) -- never to StayConnect cloud storage (PII boundary,
+  [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md)). The Erasure Ledger's secondary storage is mandatory for erasure; backups themselves stay on
+  the appliance until the hotel downloads them (decision D-B).
+- ~~HA pairs~~ **NOT APPLICABLE AND NOT IMPLEMENTABLE TODAY.** There is no HA: decision ARCH-04 is ACTIVE.
 
-### The `public` tables 0048 creates and 0093 drops — what a restore must know
+### The `public` tables 0048 creates and 0093 drops -- what a restore must know
 
-`public.edge_offline_packages` (the single-use ledger of imported offline activation packages, which the
-offline reconcile reads) is created by appliance migration **0048**, owned on a live appliance by the
-installation superuser (`stayconnect`), and granted to `svc_scd` by Gate P. It is in every dump and in every
-database rebuilt from migrations.
+`public.edge_offline_packages` (the single-use ledger of imported offline activation packages, which the offline reconcile reads) is
+created by appliance migration **0048**, owned on a live appliance by the installation superuser (`stayconnect`), and granted to `svc_scd`
+by Gate P. It is in every dump and in every database rebuilt from migrations.
 
-Migration **0093** removed the cloud telemetry subsystem and drops `public.sync_outbox`,
-`public.sync_checkpoints`, `public.edge_executed_commands` and `public.edge_installed_updates` with their
-rows (authorized). Where the applying role cannot drop them (a live site applies as `iam_v2_owner`) they are
-left for their owner, see [ROLLBACK_POLICY.md](ROLLBACK_POLICY.md) §"Appliance schema boundaries".
+Migration **0093** removed the cloud telemetry subsystem and drops `public.sync_outbox`, `public.sync_checkpoints`,
+`public.edge_executed_commands` and `public.edge_installed_updates` with their rows (authorized). Where the applying role cannot drop them
+(a live site applies as `iam_v2_owner`) they are left for their owner, see [ROLLBACK_POLICY.md](ROLLBACK_POLICY.md) §"Appliance schema
+boundaries".
 
-- **Restoring a dump taken before 0093:** the four tables come back with the dump; applying 0093 (and the
-  owner statement) removes them again. Nothing reads them and Gate P no longer grants on them.
-- **Comparing a rebuilt database with an appliance:** an appliance that has applied 0093 but not yet run the
-  owner statement still carries the four tables; that is the expected difference, not a failed restore.
+- **Restoring a dump taken before 0093:** the four tables come back with the dump; applying 0093 (and the owner statement) removes them
+  again. Nothing reads them and Gate P no longer grants on them.
+- **Comparing a rebuilt database with an appliance:** an appliance that has applied 0093 but not yet run the owner statement still carries
+  the four tables; that is the expected difference, not a failed restore.
 
-### Restore (site)
-
-**Once Phase 4 is deployed, use the supported tool rather than the raw commands:**
-
-```sh
-deploy/scripts/stayconnect-financial-restore.sh   --dump     /var/backups/stayconnect/site-<stamp>.dump   --manifest /var/backups/stayconnect/site-<stamp>.manifest.json   --tenant   <tenant-uuid> --site <site-uuid>
-```
-
-It does what the raw commands below do, plus the three things that make a financial restore trustworthy:
-
-1. **Verifies the manifest against this appliance's pinned registry root anchor**
-   (`/etc/stayconnect/assignment-registry-root.pub`, the same anchor the assignment registry uses). There is
-   no `--pubkey` option, and passing one is an error: a verification key supplied by whoever runs the
-   restore proves only that they have a key.
-2. **Proves every financial writer is stopped** — `stayconnect-edged`, `-pmsd`, `-acctd`, `-portald`,
-   `-scd` — by checking `systemctl is-active` after stopping each one, and aborts if any cannot be proven
-   stopped. It does not swallow a failed stop.
-3. **Advances the management marker BEFORE restoring**, so that even a crash mid-restore leaves the
-   appliance able to detect that its database is older than it should be, and then records the restore and
-   enters `FINANCIAL_RECOVERY_MODE`.
-
-After it completes, client internet access runs normally and **money movement is held** until an operator
-reconciles every item that was in flight when the backup was taken. Nothing is replayed automatically.
-
-The underlying commands, for reference and for a pre-Phase-4 appliance. **These were corrected after being
-run**: the previous version of this block named a role that does not exist, used host binaries this
-appliance does not have, and omitted the three TimescaleDB steps without which the restore destroys the
-extension. Every line below has been executed on PRE-LIVE.
-
-```sh
-# The database runs in a container and the host carries NO psql/pg_restore. `stayconnect_site` is the
-# DATABASE; the role is the container's own superuser (POSTGRES_USER), which is `stayconnect` here.
-PGX="docker exec -i stayconnect-pg psql -v ON_ERROR_STOP=1 -U stayconnect"
-
-systemctl stop stayconnect-edged stayconnect-pmsd stayconnect-acctd stayconnect-portald stayconnect-scd               stayconnect-netd
-$PGX -d postgres -tAc "SELECT pg_terminate_backend(pid) FROM pg_stat_activity
-                        WHERE datname='stayconnect_site' AND pid<>pg_backend_pid()"
-$PGX -d postgres -c 'DROP DATABASE stayconnect_site'
-$PGX -d postgres -c 'CREATE DATABASE stayconnect_site'
-
-# TIMESCALEDB, IN THIS ORDER. The extension must exist BEFORE the restore, be suspended ACROSS it, and be
-# restored AFTERWARDS. Skipping this -- or using `pg_restore --clean --if-exists`, which drops the
-# extension and its schemas -- produces "schema _timescaledb_functions does not exist", 72 ignored errors,
-# and a database with its relational tables intact and both hypertables empty.
-$PGX -d stayconnect_site -c 'CREATE EXTENSION IF NOT EXISTS timescaledb'
-$PGX -d stayconnect_site -tAc 'SELECT timescaledb_pre_restore()'
-docker exec -i stayconnect-pg pg_restore -U stayconnect -d stayconnect_site   < /var/backups/stayconnect/site-<stamp>.dump
-$PGX -d stayconnect_site -tAc 'SELECT timescaledb_post_restore()'
-
-# PRIVILEGES THE DUMP DOES NOT CARRY. pg_dump captures grants on OBJECTS, not on the DATABASE, and
-# gatep-iam-roles.sql grants CREATE ON DATABASE to iam_v2_owner. Recreating the database revokes it
-# silently, and the symptom is the NEXT migration failing on an appliance whose restore reported success.
-docker cp /opt/stayconnect/deploy/gatep stayconnect-pg:/tmp/gatep
-for f in gatep-roles.sql gatep-iam-roles.sql gatep-iam-ownership.sql gatep-grants.sql; do
-  $PGX -d stayconnect_site -f "/tmp/gatep/$f"
-done
-
-# Registered, not merely shaped: an unregistered hypertable refuses every write while looking correct.
-$PGX -d stayconnect_site -tAc 'SELECT count(*) FROM timescaledb_information.hypertables'   # expect >= 2
-
-tar xzf site-<stamp>-etc.tgz -C /            # identity + license + env; contains NO financial marker
-systemctl start stayconnect-netd stayconnect-scd stayconnect-portald stayconnect-acctd                stayconnect-pmsd stayconnect-edged
-```
-
-> **The marker must be readable by edged.** `financial-restore-generation.json` is written `0644` and
-> root-owned: root-owned so only root can advance it, world-readable because edged runs unprivileged and is
-> the only process that evaluates it. It was briefly written `0600`, and the effect was measured on
-> PRE-LIVE: a real supported restore produced `outcome=UNCHANGED`, no hold and no restore event, because
-> the reader got `EACCES` and the code treated unreadable as "never restored". An unreadable marker is now
-> an error rather than an assumption of innocence.
-
-> Restoring the `/etc` archive never rewrites `financial-restore-generation.json`, because the backup
-> excludes it. If an older archive that predates that exclusion is restored, the marker ends up BEHIND the
-> database; migration 0025 detects the disagreement and holds money movement rather than assuming which
-> record is right.
-
-Post-restore checks: scd health; voucher login from the netns client; license
-evaluation (`GET /edge/v1/central/status`) — note the license store's high-water mark
-restores with `/etc/stayconnect`, so clock-rollback protection stays intact.
-An appliance restored from a dump of a site that Central has since deleted still
-finds out on its next hello: if it had held a customer it enters the
-*Removed from OneGate Central* state (the marker `/etc/stayconnect/removed-from-central.json`
-restores with `/etc` and is honoured), and only a factory-clean install brings it back.
+Post-restore checks: scd health; voucher login from the netns client; licence evaluation (`GET /edge/v1/central/status`) -- note the
+licence store's high-water mark restores with `/etc/stayconnect`, so clock-rollback protection stays intact. An appliance restored from a
+dump of a site that Central has since deleted still finds out on its next hello: if it had held a customer it enters the *Removed from
+OneGate Central* state (the marker `/etc/stayconnect/removed-from-central.json` restores with `/etc` and is honoured), and only a
+factory-clean install brings it back.
 
 ## 2. Cloud DB backup
 
@@ -243,8 +239,12 @@ restores with `/etc` and is honoured), and only a factory-clean install brings i
 
 `stayconnect-central-backup.timer` (daily, 02:15) runs `deploy/scripts/central-backup.sh`: `pg_dump -Fc` of
 the `sc-central-pg` container's `stayconnect` database to
-`/opt/stayconnect/backups/db/central-<stamp>-scheduled.dump` (0600, proven readable with `pg_restore -l`
-before it counts). Every deploy takes the same dump as `central-<stamp>-pre-<sha12>.dump`. Retention is
+`/opt/stayconnect/backups/db/central-<stamp>-scheduled.dump.age` (0600, proven readable with `pg_restore -l`
+before it counts, then encrypted with `age` to every public key listed in `/etc/stayconnect/backup-recipients.txt`;
+Central keeps no private key, so it cannot read its own backups; restore with
+`age -d -i <key> <file> | docker exec -i sc-central-pg pg_restore ...`). Until that file lists a key the dump is a
+plain `.dump` and every run warns; once it does, a dump that cannot be encrypted is a failed backup, never a plain
+one. Add a key: `age-keygen -o key.txt` on the restorer's own machine, then append its `age1...` line to the file. Every deploy takes the same dump as `central-<stamp>-pre-<sha12>.dump`. Retention is
 `KEEP_DB` in `/etc/stayconnect/backup-retention.conf` (the newest dump and pinned dumps are never deleted);
 *System → Backup health* reports it. The dumps are **local only** — an off-host copy is the operator's
 responsibility ([DEPLOYMENT_CLOUD.md](DEPLOYMENT_CLOUD.md) §9). TimescaleDB note: restore into a database with
@@ -290,11 +290,47 @@ Run quarterly, and once as part of pilot acceptance:
 
 | Drill | Steps | Pass criteria |
 |---|---|---|
-| Site restore | restore latest site dump to a scratch DB (`stayconnect_site_drill`), count rows vs `backup_records.size_bytes` era, spot-check a voucher and a session | pg_restore exit 0; counts plausible; no FK errors |
-| Full appliance rebuild | fresh VM → deploy stack → restore site dump + `/etc/stayconnect` → run phase 1 suite | client login green without touching the cloud |
+| Site restore | Hotel Admin → Backups → *Verify* a recent backup (it is loaded into a throwaway database), spot-check a voucher and a session; `scripts/ledger-restore-drill.sh` for the full restore, including the financial guarantees | verified; counts plausible; every drill scenario passes |
+| Full appliance rebuild | fresh VM → deploy stack → restore the latest backup + its configuration archive → run phase 1 suite | client login green without touching the cloud |
 | Cloud restore | restore cloud dump to scratch; issue a test license against it | envelope signs & verifies |
 | Vendor-key escrow check | decrypt the escrowed key, `LoadSigner` succeeds, key_id matches production | key_id equality |
 | Outage replay | combine with the cloud-outage drill: restore cloud from a dump taken *before* an edge outage window; appliances keep serving clients throughout, and their next licence fetch and assignment poll succeed against the restored Central | clients unaffected; appliances `Connected` again |
 
-Record every drill in the cloud audit log (`backup.drill` action) and, for
-site drills, as a `manual` row in `backup_records`.
+Record every drill in the cloud audit log (`backup.drill` action).
+
+### After a restore: the erasure ledger (migration 0148)
+
+A restore brings back exactly what the backup held, so a guest erased after the backup would be back, and a request answered after it
+would be open again. The **erasure ledger** prevents that ([privacy/ERASURE_LEDGER.md](privacy/ERASURE_LEDGER.md)): every erasure and
+every closed request is recorded in the database, in a file on the appliance (`/var/lib/stayconnect/ledger/erasure-ledger.jsonl`) and
+in the secondary storage the hotel set up, and the restore reapplies it **to the staging database before the swap**.
+
+What the restore does by itself, each step shown on the restore result:
+
+1. **ledger_prepare** -- the live database's own ledger entries are made durable in the file first. A restore that cannot do this does
+   not start.
+2. **ledger_storage** -- the secondary-storage setting of *this appliance* is carried across the swap.
+3. **ledger** -- the copies are read and verified; **one verified, complete copy is enough** (the other need not be online). The ledger
+   inside the backup, the live database and the ledger head recorded in the note of every backup on the appliance are the witnesses.
+   If no copy can be trusted, the copies contradict each other, a copy was cut short, or the backup is older than the ledger while
+   erasures exist, **the restore stops with nothing replaced** and says why. An encrypted secondary copy needs a backup key holder's key
+   (the same key as the backup, pasted into the restore dialog).
+4. The entries after the backup are applied to the staging data: guests are erased again, answered requests are closed again, the erasure
+   reference the guest was given exists again with its counts.
+5. After the swap, **ledger_synced** -- the missing copy is rebuilt and the two copies are brought into step. If the secondary storage
+   is unreachable the restore still succeeds and the step says so; it is retried hourly.
+
+**Check after any restore:** Backups → Erasure ledger shows *Both copies are in step*; the restore result lists `ledger` and
+`ledger_synced`. **Replacement appliance:** [runbooks/ERASURE_LEDGER_RECOVERY.md](runbooks/ERASURE_LEDGER_RECOVERY.md).
+
+**What stays open after a restore:** a request that was still *open* at the backup comes back open (the ledger records answers, not the
+requests, because they hold who asked); close it again. Assisted requests expire after 30 days anyway.
+
+**The database set aside.** The database a restore replaces is kept so the restore can be undone. It still holds data erased since, so
+`scd` removes it after `SET_ASIDE_DAYS` (default 14; Hotel Admin → Backups → Retention). Undo a restore within that time or not at all.
+Interrupted writes leave `*.partial` files, removed after a day.
+
+**Drill (quarterly, and after any change to restore or the ledger):** `scripts/ledger-restore-drill.sh` runs the real restore against a
+disposable database: both copies, the secondary unplugged, the secondary alone, forked copies, nothing trustworthy, an interrupted write,
+a copy cut short, and a backup older than the ledger. On the appliance itself, erase a test guest, restore a backup taken before it, and
+confirm the guest is anonymised again after the restore result reports `ledger` OK.

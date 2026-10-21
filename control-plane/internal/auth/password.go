@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/argon2"
@@ -114,6 +115,31 @@ func VerifyPassword(encoded, password string) error {
 	got := argon2.IDKey([]byte(password), salt, iter, mem, threads, uint32(len(want)))
 	if subtle.ConstantTimeCompare(want, got) != 1 {
 		return ErrMismatch
+	}
+	return nil
+}
+
+var (
+	decoyMu   sync.Mutex
+	decoyHash string
+)
+
+// SpendPasswordCheck does the work of checking a password that cannot match, so a sign-in for a name Central does not
+// know (or an account that cannot sign in) takes as long as a wrong password for a real one: the response time must not
+// say which names have an account. It returns ErrBusy exactly when a real check would have, so the caller can answer the
+// same "busy" for both. The decoy hash is made on first use and made again if that failed.
+func SpendPasswordCheck(password string) error {
+	decoyMu.Lock()
+	if decoyHash == "" {
+		decoyHash, _ = HashPassword("decoy-" + time.Now().String())
+	}
+	h := decoyHash
+	decoyMu.Unlock()
+	if h == "" {
+		return nil
+	}
+	if err := VerifyPassword(h, password); errors.Is(err, ErrBusy) {
+		return err
 	}
 	return nil
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Menu } from "lucide-react";
@@ -10,7 +10,9 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Skeleton } from "@/components/ui/misc";
 import { ToastProvider } from "@/components/ui/toast";
 import { StepUpProvider } from "@/components/step-up";
-import { api, Whoami } from "@/lib/api";
+import { SessionExpiryWarning } from "@/components/session-expiry";
+import { api, ApiError, BACKGROUND, setUnauthorizedHandler, type RequestOptions, type Whoami } from "@/lib/api";
+import { deadlinesFrom, expiredSignInUrl, sameDeadlines, type Deadlines } from "@/lib/session-expiry";
 import { SessionProvider } from "@/lib/session";
 import { usePoll } from "@/lib/use-poll";
 import { useSidebarCollapsed } from "@/lib/sidebar-state";
@@ -25,29 +27,57 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [drawer, setDrawer] = useState(false);
   const { collapsed, toggle: toggleCollapsed } = useSidebarCollapsed();
 
+  const [deadlines, setDeadlines] = useState<Deadlines>({ idle: null, absolute: null });
+
+  // AN ENDED SIGN-IN goes back to the sign-in page, saying why, and returns here afterwards. The stale cookie is
+  // cleared first, or the sign-in page would send the browser straight back. Any 401 from the API lands here
+  // (lib/api.ts), so a page never sits erroring on a sign-in that is gone.
+  const pathRef = useRef(pathname);
+  pathRef.current = pathname;
+  const ending = useRef(false);
+  const expire = useCallback(() => {
+    if (ending.current) return;
+    ending.current = true;
+    const here = pathRef.current + (typeof window !== "undefined" ? window.location.search : "");
+    void api.post("/v1/auth/logout").catch(() => undefined).finally(() => router.replace(expiredSignInUrl(here)));
+  }, [router]);
+  useEffect(() => setUnauthorizedHandler(() => expire()), [expire]);
+
+  // whoami carries the session's deadlines; they are kept apart from `me` so a new reading does not re-render
+  // every screen, and are replaced only when they actually moved.
+  const take = useCallback((m: Whoami): Deadlines => {
+    const { idle_expires_at, absolute_expires_at, server_time, ...who } = m;
+    const d = deadlinesFrom({ idle_expires_at, absolute_expires_at, server_time });
+    setMe((prev) => (prev && JSON.stringify(prev) === JSON.stringify(who) ? prev : who));
+    setDeadlines((prev) => (sameDeadlines(prev, d) ? prev : d));
+    return d;
+  }, []);
+  const readWhoami = useCallback((opts?: RequestOptions) => api.get<Whoami>("/v1/auth/whoami", opts).then(take), [take]);
+
   useEffect(() => {
     let cancelled = false;
     api.get<Whoami>("/v1/auth/whoami")
-      .then((m) => { if (!cancelled) setMe(m); })
-      .catch(() => { if (!cancelled) router.replace("/login"); })
+      .then((m) => { if (!cancelled) take(m); })
+      .catch((e) => {
+        // A 401 is an ended sign-in, already on its way to the sign-in page.
+        if (!cancelled && !(e instanceof ApiError && e.status === 401)) router.replace("/login");
+      })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [router]);
+  }, [router, take]);
 
-  // Re-read whoami every 30 s while the tab is visible: an expired session recovers to /login instead of erroring
-  // on every poll, and a role changed mid-session reaches the role-gated screens without a reload.
-  usePoll(() => {
-    api.get<Whoami>("/v1/auth/whoami")
-      .then((m) => setMe((prev) => (prev && JSON.stringify(prev) === JSON.stringify(m) ? prev : m)))
-      .catch(() => router.replace("/login"));
-  }, 30000, !loading);
-
+  // Re-read whoami every 30 s while the tab is visible: a role changed mid-session reaches the role-gated screens
+  // without a reload, and the sign-in's deadlines stay current. whoami is not activity. An ended sign-in is handled
+  // by the 401 handler above; any other failure (a network blip) is left for the next poll.
+  usePoll((opts) => { readWhoami(opts).catch(() => undefined); }, 30000, !loading);
   // The content pane is the scrolling element, so reset it on navigation.
   useEffect(() => { mainRef.current?.scrollTo?.({ top: 0 }); }, [pathname]);
   // The drawer closes on navigation.
   useEffect(() => { setDrawer(false); }, [pathname]);
 
   const here = useMemo(() => crumbs(pathname), [pathname]);
+  // Each route names itself in the browser tab and history (WCAG 2.4.2), from the same label as the breadcrumb.
+  useEffect(() => { document.title = `${here.label} · OneGate Central`; }, [here.label]);
 
   async function onLogout() {
     try { await api.post("/v1/auth/logout"); } catch {}
@@ -76,6 +106,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <SessionProvider me={me}>
       <ToastProvider>
         <StepUpProvider>
+          <SessionExpiryWarning
+            deadlines={deadlines}
+            refresh={() => readWhoami(BACKGROUND)}
+            keepAlive={() => api.get("/v1/auth/mfa")}
+            onExpired={expire}
+            onSignOut={onLogout}
+          />
           <div className="flex h-screen overflow-hidden">
             {/* SKIP LINK: the first tab stop on every screen, so a keyboard operator is not walked through the
                 whole sidebar before each page's content. Invisible until it has focus. */}

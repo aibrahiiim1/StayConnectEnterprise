@@ -40,7 +40,7 @@ func protectionRBACRouter(s *server) http.Handler {
 		})
 		mountResource(r, s, "guest-signin-credentials", func() http.Handler {
 			rr := chi.NewRouter()
-			rr.Get("/{id}", reached)
+			rr.Post("/{id}", reached)
 			return rr
 		})
 	})
@@ -114,7 +114,7 @@ func TestSignInProtection_TheReleasePermissionDoesNotCarryCredentials(t *testing
 	if got := protectionDo(t, h, http.MethodGet, "/guest-signin-restrictions/", cookie); got != http.StatusTeapot {
 		t.Fatalf("setup: site_viewer should read the restriction list, got %d", got)
 	}
-	if got := protectionDo(t, h, http.MethodGet, "/guest-signin-credentials/any", cookie); got != http.StatusForbidden {
+	if got := protectionDo(t, h, http.MethodPost, "/guest-signin-credentials/any", cookie); got != http.StatusForbidden {
 		t.Fatalf("reading the restriction list carried access to guest credentials: %d", got)
 	}
 }

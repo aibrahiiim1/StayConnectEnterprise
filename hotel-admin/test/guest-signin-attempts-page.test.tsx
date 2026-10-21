@@ -20,12 +20,13 @@ class ResizeObserverStub {
 (globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverStub;
 
 const get = vi.fn();
+const post = vi.fn();
 // ApiError is part of the module's RUNTIME surface, not just its types: ErrorBanner does
 // `err instanceof ApiError` to decide whether to show a trace id. A mock that omits it makes that check
 // throw, React unmounts the tree, and the page renders as an empty div.
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
-  return { ...actual, api: { get: (...a: any[]) => get(...a) } };
+  return { ...actual, api: { get: (...a: any[]) => get(...a), post: (...a: any[]) => post(...a) } };
 });
 
 const ATTEMPT = {
@@ -81,9 +82,16 @@ function wire(roles: string[], overrides: Record<string, unknown> = {}) {
     if (path.startsWith("/guest-signin-attempts/")) {
       return Promise.resolve({ ...DETAIL, ...overrides });
     }
-    if (path.startsWith("/guest-signin-credentials/")) return Promise.resolve(CREDENTIALS);
     return Promise.resolve({ data: [], meta: { has_more: false } });
   });
+  post.mockImplementation((path: string) =>
+    path.startsWith("/guest-signin-credentials/") ? Promise.resolve(CREDENTIALS) : Promise.resolve({}));
+}
+
+/** B8: what the guest typed is revealed only after the operator confirms their password. */
+async function revealWithPassword(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(await screen.findByLabelText("Your password"), "my-own-password");
+  await user.click(screen.getByRole("button", { name: /Show what was entered/ }));
 }
 
 async function renderPage() {
@@ -92,7 +100,7 @@ async function renderPage() {
   return userEvent.setup();
 }
 
-beforeEach(() => get.mockReset());
+beforeEach(() => { get.mockReset(); post.mockReset(); });
 afterEach(() => vi.resetModules());
 
 describe("guest sign-in attempts", () => {
@@ -115,6 +123,11 @@ describe("guest sign-in attempts", () => {
     const user = await renderPage();
 
     await user.click(await screen.findByRole("button", { name: "Details" }));
+    // Nothing is fetched until the operator confirms their password.
+    expect(screen.queryByText("Nottheguest")).toBeNull();
+    expect(post).not.toHaveBeenCalled();
+    await revealWithPassword(user);
+    expect(post).toHaveBeenCalledWith("/guest-signin-credentials/" + ATTEMPT.id, { password: "my-own-password" });
 
     expect(await screen.findByText("Nottheguest")).toBeTruthy();
     expect(screen.getByText("MARIA DEL CARMEN")).toBeTruthy();
@@ -140,7 +153,8 @@ describe("guest sign-in attempts", () => {
     }
     // The page must never even ASK for values it may not show — a request that 403s is still a request that
     // put the attempt id in an access log for no reason.
-    expect(get.mock.calls.some((c) => String(c[0]).startsWith("/guest-signin-credentials/"))).toBe(false);
+    expect(post.mock.calls.some((c) => String(c[0]).startsWith("/guest-signin-credentials/"))).toBe(false);
+    expect(screen.queryByLabelText("Your password")).toBeNull();
   });
 
   // NO EXPECTED VALUES ARE INVENTED. A room the mirror does not hold has nothing that would have been
@@ -156,6 +170,7 @@ describe("guest sign-in attempts", () => {
 
     await user.click(await screen.findByRole("button", { name: "Details" }));
 
+    await revealWithPassword(user);
     expect(await screen.findByText(/No eligible stay for this room exists in the appliance's guest list/i)).toBeTruthy();
     expect(screen.getByText(/Changes made in the PMS after the displayed last-sync time/i)).toBeTruthy();
     // What the guest typed IS still shown — it is the one thing that is genuinely known here.

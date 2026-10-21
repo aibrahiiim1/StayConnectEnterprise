@@ -244,7 +244,7 @@ export function ApplianceStatus() {
 
   // Faster while the appliance is on its way to activated, so the operator watching sees it land.
   const activating = st?.activation === "activating" || st?.activation === "waiting";
-  usePoll(() => void load(), activating ? POLL_ACTIVATING_MS : POLL_MS);
+  usePoll(() => load(), activating ? POLL_ACTIVATING_MS : POLL_MS);
 
   async function checkNow() {
     setChecking(true);

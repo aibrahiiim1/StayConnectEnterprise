@@ -13,15 +13,17 @@
 # Options: --release <dir|tar.gz> (default: the release this script is part of) · --dry-run
 #
 # DEPLOY, IN ORDER (each step verified before the next):
-#   1. verify the release (SHA256SUMS, ctrlapi embeds its commit, console manifest = its BUILD_ID)
+#   1. verify the release (SHA256SUMS, ctrlapi embeds its commit, console manifest = its BUILD_ID); ensure the
+#      console two-step sign-in key exists (created with the NEW binary if absent, never replaced) and passes
+#      `ctrlapi check-mfa-key`; render the Caddyfile and `caddy validate` it. Any failure here changes nothing.
 #   2. database backup: central-backup.sh --reason pre-<sha12> -> /opt/stayconnect/backups/db, the same place,
 #      pattern and retention as the daily backup; proven readable before it counts
 #   3. backup the running ctrlapi binary and ctrlapi.env
 #   4. stop ctrlapi; migrate (central-migrate.sh up + verify) with the NEW release's migrations
 #   5. install the new binary + units; start --no-block; poll /readyz; the running binary must embed the commit
-#   6. Caddy: re-render the Caddyfile from the release template; if it changed, validate + restart
+#   6. Caddy: install the Caddyfile validated in step 1 if it changed, restart
 #   7. console: new release dir, atomic symlink switch (previous kept), restart, wait for its BUILD_ID
-#   8. smoke through the real site name (--resolve), then write DEPLOYED.json
+#   8. smoke through the real site name (--resolve), incl. /readyz "signin":"available"; then write DEPLOYED.json
 # Any failure in 5-8 rolls the binary and the console back to what was running and exits non-zero.
 # The DATABASE is not rolled back automatically: migrations are forward-only, and the pre-deploy dump path is
 # printed for a deliberate restore (docs/DEPLOYMENT_CLOUD.md §7).
@@ -38,7 +40,7 @@ while [ $# -gt 0 ]; do
     deploy|rollback|smoke|status) CMD="$1"; shift ;;
     --release) RELEASE_ARG="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
-    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,29p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -63,6 +65,13 @@ smoke() {
   say "smoke test (via Caddy as $primary)"
   body="$(curl -fsS --max-time 5 http://127.0.0.1:8080/readyz 2>/dev/null || true)"
   case "$body" in *'"ready"'*) _pass "ctrlapi loopback /readyz: $body" ;; *) _fail "ctrlapi loopback /readyz: ${body:-no answer}" ;; esac
+  # Console sign-in needs the two-step sign-in key; without it ctrlapi is "ready" for appliances but refuses every
+  # operator. A ctrlapi older than this check does not report it (a rollback to one is warned about, not failed).
+  case "$body" in
+    *'"signin":"available"'*) _pass "console sign-in available (two-step sign-in key loaded)" ;;
+    *'"signin":'*) _fail "console sign-in UNAVAILABLE: ctrlapi has no usable two-step sign-in key ($(mfa_key_path))" ;;
+    *) warn "this ctrlapi does not report whether console sign-in is available (older release)" ;;
+  esac
 
   body="$("${C[@]}" "$base/readyz" 2>&1 || true)"
   # Output is captured and matched with here-strings, never piped into `grep -q`: under pipefail an early-exiting
@@ -173,7 +182,7 @@ rollback() {
   write_deployed "$(binary_revision "$CTRLAPI_BIN_PATH")" rollback
   [ "$DRY_RUN" = 1 ] || smoke || die "rolled back, but the smoke test still fails"
   say "rolled back. The database was NOT touched; the newest pre-deploy dump is:"
-  say "  $(ls -1t "$CENTRAL_DB_BACKUPS"/central-*-pre-*.dump 2>/dev/null | head -1)"
+  say "  $(ls -1t "$CENTRAL_DB_BACKUPS"/central-*-pre-*.dump "$CENTRAL_DB_BACKUPS"/central-*-pre-*.dump.age 2>/dev/null | head -1)"
 }
 
 case "$CMD" in
@@ -203,6 +212,28 @@ NAME="onegate-central-${COMMIT:0:12}"
 OLD_REV="$(binary_revision "$CTRLAPI_BIN_PATH" || true)"
 say "deploying $NAME over ctrlapi ${OLD_REV:0:12} / console $(cat "$CONSOLE_CURRENT/.next/BUILD_ID" 2>/dev/null)"
 T="$REL/deploy/scripts"
+
+# The console two-step sign-in key (0052). A Central installed before it has none, and without it the new ctrlapi
+# would come up "ready" and refuse every console sign-in. Created with the NEW binary when absent, never replaced,
+# then proved against the enrolled authenticators -- all before anything is switched.
+MFA_KEY="$(mfa_key_path)"
+ensure_mfa_key "$REL/bin/ctrlapi" "$MFA_KEY" \
+  || die "the console two-step sign-in key $MFA_KEY could not be created — nothing was changed"
+check_mfa_key "$REL/bin/ctrlapi" "$MFA_KEY" \
+  || die "the console two-step sign-in key $MFA_KEY failed its check (above) — nothing was changed. Restore the right
+    key file (central-export.sh bundles carry it); never replace it with a new one. If it was replaced on purpose,
+    reset the authenticators set up under the old one first (ctrlapi reset-mfa --email <them> --reason <why>)."
+
+# The Caddyfile this release would run, validated now: a release whose configuration Caddy refuses is not
+# deployed (the running one would carry on without this release's log filters).
+install_central_access_log_rotation
+render_caddyfile "$REL/deploy/caddy/Caddyfile.central" "$(setting CENTRAL_SITE_ADDRESSES | sed 's/,/, /g')" \
+  "$(setting CENTRAL_TLS_MODE)" "$(setting CENTRAL_ACME_EMAIL)" > "$WORK/Caddyfile"
+if ! caddy validate --config "$WORK/Caddyfile" --adapter caddyfile >/dev/null 2>&1; then
+  caddy validate --config "$WORK/Caddyfile" --adapter caddyfile || true
+  die "the release's Caddyfile does not validate (above) — nothing was changed"
+fi
+say "release Caddyfile validates"
 
 step "2/8 database backup"
 # The same tool, directory, naming and retention as the daily backup — so the pre-deploy dump is on the Backup
@@ -282,20 +313,14 @@ if [ "$DRY_RUN" = 0 ]; then
 fi
 
 step "6/8 Caddy"
-render_caddyfile "$REL/deploy/caddy/Caddyfile.central" "$(setting CENTRAL_SITE_ADDRESSES | sed 's/,/, /g')" \
-  "$(setting CENTRAL_TLS_MODE)" "$(setting CENTRAL_ACME_EMAIL)" > "$WORK/Caddyfile"
+# Rendered and validated in step 1, before anything changed.
 if cmp -s "$WORK/Caddyfile" "$CADDYFILE_PATH" && [ "$units_changed" = 0 ]; then
   say "Caddyfile and unit unchanged — Caddy not restarted"
 else
   run cp -a "$CADDYFILE_PATH" "$CADDYFILE_PATH.bak-$STAMP"
-  if caddy validate --config "$WORK/Caddyfile" --adapter caddyfile >/dev/null 2>&1; then
-    write_file "$CADDYFILE_PATH" 0644 < "$WORK/Caddyfile"
-    unit_restart_noblock stayconnect-caddy
-    say "Caddy restarted with the re-rendered configuration"
-  else
-    caddy validate --config "$WORK/Caddyfile" --adapter caddyfile || true
-    warn "the re-rendered Caddyfile does not validate — the running configuration was left in place"
-  fi
+  write_file "$CADDYFILE_PATH" 0644 < "$WORK/Caddyfile"
+  unit_restart_noblock stayconnect-caddy
+  say "Caddy restarted with the re-rendered configuration"
 fi
 
 step "7/8 console"

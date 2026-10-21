@@ -42,6 +42,20 @@
 {
 	admin off
 	auto_https disable_redirects
+	# The default logger takes what no site logger does: errors such as a 502 while an upstream restarts. Those lines
+	# embed the whole request (address, URI with its query, every header -- among them the X-*-Search fields that
+	# carry staff searches). It gets the same filter as the access logs (GDPR final audit).
+	log {
+		output stderr
+		format filter {
+			wrap json
+			fields {
+				request>headers delete
+				resp_headers>Location delete
+				request>uri regexp "[?].*$|[0-9A-Fa-f]{2}(?:(?:[:-]|%3[Aa])[0-9A-Fa-f]{2}){5}" "[redacted]"
+			}
+		}
+	}
 	__CENTRAL_GLOBAL_EXTRA__
 }
 __CENTRAL_SITE_ADDRESSES__ {
@@ -70,6 +84,22 @@ __CENTRAL_SITE_ADDRESSES__ {
 	# Created (owned by caddy) by central-install.sh BEFORE the first `caddy validate` runs as root: a
 	# root-owned log file makes every later start of the caddy-user service fail to open its log writer.
 	log {
-		output file /var/log/caddy/central.log
+		# Rolled daily and kept 14 days by /etc/logrotate.d/stayconnect-caddy-central (central-install.sh; GDPR audit
+		# 2026-10-19, C6): the access log carries client IP addresses. Caddy's own size-based rolling is off, so there
+		# is one mechanism and one period.
+		output file /var/log/caddy/central.log {
+			roll_disabled
+		}
+		# No query, no MAC address and no request headers in the access log (GDPR audit 2026-10-19):
+		# a query carries searches, single-use codes and links; headers carry the X-*-Search fields.
+		format filter {
+			wrap json
+			fields {
+				request>headers delete
+				# A redirect target is a URL too (GDPR final check): it is not logged.
+				resp_headers>Location delete
+				request>uri regexp "[?].*$|[0-9A-Fa-f]{2}(?:(?:[:-]|%3[Aa])[0-9A-Fa-f]{2}){5}" "[redacted]"
+			}
+		}
 	}
 }

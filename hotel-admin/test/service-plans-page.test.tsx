@@ -274,7 +274,7 @@ describe("ServicePlansPage — editing an existing plan", () => {
   it("pre-fills every value the plan already has, including the time allowance and its unit", async () => {
     mockLoad([], [ONEDAY]);
     const { container } = render(<ServicePlansPage />);
-    fireEvent.click(await screen.findByRole("button", { name: /^edit$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^edit\b/i }));
 
     const v = fieldsOf(container);
     expect(v("code")).toBe("OneDay");
@@ -289,7 +289,7 @@ describe("ServicePlansPage — editing an existing plan", () => {
   it("leaves genuinely unset fields empty rather than inventing a zero", async () => {
     mockLoad([], [ONEDAY]);
     const { container } = render(<ServicePlansPage />);
-    fireEvent.click(await screen.findByRole("button", { name: /^edit$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^edit\b/i }));
 
     const v = fieldsOf(container);
     for (const unset of ["data_quota_gb", "idle_timeout", "max_session"]) expect(v(unset)).toBe("");
@@ -300,7 +300,7 @@ describe("ServicePlansPage — editing an existing plan", () => {
     mockLoad([], [ONEDAY]);
     p.mockResolvedValue({ current_revision_id: "rev-od-2" });
     const { container } = render(<ServicePlansPage />);
-    fireEvent.click(await screen.findByRole("button", { name: /^edit$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^edit\b/i }));
     fireEvent.change(document.querySelector('[name="max_concurrent_devices"]')!, { target: { value: "6" } });
     fireEvent.change(document.querySelector('[name="password"]')!, { target: { value: "pw-op" } });
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
@@ -317,7 +317,7 @@ describe("ServicePlansPage — editing an existing plan", () => {
     mockLoad([], [{ ...ONEDAY, time_accounting_mode: "AGGREGATE_ONLINE_TIME" }]);
     p.mockResolvedValue({ current_revision_id: "rev-od-2" });
     render(<ServicePlansPage />);
-    fireEvent.click(await screen.findByRole("button", { name: /^edit$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^edit\b/i }));
     // Shown as it is, not offered as a choice that could convert it.
     const mode = document.getElementById("plan-time-mode") as HTMLSelectElement;
     expect(mode.disabled).toBe(true);
@@ -333,7 +333,7 @@ describe("ServicePlansPage — editing an existing plan", () => {
     const { ApiError } = await import("@/lib/api");
     p.mockRejectedValue(new (ApiError as unknown as new (s: number, b: unknown) => Error)(401, { error: "reauth_required" }));
     render(<ServicePlansPage />);
-    fireEvent.click(await screen.findByRole("button", { name: /^edit$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^edit\b/i }));
     fireEvent.change(document.querySelector('[name="password"]')!, { target: { value: "wrong" } });
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
     expect(await screen.findByText("That password is not correct. The plan was not saved.")).toBeInTheDocument();
@@ -344,7 +344,7 @@ describe("ServicePlansPage — editing an existing plan", () => {
     // Refusing it here names a control the operator can see instead of a wire field they cannot.
     mockLoad([], [ONEDAY]);
     const { container } = render(<ServicePlansPage />);
-    fireEvent.click(await screen.findByRole("button", { name: /^edit$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^edit\b/i }));
 
     const down = document.querySelector('[name="down_mbps"]') as HTMLInputElement;
     expect(down.max).toBe("10000");
@@ -374,7 +374,7 @@ describe("ServicePlansPage — add, record and delete", () => {
     await waitFor(() => expect(p).toHaveBeenCalledTimes(1));
     expect(p.mock.calls[0][1].create_only).toBe(true);
 
-    fireEvent.click(await screen.findByRole("button", { name: /^edit$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^edit\b/i }));
     fireEvent.change(document.querySelector('[name="password"]')!, { target: { value: "pw-op" } });
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
     await waitFor(() => expect(p).toHaveBeenCalledTimes(2));

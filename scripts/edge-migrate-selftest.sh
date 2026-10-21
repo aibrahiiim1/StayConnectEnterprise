@@ -87,6 +87,16 @@ SHA="$(sha256sum "$MIGDIR/0099_selftest_noop.up.sql" | awk '{print $1}')"
 mkdir -p "$WORK/scripts"; cp "$RUNNER" "$WORK/scripts/edge-migrate.sh"
 RUN="$WORK/scripts/edge-migrate.sh"
 
+# THE MANDATORY PRE-CHANGE BACKUP is a command the runner calls on a live site. Here it is a stub that records what it was asked and
+# succeeds, unless $WORK/backup.fail exists (case 9 proves the runner refuses to change the database when the backup cannot be taken).
+cat > "$WORK/prechange-stub.sh" <<STUB
+#!/usr/bin/env bash
+echo "\$*" >> "$WORK/backup.log"
+[ ! -e "$WORK/backup.fail" ] || { echo "stub: no backup key holder" >&2; exit 1; }
+exit 0
+STUB
+export EDGE_PRECHANGE_BACKUP="bash $WORK/prechange-stub.sh"
+
 run_apply(){ # run_apply <extra args...> ; always live-site, always the disposable migration
   EDGE_PSQL="$PSQL" bash "$RUN" --apply-role edge_apply --only 0099_selftest_noop \
     --expect-db "$DB" --target-kind live-site --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION \
@@ -528,7 +538,12 @@ ledger_add 0098_selftest_fails
 # Hold the ledger lock, delete the predecessor while STILL HOLDING it, then let go. The runner's pre-lock
 # check therefore sees the row and its under-lock re-assertion does not.
 #
-# THE WINDOW IS 25s, NOT 6s. At 6s the runner's pre-lock structural checks -- a dozen round trips, each a
+# THE HOLDER NOW WAITS FOR THE RUNNER, NOT FOR THE CLOCK. A fixed window (6s, then 25s, then 40s) is a race against however long the
+# runner's pre-lock phase takes on the machine the suite runs on -- and that phase gained a mandatory pre-change backup call. The
+# holder polls pg_locks for the runner's own queued request for the ledger lock and deletes the predecessor only once the runner is
+# provably waiting, i.e. after its pre-lock gap check has passed. (History of the fixed window follows.)
+#
+# THE WINDOW WAS 25s, NOT 6s. At 6s the runner's pre-lock structural checks -- a dozen round trips, each a
 # separate `docker exec psql` in this fixture -- had not finished, so the DELETE landed BEFORE the gap
 # check and the case reported "gap check SKIPPED: empty" instead of exercising the guard. The window has
 # to outlast the pre-lock phase, not merely overlap it.
@@ -540,7 +555,7 @@ ledger_add 0098_selftest_fails
 # arguments run as separate transactions in the same session, so the DELETE is committed BEFORE the unlock.
 docker exec -d "$C" psql -U postgres -d "$DB" \
   -c "SELECT pg_advisory_lock($LKEY7M)" \
-  -c "SELECT pg_sleep(25)" \
+  -c "DO \$\$ DECLARE n int := 0; BEGIN LOOP EXIT WHEN n > 900 OR EXISTS (SELECT 1 FROM pg_locks WHERE locktype='advisory' AND NOT granted AND ((classid::bigint << 32) | objid::bigint) = ($LKEY7M)); PERFORM pg_sleep(0.2); n := n + 1; END LOOP; PERFORM pg_sleep(1); END \$\$" \
   -c "DELETE FROM public.schema_migrations WHERE version='0096_selftest_predecessor'" \
   -c "SELECT pg_advisory_unlock($LKEY7M)" >/dev/null 2>&1
 # WAIT UNTIL THE LOCK IS ACTUALLY HELD, NOT FOR A FIXED SECOND. `docker exec -d` returns before its psql has
@@ -623,6 +638,46 @@ if grep -q "NOT_HEAD_AFTER_LOCK" "$RUNNER"; then
 else
   no "the down path only checks head before taking the lock" ""
 fi
+
+echo "== 9. a live site is backed up FIRST (the mandatory pre-change backup), whatever the backup schedule says =="
+undo; ledger_reset; mk_commerce; : > "$WORK/backup.log"; rm -f "$WORK/backup.fail"
+out="$(run_apply)"
+if applied && grep -q -- '--reason applying migration 0099_selftest_noop' "$WORK/backup.log" && grep -q -- '--by edge-migrate' "$WORK/backup.log"; then
+  ok "a live apply took the pre-change backup first, naming the migration"
+else no "a live apply did not take (or name) the pre-change backup" "$out"; fi
+# a migration that is already applied changes nothing: no backup
+: > "$WORK/backup.log"
+out="$(run_apply)"
+if [ ! -s "$WORK/backup.log" ] && applied; then ok "re-running an applied migration takes no backup (nothing changes)"
+else no "a skipped migration still took a backup" "$(cat "$WORK/backup.log")"; fi
+# no backup, no change
+undo; : > "$WORK/backup.log"; : > "$WORK/backup.fail"
+out="$(run_apply)"; rc=$?
+if [ "$rc" = 4 ] && ! applied && echo "$out" | grep -q "database was NOT changed"; then
+  ok "when the backup cannot be taken, the migration is REFUSED and the database is untouched (exit 4)"
+else no "the migration ran (or failed differently) without a backup" "rc=$rc $out"; fi
+rm -f "$WORK/backup.fail"
+# a down is backed up too, and refused without one
+cat > "$MIGDIR/0099_selftest_noop.down.sql" <<'SQL'
+BEGIN;
+DROP TABLE IF EXISTS iam_v2.edge_selftest_marker;
+COMMIT;
+SQL
+out="$(run_apply)"
+: > "$WORK/backup.log"; : > "$WORK/backup.fail"
+out="$(run_down --ack-down I_UNDERSTAND_LIVE_SITE_DOWN_MIGRATION)"; rc=$?
+if [ "$rc" = 4 ] && applied && [ "$(marker)" = "1" ]; then ok "a live down-migration is refused without a backup; the schema is untouched"
+else no "a down ran without a backup" "rc=$rc $out"; fi
+rm -f "$WORK/backup.fail"; : > "$WORK/backup.log"
+out="$(run_down --ack-down I_UNDERSTAND_LIVE_SITE_DOWN_MIGRATION)"
+if ! applied && grep -q -- '--reason rolling back migration 0099_selftest_noop' "$WORK/backup.log"; then ok "a live down-migration took the pre-change backup first"
+else no "the down did not take the backup first" "$out"; fi
+rm -f "$MIGDIR/0099_selftest_noop.down.sql"
+# there is no way to skip it, and a disposable database does not need one
+if grep -qiE 'skip-?(prechange|backup)|--no-backup' "$RUNNER"; then no "the runner has a way to skip the pre-change backup" ""
+else ok "no option exists to skip the pre-change backup"; fi
+if grep -q 'live-site" \] || return 0' "$RUNNER"; then ok "only a live site takes the backup; a disposable test database does not"
+else no "the pre-change backup is not limited to live sites" ""; fi
 
 echo "============================================================"
 if [ "$fail" = "0" ]; then echo "EDGE_MIGRATE_SELFTEST = PASS ($pass cases)"; exit 0; fi

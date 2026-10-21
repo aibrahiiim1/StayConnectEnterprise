@@ -5,6 +5,7 @@ import { PageHeader, PageShell } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { UsersManager } from "@/components/users-manager";
 import { SessionLifetimeSetting } from "@/components/session-lifetime";
+import { DataRetentionSetting } from "@/components/data-retention";
 import { roleLabel, TEAM_ROLES, usePermissions } from "@/lib/permissions";
 import { useSession } from "@/lib/session";
 
@@ -36,10 +37,12 @@ export default function TeamPage() {
           canManage={can["team.manage"]}
           meId={me.operator_id}
           canResetPassword
+          canExportData={can["team.manage"]}
           noun="team member"
         />
       </Card>
       <SessionLifetimeSetting canManage={can["team.manage"]} />
+      <DataRetentionSetting canManage={can["team.manage"]} />
     </PageShell>
   );
 }

@@ -112,6 +112,13 @@ JOIN pg_namespace n ON n.oid = c.relnamespace
 CROSS JOIN LATERAL aclexplode(att.attacl) a
 WHERE n.nspname IN ('public','iam_v2') AND att.attnum > 0 AND NOT att.attisdropped
 UNION ALL
+-- DATABASE PRIVILEGES. Cluster-level, so a dump never carries them and a freshly created database has none. Gate-P gives
+-- iam_v2_owner CREATE on the database; without this the next migration after a restore could not create anything.
+SELECT 3, 'GRANT ' || a.privilege_type || ' ON DATABASE ' || quote_ident(d.datname)
+          || ' TO ' || CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(a.grantee)) END || ';'
+FROM pg_database d CROSS JOIN LATERAL aclexplode(d.datacl) a
+WHERE d.datname = current_database() AND a.grantee <> d.datdba
+UNION ALL
 SELECT 3, 'GRANT ' || a.privilege_type || ' ON FUNCTION ' || quote_ident(n.nspname) || '.' || quote_ident(p.proname)
           || '(' || pg_get_function_identity_arguments(p.oid) || ')'
           || ' TO ' || CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(a.grantee)) END || ';'

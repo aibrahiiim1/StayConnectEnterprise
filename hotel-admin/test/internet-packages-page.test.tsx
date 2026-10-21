@@ -186,7 +186,7 @@ describe("InternetPackagesPage — packages", () => {
     p.mockResolvedValue({});
     render(<InternetPackagesPage />);
     await screen.findByText("FREEWIFI");
-    fireEvent.click(screen.getByRole("button", { name: /^disable$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^disable\b/i }));
 
     expect(p).not.toHaveBeenCalled();
     fireEvent.change(await screen.findByLabelText(/why are you disabling it/i), { target: { value: "bad package" } });
@@ -202,7 +202,7 @@ describe("InternetPackagesPage — packages", () => {
     p.mockResolvedValue({});
     render(<InternetPackagesPage />);
     await screen.findByText("FREEWIFI");
-    fireEvent.click(screen.getByRole("button", { name: /^disable$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^disable\b/i }));
     fireEvent.click(await screen.findByRole("button", { name: /^cancel$/i }));
     await new Promise((r) => setTimeout(r, 10));
     expect(p).not.toHaveBeenCalled();
@@ -212,7 +212,7 @@ describe("InternetPackagesPage — packages", () => {
     routes({ "/commercial-packages": list([{ package_id: "pk1", code: "FREEWIFI", active: true, current_revision_id: "r1", revision_count: 1 }]) });
     render(<InternetPackagesPage />);
     await screen.findByText("FREEWIFI");
-    fireEvent.click(screen.getByRole("button", { name: /^disable$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^disable\b/i }));
 
     const confirm = await screen.findByRole("button", { name: /stop offering it/i });
     expect(confirm).toBeDisabled();
@@ -266,7 +266,7 @@ describe("InternetPackagesPage — packages", () => {
     p.mockResolvedValue({});
     render(<InternetPackagesPage />);
     await screen.findByText("Free WiFi");
-    fireEvent.click(screen.getByRole("button", { name: /^edit$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^edit\b/i }));
     fireEvent.click(await screen.findByRole("button", { name: /save changes/i }));
     await waitFor(() => expect(p).toHaveBeenCalledTimes(1));
     expect(p.mock.calls[0][0]).toBe("/commercial-packages");
@@ -295,7 +295,7 @@ describe("InternetPackagesPage — packages", () => {
     p.mockRejectedValueOnce(new ApiError(400, { error: "validation", message: "invalid_room_charge_mapping: one mapping per PMS interface" }));
     render(<InternetPackagesPage />);
     await screen.findByText("Free WiFi");
-    fireEvent.click(screen.getByRole("button", { name: /^edit$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^edit\b/i }));
     await screen.findByTestId("room-charge-mappings");
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
     await waitFor(() => expect(p).toHaveBeenCalledTimes(1));
@@ -328,7 +328,7 @@ describe("InternetPackagesPage — packages", () => {
     p.mockResolvedValue({});
     render(<InternetPackagesPage />);
     await screen.findByText("Free WiFi");
-    fireEvent.click(screen.getByRole("button", { name: /^edit$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^edit\b/i }));
     // The unknown condition is shown, read-only, as kept.
     const kept = await screen.findByTestId("preserved-rules");
     expect(kept.textContent).toContain("STAY_STATUS");
@@ -366,7 +366,7 @@ describe("InternetPackagesPage — packages", () => {
     p.mockResolvedValue({});
     render(<InternetPackagesPage />);
     await screen.findByText("Free WiFi");
-    fireEvent.click(screen.getByRole("button", { name: /^edit$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^edit\b/i }));
     const price = await screen.findByLabelText("Price");
     fireEvent.change(price, { target: { value: "7.50" } });
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
@@ -392,7 +392,7 @@ describe("InternetPackagesPage — packages", () => {
     p.mockResolvedValueOnce({});
     render(<InternetPackagesPage />);
     await screen.findByText("Free WiFi");
-    fireEvent.click(screen.getByRole("button", { name: /^edit$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^edit\b/i }));
     fireEvent.click(await screen.findByRole("button", { name: /save changes/i }));
     const confirm = await screen.findByRole("dialog", { name: /confirm the change of terms/i });
     fireEvent.change(within(confirm).getByLabelText(/confirm your password/i), { target: { value: "pw-op" } });
@@ -406,7 +406,7 @@ describe("InternetPackagesPage — packages", () => {
     p.mockResolvedValue({});
     render(<InternetPackagesPage />);
     await screen.findByText("Free WiFi");
-    fireEvent.click(screen.getByRole("button", { name: /^enable$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^enable\b/i }));
     const dlg = await screen.findByRole("dialog", { name: /offer free wifi again/i });
     expect(p).not.toHaveBeenCalled();
     fireEvent.change(within(dlg).getByLabelText(/confirm your password/i), { target: { value: "pw-op" } });

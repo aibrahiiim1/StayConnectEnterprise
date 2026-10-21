@@ -13,6 +13,9 @@ beforeEach(() => nav.reset("/system/team"));
 
 const settings = {
   operator_session_max_hours: 24, default: 24, min: 1, max: 168, unit: "hours",
+  operator_idle_minutes: 30, idle_bounds: { default: 30, min: 5, max: 240, unit: "minutes" },
+  signin_lock_failures: 5, signin_lock_failures_bounds: { default: 5, min: 3, max: 20, unit: "wrong attempts" },
+  signin_lock_minutes: 15, signin_lock_minutes_bounds: { default: 15, min: 1, max: 1440, unit: "minutes" },
   updated_at: "2026-10-01T08:00:00Z", updated_by: "owner@example.test",
 };
 const team = { match: "/api/cloud/v1/team", method: "GET", body: { items: [] } };
@@ -50,7 +53,55 @@ describe("System > Team: the sign-in lifetime setting", () => {
     await user.type(within(dialog).getByLabelText(/^Password/), "hunter22");
     await user.click(within(dialog).getByRole("button", { name: "Confirm" }));
     await waitFor(() => expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(2));
-    expect(calls.filter((c) => c.method === "PATCH")[1].body).toEqual({ operator_session_max_hours: 8, reason: "front desk PC" });
+    expect(calls.filter((c) => c.method === "PATCH")[1].body).toEqual({ operator_session_max_hours: 8, operator_idle_minutes: 30, signin_lock_failures: 5, signin_lock_minutes: 15, reason: "front desk PC" });
+  });
+
+  it("the idle limit is saved with its bounds (GDPR plan C10)", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetch([
+      team,
+      { match: "/api/cloud/v1/settings/security", method: "GET", body: settings },
+      { match: "/api/cloud/v1/settings/security", method: "PATCH", body: { ...settings, operator_idle_minutes: 15 } },
+    ]);
+    renderAs(PLATFORM_ME, <TeamPage />);
+    const idle = await screen.findByLabelText("Sign out after this many minutes without activity");
+    expect(idle).toHaveValue("30");
+    await user.clear(idle);
+    await user.type(idle, "2");
+    await user.type(screen.getByPlaceholderText("e.g. shared workstation"), "night shift");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText(/from 5 to 240/)).toBeInTheDocument();
+    await user.clear(idle);
+    await user.type(idle, "15");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(1));
+    expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ operator_session_max_hours: 24, operator_idle_minutes: 15, signin_lock_failures: 5, signin_lock_minutes: 15, reason: "night shift" });
+  });
+
+  it("the sign-in lockout is two settings with their bounds (Central migration 0053)", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetch([
+      team,
+      { match: "/api/cloud/v1/settings/security", method: "GET", body: settings },
+      { match: "/api/cloud/v1/settings/security", method: "PATCH", body: { ...settings, signin_lock_failures: 3, signin_lock_minutes: 60 } },
+    ]);
+    renderAs(PLATFORM_ME, <TeamPage />);
+    const n = await screen.findByLabelText("Wrong passwords or codes before the account is locked");
+    const mins = screen.getByLabelText("Minutes an account stays locked");
+    expect(n).toHaveValue("5");
+    expect(mins).toHaveValue("15");
+    await user.clear(n);
+    await user.type(n, "2");
+    await user.type(screen.getByPlaceholderText("e.g. shared workstation"), "audit finding");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText(/wrong attempts from 3 to 20/)).toBeInTheDocument();
+    await user.clear(n);
+    await user.type(n, "3");
+    await user.clear(mins);
+    await user.type(mins, "60");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(1));
+    expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ operator_session_max_hours: 24, operator_idle_minutes: 30, signin_lock_failures: 3, signin_lock_minutes: 60, reason: "audit finding" });
   });
 
   it("support staff see the value but cannot change it", async () => {
@@ -58,6 +109,57 @@ describe("System > Team: the sign-in lifetime setting", () => {
     renderAs(SUPPORT_ME, <TeamPage />);
     expect(await screen.findByLabelText("Sign-in lifetime in hours")).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+  });
+});
+
+const retention = {
+  audit_log_months: 24, audit_log_months_bounds: { default: 24, min: 6, max: 120, unit: "months" },
+  history_personal_months: 24, history_personal_months_bounds: { default: 24, min: 6, max: 120, unit: "months" },
+  history_years: 6, history_years_bounds: { default: 6, min: 1, max: 10, unit: "years" },
+  disabled_account_months: 24, disabled_account_months_bounds: { default: 24, min: 1, max: 120, unit: "months" },
+  updated_at: "2026-10-19T08:00:00Z", updated_by: "owner@example.test",
+};
+
+describe("System > Team: data retention (Central migration 0054)", () => {
+  it("shows the four periods with their bounds, refuses one out of range, and sends only what changed", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetch([
+      team,
+      { match: "/api/cloud/v1/settings/security", method: "GET", body: settings },
+      { match: "/api/cloud/v1/settings/retention", method: "GET", body: retention },
+      { match: "/api/cloud/v1/settings/retention", method: "PATCH", body: { ...retention, audit_log_months: 36 } },
+    ]);
+    renderAs(PLATFORM_ME, <TeamPage />);
+    const audit = await screen.findByLabelText("Months the audit log is kept");
+    expect(audit).toHaveValue("24");
+    expect(screen.getByLabelText("Years the history and licences are kept")).toHaveValue("6");
+    expect(screen.getByLabelText("Months before a disabled account is anonymised")).toHaveValue("24");
+    expect(screen.getByText(/From 1 to 10 years\. Default 6\./)).toBeInTheDocument();
+
+    await user.clear(audit);
+    await user.type(audit, "3");
+    await user.type(screen.getByPlaceholderText("e.g. auditor's request"), "auditor asked");
+    const saves = screen.getAllByRole("button", { name: "Save" });
+    await user.click(saves[saves.length - 1]);
+    expect(await screen.findByText(/Audit log \(months\): enter a whole number from 6 to 120/)).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+
+    await user.clear(audit);
+    await user.type(audit, "36");
+    await user.click(saves[saves.length - 1]);
+    await waitFor(() => expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(1));
+    expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ audit_log_months: 36, reason: "auditor asked" });
+  });
+
+  it("support staff see the periods but cannot change them", async () => {
+    mockFetch([
+      team,
+      { match: "/api/cloud/v1/settings/security", method: "GET", body: settings },
+      { match: "/api/cloud/v1/settings/retention", method: "GET", body: retention },
+    ]);
+    renderAs(SUPPORT_ME, <TeamPage />);
+    expect(await screen.findByLabelText("Months the audit log is kept")).toBeDisabled();
+    expect(screen.queryByPlaceholderText("e.g. auditor's request")).not.toBeInTheDocument();
   });
 });
 

@@ -93,7 +93,7 @@ describe("a read-only role is offered no write control", () => {
     expect(await screen.findByText("Gold", { selector: "button" })).toBeInTheDocument();
     expect(await screen.findByText(/can see the service plans but not change them/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /add plan|add the first plan/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: /^edit$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^edit\b/i })).toBeNull();
     fireEvent.click(screen.getByText("Gold", { selector: "button" }));
     await screen.findByRole("dialog");
     expect(screen.queryByRole("button", { name: /delete…/i })).toBeNull();
@@ -103,7 +103,7 @@ describe("a read-only role is offered no write control", () => {
     routes(["site_admin"]);
     render(<ServicePlansPage />);
     expect(await screen.findByRole("button", { name: /add plan/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^edit$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^edit\b/i })).toBeInTheDocument();
   });
 
   it("Internet packages: a viewer sees the packages and no Add, Edit or Disable", async () => {
@@ -112,15 +112,15 @@ describe("a read-only role is offered no write control", () => {
     expect(await screen.findByText("Free WiFi")).toBeInTheDocument();
     expect(await screen.findByText(/can see the internet packages but not change them/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /add package/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: /^edit$/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: /^disable$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^edit\b/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^disable\b/i })).toBeNull();
   });
 
   it("Internet packages: an admin is offered Add package", async () => {
     routes(["site_admin"]);
     render(<InternetPackagesPage />);
     expect(await screen.findByRole("button", { name: /add package/i })).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("button", { name: /^edit$/i })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: /^edit\b/i })).toBeInTheDocument());
   });
 
   it("Sign-in methods: the desk sees each method's state in words and no switch", async () => {

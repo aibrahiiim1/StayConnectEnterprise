@@ -281,6 +281,18 @@ func (p *phase3Auth) applyProtection(ctx context.Context, at signinattempt.Attem
 			slog.Info("phase3 auth: guest sign-in restricted for a device after repeated wrong credentials",
 				"failures", count, "expires_at", expires, "guest_network", at.GuestNetworkName)
 		}
+		paused, until, n, err := p.protection.NoteNetworkFailure(ctx, p.srv.tenID, p.srv.siteID,
+			at.GuestNetworkID, at.GuestNetworkName)
+		if err != nil {
+			slog.Warn("phase3 auth: a wrong room sign-in was not counted for its network", "err", err)
+			return
+		}
+		if paused {
+			// WARN: many wrong room sign-ins from many devices is what guessing looks like. Hotel Admin shows
+			// the pause; this line is for whoever reads the journal.
+			slog.Warn("phase3 auth: room sign-in paused on a guest network after many wrong room sign-ins",
+				"failures", n, "until", until, "guest_network", at.GuestNetworkName)
+		}
 	}
 }
 

@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { canRead } from "@/lib/roles";
@@ -13,7 +13,7 @@ import {
   PanelLeftClose, PanelLeftOpen, ClipboardCheck, Ticket,
   DoorOpen, DoorClosed, BedDouble, Plug, Route, Inbox, ShieldCheck, UserX, Layers, ArrowLeftRight, HeartPulse, Receipt,
   LifeBuoy, Globe, AtSign, MessageSquare, Stethoscope, Bell, Hourglass, CalendarClock, ChartColumn,
-  CreditCard, BedSingle, Blocks, UsersRound,
+  CreditCard, BedSingle, Blocks, UsersRound, UserSearch,
 } from "lucide-react";
 import { BySemantics, OneGateLockup } from "@/components/brand";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -203,6 +203,7 @@ const SECTIONS: Section[] = [
       { href: "/appliance",          label: "Appliance & licence", icon: ServerCog, resource: "license", keywords: "enrol claim serial activate setup cloud connection central licence capacity expiry plan offline renewal first-time" },
       { href: "/modules",            label: "Modules",     icon: Blocks,     resource: "modules", keywords: "licence licensed features hospitality paid access card payment room charge switch on off site type" },
       { href: "/backups",            label: "Backups",     icon: Archive,    resource: "backups", keywords: "restore snapshot database retention schedule" },
+      { href: "/guest-data",         label: "Guest data requests", icon: UserSearch, resource: "guest-data-rights", keywords: "gdpr privacy personal data erase delete forget export copy access request subject" },
       // Who may.
       { href: "/operators",          label: "Operators",   icon: Users,      resource: "operators", keywords: "staff users roles password" },
     ],
@@ -258,6 +259,9 @@ export function Nav({
   const focusFilterAfterExpand = useRef(false);
 
   const activeHref = useMemo(() => activeNavHref(path), [path]);
+  // Section heading ids. Prefixed per instance: the desktop column and the phone drawer are both Navs.
+  const navId = useId();
+  const sectionId = (title: string) => `${navId}-section-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
 
   // A FILTER, NOT A SEARCH ENGINE. Thirty-four screens in eight groups is past the point where scanning is
   // reliable, and the operator who needs "the page with the resync button" should not have to remember that it
@@ -299,7 +303,7 @@ export function Nav({
     }
     searchRef.current?.focus();
   };
-  // Read through a ref by the "/" listener, so that listener is registered once rather than on every render.
+  // Read through a ref by the Ctrl+K listener, so that listener is registered once rather than on every render.
   const openFilterRef = useRef(openFilter);
   useEffect(() => {
     openFilterRef.current = openFilter;
@@ -312,13 +316,13 @@ export function Nav({
     }
   }, [collapsed]);
 
-  // "/" focuses the filter, the one shortcut worth having on a screen whose primary cost is finding a page.
-  // Guarded so it does not steal the key while the operator is typing into a form.
+  // Ctrl+K (Cmd+K on a Mac) focuses the filter, the one shortcut worth having on a screen whose primary cost is
+  // finding a page. It used to be a bare "/", which WCAG 2.1.4 rules out: a single printable key cannot be turned
+  // off, and speech-input users trigger it by dictating any text with a slash in it. With a modifier it is safe
+  // even while typing in a field, so it no longer needs to stand aside for one.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      if (e.key.toLowerCase() !== "k" || !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
       e.preventDefault();
       openFilterRef.current();
     };
@@ -403,6 +407,8 @@ export function Nav({
               onKeyDown={(e) => e.key === "Escape" && setQuery("")}
               placeholder="Find a screen…"
               aria-label="Filter navigation"
+              aria-keyshortcuts="Control+K Meta+K"
+              title="Find a screen (Ctrl+K)"
               className={cn(
                 "h-9 w-full rounded-md border border-sidebar-border bg-sidebar-accent/70 pl-8 pr-8 text-[0.8125rem] pointer-coarse:pr-11",
                 "text-sidebar-foreground placeholder:text-sidebar-muted",
@@ -444,13 +450,22 @@ export function Nav({
                 // groups, which is most of what the headings were doing for someone who already knows the
                 // product. It is decorative, so it is hidden from assistive tech — the accessible grouping
                 // still comes from each item's own label.
-                <div className="mx-2 mb-1.5 mt-1 border-t border-sidebar-border/70 first:mt-0 first:border-t-0" aria-hidden />
+                // The heading itself stays for assistive tech, visually hidden, so the list keeps its name.
+                <>
+                  <div className="mx-2 mb-1.5 mt-1 border-t border-sidebar-border/70 first:mt-0 first:border-t-0" aria-hidden />
+                  <h2 id={sectionId(sec.title)} className="sr-only">{sec.title}</h2>
+                </>
               ) : (
-                <div className="px-2.5 pb-1.5 pt-2 text-nano uppercase tracking-[0.12em] text-sidebar-muted">
+                // A real heading (WCAG 1.3.1), so a screen-reader user can jump between the groups, and the list
+                // below is named by it. Styled exactly as the plain label it replaces.
+                <h2
+                  id={sectionId(sec.title)}
+                  className="px-2.5 pb-1.5 pt-2 text-nano font-normal uppercase tracking-[0.12em] text-sidebar-muted"
+                >
                   {sec.title}
-                </div>
+                </h2>
               )}
-              <ul className="space-y-0.5">
+              <ul className="space-y-0.5" aria-labelledby={sectionId(sec.title)}>
                 {sec.items.map((it) => {
                   const active = it.href === activeHref;
                   const Icon = it.icon;
@@ -528,6 +543,8 @@ export function Nav({
             {/* Not a button: it does nothing when activated. tabIndex makes it focusable so the tooltip is
                 reachable from the keyboard, and the role/label make it announce as the status it is. */}
             <div
+              // jsx-a11y does not know focusable tooltip triggers, which WCAG 1.4.13 needs reachable without a mouse.
+              // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
               tabIndex={0}
               role="img"
               aria-label={`Signed in as ${email ?? "unknown"}${roleLabel ? `, ${roleLabel}` : ""}`}
@@ -581,6 +598,27 @@ export function Nav({
             </Link>
           );
           return collapsed ? <Tooltip content="Change my password" side="right">{change}</Tooltip> : change;
+        })()}
+
+        {/* The operator's own two-step sign-in (0132): its state and new recovery codes. */}
+        {(() => {
+          const twoStep = (
+            <Link
+              href="/account/security"
+              onClick={onNavigate}
+              aria-label={collapsed ? "Two-step sign-in" : undefined}
+              className={cn(
+                "mt-1 flex w-full items-center rounded-md text-sm text-sidebar-foreground/85",
+                "transition-colors hover:bg-sidebar-accent/60 hover:text-white",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
+                collapsed ? "h-10 justify-center px-0" : "gap-2.5 px-2.5 py-1.5",
+              )}
+            >
+              <Smartphone className="size-4 shrink-0 text-sidebar-muted" />
+              <span className={cn(collapsed ? "sr-only" : undefined)}>Two-step sign-in</span>
+            </Link>
+          );
+          return collapsed ? <Tooltip content="Two-step sign-in" side="right">{twoStep}</Tooltip> : twoStep;
         })()}
 
         {(() => {

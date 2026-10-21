@@ -191,7 +191,7 @@ test("internet packages: publish via the plan selector, then step-up deactivate"
   // that states what stops, with the password masked. No browser prompt is used anywhere.
   let browserDialogs = 0;
   page.on("dialog", (d) => { browserDialogs += 1; d.dismiss(); });
-  await page.getByRole("button", { name: /^disable$/i }).click();
+  await page.getByRole("button", { name: /^disable /i }).click();
   const confirm = page.getByRole("dialog");
   await expect(confirm.getByRole("button", { name: /stop offering it/i })).toBeDisabled();
   await confirm.getByLabel(/why are you disabling it/i).fill("retire it");
@@ -242,7 +242,7 @@ test("internet packages: Delete… of a used package explains what is attached a
     mutations,
   });
   await page.goto("/internet-packages");
-  await page.getByRole("button", { name: "Free WiFi" }).click();
+  await page.getByRole("button", { name: "Free WiFi", exact: true }).click();
   await page.getByRole("button", { name: /delete…/i }).click();
   await expect(page.getByText("2 internet grants given to guests record this package.")).toBeVisible();
   await expect(page.getByText(/why it can't be deleted/i)).toBeVisible();

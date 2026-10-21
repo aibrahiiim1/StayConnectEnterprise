@@ -48,16 +48,23 @@ export function placementSiteType(p: Placement): string {
   return isNewSite(p) ? p.newSiteType : p.existingSiteType;
 }
 
-export function placementProblem(p: Placement): string | null {
-  if (!p.customerId) return "Choose a customer.";
-  if (isNewCustomer(p) && !p.newCustomerName.trim()) return "Enter the new customer's name.";
-  if (!isNewSite(p) && !p.siteId) return "Choose a site.";
+export type PlacementField = "customer" | "newCustomerName" | "site" | "newSiteName" | "newSiteTimezone" | "newSiteCountry";
+
+/** The first thing missing from the placement and the field it belongs to, or null. */
+export function placementIssue(p: Placement): { field: PlacementField; message: string } | null {
+  if (!p.customerId) return { field: "customer", message: "Choose a customer." };
+  if (isNewCustomer(p) && !p.newCustomerName.trim()) return { field: "newCustomerName", message: "Enter the new customer's name." };
+  if (!isNewSite(p) && !p.siteId) return { field: "site", message: "Choose a site." };
   if (isNewSite(p)) {
-    if (!p.newSiteName.trim()) return "Enter the new site's name.";
-    if (!p.newSiteTimezone.trim()) return "Choose the site's time zone.";
-    if (p.newSiteCountry && !/^[A-Za-z]{2}$/.test(p.newSiteCountry.trim())) return "Country is a two-letter code, such as EG.";
+    if (!p.newSiteName.trim()) return { field: "newSiteName", message: "Enter the new site's name." };
+    if (!p.newSiteTimezone.trim()) return { field: "newSiteTimezone", message: "Choose the site's time zone." };
+    if (p.newSiteCountry && !/^[A-Za-z]{2}$/.test(p.newSiteCountry.trim())) return { field: "newSiteCountry", message: "Country is a two-letter code, such as EG." };
   }
   return null;
+}
+
+export function placementProblem(p: Placement): string | null {
+  return placementIssue(p)?.message ?? null;
 }
 
 /** The customer/site half of the §6 activate body. */
@@ -85,11 +92,18 @@ function timezones(): string[] {
 }
 
 /** A site's time zone: the browser's list when it has one, free text on an older browser. */
-export function TimezoneSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+export function TimezoneSelect({
+  value,
+  onChange,
+  ...rest
+}: { value: string; onChange: (v: string) => void } & Omit<React.SelectHTMLAttributes<HTMLSelectElement>, "value" | "onChange">) {
   const zones = useMemo(timezones, []);
-  if (zones.length === 0) return <Input value={value} onChange={(e) => onChange(e.target.value)} />;
+  // `rest` carries the id and aria-* that Field injects, so the label is bound to this control (as SiteTypeSelect).
+  if (zones.length === 0) {
+    return <Input {...(rest as React.InputHTMLAttributes<HTMLInputElement>)} value={value} onChange={(e) => onChange(e.target.value)} />;
+  }
   return (
-    <Select value={value} onChange={(e) => onChange(e.target.value)}>
+    <Select {...rest} value={value} onChange={(e) => onChange(e.target.value)}>
       {!zones.includes(value) && <option value={value}>{value}</option>}
       {zones.map((z) => <option key={z} value={z}>{z}</option>)}
     </Select>
@@ -119,10 +133,15 @@ export function PlacementFields({
   value,
   onChange,
   lockedCustomer,
+  errorFor,
+  idFor,
 }: {
   value: Placement;
   onChange: (next: Placement) => void;
   lockedCustomer?: { id: string; name: string };
+  /** A field's error and id (useFieldErrors), so a problem is shown under, and focuses, the field it is about. */
+  errorFor?: (field: PlacementField) => string | undefined;
+  idFor?: (field: PlacementField) => string;
 }) {
   const [customers, setCustomers] = useState<Customer[] | null>(null);
   const [sites, setSites] = useState<Site[] | null>(null);
@@ -148,13 +167,14 @@ export function PlacementFields({
 
   return (
     <div className="grid gap-4 sm:grid-cols-2">
-      <Field label="Customer" required>
+      <Field label="Customer" required error={errorFor?.("customer")}>
         {lockedCustomer ? (
-          <Select value={lockedCustomer.id} disabled onChange={() => undefined}>
+          <Select id={idFor?.("customer")} value={lockedCustomer.id} disabled onChange={() => undefined}>
             <option value={lockedCustomer.id}>{lockedCustomer.name}</option>
           </Select>
         ) : (
           <Select
+            id={idFor?.("customer")}
             value={value.customerId}
             disabled={customers === null}
             onChange={(e) => set({ customerId: e.target.value, siteId: e.target.value === NEW ? NEW : "", existingSiteType: "" })}
@@ -169,12 +189,13 @@ export function PlacementFields({
       </Field>
 
       {newCustomer ? (
-        <Field label="New customer's name" required>
-          <Input value={value.newCustomerName} onChange={(e) => set({ newCustomerName: e.target.value })} autoComplete="off" />
+        <Field label="New customer's name" required error={errorFor?.("newCustomerName")}>
+          <Input id={idFor?.("newCustomerName")} value={value.newCustomerName} onChange={(e) => set({ newCustomerName: e.target.value })} autoComplete="off" />
         </Field>
       ) : (
-        <Field label="Site" required>
+        <Field label="Site" required error={errorFor?.("site")}>
           <Select
+            id={idFor?.("site")}
             value={value.siteId}
             disabled={!value.customerId || sites === null}
             onChange={(e) => set({
@@ -193,17 +214,18 @@ export function PlacementFields({
 
       {newSite && (
         <>
-          <Field label="New site's name" required hint="One physical location, such as a hotel, office or campus.">
-            <Input value={value.newSiteName} onChange={(e) => set({ newSiteName: e.target.value })} autoComplete="off" />
+          <Field label="New site's name" required hint="One physical location, such as a hotel, office or campus." error={errorFor?.("newSiteName")}>
+            <Input id={idFor?.("newSiteName")} value={value.newSiteName} onChange={(e) => set({ newSiteName: e.target.value })} autoComplete="off" />
           </Field>
-          <Field label="Time zone" required>
-            <TimezoneSelect value={value.newSiteTimezone} onChange={(v) => set({ newSiteTimezone: v })} />
+          <Field label="Time zone" required error={errorFor?.("newSiteTimezone")}>
+            <TimezoneSelect id={idFor?.("newSiteTimezone")} value={value.newSiteTimezone} onChange={(v) => set({ newSiteTimezone: v })} />
           </Field>
           <Field label="Site type" hint="Describes the place. It does not turn anything on.">
             <SiteTypeSelect value={value.newSiteType} onChange={(v) => set({ newSiteType: v })} />
           </Field>
-          <Field label="Country" hint="Two letters, such as EG. Optional.">
+          <Field label="Country" hint="Two letters, such as EG. Optional." error={errorFor?.("newSiteCountry")}>
             <Input
+              id={idFor?.("newSiteCountry")}
               value={value.newSiteCountry}
               maxLength={2}
               onChange={(e) => set({ newSiteCountry: e.target.value })}

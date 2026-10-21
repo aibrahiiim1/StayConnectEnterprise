@@ -9,7 +9,7 @@ import {
 } from "@/lib/api";
 import { Card, CardBody } from "@/components/ui/card";
 import { Button, LinkButton } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/input";
+import { Field, Input, useFieldErrors } from "@/components/ui/input";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
@@ -56,6 +56,7 @@ function CustomerView({ id }: { id: string }) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [dErr, setDErr] = useState<unknown>(null);
+  const renameErr = useFieldErrors<"name">();
 
   const load = useCallback(async () => {
     try {
@@ -72,16 +73,19 @@ function CustomerView({ id }: { id: string }) {
   const tab: Tab = (tabs as readonly string[]).includes(q.tab) ? (q.tab as Tab) : "summary";
   const idBase = `customer-${id}`;
 
-  async function act(fn: () => Promise<unknown>, done: string) {
+  async function act(fn: () => Promise<unknown>, done: string, nameField = false) {
     setBusy(true);
     setDErr(null);
+    renameErr.clear();
     try {
       await fn();
       toast.success(done, c?.name);
       setDialog(null);
       await load();
     } catch (e) {
-      setDErr(e);
+      // A refused or taken name is shown under the Name field, which takes focus.
+      if (nameField && e instanceof ApiError && (e.status === 400 || e.status === 409)) renameErr.fail({ name: e.message });
+      else setDErr(e);
     } finally {
       setBusy(false);
     }
@@ -168,6 +172,7 @@ function CustomerView({ id }: { id: string }) {
                 canManage={can["users.manage"]}
                 meId={me.operator_id}
                 canResetPassword={false}
+                canExportData={can["team.manage"]}
               />
             </Card>
           )}
@@ -189,10 +194,11 @@ function CustomerView({ id }: { id: string }) {
         busy={busy}
         error={dErr}
         disabled={!name.trim() || name.trim() === c.name}
-        onSubmit={() => act(() => api.patch(`/cloud/v1/customers/${c.id}`, { name: name.trim() }), "Customer renamed")}
+        disabledReason={!name.trim() ? "To continue, enter the customer's name." : "To continue, enter a different name."}
+        onSubmit={() => act(() => api.patch(`/cloud/v1/customers/${c.id}`, { name: name.trim() }), "Customer renamed", true)}
       >
-        <Field label="Name" required>
-          <Input value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" />
+        <Field label="Name" required error={renameErr.error("name")}>
+          <Input id={renameErr.id("name")} value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" />
         </Field>
       </DialogForm>
 
@@ -227,6 +233,15 @@ function CustomerView({ id }: { id: string }) {
   );
 }
 
+const SUMMARY_BUTTON =
+  "rounded text-headline tabular hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
+/** "3 sites, open the Sites tab": a number alone does not say what it counts or what the button does. The number
+ *  comes first so the name still starts with the visible text (WCAG 2.5.3). */
+function countLabel(n: number, one: string, many: string, tab: string): string {
+  return `${n} ${n === 1 ? one : many}, open the ${tab} tab`;
+}
+
 function Summary({ c, onTab }: { c: Customer; onTab: (t: Tab) => void }) {
   return (
     <div className="grid gap-5 lg:grid-cols-3">
@@ -234,14 +249,17 @@ function Summary({ c, onTab }: { c: Customer; onTab: (t: Tab) => void }) {
         <CardBody>
           <dl className="grid gap-5 sm:grid-cols-3">
             <Fact label="Sites">
-              <button type="button" className="text-headline tabular hover:underline" onClick={() => onTab("sites")}>{c.sites}</button>
+              <button type="button" className={SUMMARY_BUTTON} onClick={() => onTab("sites")}
+                aria-label={countLabel(c.sites, "site", "sites", "Sites")}>{c.sites}</button>
             </Fact>
             <Fact label="Appliances">
-              <button type="button" className="text-headline tabular hover:underline" onClick={() => onTab("appliances")}>{c.appliances}</button>
+              <button type="button" className={SUMMARY_BUTTON} onClick={() => onTab("appliances")}
+                aria-label={countLabel(c.appliances, "appliance", "appliances", "Appliances")}>{c.appliances}</button>
               <div className="text-caption text-muted-foreground">{c.activated} activated</div>
             </Fact>
             <Fact label="Active licenses">
-              <button type="button" className="text-headline tabular hover:underline" onClick={() => onTab("licenses")}>{c.licenses_active}</button>
+              <button type="button" className={SUMMARY_BUTTON} onClick={() => onTab("licenses")}
+                aria-label={countLabel(c.licenses_active, "active license", "active licenses", "Licenses")}>{c.licenses_active}</button>
             </Fact>
           </dl>
         </CardBody>
@@ -265,6 +283,20 @@ function Summary({ c, onTab }: { c: Customer; onTab: (t: Tab) => void }) {
 
 type SiteDraft = { name: string; code: string; timezone: string; country: string; siteType: string };
 
+type SiteField = "name" | "timezone" | "country" | "siteType" | "code";
+
+/** Which field the server's refusal of a site is about, from its sentence (400) or a taken code (409). */
+function siteFieldOf(e: ApiError): SiteField | null {
+  if (e.status !== 400 && e.status !== 409) return null;
+  const m = e.message.toLowerCase();
+  if (m.includes("timezone") || m.includes("time zone")) return "timezone";
+  if (m.includes("site type") || m.includes("site_type")) return "siteType";
+  if (m.includes("country")) return "country";
+  if (m.includes("code")) return "code";
+  if (m.includes("name")) return "name";
+  return null;
+}
+
 function Sites({ customerId, canManage, onChanged }: { customerId: string; canManage: boolean; onChanged: () => void }) {
   const toast = useToast();
   const [rows, setRows] = useState<Site[] | null>(null);
@@ -274,6 +306,7 @@ function Sites({ customerId, canManage, onChanged }: { customerId: string; canMa
   const [deleteSite, setDeleteSite] = useState<Site | null>(null);
   const [busy, setBusy] = useState(false);
   const [dErr, setDErr] = useState<unknown>(null);
+  const siteErr = useFieldErrors<SiteField>();
 
   const load = useCallback(async () => {
     try {
@@ -286,9 +319,10 @@ function Sites({ customerId, canManage, onChanged }: { customerId: string; canMa
   }, [customerId]);
   useEffect(() => { void load(); }, [load]);
 
-  async function run(fn: () => Promise<unknown>, done: string, detail?: string) {
+  async function run(fn: () => Promise<unknown>, done: string, detail?: string, fieldOf?: (e: ApiError) => SiteField | null) {
     setBusy(true);
     setDErr(null);
+    siteErr.clear();
     try {
       await fn();
       toast.success(done, detail);
@@ -297,7 +331,9 @@ function Sites({ customerId, canManage, onChanged }: { customerId: string; canMa
       await load();
       onChanged();
     } catch (e) {
-      setDErr(e);
+      const field = e instanceof ApiError && fieldOf ? fieldOf(e) : null;
+      if (field && e instanceof ApiError) siteErr.fail({ [field]: e.message });
+      else setDErr(e);
     } finally {
       setBusy(false);
     }
@@ -310,14 +346,15 @@ function Sites({ customerId, canManage, onChanged }: { customerId: string; canMa
     if (d.country.trim()) body.country = d.country.trim().toUpperCase();
     if (edit.site) {
       const s = edit.site;
-      return run(() => api.patch(`/cloud/v1/sites/${s.id}`, body), "Site saved", body.name);
+      return run(() => api.patch(`/cloud/v1/sites/${s.id}`, body), "Site saved", body.name, siteFieldOf);
     }
     if (d.code.trim()) body.code = d.code.trim();
-    return run(() => api.post(`/cloud/v1/customers/${customerId}/sites`, body), "Site created", body.name);
+    return run(() => api.post(`/cloud/v1/customers/${customerId}/sites`, body), "Site created", body.name, siteFieldOf);
   }
 
   const open = (site: Site | null) => {
     setDErr(null);
+    siteErr.clear();
     setEdit({
       site,
       draft: site
@@ -406,25 +443,26 @@ function Sites({ customerId, canManage, onChanged }: { customerId: string; canMa
         busy={busy}
         error={dErr}
         disabled={!d?.name.trim() || !d?.timezone.trim()}
+        disabledReason={!d?.name.trim() ? "To continue, enter the site's name." : "To continue, choose the site's time zone."}
         onSubmit={save}
       >
         {d && (
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Name" required className="sm:col-span-2">
-              <Input value={d.name} onChange={(e) => setD({ name: e.target.value })} autoComplete="off" />
+            <Field label="Name" required className="sm:col-span-2" error={siteErr.error("name")}>
+              <Input id={siteErr.id("name")} value={d.name} onChange={(e) => setD({ name: e.target.value })} autoComplete="off" />
             </Field>
-            <Field label="Time zone" required>
-              <TimezoneSelect value={d.timezone} onChange={(v) => setD({ timezone: v })} />
+            <Field label="Time zone" required error={siteErr.error("timezone")}>
+              <TimezoneSelect id={siteErr.id("timezone")} value={d.timezone} onChange={(v) => setD({ timezone: v })} />
             </Field>
-            <Field label="Country" hint="Two letters, such as EG. Optional.">
-              <Input value={d.country} maxLength={2} className="uppercase" onChange={(e) => setD({ country: e.target.value })} />
+            <Field label="Country" hint="Two letters, such as EG. Optional." error={siteErr.error("country")}>
+              <Input id={siteErr.id("country")} value={d.country} maxLength={2} className="uppercase" onChange={(e) => setD({ country: e.target.value })} />
             </Field>
-            <Field label="Site type" hint="Describes the place. It does not turn anything on; the license's modules do." className="sm:col-span-2">
-              <SiteTypeSelect value={d.siteType} onChange={(v) => setD({ siteType: v })} />
+            <Field label="Site type" hint="Describes the place. It does not turn anything on; the license's modules do." className="sm:col-span-2" error={siteErr.error("siteType")}>
+              <SiteTypeSelect id={siteErr.id("siteType")} value={d.siteType} onChange={(v) => setD({ siteType: v })} />
             </Field>
             {!edit?.site && (
-              <Field label="Short code" hint="Optional. Generated from the name when left empty." className="sm:col-span-2">
-                <Input value={d.code} onChange={(e) => setD({ code: e.target.value })} autoComplete="off" />
+              <Field label="Short code" hint="Optional. Generated from the name when left empty." className="sm:col-span-2" error={siteErr.error("code")}>
+                <Input id={siteErr.id("code")} value={d.code} onChange={(e) => setD({ code: e.target.value })} autoComplete="off" />
               </Field>
             )}
           </div>

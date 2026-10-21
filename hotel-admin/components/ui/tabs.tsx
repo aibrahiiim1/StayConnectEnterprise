@@ -3,6 +3,7 @@
 import * as React from "react";
 import * as TabsPrimitive from "@radix-ui/react-tabs";
 import { cn } from "@/lib/utils";
+import { useRadioKeys } from "./data";
 
 // Radix Tabs, so arrow-key navigation and the tab/panel ARIA relationship come for free. The admin's existing
 // tab strips are plain buttons plus a `useState`, which look like tabs and behave like nothing.
@@ -42,7 +43,12 @@ export function TabsContent({
 }: React.ComponentPropsWithoutRef<typeof TabsPrimitive.Content>) {
   return (
     <TabsPrimitive.Content
-      className={cn("focus-visible:outline-none animate-fade-in", className)}
+      // Radix makes every panel a tab stop (tabIndex=0), so it needs a visible ring like every other stop (WCAG
+      // 2.4.7); removing the outline with nothing in its place made the focus vanish between the tabs and the panel.
+      className={cn(
+        "rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background animate-fade-in",
+        className,
+      )}
       {...p}
     />
   );
@@ -69,16 +75,24 @@ export function Segmented<T extends string>({
   className?: string;
   label?: string;
 }) {
+  // The radiogroup keyboard contract (arrows, Home/End, one tab stop), the same one the theme toggle and the
+  // filter chips use. role="radio" promises it; without it each segment was its own tab stop.
+  const onKeyDown = useRadioKeys(options.map((o) => o.value), value, onChange);
+  const known = options.some((o) => o.value === value);
   return (
+    // A radiogroup is one tab stop on its CHECKED radio (roving tabIndex, useRadioKeys), never the group
+    // itself, which is the ARIA pattern; jsx-a11y reads the container role as a control.
+    // eslint-disable-next-line jsx-a11y/interactive-supports-focus
     <div
       role="radiogroup"
       aria-label={label}
+      onKeyDown={onKeyDown}
       className={cn(
         "inline-flex items-center gap-0.5 rounded-md border border-border bg-surface p-0.5",
         className,
       )}
     >
-      {options.map((o) => {
+      {options.map((o, i) => {
         const active = o.value === value;
         return (
           <button
@@ -86,6 +100,7 @@ export function Segmented<T extends string>({
             type="button"
             role="radio"
             aria-checked={active}
+            tabIndex={active || (!known && i === 0) ? 0 : -1}
             onClick={() => onChange(o.value)}
             className={cn(
               "inline-flex items-center gap-1.5 rounded-[5px] font-medium transition-colors",

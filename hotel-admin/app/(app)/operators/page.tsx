@@ -32,6 +32,8 @@ import { canWrite, SITE_ROLES, ROLE_LABELS, SiteRole } from "@/lib/roles";
 import { formatRelative } from "@/lib/utils";
 import { HelpList, HelpSection } from "@/components/help";
 import { OperatorSigninProtection } from "@/components/operator-signin-protection";
+import { OperatorSessionLimits } from "@/components/operator-session-limits";
+import { OperatorAccountRetention } from "@/components/operator-account-retention";
 
 const MIN_PASSWORD = 10;
 
@@ -58,7 +60,14 @@ export default function OperatorsPage() {
   const [requireChangeReset, setRequireChangeReset] = useState(true);
 
   const [disabling, setDisabling] = useState<EdgeOperator | null>(null);
+  // Resetting a colleague's two-step sign-in (0132): they set up a new app at their next sign-in.
+  const [mfaFor, setMfaFor] = useState<EdgeOperator | null>(null);
+  const [mfaReason, setMfaReason] = useState("");
+  const [mfaPassword, setMfaPassword] = useState("");
   const [removingRole, setRemovingRole] = useState<{ op: EdgeOperator; role: string } | null>(null);
+  // Every change to a colleague's account asks for YOUR password first (GDPR audit B7). It is cleared whenever a
+  // dialog opens or the change succeeds, so it never outlives the one change it confirmed.
+  const [yourPw, setYourPw] = useState("");
 
   const writable = canWrite("operators", me?.roles ?? []);
 
@@ -72,7 +81,7 @@ export default function OperatorsPage() {
   }, []);
 
   function openNew() {
-    setEmail(""); setDisplayName(""); setPassword(""); setRole("site_viewer"); setRequireChangeNew(true);
+    setEmail(""); setDisplayName(""); setPassword(""); setRole("site_viewer"); setRequireChangeNew(true); setYourPw("");
     setFormErr(null);
     setShowNew(true);
   }
@@ -89,9 +98,10 @@ export default function OperatorsPage() {
         password,
         role,
         require_change: requireChangeNew,
+        your_password: yourPw,
       });
       setShowNew(false);
-      setPassword("");
+      setPassword(""); setYourPw("");
       toast.success("Operator added", `${email.trim()} can now sign in as ${ROLE_LABELS[role as SiteRole] ?? role}.`);
       await load();
     } catch (e) { setFormErr(e); }
@@ -110,20 +120,32 @@ export default function OperatorsPage() {
       setFormErr("The two passwords do not match."); setBusy(false); return;
     }
     try {
-      await api.post(`/operators/${pwFor.id}/set-password`, { password: newPw, require_change: requireChangeReset });
+      await api.post(`/operators/${pwFor.id}/set-password`, { password: newPw, require_change: requireChangeReset, your_password: yourPw });
       toast.success("Password reset", `${pwFor.email} has been signed out everywhere${requireChangeReset ? " and must choose a new password at the next sign-in" : ""}.`);
       await load();
       setPwFor(null);
-      setNewPw(""); setConfirmPw("");
+      setNewPw(""); setConfirmPw(""); setYourPw("");
     } catch (e) { setFormErr(e); }
     finally { setBusy(false); }
   }
 
-  async function onDisable() {
+  async function onResetMFA() {
+    if (!mfaFor) return;
+    setBusy(true); setFormErr(null);
+    try {
+      await api.post(`/operators/${mfaFor.id}/reset-mfa`, { reason: mfaReason.trim(), password: mfaPassword });
+      toast.success("Two-step sign-in reset", `${mfaFor.email} has been signed out and sets up a new app at the next sign-in.`);
+      setMfaFor(null); setMfaReason(""); setMfaPassword("");
+      await load();
+    } catch (e) { setFormErr(e); }
+    finally { setBusy(false); }
+  }
+
+  async function onDisable({ password }: { password: string }) {
     if (!disabling) return;
     setBusy(true); setFormErr(null);
     try {
-      await api.del(`/operators/${disabling.id}`);
+      await api.del(`/operators/${disabling.id}`, { your_password: password });
       toast.success("Operator disabled", `${disabling.email} can no longer sign in.`);
       setDisabling(null);
       await load();
@@ -135,12 +157,12 @@ export default function OperatorsPage() {
   // grant the role on the spot: one slip of a select widened a colleague's access with nothing to catch it. The
   // request is the same one, sent only after the operator confirms.
   const [addingRole, setAddingRole] = useState<{ op: EdgeOperator; role: string } | null>(null);
-  async function onAddRole() {
+  async function onAddRole({ password }: { password: string }) {
     if (!addingRole) return;
     const { op, role } = addingRole;
     setBusy(true); setFormErr(null);
     try {
-      await api.post(`/operators/${op.id}/roles`, { role });
+      await api.post(`/operators/${op.id}/roles`, { role, your_password: password });
       toast.success("Role added", `${op.email} is now also ${ROLE_LABELS[role as SiteRole] ?? role}.`);
       setAddingRole(null);
       await load();
@@ -148,11 +170,11 @@ export default function OperatorsPage() {
     finally { setBusy(false); }
   }
 
-  async function onRemoveRole() {
+  async function onRemoveRole({ password }: { password: string }) {
     if (!removingRole) return;
     setBusy(true); setFormErr(null);
     try {
-      await api.del(`/operators/${removingRole.op.id}/roles/${removingRole.role}`);
+      await api.del(`/operators/${removingRole.op.id}/roles/${removingRole.role}`, { your_password: password });
       toast.success("Role removed");
       setRemovingRole(null);
       await load();
@@ -192,6 +214,18 @@ export default function OperatorsPage() {
                   "A password you set for someone must, by default, be replaced by them at their next sign-in.",
                   "Your own password is changed with Change my password, which asks for your current one.",
                   "A disabled operator can no longer sign in, and is signed out at once.",
+                  "A disabled account is anonymised after the period set under Disabled accounts (24 months by default).",
+                  "Adding, disabling or resetting an operator, or changing their roles, asks for your own password first.",
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="Two-step sign-in">
+              <HelpList
+                items={[
+                  "Signing in asks for the password and the 6-digit code from an authenticator app on the operator's phone.",
+                  "The app is set up at the first sign-in, which also gives ten single-use recovery codes.",
+                  "Someone who lost their phone signs in with a recovery code, or you reset their two-step sign-in: they are signed out and set up a new app at their next sign-in.",
+                  "You cannot reset your own; another site administrator must.",
                 ]}
               />
             </HelpSection>
@@ -238,6 +272,9 @@ export default function OperatorsPage() {
                         )}
                         {op.status === "active" && op.must_change_password && (
                           <Badge tone="warn" className="mt-1">Must set a new password</Badge>
+                        )}
+                        {op.status === "active" && op.two_step_enrolled === false && (
+                          <Badge tone="neutral" className="mt-1">Sets up two-step at next sign-in</Badge>
                         )}
                       </TD>
                       <TD>
@@ -303,11 +340,17 @@ export default function OperatorsPage() {
                               size="sm"
                               variant="ghost"
                               aria-label={`Reset the password for ${op.email}`}
-                              onClick={() => { setFormErr(null); setNewPw(""); setConfirmPw(""); setRequireChangeReset(true); setPwFor(op); }}
+                              onClick={() => { setFormErr(null); setNewPw(""); setConfirmPw(""); setYourPw(""); setRequireChangeReset(true); setPwFor(op); }}
                             >
                               Reset password
                             </Button>
                           )}
+                        {writable && op.status === "active" && !isMe && op.two_step_enrolled && (
+                          <Button size="sm" variant="ghost" aria-label={`Reset two-step sign-in for ${op.email}`}
+                            onClick={() => { setFormErr(null); setMfaReason(""); setMfaPassword(""); setMfaFor(op); }}>
+                            Reset two-step
+                          </Button>
+                        )}
                         {writable && op.status === "active" && !isMe && (
                           <Button size="sm" variant="ghost" aria-label={`Disable ${op.email}`} onClick={() => { setFormErr(null); setDisabling(op); }}>
                             Disable
@@ -328,6 +371,33 @@ export default function OperatorsPage() {
       {/* ------------------------------------------------------------------ sign-in protection (0119) */}
       <OperatorSigninProtection writable={writable} />
 
+      {/* ------------------------------------------------------------------ session limits (0132) */}
+      <OperatorSessionLimits writable={writable} />
+
+      {/* ------------------------------------------------------------------ disabled accounts (0138) */}
+      <OperatorAccountRetention writable={writable} />
+
+      {/* ------------------------------------------------------------------ reset two-step sign-in (0132) */}
+      <DialogForm
+        open={mfaFor !== null}
+        onOpenChange={(v) => !v && setMfaFor(null)}
+        size="sm"
+        title={mfaFor ? `Reset two-step sign-in for ${mfaFor.display_name || mfaFor.email}` : "Reset two-step sign-in"}
+        description="Their authenticator app and recovery codes stop working, they are signed out everywhere, and they set up a new app at their next sign-in."
+        submitLabel="Reset two-step sign-in"
+        busy={busy}
+        error={formErr}
+        disabled={mfaReason.trim().length < 4 || mfaPassword === ""}
+        onSubmit={onResetMFA}
+      >
+        <Field label="Reason" required hint="Recorded with the reset, for example: lost their phone.">
+          <Input value={mfaReason} maxLength={500} onChange={(e) => setMfaReason(e.target.value)} />
+        </Field>
+        <Field label="Your password" required hint="Confirms the reset.">
+          <Input type="password" autoComplete="current-password" value={mfaPassword} onChange={(e) => setMfaPassword(e.target.value)} />
+        </Field>
+      </DialogForm>
+
       {/* ------------------------------------------------------------------ new operator */}
       <DialogForm
         open={showNew}
@@ -337,7 +407,7 @@ export default function OperatorsPage() {
         submitLabel="Create operator"
         busy={busy}
         error={formErr}
-        disabled={!email.trim() || password.length < MIN_PASSWORD}
+        disabled={!email.trim() || password.length < MIN_PASSWORD || yourPw === ""}
         onSubmit={onCreate}
       >
         <div className="grid gap-4 sm:grid-cols-2">
@@ -369,6 +439,7 @@ export default function OperatorsPage() {
           </Select>
         </Field>
         <RequireChangeBox checked={requireChangeNew} onChange={setRequireChangeNew} />
+        <YourPasswordField value={yourPw} onChange={setYourPw} />
       </DialogForm>
 
       {/* ------------------------------------------------------------------ change password */}
@@ -381,7 +452,7 @@ export default function OperatorsPage() {
         submitLabel="Reset password"
         busy={busy}
         error={formErr}
-        disabled={newPw.length < MIN_PASSWORD || newPw !== confirmPw}
+        disabled={newPw.length < MIN_PASSWORD || newPw !== confirmPw || yourPw === ""}
         onSubmit={onSetPassword}
       >
         <Field label="New password" required hint={`At least ${MIN_PASSWORD} characters.`}>
@@ -408,6 +479,7 @@ export default function OperatorsPage() {
           />
         </Field>
         <RequireChangeBox checked={requireChangeReset} onChange={setRequireChangeReset} />
+        <YourPasswordField value={yourPw} onChange={setYourPw} />
       </DialogForm>
 
       {/* ------------------------------------------------------------------ disable */}
@@ -417,11 +489,13 @@ export default function OperatorsPage() {
         title="Stop this operator signing in?"
         description={
           disabling
-            ? `${disabling.display_name || disabling.email} will no longer be able to sign in to this appliance. Their account and everything they have done is kept. There is no way to re-enable a disabled operator from this screen.`
+            ? `${disabling.display_name || disabling.email} will no longer be able to sign in to this appliance. Their account and everything they have done is kept until the disabled-account period ends; then their email and name are removed. There is no way to re-enable a disabled operator from this screen.`
             : undefined
         }
         confirmLabel="Disable account"
         confirmVariant="danger"
+        requirePassword
+        passwordLabel="Your password"
         busy={busy}
         error={formErr}
         onConfirm={onDisable}
@@ -438,6 +512,8 @@ export default function OperatorsPage() {
             : undefined
         }
         confirmLabel="Add role"
+        requirePassword
+        passwordLabel="Your password"
         busy={busy}
         error={formErr}
         onConfirm={onAddRole}
@@ -455,11 +531,22 @@ export default function OperatorsPage() {
         }
         confirmLabel="Remove role"
         confirmVariant="danger"
+        requirePassword
+        passwordLabel="Your password"
         busy={busy}
         error={formErr}
         onConfirm={onRemoveRole}
       />
     </PageShell>
+  );
+}
+
+/** The administrator's own password, confirming a change to a colleague's account (B7). */
+function YourPasswordField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <Field label="Your password" required hint="Confirms that it is you making this change.">
+      <Input type="password" autoComplete="current-password" value={value} onChange={(e) => onChange(e.target.value)} />
+    </Field>
   );
 }
 

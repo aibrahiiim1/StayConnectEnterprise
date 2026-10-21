@@ -3,6 +3,11 @@
 // identity, self-signs the registration request, and POSTs /v1/appliances/register
 // with a chosen serial — so a test can simulate a factory reset (same serial, new
 // identity). It is a TEST helper only; it is never part of the production runtime.
+//
+// With -signin it instead signs an operator in through both steps (password from $ADMIN_PASS, then the
+// authenticator code; internal/opsignin) and writes the session to a curl cookie jar:
+//
+//	ADMIN_PASS=... regtest -signin -base $API -email $ADMIN_EMAIL -jar $CJ
 package main
 
 import (
@@ -15,16 +20,47 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
+	"os"
 	"time"
 
 	"github.com/stayconnect/enterprise/control-plane/internal/applianceauth"
+	"github.com/stayconnect/enterprise/control-plane/internal/opsignin"
 )
+
+// signIn takes the password from the environment so it never shows in a process list.
+func signIn(base, email, jarPath string) error {
+	pass := os.Getenv("ADMIN_PASS")
+	if email == "" || jarPath == "" || pass == "" {
+		return fmt.Errorf("-email, -jar and $ADMIN_PASS are required")
+	}
+	kr, err := opsignin.Open(opsignin.DefaultKeyringPath())
+	if err != nil {
+		return err
+	}
+	jar, _ := cookiejar.New(nil)
+	cl := &http.Client{Jar: jar, Timeout: 30 * time.Second}
+	if err := kr.SignIn(cl, base, email, pass); err != nil {
+		return err
+	}
+	return opsignin.WriteCurlJar(cl, base, jarPath)
+}
 
 func main() {
 	base := flag.String("base", "http://127.0.0.1:8080", "control-plane base URL")
 	serial := flag.String("serial", "", "hardware serial to register")
 	hwf := flag.String("hwf", "ZZZ-HWF", "hardware fingerprint")
+	signin := flag.Bool("signin", false, "sign an operator in and write a curl cookie jar instead")
+	email := flag.String("email", "", "-signin: the operator's email")
+	jarPath := flag.String("jar", "", "-signin: the curl cookie jar to write")
 	flag.Parse()
+	if *signin {
+		if err := signIn(*base, *email, *jarPath); err != nil {
+			fmt.Fprintln(os.Stderr, "SIGNIN-ERR", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	body, _ := json.Marshal(map[string]any{

@@ -69,9 +69,11 @@
 # create what already exists, and fail. Both proofs below are therefore required: psql's exit status, and
 # the ledger row actually being GONE.
 #
-# WHAT THIS MODE DOES NOT DO. It does not take a backup, and it does not pretend to have verified one. A
-# backup before a live down-migration is policy, it belongs in the runbook, and an acknowledgement flag this
-# script could not check would be theatre rather than a guard.
+# THE MANDATORY PRE-CHANGE BACKUP (GDPR final mission: one backup system). On a LIVE site, a forward apply that will change the
+# database and every --down take a backup FIRST, with the one backup system (scd backup-now: encrypted, proven restorable by loading it
+# into a scratch database, recorded with the reason), and REFUSE (exit 4) to touch the database if it cannot. It does not depend on
+# whether scheduled backups are switched on, and there is no flag to skip it: a migration that cannot be undone from a verified backup
+# does not run. EDGE_PRECHANGE_BACKUP names the command (default /opt/stayconnect/bin/scd backup-now); the self-test substitutes a stub.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd -P)"
 CANON_MIG_DIR="$HERE/data-plane/migrations"
@@ -134,6 +136,19 @@ ack_for_kind(){ case "$1" in disposable) echo "I_UNDERSTAND_DISPOSABLE_DATABASE"
 # A SEPARATE VOCABULARY FOR REMOVING SCHEMA. Deliberately not derived from the apply acknowledgement, so
 # muscle memory for one cannot satisfy the other.
 ack_down_for_kind(){ case "$1" in disposable) echo "I_UNDERSTAND_DISPOSABLE_DOWN_MIGRATION";; live-site) echo "I_UNDERSTAND_LIVE_SITE_DOWN_MIGRATION";; *) echo "";; esac; }
+
+# prechange_backup <what is about to change>: the mandatory backup before a live site changes. Exit 4 = refused, nothing was changed.
+prechange_backup(){
+  [ "$TARGET_KIND" = "live-site" ] || return 0
+  local cmd="${EDGE_PRECHANGE_BACKUP:-/opt/stayconnect/bin/scd backup-now}"
+  echo "== a live site is about to change ($1): taking the mandatory pre-change backup first =="
+  # </dev/null: the backup command must not eat the caller's stdin (see q() above)
+  if ! $cmd --reason "$1" --by "edge-migrate" </dev/null; then
+    echo "REFUSED: the pre-change backup could not be taken, so the database was NOT changed ($1)." >&2
+    echo "         It is encrypted to the backup key holders: if none is set up, add one in Hotel Admin -> Backups first." >&2
+    exit 4
+  fi
+}
 
 verify_target_identity(){ # $1=mode-label
   [ -n "$EXPECT_DB" ]     || { echo "REFUSED: --expect-db is mandatory" >&2; exit 3; }
@@ -720,6 +735,7 @@ if [ "$DOWN" -eq 1 ]; then
   MIG_DIR="$(resolve_mig_dir)"
   verify_ledger_structural_down
   f="$(select_down_file "$MIG_DIR")"
+  prechange_backup "rolling back migration $ONLY"
   echo "== DOWN MIGRATION: this REMOVES schema. What follows is the exact file that will run =="
   sed -n '1,200p' "$f" | grep -vE '^\s*--' | grep -vE '^\s*$' | sed 's/^/    /'
   echo "== end of down file =="
@@ -741,6 +757,10 @@ verify_ledger_structural
 applied=0; skipped=0
 if [ -n "$ONLY" ]; then
   f="$(select_file "$MIG_DIR")"
+  # A migration already in the ledger will be skipped and changes nothing: no backup is needed for that.
+  if [ "$(q "SELECT count(*) FROM public.schema_migrations WHERE version = '${ONLY}'" | tr -d '[:space:]')" != "1" ]; then
+    prechange_backup "applying migration $ONLY"
+  fi
   set +e; apply_one "$f"; rc=$?; set -e
   [ "$rc" = 10 ] && applied=$((applied+1)); [ "$rc" = 11 ] && skipped=$((skipped+1))
   { [ "$rc" = 10 ] || [ "$rc" = 11 ]; } || exit "$rc"

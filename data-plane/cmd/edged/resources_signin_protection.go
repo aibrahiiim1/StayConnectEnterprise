@@ -82,6 +82,9 @@ func (s *server) signInProtectionRoutes() http.Handler {
 	r.Get("/", s.getSignInProtection)
 	r.Put("/", s.putSignInProtection)
 	r.Get("/changes", s.listSignInProtectionChanges)
+	// The network pause's three numbers (resources_signin_network_pause.go).
+	r.Get("/network", s.getNetworkPolicy)
+	r.Put("/network", s.putNetworkPolicy)
 	return r
 }
 
@@ -318,6 +321,11 @@ func (s *server) signInRestrictionsRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", s.listSignInRestrictions)
 	r.Post("/{id}/release", s.releaseSignInRestriction)
+	// Network pauses: see them, end one, confirm a genuine guest's device (resources_signin_network_pause.go).
+	r.Get("/network-pauses", s.listNetworkPauses)
+	r.Get("/network-pauses/{id}/devices", s.listNetworkPauseDevices)
+	r.Post("/network-pauses/{id}/end", s.endNetworkPause)
+	r.Post("/network-pauses/{id}/confirm", s.confirmPausedDevice)
 	return r
 }
 

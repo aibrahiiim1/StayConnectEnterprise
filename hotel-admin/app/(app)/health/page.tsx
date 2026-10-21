@@ -12,7 +12,7 @@
 
 import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
-import { api, ApiError, Whoami } from "@/lib/api";
+import { api, ApiError, inBackground, Whoami } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
@@ -144,7 +144,7 @@ export default function HealthPage() {
   }, []);
 
   useEffect(() => { api.get<Whoami>("/auth/whoami").then(setMe).catch(() => {}); }, []);
-  useEffect(() => { load(); const t = setInterval(load, POLL_SECONDS * 1000); return () => clearInterval(t); }, [load]);
+  useEffect(() => { load(); const t = setInterval(() => void inBackground(load), POLL_SECONDS * 1000); return () => clearInterval(t); }, [load]);
 
   // The service awaiting a restart confirmation.
   const [restarting, setRestarting] = useState<string | null>(null);

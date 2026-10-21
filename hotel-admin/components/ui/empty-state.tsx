@@ -17,7 +17,9 @@ export function EmptyState({
   className?: string;
 }) {
   return (
-    <div className={cn("flex flex-col items-center justify-center px-6 py-12 text-center", className)}>
+    // role="status": an empty list is often the ANSWER to a search or a filter, and a screen-reader user who just
+    // typed a query otherwise hears nothing at all when no rows come back (WCAG 4.1.3).
+    <div role="status" className={cn("flex flex-col items-center justify-center px-6 py-12 text-center", className)}>
       {icon && (
         <div className="mb-3 flex size-10 items-center justify-center rounded-full border border-border bg-surface text-muted-foreground [&_svg]:size-5">
           {icon}

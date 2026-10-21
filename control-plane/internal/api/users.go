@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -31,13 +32,16 @@ type UserRow struct {
 	CreatedAt   time.Time `json:"created_at"`
 	// LastLoginAt is the last successful console sign-in; null when the user never signed in.
 	LastLoginAt *time.Time `json:"last_login_at"`
+	// TwoStepEnrolled: an authenticator app is set up (0052). Without one, the next sign-in sets one up.
+	TwoStepEnrolled bool `json:"two_step_enrolled"`
 }
 
 // queryUsers lists users. customerID "" = the Team (operators holding a platform role).
 func (b *Base) queryUsers(ctx context.Context, customerID, userID string) ([]UserRow, error) {
 	rows, err := b.DB.Query(ctx, `
         SELECT o.id::text, o.email, COALESCE(o.display_name,''), o.status, o.tenant_id::text, o.created_at, o.last_login_at,
-               COALESCE(array_agg(r.role ORDER BY r.role) FILTER (WHERE r.role IS NOT NULL), '{}')
+               COALESCE(array_agg(r.role ORDER BY r.role) FILTER (WHERE r.role IS NOT NULL), '{}'),
+               EXISTS (SELECT 1 FROM operator_mfa m WHERE m.operator_id = o.id AND m.confirmed_at IS NOT NULL)
           FROM operators o
           LEFT JOIN operator_roles r ON r.operator_id = o.id
          WHERE ($2 = '' OR o.id::text = $2)
@@ -56,7 +60,8 @@ func (b *Base) queryUsers(ctx context.Context, customerID, userID string) ([]Use
 	out := []UserRow{}
 	for rows.Next() {
 		var u UserRow
-		if err := rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Status, &u.CustomerID, &u.CreatedAt, &u.LastLoginAt, &u.Roles); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Status, &u.CustomerID, &u.CreatedAt, &u.LastLoginAt, &u.Roles,
+			&u.TwoStepEnrolled); err != nil {
 			return nil, err
 		}
 		for _, role := range u.Roles {
@@ -129,6 +134,23 @@ func hasRole(s *auth.Session, role string) bool {
 	return false
 }
 
+// validUserEmail is the one check for a Central user's email, at creation and at a correction: a single plain
+// address (no display name, no comment, no spaces), with a dotted domain, at most 254 characters. The caller has
+// lower-cased and trimmed it.
+func validUserEmail(e string) bool {
+	if e == "" || len(e) > 254 || strings.ContainsAny(e, " \t\r\n<>\"(),;:\\") {
+		return false
+	}
+	a, err := mail.ParseAddress(e)
+	if err != nil || a.Address != e || a.Name != "" {
+		return false
+	}
+	at := strings.LastIndexByte(e, '@')
+	domain := e[at+1:]
+	return at > 0 && strings.Contains(domain, ".") && !strings.HasPrefix(domain, ".") && !strings.HasSuffix(domain, ".") &&
+		!strings.Contains(domain, "..")
+}
+
 // createUser inserts an operator with exactly one role. customerID "" = a Team member.
 func (b *Base) createUser(w http.ResponseWriter, r *http.Request, customerID string) {
 	var in userWrite
@@ -137,7 +159,7 @@ func (b *Base) createUser(w http.ResponseWriter, r *http.Request, customerID str
 		return
 	}
 	in.Email = strings.ToLower(strings.TrimSpace(in.Email))
-	if in.Email == "" || !strings.Contains(in.Email, "@") {
+	if !validUserEmail(in.Email) {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "a valid email is required")
 		return
 	}
@@ -195,8 +217,11 @@ func (b *Base) updateUser(w http.ResponseWriter, r *http.Request, customerID, id
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body (a user holds exactly one role)")
 		return
 	}
-	if in.Email != "" {
-		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "email cannot be changed")
+	// AN EMAIL CAN BE CORRECTED (GDPR audit B5, Art. 16). The history then names the person by the corrected
+	// address, so a correction is not a second identity.
+	in.Email = strings.ToLower(strings.TrimSpace(in.Email))
+	if in.Email != "" && !validUserEmail(in.Email) {
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "a valid email is required")
 		return
 	}
 	s := auth.FromContext(r.Context())
@@ -249,6 +274,24 @@ func (b *Base) updateUser(w http.ResponseWriter, r *http.Request, customerID, id
 		return
 	}
 	defer tx.Rollback(ctx)
+	emailChanged := in.Email != "" && in.Email != strings.ToLower(cur[0].Email)
+	if emailChanged {
+		if _, err := tx.Exec(ctx, `UPDATE operators SET email=$2, updated_at=now() WHERE id=$1`, id, in.Email); err != nil {
+			if isUniqueViolation(err) {
+				Fail(w, r, http.StatusConflict, CodeConflict, "another user already has this email")
+				return
+			}
+			Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
+			return
+		}
+		// Only what is attributable to this user follows the correction (0056): the who-acted columns holding the old
+		// address and the audit entries made by or about them -- never a matching string anywhere else in the
+		// platform's history, which a customer's administrator must not be able to rewrite.
+		if _, err := tx.Exec(ctx, `SELECT central_correct_actor_email($1::uuid, $2, $3)`, id, cur[0].Email, in.Email); err != nil {
+			Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
+			return
+		}
+	}
 	if in.DisplayName != nil || in.Status != "" {
 		if _, err := tx.Exec(ctx, `
             UPDATE operators SET display_name = CASE WHEN $2 THEN NULLIF(btrim($3),'') ELSE display_name END,
@@ -287,7 +330,7 @@ func (b *Base) updateUser(w http.ResponseWriter, r *http.Request, customerID, id
 	}
 	// Losing access, changing role or getting a new password ends every console session the user has open:
 	// they stop at their next request instead of running out the sliding lifetime on the old access.
-	sessionsEnded := in.Status == "disabled" || (in.Role != "" && in.Role != cur[0].Role) || in.Password != ""
+	sessionsEnded := in.Status == "disabled" || (in.Role != "" && in.Role != cur[0].Role) || in.Password != "" || emailChanged
 	if sessionsEnded {
 		if err := auth.EndOperatorSessions(ctx, tx, id); err != nil {
 			Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
@@ -300,12 +343,15 @@ func (b *Base) updateUser(w http.ResponseWriter, r *http.Request, customerID, id
 	}
 	audit.Op(r.Context(), b.DB, r, "user.updated", "operator", id, map[string]any{
 		"_tenant_id": customerID, "role": in.Role, "status": in.Status, "password_changed": in.Password != "",
+		"email_changed":  emailChanged,
 		"sessions_ended": sessionsEnded})
 	b.writeUser(w, r, http.StatusOK, customerID, id)
 }
 
 // removeUser is DELETE: the sign-in is removed. The audit log keeps what the user did (it records the actor
-// id and has no foreign key); licences they issued keep their history with created_by cleared.
+// id and has no foreign key); licences they issued keep their history with created_by cleared. Deleting the row
+// replaces their email everywhere the history keeps it as text (migration 0055, GDPR audit B5), so the entry
+// for the removal itself does not repeat it either.
 func (b *Base) removeUser(w http.ResponseWriter, r *http.Request, customerID, id string) {
 	if s := auth.FromContext(r.Context()); s != nil && s.OperatorID == id {
 		Fail(w, r, http.StatusConflict, CodeConflict, "you cannot remove yourself")
@@ -334,7 +380,7 @@ func (b *Base) removeUser(w http.ResponseWriter, r *http.Request, customerID, id
 		return
 	}
 	audit.Op(r.Context(), b.DB, r, "user.removed", "operator", id, map[string]any{
-		"_tenant_id": customerID, "email": cur[0].Email, "role": cur[0].Role, "sessions_ended": true})
+		"_tenant_id": customerID, "role": cur[0].Role, "sessions_ended": true})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -421,6 +467,76 @@ func (b *Base) teamPassword(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// teamMFAReset: POST /cloud/v1/team/{id}/mfa-reset {reason}
+func (b *Base) teamMFAReset(w http.ResponseWriter, r *http.Request) {
+	b.resetUserMFA(w, r, "", chi.URLParam(r, "id"))
+}
+
+// customerUserMFAReset: POST /cloud/v1/customers/{id}/users/{uid}/mfa-reset {reason}
+func (b *Base) customerUserMFAReset(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if !requireCustomerManage(w, r, id, auth.PermUsersManage, auth.PermCustomerUsersManage) {
+		return
+	}
+	b.resetUserMFA(w, r, id, chi.URLParam(r, "uid"))
+}
+
+// resetUserMFA removes a colleague's authenticator and recovery codes (0052, GDPR plan C10): their sessions end
+// and they set up a new authenticator at their next sign-in. Never one's own -- a stolen session plus the
+// password must not be enough to remove the second factor -- and with a reason, audited. It also lifts every
+// wrong-password lock on their account, from every address (0056, decision D-R1), so a colleague locked out
+// can be let back in from the console.
+func (b *Base) resetUserMFA(w http.ResponseWriter, r *http.Request, customerID, id string) {
+	var in struct {
+		Reason string `json:"reason"`
+	}
+	if err := DecodeJSON(r, &in); err != nil || len(strings.TrimSpace(in.Reason)) < 4 {
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "a reason of at least 4 characters is required")
+		return
+	}
+	s := auth.FromContext(r.Context())
+	if s != nil && s.OperatorID == id {
+		Fail(w, r, http.StatusConflict, "not_yourself", "Another administrator must reset your two-step sign-in.")
+		return
+	}
+	ctx, cancel := DBCtx(r)
+	defer cancel()
+	cur, err := b.queryUsers(ctx, customerID, id)
+	if err != nil || len(cur) == 0 {
+		Fail(w, r, http.StatusNotFound, CodeNotFound, "user not found")
+		return
+	}
+	if !mayGrant(s, cur[0].Role) {
+		Fail(w, r, http.StatusForbidden, CodeForbidden, "you may not change a "+cur[0].Role)
+		return
+	}
+	tx, err := b.DB.Begin(ctx)
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "reset failed")
+		return
+	}
+	defer tx.Rollback(ctx)
+	had, err := auth.ResetMFA(ctx, tx, id)
+	if err == nil {
+		err = auth.EndOperatorSessions(ctx, tx, id)
+	}
+	var unlocked int64
+	if err == nil {
+		unlocked, err = auth.ClearSigninLocks(ctx, tx, b.MFA.SigninName(cur[0].Email))
+	}
+	if err == nil {
+		err = tx.Commit(ctx)
+	}
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "reset failed")
+		return
+	}
+	audit.Op(r.Context(), b.DB, r, "user.mfa_reset", "operator", id, map[string]any{
+		"reason": strings.TrimSpace(in.Reason), "had_authenticator": had, "sessions_ended": true,
+		"signin_locks_cleared": unlocked})
+	WriteJSON(w, http.StatusOK, map[string]any{"removed": had})
+}
+
 // ---- Customer users: /cloud/v1/customers/{id}/users ----
 
 func (b *Base) listCustomerUsers(w http.ResponseWriter, r *http.Request) {
@@ -476,4 +592,35 @@ func (b *Base) deleteCustomerUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b.removeUser(w, r, id, chi.URLParam(r, "uid"))
+}
+
+// userDataExport: POST /cloud/v1/users/{id}/data-export {reason}. One user's data as a JSON document, for the
+// platform to hand to them (GDPR audit B5, Art. 15/20; migration 0055). Platform-only (Team management), with
+// the password re-confirmed and a reason, and audited. Works for Team members and customer users alike.
+func (b *Base) userDataExport(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var in struct {
+		Reason string `json:"reason"`
+	}
+	if err := DecodeJSON(r, &in); err != nil {
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body")
+		return
+	}
+	reason := strings.TrimSpace(in.Reason)
+	if len(reason) < 4 || len(reason) > 500 {
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "a reason of 4-500 characters is required")
+		return
+	}
+	ctx, cancel := DBCtx(r)
+	defer cancel()
+	var doc []byte
+	if err := b.DB.QueryRow(ctx, `SELECT central_user_data($1::uuid)::text`, id).Scan(&doc); err != nil {
+		Fail(w, r, http.StatusNotFound, CodeNotFound, "user not found")
+		return
+	}
+	audit.Op(r.Context(), b.DB, r, "user.data_exported", "operator", id, map[string]any{"reason": reason})
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(doc)
 }

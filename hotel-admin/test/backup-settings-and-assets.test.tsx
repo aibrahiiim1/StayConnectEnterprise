@@ -27,7 +27,8 @@ afterEach(() => vi.resetModules());
 /** The schema the appliance serves, matching stayconnect-backup-cleanup's own defaults. */
 const SETTINGS = {
   retention: [
-    { key: "KEEP_DB", label: "Database backups", unit: "backups", default: 7, min: 1, max: 365, value: 7, explains: "How many to retain." },
+    { key: "BACKUP_ENABLED", label: "Scheduled backups", unit: "0 = off, 1 = on", default: 0, min: 0, max: 1, value: 0, explains: "Off until you switch it on." },
+    { key: "BACKUP_KEEP", label: "Backups kept", unit: "backups", default: 7, min: 1, max: 30, value: 7, explains: "How many to retain." },
     { key: "KEEP_BINARIES", label: "Service binaries", unit: "versions", default: 5, min: 2, max: 30, value: 5, explains: "Rollback targets." },
     { key: "DISK_WARN", label: "Disk warning threshold", unit: "% used", default: 80, min: 50, max: 95, value: 80, explains: "Warn here." },
     { key: "DISK_CRIT", label: "Disk critical threshold", unit: "% used", default: 90, min: 60, max: 99, value: 90, explains: "Alarm here." },
@@ -56,11 +57,13 @@ describe("backup retention is editable, not just visible", () => {
     const Page = (await import("@/app/(app)/backups/page")).default;
     render(<Page />);
 
-    const field = await screen.findByLabelText(/Database backups/i);
-    expect((field as HTMLInputElement).value).toBe("7");
+    const field = await screen.findByLabelText(/Service binaries/i);
+    expect((field as HTMLInputElement).value).toBe("5");
     // An operator cannot set a value responsibly without knowing what it does and what it may be.
-    // (SettingField states it as "Default 7 backups; allowed 1–365.")
-    expect(screen.getByText(/Default 7 backups; allowed 1–365/)).toBeTruthy();
+    // (SettingField states it as "Default 5 versions; allowed 2–30.")
+    expect(screen.getByText(/Default 5 versions; allowed 2–30/)).toBeTruthy();
+    // the backup schedule and counts are not in the sweep list: they live on the Scheduled backups card
+    expect(screen.queryAllByLabelText(/Backups kept/i).length).toBeLessThanOrEqual(1);
     expect(await screen.findByLabelText(/Nightly sweep runs at/i)).toBeTruthy();
   });
 
@@ -79,7 +82,7 @@ describe("backup retention is editable, not just visible", () => {
     const Page = (await import("@/app/(app)/backups/page")).default;
     render(<Page />);
 
-    fireEvent.change(await screen.findByLabelText(/Database backups/i), { target: { value: "30" } });
+    fireEvent.change(await screen.findByLabelText(/Service binaries/i), { target: { value: "9" } });
     fireEvent.change(screen.getByLabelText(/Nightly sweep runs at/i), { target: { value: "02:15" } });
     fireEvent.change(await screen.findByLabelText(/Confirm your password/i), { target: { value: "pw" } });
     fireEvent.click(screen.getByRole("button", { name: /Save retention policy/i }));
@@ -87,10 +90,10 @@ describe("backup retention is editable, not just visible", () => {
     await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
     const [path, body] = put.mock.calls[0];
     expect(path).toBe("/backups/settings");
-    expect(body.retention.KEEP_DB).toBe(30);
+    expect(body.retention.KEEP_BINARIES).toBe(9);
     // Untouched knobs travel too: sending only what changed would let the appliance rewrite the rest to
     // defaults it never asked for.
-    expect(body.retention.KEEP_BINARIES).toBe(5);
+    expect(body.retention.DISK_WARN).toBe(80);
     expect(body.schedule).toBe("02:15");
     expect(body.password).toBe("pw");
   });
@@ -99,7 +102,7 @@ describe("backup retention is editable, not just visible", () => {
     mockBackups();
     const Page = (await import("@/app/(app)/backups/page")).default;
     render(<Page />);
-    await screen.findByLabelText(/Database backups/i);
+    await screen.findByLabelText(/Service binaries/i);
     expect(screen.queryByRole("button", { name: /Save retention policy/i })).toBeNull();
   });
 });

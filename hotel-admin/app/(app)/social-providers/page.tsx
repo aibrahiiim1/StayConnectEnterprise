@@ -21,6 +21,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api, ListResp, Whoami, SocialOAuthProvider } from "@/lib/api";
 import { PROVIDER_CONSOLE_HELP, PROVIDER_LABELS, PortalCallbackURL, keepAvailable, offeredWords } from "@/lib/portal-https";
+import { DEFAULT_SCOPES, extraScopes } from "@/lib/social-scopes";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody } from "@/components/ui/card";
@@ -246,7 +247,7 @@ export default function SocialProvidersPage() {
           ) : (
             <Table>
               <THead>
-                <TR><TH>Provider</TH><TH>Client ID</TH><TH>Status</TH><TH>Last used</TH><TH /></TR>
+                <TR><TH>Provider</TH><TH>Client ID</TH><TH>Status</TH><TH>Last used</TH><TH><span className="sr-only">Actions</span></TH></TR>
               </THead>
               <TBody>
                 {rows.map((p) => (
@@ -265,9 +266,9 @@ export default function SocialProvidersPage() {
                       {p.last_success_at ? formatRelative(p.last_success_at) : "Never"}
                     </TD>
                     <TD className="whitespace-nowrap text-right">
-                      {writable && <Button size="sm" variant="ghost" onClick={() => openEdit(p)}>Edit</Button>}
+                      {writable && <Button size="sm" variant="ghost" aria-label={`Edit ${p.display_name || PROVIDER_LABELS[p.provider] || p.provider}`} onClick={() => openEdit(p)}>Edit</Button>}
                       {writable && (
-                        <Button size="sm" variant="ghost" onClick={() => { setFormErr(null); setDeleting(p); }}>
+                        <Button size="sm" variant="ghost" aria-label={`Remove ${p.display_name || PROVIDER_LABELS[p.provider] || p.provider}`} onClick={() => { setFormErr(null); setDeleting(p); }}>
                           Remove
                         </Button>
                       )}
@@ -324,9 +325,19 @@ export default function SocialProvidersPage() {
               placeholder={mode === "edit" ? "Unchanged" : ""}
             />
           </Field>
-          <Field label="Scopes" hint="Space separated.">
-            <Input value={f.scopes} onChange={(e) => set("scopes", e.target.value)} placeholder="openid email profile" />
+          <Field label="Scopes" hint="Leave empty to ask only for what sign-in needs. Space separated.">
+            <Input value={f.scopes} onChange={(e) => set("scopes", e.target.value)} placeholder={DEFAULT_SCOPES[f.provider] ?? ""} />
           </Field>
+          {extraScopes(f.provider, f.scopes).length > 0 && (
+            <div className="sm:col-span-2">
+            <Callout tone="warning" title="This asks guests for more than sign-in needs">
+              Guests will be asked to share {extraScopes(f.provider, f.scopes).map((x) => `"${x}"`).join(", ")} as
+              well as their email. Sign-in keeps only the email and the account id, so this data is not used. Under
+              data-protection law your hotel must have a reason to collect it and tell guests in its privacy notice.
+              You can still save.
+            </Callout>
+            </div>
+          )}
           {f.provider === "microsoft" && (
             <Field label="Directory (tenant)" hint="Leave empty for common (any Microsoft account).">
               <Input value={f.tenant} onChange={(e) => set("tenant", e.target.value)} placeholder="common" />

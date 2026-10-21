@@ -166,6 +166,8 @@ var reCode = regexp.MustCompile(`^[0-9]{4,10}$`)
 type connectView struct {
 	guestPage
 	ChallengeID, Code string
+	// Secure: the page was served over HTTPS, so "Remember this device" can be offered (GDPR audit B10).
+	Secure bool
 }
 
 // GET /connect?c=<challenge>&k=<code> -- the page the email's link opens. It verifies NOTHING: it shows one
@@ -185,7 +187,7 @@ func (h *handler) connectPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
 	nonce := setPortalCSP(w)
 	pg := h.newGuestPage(r, nonce, "link.", "welcome.connect")
-	_ = connectTmpl.Execute(w, connectView{guestPage: pg, ChallengeID: c, Code: k})
+	_ = connectTmpl.Execute(w, connectView{guestPage: pg, ChallengeID: c, Code: k, Secure: r.TLS != nil})
 }
 
 // POST /auth/otp/link -- the Connect button: the same verification as the code box, from the browser the
@@ -284,6 +286,7 @@ const connectHTML = guestHead + `
   <form method="post" action="/auth/otp/link" id="form-link">
     <input type="hidden" name="c" value="{{.ChallengeID}}">
     <input type="hidden" name="k" value="{{.Code}}">
+    {{if .Secure}}<label class="remember-device"><input type="checkbox" name="remember" value="1"> <span>{{index .T "remember.device"}}</span></label>{{end}}
     <button class="primary" type="submit">{{index .T "welcome.connect"}}</button>
   </form>
 </div>` + guestFoot + `

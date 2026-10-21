@@ -73,6 +73,14 @@ func (s *server) backupsRoutes() http.Handler {
 	r.Post("/artifacts/{name}/restore", s.restoreDatabaseBackup)
 	r.Get("/maintenance", s.backupMaintenance)
 	r.Get("/last-restore", s.lastRestoreResult)
+	// THE ERASURE LEDGER AND THE BACKUP STATUS (ledger_admin.go).
+	r.Get("/ledger", s.ledgerStatusGet)
+	r.Post("/ledger/destination/probe", s.ledgerDestinationProbe)
+	r.Post("/ledger/destination/test", s.ledgerDestinationTest)
+	r.Put("/ledger/destination", s.ledgerDestinationSave)
+	r.Post("/ledger/recover", s.ledgerRecover)
+	r.Get("/status", s.backupStatusGet)
+	r.Post("/earlier/remove", s.earlierBackupsRemove)
 	return r
 }
 
@@ -186,7 +194,7 @@ func (s *server) backupHealth(w http.ResponseWriter, r *http.Request) {
 	if entries, err := os.ReadDir(dbBackupDir); err == nil {
 		var newest time.Time
 		for _, e := range entries {
-			if e.IsDir() {
+			if e.IsDir() || !reDBBackupFile.MatchString(e.Name()) {
 				continue
 			}
 			out.DatabaseBackups++
@@ -222,6 +230,37 @@ type backupArtifact struct {
 	// anything; this is what lets the screen explain WHY the button is unavailable instead of just disabling it.
 	VerifiedAt     string `json:"verified_at,omitempty"`
 	VerifiedTables int    `json:"verified_tables,omitempty"`
+
+	// The note beside a backup the one engine made: why it exists, who asked and what it holds. A backup with no note is an
+	// earlier backup (before there was one system); it is listed, restorable if it was verified, and never removed automatically.
+	BackupKind string `json:"backup_kind,omitempty"` // scheduled | manual | pre-change | pre-restore | earlier
+	Reason     string `json:"reason,omitempty"`
+	By         string `json:"by,omitempty"`
+	Restorable bool   `json:"restorable,omitempty"`
+	LedgerSeq  int64  `json:"ledger_seq,omitempty"`
+}
+
+// backupNote is the part of scd's note edged reports. Read-only.
+type backupNote struct {
+	Kind       string `json:"kind"`
+	Reason     string `json:"reason"`
+	By         string `json:"by"`
+	Restorable bool   `json:"restorable"`
+	LedgerSeq  int64  `json:"ledger_seq"`
+}
+
+// readBackupNote reads the note of a database backup by name; ok is false for a backup with none.
+func readBackupNote(dir, name string) (backupNote, bool) {
+	base := strings.TrimSuffix(strings.TrimSuffix(name, ".age"), ".sql.gz")
+	b, err := os.ReadFile(filepath.Join(dir, base+".meta.json"))
+	if err != nil {
+		return backupNote{}, false
+	}
+	var n backupNote
+	if json.Unmarshal(b, &n) != nil || n.Kind == "" {
+		return backupNote{}, false
+	}
+	return n, true
 }
 
 // verifiedRecord mirrors the marker scd writes beside a verified archive. Read-only here: edged reports
@@ -294,6 +333,8 @@ func artifactKind(name string, dir bool) string {
 	}
 }
 
+var reDBBackupFile = regexp.MustCompile(`^db-(safety-)?[0-9TZ]+\.sql\.gz(\.age)?$`)
+
 func (s *server) listBackupArtifacts(w http.ResponseWriter, r *http.Request) {
 	out := []backupArtifact{}
 	add := func(base string, e os.DirEntry) {
@@ -303,7 +344,7 @@ func (s *server) listBackupArtifacts(w http.ResponseWriter, r *http.Request) {
 		}
 		// A verification marker is bookkeeping, not an artefact. Listing it would put a second entry beside
 		// every verified backup that an operator could neither download nor restore.
-		if strings.HasSuffix(e.Name(), ".verified") {
+		if strings.HasSuffix(e.Name(), ".verified") || strings.HasSuffix(e.Name(), ".meta.json") || strings.HasSuffix(e.Name(), ".partial") {
 			return
 		}
 		a := backupArtifact{
@@ -316,6 +357,13 @@ func (s *server) listBackupArtifacts(w http.ResponseWriter, r *http.Request) {
 		if rec, ok := readVerification(base, e.Name()); ok {
 			a.VerifiedAt = rec.VerifiedAt.Format(time.RFC3339)
 			a.VerifiedTables = rec.Tables
+		}
+		if a.Kind == "database" && base == dbBackupDir && reDBBackupFile.MatchString(e.Name()) {
+			if n, ok := readBackupNote(base, e.Name()); ok {
+				a.BackupKind, a.Reason, a.By, a.Restorable, a.LedgerSeq = n.Kind, n.Reason, n.By, n.Restorable, n.LedgerSeq
+			} else {
+				a.BackupKind = "earlier"
+			}
 		}
 		out = append(out, a)
 	}
@@ -402,7 +450,16 @@ func (s *server) runDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 	// So the history is the ARTEFACTS -- which are real, enumerable, and the thing an operator actually
 	// restores from. Adding a second permanently-empty viewer beside the first would have repeated the defect
 	// rather than fixed it.
-	code, body, err := s.scd.call(r.Context(), http.MethodPost, "/v1/backup/run", nil)
+	// ONE ENGINE: the same encrypted, verified backup the schedule takes, asked for by a person.
+	code, body, err := s.scd.call(r.Context(), http.MethodPost, "/v1/backup/run",
+		map[string]any{"kind": "manual", "by": protectionActor(sessFrom(r.Context()))})
+	if err == nil && code == http.StatusConflict {
+		// No key holder yet: a backup is always encrypted, so none was taken. Say so plainly.
+		detail := scdDetail(body, nil)
+		s.audit(r, "backup.refused", "backup", "", map[string]any{"error": detail})
+		jsonErr(w, http.StatusConflict, "no_key_holder", detail)
+		return
+	}
 	if err != nil || code != http.StatusOK {
 		detail := scdDetail(body, err)
 		s.audit(r, "backup.failed", "backup", "", map[string]any{"error": detail})
@@ -411,8 +468,9 @@ func (s *server) runDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var res struct {
-		Name      string `json:"name"`
-		SizeBytes int64  `json:"size_bytes"`
+		Name       string `json:"name"`
+		SizeBytes  int64  `json:"size_bytes"`
+		Restorable bool   `json:"restorable"`
 	}
 	if jerr := json.Unmarshal(body, &res); jerr != nil || res.Name == "" {
 		jsonErr(w, http.StatusInternalServerError, "backup_failed",
@@ -422,8 +480,8 @@ func (s *server) runDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 	name, size := res.Name, res.SizeBytes
 	// The audit log IS the record of who took it and when -- written through the same path as every other
 	// privileged operator action, and readable on the Audit screen.
-	s.audit(r, "backup.created", "backup", name, map[string]any{"size_bytes": size, "kind": "database"})
-	writeJSON(w, http.StatusOK, map[string]any{"name": name, "size_bytes": size})
+	s.audit(r, "backup.created", "backup", name, map[string]any{"size_bytes": size, "kind": "manual", "restorable": res.Restorable})
+	writeJSON(w, http.StatusOK, map[string]any{"name": name, "size_bytes": size, "restorable": res.Restorable})
 }
 
 // ------------------------------------------------------------------------------------------ verifying
@@ -447,8 +505,23 @@ func (s *server) verifyBackupArtifact(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "not_found", "no such database backup")
 		return
 	}
+	// AN ENCRYPTED BACKUP (.age, migration 0129) is opened with a backup key holder's key, sent with this
+	// request and passed to scd for it alone. The body is optional: a backup in the clear needs none.
+	var in struct {
+		Identity string `json:"identity"`
+	}
+	if raw, _ := io.ReadAll(io.LimitReader(r.Body, 64<<10)); len(strings.TrimSpace(string(raw))) > 0 {
+		if err := json.Unmarshal(raw, &in); err != nil {
+			jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")
+			return
+		}
+	}
 	code, body, err := s.scd.call(r.Context(), http.MethodPost, "/v1/backup/verify",
-		map[string]any{"name": name})
+		map[string]any{"name": name, "identity": in.Identity})
+	if err == nil && code == http.StatusBadRequest {
+		jsonErr(w, http.StatusBadRequest, "backup_key", scdDetail(body, nil))
+		return
+	}
 	if err != nil || code != http.StatusOK {
 		jsonErr(w, http.StatusInternalServerError, "verify_failed", scdDetail(body, err))
 		return
@@ -529,6 +602,8 @@ func (s *server) restoreDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Password string `json:"password"`
 		Confirm  string `json:"confirm"`
+		// A backup key holder's key, for an encrypted backup. Passed to scd for this restore only.
+		Identity string `json:"identity"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")
@@ -566,7 +641,13 @@ func (s *server) restoreDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 	// describes an outcome this process never saw. The durable record in scd is the outcome; restore_started,
 	// written above and captured by the safety backup, is what the audit trail can truthfully hold.
 	code, body, err := s.scd.call(r.Context(), http.MethodPost, "/v1/backup/restore",
-		map[string]any{"name": name})
+		map[string]any{"name": name, "identity": in.Identity, "by": protectionActor(sessFrom(r.Context()))})
+	if err == nil && code == http.StatusBadRequest {
+		// The key did not open the backup (or none was given): checked by scd before anything was touched.
+		s.audit(r, "backup.restore_refused", "backup", name, map[string]any{"detail": scdDetail(body, nil)})
+		jsonErr(w, http.StatusBadRequest, "backup_key", scdDetail(body, nil))
+		return
+	}
 	if err != nil || (code != http.StatusOK && code != http.StatusAccepted) {
 		detail := scdDetail(body, err)
 		s.audit(r, "backup.restore_failed", "backup", name, map[string]any{"detail": detail})

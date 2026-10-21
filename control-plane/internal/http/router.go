@@ -40,6 +40,7 @@ type Deps struct {
 	AllowOrigins  []string           // CORS allowlist for the console in development
 	CookieSecure  bool               // set true behind HTTPS
 	PortalTLS     *portaltls.Service // portal hostnames and certificates; nil leaves /cloud/v1/portal-tls unavailable
+	MFA           *auth.MFA          // console two-step sign-in (0052); nil refuses every sign-in
 
 	rateCounter api.RateCounter // tests only; production counts in Redis
 }
@@ -61,7 +62,7 @@ func NewRouter(d Deps) http.Handler {
 	store := &auth.SessionStore{R: d.Redis}
 	repo := &auth.Repo{DB: d.DB}
 	adeps := authDeps{Repo: repo, Store: store, Secure: d.CookieSecure, DB: d.DB,
-		Failures: ratebudget.New(5, 300, time.Minute)}
+		Failures: ratebudget.New(5, 300, time.Minute), MFA: d.MFA}
 	// Every authenticated request re-reads the operator (session_policy.go). Only a router built without a
 	// database (unit tests of the unauthenticated limits) runs without it.
 	var checker auth.SessionChecker
@@ -80,7 +81,7 @@ func NewRouter(d Deps) http.Handler {
 	// No middleware.RealIP: it believes any client's X-Forwarded-For. clientip.From decides per request and
 	// trusts forwarding headers only from the loopback proxy.
 	r.Use(traceIDHeader)
-	r.Use(middleware.Logger)
+	r.Use(requestLog)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(15 * time.Second))
 	r.Use(corsMiddleware(d.AllowOrigins))
@@ -109,6 +110,11 @@ func NewRouter(d Deps) http.Handler {
 		// Operator authentication. Password re-entry is limited BEFORE the session check, so the limit also
 		// holds for guesses made without a valid session.
 		r.With(limit("login", loginPerMinute)).Post("/auth/login", adeps.login)
+		// The second step (0052): set up the authenticator, or enter its code. Same limit as the password.
+		r.With(limit("login", loginPerMinute)).Post("/auth/login/enrol", adeps.loginEnrol)
+		r.With(limit("login", loginPerMinute)).Post("/auth/login/code", adeps.loginCode)
+		r.With(auth.RequireAuth(store, checker)).Get("/auth/mfa", adeps.mfaStatus)
+		r.With(auth.RequireAuth(store, checker), api.RequireReauth(d.Redis)).Post("/auth/mfa/recovery-codes", adeps.mfaRecoveryCodes)
 		r.Post("/auth/logout", adeps.logout)
 		r.With(limit("reauth", reauthPerMinute), auth.RequireAuth(store, checker)).Post("/auth/reauth", adeps.reauth)
 		r.With(auth.RequireAuth(store, checker)).Get("/auth/whoami", adeps.whoami)
@@ -142,7 +148,7 @@ func NewRouter(d Deps) http.Handler {
 	})
 
 	base := &api.Base{DB: d.DB, Redis: d.Redis, AssignKey: d.AssignKey, CA: d.CA,
-		ClientValid: 90 * 24 * time.Hour, Lic: d.Licensing, PortalTLS: d.PortalTLS}
+		ClientValid: 90 * 24 * time.Hour, Lic: d.Licensing, PortalTLS: d.PortalTLS, MFA: d.MFA}
 	if d.ApplianceBase == "" {
 		slog.Warn("offline activation packages are DISABLED: CTRLAPI_APPLIANCE_BASE is not set. Set it to " +
 			"the appliance-facing HTTPS endpoint (a stable FQDN, not an IP) that appliances dial, then restart.")
@@ -191,7 +197,14 @@ func readyz(d Deps) http.HandlerFunc {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "not-ready", "redis": "unreachable"})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"status": "ready", "version": d.Version})
+		// signin says whether console sign-in can work: without the two-step sign-in key every sign-in is refused
+		// (auth_mfa_handlers.go), while appliances are served normally. central-deploy.sh's smoke test requires
+		// "available", so a release that comes up without the key is rolled back.
+		signin := "available"
+		if d.MFA == nil {
+			signin = "unavailable"
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ready", "version": d.Version, "signin": signin})
 	}
 }
 
@@ -251,7 +264,7 @@ func corsMiddleware(origins []string) func(http.Handler) http.Handler {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept, X-Requested-With")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept, X-Requested-With, "+auth.BackgroundHeader)
 				w.Header().Set("Access-Control-Expose-Headers", "X-Trace-Id")
 				w.Header().Set("Vary", strings.TrimSpace("Origin, "+w.Header().Get("Vary")))
 			}

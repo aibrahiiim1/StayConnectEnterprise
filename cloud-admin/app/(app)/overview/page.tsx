@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ArrowRight, CheckCircle2 } from "lucide-react";
-import { api, ApiError, type AttentionItem, type Overview } from "@/lib/api";
+import { api, ApiError, type AttentionItem, type Overview, type RequestOptions } from "@/lib/api";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { LinkButton } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -74,10 +74,10 @@ export default function OverviewPage() {
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: RequestOptions) => {
     setRefreshing(true);
     try {
-      setData(await api.get<Overview>("/cloud/v1/overview"));
+      setData(await api.get<Overview>("/cloud/v1/overview", opts));
       setUpdatedAt(Date.now());
       setErr(null);
     } catch (e) {

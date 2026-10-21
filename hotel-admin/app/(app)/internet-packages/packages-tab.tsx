@@ -458,8 +458,8 @@ export function PackagesTab({
                     <TD className="whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
                       {writable && (
                         <>
-                          <Button size="sm" variant="ghost" disabled={busy} onClick={() => startEdit(p)}>Edit</Button>
-                          <Button size="sm" variant="ghost" disabled={busy}
+                          <Button size="sm" variant="ghost" disabled={busy} aria-label={`Edit ${p.name || p.code}`} onClick={() => startEdit(p)}>Edit</Button>
+                          <Button size="sm" variant="ghost" disabled={busy} aria-label={`${p.active ? "Disable" : "Enable"} ${p.name || p.code}`}
                             onClick={() => { setActionErr(null); if (p.active) setDisabling(p); else setEnabling(p); }}>
                             {p.active ? "Disable" : "Enable"}
                           </Button>

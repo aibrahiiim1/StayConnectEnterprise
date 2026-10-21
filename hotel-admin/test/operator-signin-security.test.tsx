@@ -64,11 +64,14 @@ describe("safeNextPath (N-18)", () => {
 
   it("the login page sends a hostile ?next to the dashboard instead", async () => {
     search = new URLSearchParams("next=https://evil.example/phish");
-    post.mockResolvedValue({ operator_id: "op", roles: ["site_admin"] });
+    post.mockImplementation((path: string) => Promise.resolve(path === "/auth/login"
+      ? { second_step: "code" } : { operator_id: "op", roles: ["site_admin"] }));
     const Page = (await import("@/app/login/page")).default;
     render(<Page />);
     await userEvent.type(screen.getByLabelText(/Email or username/), "ops@hotel");
     await userEvent.type(screen.getByLabelText(/^Password/), "a-good-password");
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await userEvent.type(await screen.findByLabelText(/^Code/), "123456");
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
     await waitFor(() => expect(replace).toHaveBeenCalledWith("/dashboard"));
   });
@@ -161,9 +164,12 @@ describe("Operators (N-8)", () => {
     expect(box.checked).toBe(true);
     await userEvent.type(within(dialog).getByLabelText(/^New password/), "temporary-pass-1");
     await userEvent.type(within(dialog).getByLabelText(/Type it again/), "temporary-pass-1");
+    // B7: the administrator's own password confirms the reset.
+    expect(within(dialog).getByRole("button", { name: "Reset password" })).toBeDisabled();
+    await userEvent.type(within(dialog).getByLabelText(/^Your password/), "admin-pass-1");
     await userEvent.click(within(dialog).getByRole("button", { name: "Reset password" }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("/operators/o2/set-password",
-      { password: "temporary-pass-1", require_change: true }));
+      { password: "temporary-pass-1", require_change: true, your_password: "admin-pass-1" }));
   });
 
   it("offers your own row Change my password, never an administrator reset", async () => {

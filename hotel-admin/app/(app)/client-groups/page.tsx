@@ -289,7 +289,7 @@ export default function ClientGroupsPage() {
               ) : (
                 <Table>
                   <THead>
-                    <TR><TH>Group</TH><TH>Priority</TH><TH>Members</TH><TH>State</TH><TH /></TR>
+                    <TR><TH>Group</TH><TH>Priority</TH><TH>Members</TH><TH>State</TH><TH><span className="sr-only">Actions</span></TH></TR>
                   </THead>
                   <TBody>
                     {sorted.map((g) => (
@@ -302,9 +302,9 @@ export default function ClientGroupsPage() {
                         <TD className="max-w-md text-sm text-muted-foreground">{ruleSummary(g.rules)}</TD>
                         <TD>{g.enabled ? <Badge tone="ok" dot>On</Badge> : <Badge tone="default">Off</Badge>}</TD>
                         <TD className="whitespace-nowrap text-right">
-                          {writable && <Button size="sm" variant="ghost" onClick={() => openEdit(g)}>Edit</Button>}
+                          {writable && <Button size="sm" variant="ghost" aria-label={`Edit ${g.name}`} onClick={() => openEdit(g)}>Edit</Button>}
                           {writable && (
-                            <Button size="sm" variant="ghost" onClick={() => { setFormErr(null); setDeleteReason(""); setDeleting(g); }}>
+                            <Button size="sm" variant="ghost" aria-label={`Delete ${g.name}`} onClick={() => { setFormErr(null); setDeleteReason(""); setDeleting(g); }}>
                               Delete
                             </Button>
                           )}

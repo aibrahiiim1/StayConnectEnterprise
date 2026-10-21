@@ -111,8 +111,15 @@ func (h *handler) tryIAMv2AuthMode(w http.ResponseWriter, r *http.Request, paylo
 	// a different credential that lives in og_resume (acquisition.go authOpen). Writing it here overwrote the
 	// device's Welcome-back credential, so "Continue without signing in" silently made the device forget its
 	// Client.
+	//
+	// ONLY WHEN THE GUEST ASKED (GDPR audit B10, D-B10): "Remember this device" ticked, over HTTPS. Otherwise the
+	// credential scd issued is revoked at once, so no unused credential waits for this device.
 	if reply.ResumeToken != "" && reply.Method != "OPEN" {
-		setClientResumeCookie(w, r, reply.ResumeToken, reply.ResumeDays)
+		if guestAskedToRemember(r, reply.Method) {
+			setClientResumeCookie(w, r, reply.ResumeToken, reply.ResumeDays)
+		} else {
+			h.revokeResume(r.Context(), reply.ResumeToken)
+		}
 	}
 	if h.commerceSessions == nil {
 		// The store is only constructed when the Phase-2 portal surface is on. Authenticating with nowhere to

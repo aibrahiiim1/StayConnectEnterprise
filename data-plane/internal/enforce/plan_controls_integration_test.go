@@ -657,26 +657,41 @@ func oldTerminatedUsage(t *testing.T, p *pgxpool.Pool) (fixture, string, string)
 	return f, sess, ls.id
 }
 
-// UNLIMITED IS THE DEFAULT, AND UNLIMITED MEANS NOTHING HAPPENS.
-func TestIntegration_Retention_UnlimitedByDefaultPurgesNothing(t *testing.T) {
+// A YEAR IS THE DEFAULT (0131, GDPR C2), SO DETAIL YOUNGER THAN THAT STAYS; AN ADMINISTRATOR'S UNLIMITED MEANS
+// NOTHING HAPPENS.
+func TestIntegration_Retention_AYearByDefaultAndUnlimitedPurgesNothing(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
 	ctx := context.Background()
 	f, sess, _ := oldTerminatedUsage(t, p)
 	days := scalar[*int](t, p, `SELECT detail_retention_days FROM iam_v2.accounting_retention_get($1,$2)`, f.tenant, f.site)
-	if days != nil {
-		t.Fatalf("default retention is %d days; it must be unlimited", *days)
+	if days == nil || *days != 365 {
+		t.Fatalf("default retention is %v; it must be 365 days", days)
 	}
-	n, err := New(rolePool(t, "svc_acctd")).PurgeAccountingDetail(ctx, f.tenant, f.site, 1000)
-	if err != nil || n != 0 {
-		t.Fatalf("purge under the unlimited default removed %d (%v)", n, err)
+	acctd := New(rolePool(t, "svc_acctd"))
+	purgeNothing := func(what string) {
+		t.Helper()
+		n, err := acctd.PurgeAccountingDetail(ctx, f.tenant, f.site, 1000)
+		if err != nil || n != 0 {
+			t.Fatalf("purge %s removed %d (%v)", what, n, err)
+		}
+		if c := count(t, p, `SELECT count(*) FROM iam_v2.accounting_records WHERE session_id=$1`, sess); c != 1 {
+			t.Fatalf("records %d after a purge %s", c, what)
+		}
+		if c := count(t, p, `SELECT count(*) FROM iam_v2.accounting_purge_runs WHERE site_id=$1`, f.site); c != 0 {
+			t.Fatalf("a purge %s recorded a run", what)
+		}
 	}
-	if c := count(t, p, `SELECT count(*) FROM iam_v2.accounting_records WHERE session_id=$1`, sess); c != 1 {
-		t.Fatalf("records %d after an unlimited purge", c)
+	purgeNothing("of 40-day-old detail under the 365-day default")
+
+	if _, err := rolePool(t, "svc_edged").Exec(ctx,
+		`SELECT iam_v2.accounting_retention_set($1,$2,NULL,'admin@test','keep everything')`, f.tenant, f.site); err != nil {
+		t.Fatalf("the administrator could not choose unlimited: %v", err)
 	}
-	if c := count(t, p, `SELECT count(*) FROM iam_v2.accounting_purge_runs WHERE site_id=$1`, f.site); c != 0 {
-		t.Fatal("an unlimited purge recorded a run")
+	if days := scalar[*int](t, p, `SELECT detail_retention_days FROM iam_v2.accounting_retention_get($1,$2)`, f.tenant, f.site); days != nil {
+		t.Fatalf("an administrator's unlimited reads %d days", *days)
 	}
+	purgeNothing("under the administrator's unlimited")
 }
 
 // A RETENTION, ONCE SET, REMOVES ONLY WHAT IS OLD AND FINISHED -- and records that it did.

@@ -33,17 +33,24 @@ export const DEFAULT_TERMS: TermsDraft = {
 
 const whole = (s: string) => /^\d+$/.test(s.trim());
 
+export type TermsField = "maxGuests" | "validDays" | "validUntil" | "graceDays";
+
+/** The first thing wrong with the draft and the field it belongs to, or null. */
+export function termsIssue(d: TermsDraft, today: Date = new Date()): { field: TermsField; message: string } | null {
+  if (!whole(d.maxGuests) || Number(d.maxGuests) < 1) return { field: "maxGuests", message: "Enter how many clients may be online at once (1 or more)." };
+  if (d.validMode === "days") {
+    if (!whole(d.validDays) || Number(d.validDays) < 1) return { field: "validDays", message: "Enter how many days the license is valid (1 or more)." };
+  } else {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d.validUntil)) return { field: "validUntil", message: "Choose the date the license ends." };
+    if (new Date(`${d.validUntil}T23:59:59Z`).getTime() <= today.getTime()) return { field: "validUntil", message: "The end date must be in the future." };
+  }
+  if (!whole(d.graceDays)) return { field: "graceDays", message: "Enter the grace period in whole days (0 or more)." };
+  return null;
+}
+
 /** The first thing wrong with the draft, in words, or null. */
 export function termsProblem(d: TermsDraft, today: Date = new Date()): string | null {
-  if (!whole(d.maxGuests) || Number(d.maxGuests) < 1) return "Enter how many clients may be online at once (1 or more).";
-  if (d.validMode === "days") {
-    if (!whole(d.validDays) || Number(d.validDays) < 1) return "Enter how many days the license is valid (1 or more).";
-  } else {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(d.validUntil)) return "Choose the date the license ends.";
-    if (new Date(`${d.validUntil}T23:59:59Z`).getTime() <= today.getTime()) return "The end date must be in the future.";
-  }
-  if (!whole(d.graceDays)) return "Enter the grace period in whole days (0 or more).";
-  return null;
+  return termsIssue(d, today)?.message ?? null;
 }
 
 /**
@@ -77,17 +84,23 @@ export function LicenseTermsFields({
   value,
   onChange,
   siteType,
+  errorFor,
+  idFor,
 }: {
   value: TermsDraft;
   onChange: (next: TermsDraft) => void;
   /** The type of the site the license is for, when known: offers its suggested modules. */
   siteType?: string | null;
+  /** A field's error and id (useFieldErrors), so a problem is shown under, and focuses, the field it is about. */
+  errorFor?: (field: TermsField) => string | undefined;
+  idFor?: (field: TermsField) => string;
 }) {
   const set = (patch: Partial<TermsDraft>) => onChange({ ...value, ...patch });
   return (
     <div className="grid gap-4 sm:grid-cols-2">
-      <Field label="Clients online at once" required hint="The most client devices that may be online at the same time.">
+      <Field label="Clients online at once" required hint="The most client devices that may be online at the same time." error={errorFor?.("maxGuests")}>
         <Input
+          id={idFor?.("maxGuests")}
           inputMode="numeric"
           value={value.maxGuests}
           onChange={(e) => set({ maxGuests: e.target.value })}
@@ -97,8 +110,9 @@ export function LicenseTermsFields({
         label="Grace period (days)"
         required
         hint="How long it keeps admitting clients after the end date. 0 = no grace: it stops at the end date."
+        error={errorFor?.("graceDays")}
       >
-        <Input inputMode="numeric" value={value.graceDays} onChange={(e) => set({ graceDays: e.target.value })} />
+        <Input id={idFor?.("graceDays")} inputMode="numeric" value={value.graceDays} onChange={(e) => set({ graceDays: e.target.value })} />
       </Field>
       <div className="space-y-2 sm:col-span-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -115,12 +129,12 @@ export function LicenseTermsFields({
           />
         </div>
         {value.validMode === "days" ? (
-          <Field label="Days from today" required>
-            <Input inputMode="numeric" value={value.validDays} onChange={(e) => set({ validDays: e.target.value })} />
+          <Field label="Days from today" required error={errorFor?.("validDays")}>
+            <Input id={idFor?.("validDays")} inputMode="numeric" value={value.validDays} onChange={(e) => set({ validDays: e.target.value })} />
           </Field>
         ) : (
-          <Field label="Ends on" required>
-            <Input type="date" value={value.validUntil} onChange={(e) => set({ validUntil: e.target.value })} />
+          <Field label="Ends on" required error={errorFor?.("validUntil")}>
+            <Input id={idFor?.("validUntil")} type="date" value={value.validUntil} onChange={(e) => set({ validUntil: e.target.value })} />
           </Field>
         )}
       </div>

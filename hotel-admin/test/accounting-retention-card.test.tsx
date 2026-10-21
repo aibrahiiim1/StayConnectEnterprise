@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 
-// D-H: how long usage detail is kept -- Unlimited by default, a number of days only with a reason and the
-// password, and nothing offered to a role that cannot change it.
+// D-H: how long usage detail is kept -- 365 days by default (0131), Unlimited or a number of days only with a
+// reason and the password, and nothing offered to a role that cannot change it.
 
 const get = vi.fn();
 const put = vi.fn();
@@ -33,9 +33,9 @@ async function renderCard(writable: boolean) {
 }
 
 describe("Usage detail retention", () => {
-  it("shows Unlimited by default and offers no change to a read-only role", async () => {
+  it("shows an administrator's Unlimited and offers no change to a read-only role", async () => {
     await renderCard(false);
-    expect(screen.getByText(/nothing is removed/)).toBeTruthy();
+    expect(screen.getByText(/Default 365 days/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /change/i })).toBeNull();
   });
 

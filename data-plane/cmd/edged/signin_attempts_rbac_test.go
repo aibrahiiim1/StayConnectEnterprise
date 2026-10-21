@@ -11,6 +11,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,7 +34,7 @@ func signInRBACRouter(s *server) http.Handler {
 		})
 		mountResource(r, s, "guest-signin-credentials", func() http.Handler {
 			rr := chi.NewRouter()
-			rr.Get("/{id}", reached)
+			rr.Post("/{id}", reached)
 			return rr
 		})
 	})
@@ -42,7 +43,12 @@ func signInRBACRouter(s *server) http.Handler {
 
 func signInDo(t *testing.T, h http.Handler, path, cookie string) int {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, path, nil)
+	// The credential reveal is a POST carrying the operator's password (B8); the list is a GET.
+	method := http.MethodGet
+	if strings.HasPrefix(path, "/guest-signin-credentials/") {
+		method = http.MethodPost
+	}
+	req := httptest.NewRequest(method, path, nil)
 	if cookie != "" {
 		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: cookie})
 	}
@@ -115,9 +121,10 @@ func TestSignInAttempts_AnonymousIsRefusedOnBothSurfaces(t *testing.T) {
 	}
 }
 
-// WRITES ARE REFUSED EVERYWHERE. Both resources are read-only by construction — the routers register only
-// GET — but the permission model derives write intent from the METHOD, so a role holding permRead is refused
-// a POST even if a route were added later without thinking about it.
+// WRITES ARE REFUSED ON THE LIST. It is read-only by construction — the router registers only GET — and the
+// permission model derives write intent from the METHOD, so a role holding permRead is refused a POST even if a
+// route were added later without thinking about it. (The credential reveal is a POST because it carries the
+// operator's password; its only action is the reveal.)
 func TestSignInAttempts_NoRoleMayWriteEitherSurface(t *testing.T) {
 	s := &server{sessions: newSessionStore(time.Hour)}
 	h := signInRBACRouter(s)

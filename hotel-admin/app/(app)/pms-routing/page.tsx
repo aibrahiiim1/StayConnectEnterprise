@@ -214,7 +214,7 @@ export default function PMSRoutingPage() {
                       </Explain>
                     </span>
                   </TH>
-                  <TH />
+                  <TH><span className="sr-only">Actions</span></TH>
                 </TR>
               </THead>
               <tbody>
@@ -254,6 +254,7 @@ export default function PMSRoutingPage() {
                           <Button
                             size="sm"
                             variant="ghost"
+                            aria-label={`Change ${r.guest_network_name || "Unnamed network"}`}
                             onClick={() => {
                               setFormErr(null);
                               setEditing({
@@ -265,7 +266,7 @@ export default function PMSRoutingPage() {
                           >
                             Change
                           </Button>
-                          <Button size="sm" variant="ghost" onClick={() => { setFormErr(null); setClearing(r); }}>
+                          <Button size="sm" variant="ghost" aria-label={`Remove ${r.guest_network_name || "Unnamed network"}`} onClick={() => { setFormErr(null); setClearing(r); }}>
                             Remove
                           </Button>
                         </>
@@ -302,7 +303,7 @@ export default function PMSRoutingPage() {
               <THead>
                 <TR>
                   <TH>Client network</TH>
-                  <TH />
+                  <TH><span className="sr-only">Actions</span></TH>
                 </TR>
               </THead>
               <tbody>

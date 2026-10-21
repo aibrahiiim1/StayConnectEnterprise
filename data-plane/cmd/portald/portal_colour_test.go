@@ -144,8 +144,8 @@ func TestBrandForDerivesAndDoesNotRepeatThePhoto(t *testing.T) {
 		t.Errorf("a pale text colour reached the page: %s", style)
 	}
 	// 0% darkening over a photograph is raised to the minimum.
-	if !strings.Contains(style, "--sc-overlay:0.30") {
-		t.Errorf("the photograph's darkening was not raised to 0.30: %s", style)
+	if !strings.Contains(style, "--sc-overlay:0.56") {
+		t.Errorf("the photograph's darkening was not raised to 0.56: %s", style)
 	}
 	if !b.HeroLogo || b.CardLogo {
 		t.Errorf("split shows the logo in the hero only; got hero=%v card=%v", b.HeroLogo, b.CardLogo)
@@ -153,6 +153,30 @@ func TestBrandForDerivesAndDoesNotRepeatThePhoto(t *testing.T) {
 	// With no photograph, 0% darkening is the hotel's choice.
 	if s := string(brandFor(map[string]any{"template_options": map[string]any{"overlay": float64(0)}}).Style); !strings.Contains(s, "--sc-overlay:0.00") {
 		t.Errorf("no photograph: %s", s)
+	}
+	// A photograph with no darkening chosen gets the floor too: the stylesheet's default is below it.
+	if s := string(brandFor(map[string]any{"hero_image_url": "/assets/hero.jpg"}).Style); !strings.Contains(s, "--sc-overlay:0.56") {
+		t.Errorf("the default darkening over a photograph was not raised: %s", s)
+	}
+	// And the script that re-applies the design for the admin preview uses the same floor.
+	if !strings.Contains(landingHTML, "MIN_PHOTO_OVERLAY = 0.56") || !strings.Contains(landingHTML, "hasOverlay || raised") {
+		t.Error("the page script's darkening floor is not the server's")
+	}
+}
+
+// THE FLOOR IS SIZED FOR A WHITE PHOTOGRAPH (WCAG 1.4.3): white text over minPhotoOverlay of black on white
+// reaches 4.5:1, and so does the welcome line, drawn at 0.95 opacity.
+func TestThePhotoDarkeningFloorKeepsWhiteTextReadable(t *testing.T) {
+	under := shade(white, minPhotoOverlay)
+	if c := contrast(white, under); c < minTextContrast {
+		t.Errorf("white on a white photograph under %.2f darkening is %.2f:1", minPhotoOverlay, c)
+	}
+	if c := contrast(over(colour{255, 255, 255, 0.95}, under), under); c < minTextContrast {
+		t.Errorf("the welcome line on a white photograph under %.2f darkening is %.2f:1", minPhotoOverlay, c)
+	}
+	// And it is the smallest such floor, to the hundredth: the photograph is darkened no more than it must be.
+	if c := contrast(over(colour{255, 255, 255, 0.95}, shade(white, minPhotoOverlay-0.01)), shade(white, minPhotoOverlay-0.01)); c >= minTextContrast {
+		t.Errorf("%.2f is not the least darkening that reads (%.2f already gives %.2f:1)", minPhotoOverlay, minPhotoOverlay-0.01, c)
 	}
 }
 

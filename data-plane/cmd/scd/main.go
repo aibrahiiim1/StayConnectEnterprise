@@ -48,6 +48,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/otpkey"
 	"github.com/stayconnect/enterprise/data-plane/internal/pms"
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsloader"
+	"github.com/stayconnect/enterprise/data-plane/internal/reqlog"
 	"github.com/stayconnect/enterprise/data-plane/internal/sealbox"
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
 	"github.com/stayconnect/enterprise/data-plane/internal/signinattempt"
@@ -272,6 +273,11 @@ type server struct {
 	// otpEscrowKey seals the staff-readable copy of a live code (temp_access_admin.go); same local key file,
 	// its own domain.
 	otpEscrowKey sealbox.Key
+	// ledgerRT is the erasure ledger's runtime: the primary copy, the secondary storage, the last reconciliation (ledger_service.go).
+	ledgerRT ledgerRuntime
+	// operatorMFA seals the Admin Console operators' authenticator secrets and MACs their recovery codes
+	// (operator_mfa.go, 0132).
+	operatorMFA operatorMFAKeys
 
 	// PMS registry is live-reloadable (phase 5.3). All readers must go
 	// through currentPMSReg(); the reload path atomically swaps it under
@@ -605,6 +611,20 @@ func main() {
 		fmt.Println(buildprofile.Name)
 		return
 	}
+	// `scd backup-crypt ...` encrypts the nightly backup to the hotel's keys, and decrypts one for an engineer
+	// restoring it (backup_crypt.go). One implementation for every backup the appliance writes.
+	if len(os.Args) > 1 && os.Args[1] == "backup-now" {
+		os.Exit(backupNowMain(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "backup-restore" {
+		os.Exit(backupRestoreMain(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "marker-advance" {
+		os.Exit(markerAdvanceMain(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "backup-crypt" {
+		os.Exit(backupCryptMain(os.Args[2:]))
+	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
@@ -879,6 +899,8 @@ func main() {
 	s.initOpenAccess(c.SecretsDir)
 	s.initClientResume(c.SecretsDir)
 	s.initNotifyKey(c.SecretsDir)
+	s.ledgerInit(c.SecretsDir)
+	s.initOperatorMFAKey(c.SecretsDir)
 	s.portalTLS = s.initPortalTLS(c, ident != nil && talksToCentral)
 	s.socialPortal = s.portalTLS
 	// Social sign-in: load the sealing key, seal any plaintext secret still in the provider table, build the
@@ -924,7 +946,8 @@ func main() {
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(middleware.Logger)
+	// No path, query or client address in the request log (reqlog; GDPR audit 2026-10-19).
+	r.Use(reqlog.Middleware)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(10 * time.Second))
 	// WHO MAY ASK FOR WHAT. One socket carries the guest-authentication routes portald needs and the
@@ -983,6 +1006,8 @@ func main() {
 	r.Post("/v1/auth/account/forgot", s.accountForgot)
 	r.Post("/v1/auth/account/reset", s.accountReset)
 	r.Post("/v1/admin/accounts/{id}/resend-verification", s.adminAccountResendVerification)
+	// The Admin Console operator's authenticator (operator_mfa.go, 0132): edged only, under /v1/admin/.
+	s.operatorMFARoutes(r)
 	r.Post("/v1/auth/social/start", s.socialStart)
 	r.Post("/v1/sessions/authorize-social", s.authorizeSocial)
 	// The remembered device (client_resume.go): peek for the Welcome-back line, Connect, and sign-out.
@@ -998,8 +1023,19 @@ func main() {
 	r.Get("/v1/admin/pms/{name}/health", s.pmsAdminHealth)
 	r.Get("/v1/tenant/auth-methods", s.tenantAuthMethods)
 	r.Get("/v1/tenant/branding", s.tenantBranding)
+	// THE ERASURE LEDGER (ledger_service.go): edged commits every erasure through here before it tells anyone it is done.
+	r.Get("/v1/ledger/status", s.ledgerStatusGet)
+	r.Post("/v1/ledger/prepare", s.ledgerPrepare)
+	r.Post("/v1/ledger/commit", s.ledgerCommit)
+	r.Post("/v1/ledger/abort", s.ledgerAbort)
+	r.Put("/v1/ledger/destination", s.ledgerDestinationPut)
+	r.Post("/v1/ledger/destination/probe", s.ledgerDestinationProbe)
+	r.Post("/v1/ledger/recover", s.ledgerRecover)
 	r.Post("/v1/backup/run", s.backupRun)
+	r.Get("/v1/backup/status", s.backupStatus)
+	r.Post("/v1/backup/earlier/remove", s.earlierBackupsRemove)
 	r.Post("/v1/backup/verify", s.backupVerify)
+	r.Post("/v1/backup/key-test", s.backupKeyTest)
 	// THE DESTRUCTIVE ONE. edged performs the password step-up, the permission check and the audit record
 	// before it reaches here; this socket is not reachable from the network. See restore.go.
 	r.Post("/v1/backup/restore", s.backupRestore)
@@ -1210,6 +1246,14 @@ func main() {
 	if s.p3auth != nil && s.p3auth.attempts != nil {
 		go s.p3auth.attempts.RunPurge(rootCtx, time.Hour)
 	}
+
+	// GUEST-DATA RETENTION (data_retention.go, migration 0127): hourly anonymisation of what has outlived the
+	// site's retention settings.
+	go s.dataRetentionLoop(rootCtx)
+	go s.ledgerLoop(rootCtx)
+	go s.backupLoop(rootCtx)
+	// SYSTEM-LOG RETENTION (log_retention.go, migration 0134): the appliance's logs follow the site's log period.
+	go s.logRetentionLoop(rootCtx)
 
 	// Signed hello against ctrlapi — on boot AND periodically. Besides smoke-
 	// testing signed-auth, this provides ORPHAN RECOVERY: if Central no longer

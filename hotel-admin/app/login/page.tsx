@@ -5,7 +5,7 @@
 // It has no sidebar and no top bar, so the theme control has to be here too: an operator whose appliance is set
 // to dark would otherwise meet a light login page and conclude the theme preference had not stuck.
 
-import { Suspense, useState } from "react";
+import { Suspense, useCallback, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ShieldCheck } from "lucide-react";
 import { BySemantics, OneGateMark, OneGateWordmark } from "@/components/brand";
@@ -15,6 +15,7 @@ import { ErrorBanner } from "@/components/ui/error-banner";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { api } from "@/lib/api";
 import { safeNextPath } from "@/lib/safe-next";
+import { SigninSecondStep, type SecondStep } from "@/components/signin-second-step";
 
 export default function LoginPage() {
   // useSearchParams must live inside a Suspense boundary for production build.
@@ -31,11 +32,14 @@ function LoginInner() {
   // Only a path on this console (lib/safe-next.ts): ?next=https://elsewhere is how a sign-in became a hand-off
   // to another site.
   const next = safeNextPath(params.get("next"));
+  const expired = params.get("reason") === "expired";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState<unknown>(null);
   const [loading, setLoading] = useState(false);
+  // The password is the first of two steps (0132): it answers which second step comes, and opens no session.
+  const [second, setSecond] = useState<SecondStep | null>(null);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -44,17 +48,26 @@ function LoginInner() {
     try {
       // POST /edge/v1/auth/login — local site operators only; the appliance
       // has no org concept and no SSO.
-      // A weak or administrator-chosen password signs in to a session that can only replace it; the app layout
-      // shows that form whatever page it is asked for, so the destination is the same either way.
-      await api.post<{ must_change_password?: boolean }>("/auth/login", { email, password });
-      router.replace(next);
-      router.refresh();
+      const r = await api.post<{ second_step?: SecondStep }>("/auth/login", { email, password });
+      setPassword("");
+      setSecond(r.second_step === "enrol" ? "enrol" : "code");
     } catch (e) {
       setErr(e);
     } finally {
       setLoading(false);
     }
   }
+
+  // A weak or administrator-chosen password signs in to a session that can only replace it; the app layout
+  // shows that form whatever page it is asked for, so the destination is the same either way.
+  const finish = useCallback(() => {
+    router.replace(next);
+    router.refresh();
+  }, [router, next]);
+  const restart = useCallback((why: string) => {
+    setSecond(null);
+    setErr(why ? new Error(why) : null);
+  }, []);
 
   return (
     <div className="grid min-h-screen bg-background lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
@@ -104,14 +117,27 @@ function LoginInner() {
               </div>
             </div>
 
+            {/* WHY THE OPERATOR IS HERE, when the console sent them (the idle limit, or a session the appliance no
+                longer knows). Polite: it is information, not an error, and must not cut off the page's own
+                announcement. After signing in they go back to where they were. */}
+            <p role="status" className={expired ? "mb-4 rounded-lg border border-border bg-surface px-3.5 py-3 text-sm" : "sr-only"}>
+              {expired ? "Your session ended because there was no activity for a while. Sign in again to continue where you left off." : ""}
+            </p>
+
+            {second ? (
+              <SigninSecondStep step={second} onDone={finish} onRestart={restart} />
+            ) : (
             <form onSubmit={onSubmit} className="space-y-4" noValidate={false}>
-              <div aria-live="assertive">
-                <ErrorBanner err={err} className="mb-0" />
-              </div>
+              {/* The banner is role="alert" itself; an aria-live wrapper around it made a screen reader read the
+                  error twice. */}
+              <ErrorBanner err={err} className="mb-0" />
               <Field label="Email or username">
                 <Input
                   type="text"
                   required
+                  // The page exists only to take these two fields, and it is reached by choice or by a redirect
+                  // that the status line above explains, so starting in the first field skips nothing.
+                  // eslint-disable-next-line jsx-a11y/no-autofocus
                   autoFocus
                   autoComplete="username"
                   value={email}
@@ -131,6 +157,7 @@ function LoginInner() {
                 {loading ? "Signing in…" : "Sign in"}
               </Button>
             </form>
+            )}
 
             <div className="mt-6 flex gap-2.5 rounded-lg border border-border bg-card px-3.5 py-3 text-caption leading-relaxed text-muted-foreground">
               <ShieldCheck className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />

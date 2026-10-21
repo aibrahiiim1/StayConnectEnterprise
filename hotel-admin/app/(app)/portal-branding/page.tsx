@@ -29,7 +29,7 @@ import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Field, Hint, Input, Label } from "@/components/ui/input";
+import { Field, Hint, Input, Label, Textarea } from "@/components/ui/input";
 import { Segmented } from "@/components/ui/tabs";
 import { MetricStrip } from "@/components/ui/data";
 import { ConfirmDialog } from "@/components/ui/dialog";
@@ -55,6 +55,7 @@ import { HistorySection } from "./history";
 import { Design, TemplateOptions, advancedChanged, assetSrc, collectedDetails, contrastRatio, offeredLanguages } from "./strings";
 import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 import { LanguagesSection } from "./languages";
+import { PRIVACY_TEMPLATE } from "./privacy-template";
 
 // The page's tips, shared by the loading header and the loaded one so the lightbulb is there from the start.
 // Room numbers are mentioned only where hospitality is licensed: the help must not describe a hotel to a site
@@ -85,9 +86,10 @@ const pageHelp = (hospitality: boolean) => (
     </HelpSection>
     <HelpSection title="Fonts and links">
       <p>
-        The portal loads nothing from the internet, so only fonts already on the client&apos;s device are used. A
-        client reaching the portal has no internet yet, so an external terms page will not load until they are
-        online; a file uploaded here works straight away.
+        Only fonts already on the client&apos;s device are used. A client reaching the portal has no internet yet,
+        so an external page, image or font will not load until they are online, and each one tells its host the
+        client&apos;s address; a file uploaded here works straight away. The checks name every outside host the
+        page would load from.
       </p>
     </HelpSection>
     <HelpSection title="Languages">
@@ -241,6 +243,9 @@ export default function PortalSettingsPage() {
   const errorsFor = (field: string) => issues.filter((i) => i.field === field && i.severity === "error");
   const fieldError = (field: string) => errorsFor(field).map((i) => i.message).join("; ") || undefined;
   const blocking = issues.filter((i) => i.severity === "error");
+  // Warnings outside the Advanced section (which lists its own): an outside image host, an unfinished notice.
+  const notes = issues.filter((i) => i.severity === "warning" && i.field !== "custom_css" && i.field !== "custom_html");
+  const fieldNote = (field: string) => notes.filter((i) => i.field === field).map((i) => i.message).join("; ") || undefined;
 
   async function save(password?: string) {
     // The step-up is asked for ONLY when the change needs it, at the moment of saving, in a masked field.
@@ -322,7 +327,7 @@ export default function PortalSettingsPage() {
     const fields: Record<Section, string[]> = {
       template: ["template_id", "template_options", "hero_image_url"],
       brand: ["logo_url", "background_url", "brand_color", "brand_color_dark", "text_color", "corner_radius", "font_family"],
-      content: ["hotel_name", "welcome_text", "help_text", "terms_url"],
+      content: ["hotel_name", "welcome_text", "help_text", "terms_url", "privacy_text", "privacy_url"],
       wording: ["translations"], languages: ["languages"], advanced: ["custom_css", "custom_html"], history: [],
     };
     return blocking.some((i) => fields[s].includes(i.field));
@@ -390,10 +395,20 @@ export default function PortalSettingsPage() {
           )}
         </Callout>
       )}
+      {notes.length > 0 && blocking.length === 0 && (
+        <Callout tone="warning" title="Worth knowing before you save">
+          <ul className="list-disc space-y-0.5 pl-4">
+            {notes.map((i, n) => <li key={n}>{fieldName(i.field)}: {i.message}</li>)}
+          </ul>
+        </Callout>
+      )}
       {saveErr ? <ErrorBanner err={saveErr} /> : null}
 
       <div className="grid gap-6 lg:grid-cols-[210px_minmax(0,1fr)] xl:grid-cols-[210px_minmax(0,1fr)_minmax(0,1.05fr)]">
         {/* ---- the rail --------------------------------------------------------------------------------- */}
+        {/* The tablist is entered at its selected tab (roving tabIndex, arrows below), never the list itself, which is
+            the ARIA pattern; jsx-a11y reads the container role as a control. */}
+        {/* eslint-disable-next-line jsx-a11y/interactive-supports-focus */}
         <div role="tablist" aria-label="Portal settings sections" aria-orientation="vertical"
           onKeyDown={(e) => {
             const i = SECTIONS.findIndex((x) => x.id === section);
@@ -616,6 +631,43 @@ export default function PortalSettingsPage() {
             </Card>
           )}
 
+          {section === "content" && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Privacy notice</CardTitle>
+                <CardDescription>
+                  What clients are told about their data before they sign in. Shown under every sign-in method as
+                  &ldquo;How we use your data&rdquo;, opening in place, so it can be read before the client is online.
+                </CardDescription>
+              </CardHeader>
+              <CardBody className="space-y-5">
+                {!(d.privacy_text ?? "").trim() && !(d.privacy_url ?? "").trim() && (
+                  <Callout tone="warning" title="Clients are not told how their data is used">
+                    <p>Data protection law asks you to tell clients, before they sign in, who you are, what this
+                      Wi-Fi records, why, for how long, and what their rights are.</p>
+                    {writable && (
+                      <Button className="mt-2" size="sm" variant="secondary"
+                        onClick={() => set("privacy_text", PRIVACY_TEMPLATE)}>
+                        Start from the template
+                      </Button>
+                    )}
+                  </Callout>
+                )}
+                <Field label="Notice text" error={fieldError("privacy_text")}
+                  hint={fieldNote("privacy_text") ??
+                    `Plain text; line breaks are kept. Complete every part in [[double brackets]]. The retention periods are the data retention settings on the Backups page. ${(d.privacy_text ?? "").length}/${LIMITS.privacyText}`}>
+                  <Textarea value={d.privacy_text ?? ""} disabled={!writable} maxLength={LIMITS.privacyText} rows={14}
+                    onChange={(e) => set("privacy_text", e.target.value)} />
+                </Field>
+                <Field label="Full privacy notice link (optional)" error={fieldError("privacy_url")}
+                  hint="An https:// address, or a file you uploaded here (/assets/…). An external page loads only once the client is online, so keep the text above complete.">
+                  <Input value={d.privacy_url ?? ""} disabled={!writable}
+                    onChange={(e) => set("privacy_url", e.target.value)} placeholder="https://…/privacy" />
+                </Field>
+              </CardBody>
+            </Card>
+          )}
+
           {section === "wording" && (
             <LanguagesSection d={d} setD={setD} writable={writable} part="wording" initialEditing={wordingLang} />
           )}
@@ -659,6 +711,7 @@ export default function PortalSettingsPage() {
 function fieldName(field: string) {
   const names: Record<string, string> = {
     hotel_name: "Site name", welcome_text: "Welcome line", help_text: "Help line", terms_url: "Terms of use link",
+    privacy_text: "Privacy notice", privacy_url: "Privacy notice link",
     logo_url: "Logo", background_url: "Background", hero_image_url: "Hero photograph", brand_color: "Brand colour",
     brand_color_dark: "Button shade", text_color: "Text colour", corner_radius: "Corner radius", font_family: "Typeface",
     template_id: "Layout", template_options: "Layout options", languages: "Languages", translations: "Sign-in page text",

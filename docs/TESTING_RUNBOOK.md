@@ -157,7 +157,7 @@ ssh $C '/tmp/nats-acctest'    # NATS points 11–19
 | What | Where |
 |---|---|
 | Central API contract end to end (registration, activation, same-customer move and its refusals, two-phase retirement, retired-identity refusal, removed routes answer 404) | `control-plane/cmd/acceptance` (run on Central) |
-| Every appliance terminal path revokes its licence | `scripts/lifecycle-regression.sh` |
+| Every appliance terminal path revokes its licence | `scripts/lifecycle-regression.sh` (needs `control-plane/cmd/regtest`) |
 | Replacement overlap safety and factory-reset visibility | `scripts/replacement-factoryreset-regression.sh` (needs `control-plane/cmd/regtest`) |
 | Move licence decision, rate limits, state derivation | `go test ./...` in `control-plane/` (`internal/api/move_test.go`, `ratelimit_test.go`, `state_test.go`) |
 | Retried terminal ack and offline reconcile; removed-from-Central state | `go test ./cmd/scd/` in `data-plane/` (`central_retry_test.go`, `removed_from_central_test.go`, and their `*_integration_test.go` counterparts against a real PostgreSQL) |
@@ -165,6 +165,8 @@ ssh $C '/tmp/nats-acctest'    # NATS points 11–19
 | The telemetry subsystem is absent; Gate-P grants | `scripts/prod-privilege-integration.sh` |
 | Appliance unit installer skips Central units | `deploy/scripts/install-service-units-selftest.sh` |
 | Consoles | `npm test` in `cloud-admin/` and `hotel-admin/` |
+
+The Central test tools (`cmd/acceptance`, `cmd/pkitest`, and the two scripts through `cmd/regtest -signin`) sign in with the password and an authenticator code (`control-plane/internal/opsignin`). The first run sets the operator's authenticator up and keeps its secret in a 0600 keyring (`OPERATOR_TOTP_KEYRING`); an operator set up in the console first needs `ctrlapi reset-mfa --email E --reason R` before a tool can use it.
 
 Removed with the features they tested (2026-09-27 and the Central redesign): `scripts/phase5-nats-test.sh`,
 `phase5-ha-test.sh`, `phase5-reload-test.sh`, `phase17-offline-test.sh`, `phase3-api-test.sh`,

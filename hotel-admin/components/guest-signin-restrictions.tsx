@@ -17,7 +17,7 @@
 import { REASON_HINT, REASON_MAX_CHARS, reasonOk } from "@/lib/reason";
 import { useCallback, useEffect, useState } from "react";
 import { ShieldCheck, Timer } from "lucide-react";
-import { api, GuestSignInRestriction } from "@/lib/api";
+import { api, inBackground, GuestSignInRestriction } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -91,7 +91,7 @@ export function ActiveRestrictions({
   // A restriction is a minute long by default, so the list re-reads itself periodically. Without it an
   // operator watching the screen would see a countdown reach zero and the row stay there.
   useEffect(() => {
-    const t = setInterval(() => { void load(); }, POLL_SECONDS * 1000);
+    const t = setInterval(() => { void inBackground(load); }, POLL_SECONDS * 1000);
     return () => clearInterval(t);
   }, [load]);
 

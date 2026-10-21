@@ -169,7 +169,7 @@ const layerFallbackScript = `
 // guestChrome is the hero (decoration, for the photographic and bar layouts) and the language pill.
 const guestChrome = `
 <div class="sc-hero" aria-hidden="true"><div class="sc-hero-inner">{{if .Brand.HeroLogo}}<img class="sc-hero-logo" src="{{.Brand.Logo}}" alt="" data-logo>{{end}}<div class="sc-hero-name" dir="auto">{{if .Brand.Name}}{{.Brand.Name}}{{else}}{{index .T "brand.fallback"}}{{end}}</div>{{with .Brand.Welcome}}<p class="sc-hero-welcome" dir="auto">{{.}}</p>{{end}}</div></div>
-{{if gt (len .Languages) 1}}<div class="langbar"><label class="lang">` + iconGlobe + `<select id="lang" aria-label="{{index .T "lang.label"}}">{{range .Languages}}<option value="{{.Code}}"{{if eq .Code $.Lang}} selected{{end}}>{{.Label}}</option>{{end}}</select>` + iconChevDown + `</label></div>{{end}}`
+{{if gt (len .Languages) 1}}<div class="langbar"><label class="lang">` + iconGlobe + `<select id="lang" aria-label="{{index .T "lang.label"}}">{{range .Languages}}<option value="{{.Code}}" lang="{{.Code}}"{{if eq .Code $.Lang}} selected{{end}}>{{.Label}}</option>{{end}}</select>` + iconChevDown + `</label></div>{{end}}`
 
 // guestBrandblock is the hotel's logo, or the Wi-Fi mark when there is none, and its name.
 const guestBrandblock = `
@@ -177,6 +177,10 @@ const guestBrandblock = `
 
 // guestScripts: a logo that fails to load leaves nothing behind, and the language pill remembers the
 // guest's choice exactly as the sign-in page does (cookie and localStorage) before redrawing the page in it.
+// These pages are redrawn by the server, so choosing a language reloads the page -- and a reload on every
+// change would fire at each arrow-key step through a closed select (WCAG 3.2.2). A choice made with the
+// keyboard is applied on Enter or when focus leaves the pill; a choice from the pointer or a phone's picker
+// (one change, no keys) is applied at once.
 const guestScripts = `
 <script nonce="{{.Nonce}}">
 (function () {
@@ -193,11 +197,24 @@ const guestScripts = `
     })(imgs[i]);
   }
   var sel = document.getElementById('lang');
-  if (sel) sel.addEventListener('change', function () {
-    try { localStorage.setItem('sc-lang', sel.value); } catch (e) {}
-    try { document.cookie = 'sc-lang=' + encodeURIComponent(sel.value) + '; path=/; max-age=31536000; SameSite=Lax' + (location.protocol === 'https:' ? '; Secure' : ''); } catch (e) {}
-    location.reload();
-  });
+  if (sel) {
+    var pending = false, keyed = false;
+    var applyLang = function () {
+      if (!pending) return;
+      pending = false;
+      try { localStorage.setItem('sc-lang', sel.value); } catch (e) {}
+      try { document.cookie = 'sc-lang=' + encodeURIComponent(sel.value) + '; path=/; max-age=31536000; SameSite=Lax' + (location.protocol === 'https:' ? '; Secure' : ''); } catch (e) {}
+      location.reload();
+    };
+    sel.addEventListener('keydown', function (e) {
+      keyed = true;
+      if (e.key === 'Enter' && pending) { e.preventDefault(); applyLang(); }
+    });
+    sel.addEventListener('pointerdown', function () { keyed = false; });
+    sel.addEventListener('mousedown', function () { keyed = false; });
+    sel.addEventListener('change', function () { pending = true; if (!keyed) applyLang(); });
+    sel.addEventListener('blur', applyLang);
+  }
   // A refusal the server rendered is where attention goes (audit P-24): a screen reader announces role=alert
   // only when it changes, and a page that ARRIVES with one says nothing unless focus is moved to it.
   var alertEl = document.querySelector('.notice[role=alert], .page-lead[role=alert]');
@@ -263,7 +280,7 @@ const landingHTML = `<!doctype html>
   </div>
   <div class="langbar">
     <label class="lang" for="lang">` + iconGlobe + `
-      <select id="lang" aria-label="{{index .T "lang.label"}}">{{range .Languages}}<option value="{{.Code}}"{{if eq .Code $.Lang}} selected{{end}}>{{.Label}}</option>{{end}}</select>` + iconChevDown + `
+      <select id="lang" aria-label="{{index .T "lang.label"}}">{{range .Languages}}<option value="{{.Code}}" lang="{{.Code}}"{{if eq .Code $.Lang}} selected{{end}}>{{.Label}}</option>{{end}}</select>` + iconChevDown + `
     </label>
   </div>
 
@@ -299,8 +316,9 @@ const landingHTML = `<!doctype html>
     {{end}}
 
     <!-- WELCOME BACK: this device holds a valid remembered-device credential (client_resume.go). One Connect
-         button for that Client; "Not you?" forgets the device and shows the ordinary sign-in page. -->
-    {{with .Welcome}}<div class="welcome" id="welcome" role="status">
+         button for that Client; "Not you?" forgets the device and shows the ordinary sign-in page. Not a live
+         region: it arrives with the page, and it holds a heading and two forms, which a status must not. -->
+    {{with .Welcome}}<div class="welcome" id="welcome">
       <h2 data-i18n="welcome.back" data-i18n-en="Welcome back">{{index $.T "welcome.back"}}</h2>
       <p class="welcome-id"><strong dir="ltr">{{.Label}}</strong></p>
       <p class="welcome-lead" data-i18n="welcome.lead" data-i18n-en="This device is remembered. Tap Connect to get online.">{{index $.T "welcome.lead"}}</p>
@@ -455,11 +473,15 @@ const landingHTML = `<!doctype html>
     </form>
     <form data-otp="sms" data-stage="code" autocomplete="off" style="display:none">
       <p class="small"><span data-i18n="otp.sent.sms" data-i18n-en="We texted a 6-digit code to">{{index .T "otp.sent.sms"}}</span> <bdi class="dest"></bdi></p>
+      <!-- HOW LONG THE CODE LASTS, from the server's own answer (ttl_seconds), and what "Send a new code" did. A
+           polite status: it is read once when it changes, never over the code being typed. -->
+      <p class="hint" id="sms-valid" data-otp-valid role="status" aria-live="polite"></p>
       <div class="field">
         <label for="sms-code"><span data-i18n="otp.code" data-i18n-en="Verification code">{{index .T "otp.code"}}</span></label>
-        <input id="sms-code" name="code" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" required maxlength="6" placeholder="••••••" dir="ltr">
+        <input id="sms-code" name="code" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" required maxlength="6" placeholder="••••••" dir="ltr" aria-describedby="sms-valid">
       </div>
       <button class="primary" type="submit"><span data-i18n="btn.verify" data-i18n-en="Verify">{{index .T "btn.verify"}}</span></button>
+      <button type="button" class="link" data-otp-again data-i18n="otp.resend" data-i18n-en="Send a new code">{{index .T "otp.resend"}}</button>
       <button type="button" class="link" data-resend data-i18n="otp.retry.sms" data-i18n-en="Use a different number">{{index .T "otp.retry.sms"}}</button>
       <div class="err" id="sms-code-err" role="alert" data-for="sms-code"></div>
     </form>
@@ -477,17 +499,47 @@ const landingHTML = `<!doctype html>
     </form>
     <form data-otp="whatsapp" data-stage="code" autocomplete="off" style="display:none">
       <p class="small"><span data-i18n="otp.sent.whatsapp" data-i18n-en="We sent a 6-digit code on WhatsApp to">{{index .T "otp.sent.whatsapp"}}</span> <bdi class="dest"></bdi></p>
+      <p class="hint" id="wa-valid" data-otp-valid role="status" aria-live="polite"></p>
       <div class="field">
         <label for="wa-code"><span data-i18n="otp.code" data-i18n-en="Verification code">{{index .T "otp.code"}}</span></label>
-        <input id="wa-code" name="code" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" required maxlength="6" placeholder="••••••" dir="ltr">
+        <input id="wa-code" name="code" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" required maxlength="6" placeholder="••••••" dir="ltr" aria-describedby="wa-valid">
       </div>
       <button class="primary" type="submit"><span data-i18n="btn.verify" data-i18n-en="Verify">{{index .T "btn.verify"}}</span></button>
+      <button type="button" class="link" data-otp-again data-i18n="otp.resend" data-i18n-en="Send a new code">{{index .T "otp.resend"}}</button>
       <button type="button" class="link" data-resend data-i18n="otp.retry.sms" data-i18n-en="Use a different number">{{index .T "otp.retry.sms"}}</button>
       <div class="err" id="wa-code-err" role="alert" data-for="wa-code"></div>
     </form>
   </div>
 
       <div class="alt" id="alt-methods" style="display:none"></div>
+      <!-- REMEMBER THIS DEVICE (GDPR audit B10, D-B10). Unticked by default; ticking it is the guest's own request
+           for the remembered-device cookie, which is what makes that cookie lawful without a cookie banner
+           (PECR reg. 6, ePrivacy Art. 5(3)). The choice lives in a session cookie for this visit only, so it
+           survives the trip to an identity provider; the server keeps the credential only when it is set, and
+           only over HTTPS (client_resume.go). -->
+      <label class="remember-device" id="remember-device" hidden>
+        <input type="checkbox" id="remember-device-box">
+        <span data-i18n="remember.device" data-i18n-en="Remember this device, so I can reconnect with one tap">{{index .T "remember.device"}}</span>
+      </label>
+    </div>
+
+    <!-- THE PRIVACY NOTICE (GDPR Art. 13), on the card under every way in -- the welcome-back button included --
+         so a guest can read it before signing in. The hotel's own text opens in place: an outside page does not
+         load before the guest is online. The remembered-device sentence is shown where the device can be
+         remembered (a verified code or an identity provider), and on the welcome-back screen itself. -->
+    <div class="privacy" id="privacy">
+      <details class="privacy-notice" id="privacy-notice">
+        <summary data-i18n="privacy.link" data-i18n-en="How we use your data">{{index .T "privacy.link"}}</summary>
+        <div class="privacy-text" id="privacy-text" dir="auto"{{if not .PrivacyText}} hidden{{end}}>{{.PrivacyText}}</div>
+        <p class="privacy-text" id="privacy-default"{{if .PrivacyText}} hidden{{end}}
+           data-i18n="privacy.default" data-i18n-en="This Wi-Fi is provided by the hotel, which is responsible for your personal data on it. To give you internet access and keep the network secure, it records your device’s network addresses, when you connect and how much data you use, and what you sign in with. These records are deleted or made anonymous after a set time. Ask at reception for the hotel’s full privacy notice, or to see, correct or delete your data.">{{index .T "privacy.default"}}</p>
+      </details>
+      <!-- Both outside links open a new tab, and say so to a screen reader before it happens (WCAG 3.2.5). The
+           words are in their own spans: the language pass rewrites a data-i18n element's whole text. -->
+      <a class="privacy-url" id="privacy-url"{{with .PrivacyURL}} href="{{.}}"{{end}} target="_blank" rel="noopener noreferrer"{{if not .PrivacyURL}} hidden{{end}}><span
+         data-i18n="privacy.url" data-i18n-en="Privacy notice">{{index .T "privacy.url"}}</span> <span class="sc-vh" data-i18n="link.newtab" data-i18n-en="(opens in a new tab)">{{index .T "link.newtab"}}</span></a>
+      <p class="privacy-remember" id="privacy-remember"{{if not .Welcome}} hidden{{end}}
+         data-i18n="privacy.remember" data-i18n-en="If you tick “Remember this device”, a cookie keeps it remembered so you can reconnect with one tap. Signing out, or “Not you?”, forgets it.">{{index .T "privacy.remember"}}</p>
     </div>
     </div>
 
@@ -502,8 +554,8 @@ const landingHTML = `<!doctype html>
     </div>
     <div class="sc-foot">
       <p class="terms" id="brand-terms-wrap"{{if not .Terms}} hidden{{end}}>
-        <a id="brand-terms"{{with .Terms}} href="{{.}}"{{end}} target="_blank" rel="noopener noreferrer"
-           data-i18n="terms.link" data-i18n-en="Terms of use">{{index .T "terms.link"}}</a>
+        <a id="brand-terms"{{with .Terms}} href="{{.}}"{{end}} target="_blank" rel="noopener noreferrer"><span
+           data-i18n="terms.link" data-i18n-en="Terms of use">{{index .T "terms.link"}}</span> <span class="sc-vh" data-i18n="link.newtab" data-i18n-en="(opens in a new tab)">{{index .T "link.newtab"}}</span></a>
       </p>
       <!-- HELP. The ways in this hotel offers, explained; the script hides the tips for methods that are off. -->
       ` + helpOpen + `
@@ -573,6 +625,8 @@ const landingHTML = `<!doctype html>
       room_any:         'pms.prompt.any',
       either:           'pms.prompt.either',
     };
+    // The room sign-in modes that ask for exactly one name, and the autocomplete token for it.
+    const PMSAutocomplete = { room_lastname: 'family-name', room_firstname: 'given-name' };
     const challenges = {}; // channel -> challenge_id
     // The plain-HTML form a refusal on this page answers ("voucher", "account" or "email"), from the server.
     const SERVER_FORM = {{.ErrorForm}};
@@ -721,6 +775,10 @@ const landingHTML = `<!doctype html>
       if (sel) sel.setAttribute('aria-label', t('lang.label'));
       var choices = document.getElementById('pms-choices');
       if (choices) choices.setAttribute('aria-label', t('pms.choose'));
+      // The code's lifetime carries a number, so it is composed rather than looked up (otpValidity).
+      document.querySelectorAll('[data-otp-valid]').forEach(function (el) {
+        if (el.dataset.n || el.dataset.lead) renderValidity(el);
+      });
     }
 
     // REMEMBERING A CHOICE ON A CAPTIVE PORTAL IS NOT localStorage ALONE. iOS opens the portal in a throwaway
@@ -801,7 +859,7 @@ const landingHTML = `<!doctype html>
     // THE HOTEL'S COLOURS, MADE READABLE. A port of derivedColours in portal_colour.go, which renders the same
     // values into the page on the server; it runs here as well because the admin preview hands this script an
     // unsaved design that never reaches the server. The two must stay in step.
-    var INK_DARK = '#14161a', MIN_CONTRAST = 4.5, MIN_PHOTO_OVERLAY = 0.3, DEFAULT_OVERLAY = 0.35;
+    var INK_DARK = '#14161a', MIN_CONTRAST = 4.5, MIN_PHOTO_OVERLAY = 0.56, DEFAULT_OVERLAY = 0.35;
     var WHITE = { r: 255, g: 255, b: 255, a: 1 };
     function parseColour(s) {
       s = String(s || '').trim();
@@ -882,10 +940,12 @@ const landingHTML = `<!doctype html>
       const photo = !!(d && (d.hero_image_url || d.background_url));
       const overlay = Number(o.overlay);
       const hasOverlay = o.overlay !== undefined && o.overlay !== null && overlay >= 0 && overlay <= 90;
-      // White words over a photograph always get some darkening under them (as brandFor does).
+      // White words over a photograph always get enough darkening under them to read, the default included
+      // (as brandFor does).
       let ov = hasOverlay ? overlay / 100 : DEFAULT_OVERLAY;
-      if (hasOverlay && photo && ov < MIN_PHOTO_OVERLAY) ov = MIN_PHOTO_OVERLAY;
-      cssProp('--sc-overlay', hasOverlay ? String(ov) : '');
+      const raised = photo && ov < MIN_PHOTO_OVERLAY;
+      if (raised) ov = MIN_PHOTO_OVERLAY;
+      cssProp('--sc-overlay', hasOverlay || raised ? String(ov) : '');
       cssProp('--sc-heading-font', o.heading_font || '');
       // With no hero photograph the stylesheet's --sc-hero falls back to the background one.
       cssProp('--sc-hero', cssURL((d && d.hero_image_url) || ''));
@@ -946,6 +1006,12 @@ const landingHTML = `<!doctype html>
       const terms = document.getElementById('brand-terms');
       if (d.terms_url) { terms.href = d.terms_url; } else { terms.removeAttribute('href'); }
       document.getElementById('brand-terms-wrap').hidden = !d.terms_url;
+      document.getElementById('privacy-text').textContent = d.privacy_text || '';
+      document.getElementById('privacy-text').hidden = !d.privacy_text;
+      document.getElementById('privacy-default').hidden = !!d.privacy_text;
+      const privacyURL = document.getElementById('privacy-url');
+      if (d.privacy_url) { privacyURL.href = d.privacy_url; } else { privacyURL.removeAttribute('href'); }
+      privacyURL.hidden = !d.privacy_url;
       const oldSheet = document.getElementById('sc-hotel');
       if (oldSheet) oldSheet.parentNode.removeChild(oldSheet);
       if (d.custom_css) {
@@ -997,6 +1063,8 @@ const landingHTML = `<!doctype html>
       offered.forEach(function (l) {
         var o = document.createElement('option');
         o.value = l.code;
+        // Each language's own name is in that language: a screen reader says "Deutsch" in German.
+        o.lang = l.code;
         o.textContent = l.label;
         sel.appendChild(o);
       });
@@ -1100,7 +1168,11 @@ const landingHTML = `<!doctype html>
         prompt.dataset.i18n = key;
         prompt.dataset.i18nEn = PMSPrompts[cfg.pms.mode] || PMSPrompts.either;
         prompt.textContent = t(key);
-        document.getElementById('pms-secondary').dataset.mode = cfg.pms.mode || 'either';
+        const secondary = document.getElementById('pms-secondary');
+        secondary.dataset.mode = cfg.pms.mode || 'either';
+        // A field that asks for one name says which, so the device can offer it (WCAG 1.3.5). A field that
+        // takes any of several things keeps autocomplete off: no single token describes it.
+        secondary.setAttribute('autocomplete', PMSAutocomplete[cfg.pms.mode] || 'off');
       }
       // POST-STAY HAS ITS OWN GATE, and it is not the PMS one. Pushed AFTER pms so a guest arriving to
       // authenticate for the first time lands on Room, not on a PIN they do not have yet.
@@ -1170,6 +1242,25 @@ const landingHTML = `<!doctype html>
       document.querySelectorAll('[data-help-method]').forEach(function (el) {
         el.hidden = enabled.indexOf(el.dataset.helpMethod) < 0;
       });
+      // THE BOX is offered only where the device can be remembered: a code or an identity provider, over HTTPS
+      // (client_resume.go). The sentence explaining it follows exactly the same condition -- on plain HTTP there
+      // is no box to tick, and a sentence about ticking it would be false.
+      const canRemember = (hasSocial || ['email', 'sms', 'whatsapp'].some(function (m) { return enabled.indexOf(m) >= 0; })) &&
+        location.protocol === 'https:';
+      document.getElementById('privacy-remember').hidden = !canRemember;
+      const rememberEl = document.getElementById('remember-device');
+      const rememberBox = document.getElementById('remember-device-box');
+      if (rememberEl && rememberBox) {
+        rememberEl.hidden = !canRemember;
+        // A browser that blocks cookies (a sandboxed frame, a locked-down captive browser) throws on the read; the box is then simply unticked.
+        try { rememberBox.checked = /(?:^|; )og_remember=1(?:;|$)/.test(document.cookie); } catch (e) {}
+        rememberBox.addEventListener('change', function () {
+          try {
+            document.cookie = 'og_remember=' + (rememberBox.checked ? '1' : '') + '; path=/; SameSite=Lax; Secure' +
+              (rememberBox.checked ? '' : '; max-age=0');
+          } catch (e) {}
+        });
+      }
       if (enabled.length === 0 && (openOn || hasSocial)) {
         // Open selection and/or the identity providers are the only ways in: no tabs, no empty sign-in panel.
         tabsEl.style.display = 'none';
@@ -1280,6 +1371,7 @@ const landingHTML = `<!doctype html>
           if (!r.ok) { errEl.textContent = otpMessage('dest', j); return; }
           challenges[channel] = j.challenge_id;
           codeForm.querySelector('.dest').textContent = dest;
+          otpValidity(codeForm, j.ttl_seconds, '');
           destForm.style.display = 'none';
           codeForm.style.display = 'block';
           codeForm.querySelector('input[name=code]').focus();
@@ -1314,6 +1406,44 @@ const landingHTML = `<!doctype html>
         delete challenges[channel];
         fetch('/auth/otp/forget', {method:'POST'}).catch(() => {});
       });
+      // SEND A NEW CODE, to the number this device already gave. /auth/otp/resend reads that number from the
+      // portal's own record of the pending code (otp_pending.go) -- it is never sent back to the page -- and is
+      // the ordinary issue call underneath, so scd's cooldown and hourly caps apply unchanged. The outcome is
+      // said in the status line, not the refusal box: a cooldown is not something wrong with the code typed.
+      const again = codeForm.querySelector('[data-otp-again]');
+      again.addEventListener('click', async () => {
+        const status = codeForm.querySelector('[data-otp-valid]');
+        again.disabled = true;
+        try {
+          const r = await fetch('/auth/otp/resend', {
+            method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'
+          });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) { status.textContent = otpMessage('dest', j); return; }
+          if (j.challenge_id) challenges[channel] = j.challenge_id;
+          codeForm.querySelector('input[name=code]').value = '';
+          otpValidity(codeForm, j.ttl_seconds, 'otp.resent');
+        } catch (err) {
+          status.textContent = t('err.service');
+        } finally { again.disabled = false; }
+      });
+    }
+    // otpValidity says how long the code on screen lasts, in whole minutes from the seconds the SERVER reported
+    // for it (ttl_seconds), after an optional lead sentence (a key). With no lifetime reported, nothing is said
+    // about one. The values are kept on the element so a change of language says it again in the new words.
+    function otpValidity(codeForm, seconds, lead) {
+      const el = codeForm.querySelector('[data-otp-valid]');
+      if (!el) return;
+      const s = Number(seconds);
+      el.dataset.n = s > 0 ? String(Math.max(1, Math.ceil(s / 60))) : '';
+      el.dataset.lead = lead || '';
+      renderValidity(el);
+    }
+    function renderValidity(el) {
+      const parts = [];
+      if (el.dataset.lead) parts.push(t(el.dataset.lead));
+      if (el.dataset.n) parts.push(t('otp.valid').split('{n}').join(el.dataset.n));
+      el.textContent = parts.join(' ');
     }
     // A CODE ALREADY IN FLIGHT FOR THIS DEVICE (the captive browser was dismissed to read it): reopen the
     // code box for that channel, naming the masked address, and make that channel the one on screen.
@@ -1324,6 +1454,7 @@ const landingHTML = `<!doctype html>
       challenges[p.channel] = p.challenge_id;
       const destForm = form(p.channel, 'dest'), codeForm = form(p.channel, 'code');
       codeForm.querySelector('.dest').textContent = p.dest_masked || '';
+      otpValidity(codeForm, p.ttl_seconds, '');
       destForm.style.display = 'none';
       codeForm.style.display = 'block';
       setTab(p.channel);
@@ -1443,6 +1574,18 @@ const landingHTML = `<!doctype html>
       }
       const tmpl = message.replace(/[0-9]+/, '%WAIT%');
       PHASE3_WAIT_UNTIL = Date.now() + seconds * 1000;
+      // ANNOUNCED ONCE, NOT EVERY SECOND. errEl is role=alert, so every rewrite of it is read out: a ticking
+      // number inside it interrupted a screen-reader user sixty times a minute (WCAG 2.2.2, 4.1.3). The server's
+      // sentence goes in once, visually hidden; the ticking copy beside it is aria-hidden. The end of the wait
+      // replaces both, and that one change is announced.
+      errEl.textContent = '';
+      const said = document.createElement('span');
+      said.className = 'sc-vh';
+      said.textContent = message;
+      const shown = document.createElement('span');
+      shown.setAttribute('aria-hidden', 'true');
+      errEl.appendChild(said);
+      errEl.appendChild(shown);
       const render = function () {
         const left = Math.ceil((PHASE3_WAIT_UNTIL - Date.now()) / 1000);
         if (left <= 0) {
@@ -1456,7 +1599,7 @@ const landingHTML = `<!doctype html>
           if (btn) btn.disabled = false;
           return;
         }
-        errEl.textContent = tmpl.replace('%WAIT%', String(left));
+        shown.textContent = tmpl.replace('%WAIT%', String(left));
         if (btn) btn.disabled = true;
       };
       render();

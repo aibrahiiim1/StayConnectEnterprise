@@ -56,12 +56,11 @@ export function useWhoamiSession(onInvalid: () => void | Promise<void>): { me: W
   }, []);
 
   usePoll(
-    () => {
+    () =>
       api
         .get<Whoami>("/auth/whoami")
         .then(accept)
-        .catch(() => invalid.current());
-    },
+        .catch(() => invalid.current()),
     WHOAMI_REVALIDATE_MS,
     { enabled: me !== null },
   );

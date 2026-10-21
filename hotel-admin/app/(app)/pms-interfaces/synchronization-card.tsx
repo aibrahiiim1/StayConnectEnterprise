@@ -19,7 +19,7 @@
 // is the thing an operator hesitates over before pressing it.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type PmsInterfaceHealth } from "@/lib/api";
+import { api, inBackground, type PmsInterfaceHealth } from "@/lib/api";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, Field } from "@/components/ui/input";
@@ -103,7 +103,7 @@ export function SynchronizationCard({
   refreshRef.current = onRefreshed;
   const delay = active ? 3000 : 10000;
   useEffect(() => {
-    const t = setInterval(() => void refreshRef.current(), delay);
+    const t = setInterval(() => void inBackground(() => refreshRef.current()), delay);
     return () => clearInterval(t);
   }, [delay]);
 

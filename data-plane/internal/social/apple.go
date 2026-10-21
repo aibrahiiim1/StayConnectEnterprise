@@ -4,7 +4,7 @@ package social
 //
 // Flow:
 //   1. AuthorizeURL builds https://appleid.apple.com/auth/authorize with our
-//      Services ID as client_id, redirect_uri, scope "name email", state, the
+//      Services ID as client_id, redirect_uri, scope "email", state, the
 //      attempt's OIDC nonce and response_mode=form_post. No PKCE: Apple does
 //      not document it for Sign in with Apple on the web, and the nonce plus
 //      the signed client-secret JWT already bind the exchange to this client
@@ -70,7 +70,8 @@ const (
 	defaultAppleTokenURL = "https://appleid.apple.com/auth/token"
 	defaultAppleJWKSURL  = "https://appleid.apple.com/auth/keys"
 	appleIssuer          = "https://appleid.apple.com"
-	defaultAppleScope    = "name email"
+	// email only (GDPR plan C9): the name is not kept.
+	defaultAppleScope = "email"
 
 	// appleClientSecretTTL is how long each minted client-secret JWT is valid.
 	// Apple's ceiling is 6 months; one exchange needs seconds.

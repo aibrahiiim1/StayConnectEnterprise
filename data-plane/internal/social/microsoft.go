@@ -70,7 +70,9 @@ import (
 const (
 	defaultMicrosoftLoginBase = "https://login.microsoftonline.com"
 	defaultMicrosoftTenant    = "common"
-	defaultMicrosoftScope     = "openid email profile"
+	// profile stays (GDPR plan C9 reviewed it): a personal Microsoft account may give its email only as
+	// preferred_username, which needs profile (emailFromClaims).
+	defaultMicrosoftScope = "openid email profile"
 
 	// msaConsumerTenant is the fixed tenant id every personal Microsoft
 	// account token carries in its tid claim.

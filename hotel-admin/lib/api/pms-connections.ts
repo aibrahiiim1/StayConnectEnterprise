@@ -355,7 +355,12 @@ export function valuesFromRevision(
   const r = (rev ?? {}) as Record<string, unknown>;
   if (r.financial_base_currency != null) cols.financial_base_currency = r.financial_base_currency;
   if (r.financial_base_currency_exponent != null) cols.financial_base_currency_exponent = r.financial_base_currency_exponent;
-  const src: Record<string, unknown> = { ...cols, ...cfg, ...storedProviderValues(cfg) };
+  // TLS on the FIAS link is stored as config.tls {enabled, cert_sha256} (GDPR plan C8); the form fields are flat.
+  const tls = (cfg.tls && typeof cfg.tls === "object" ? cfg.tls : {}) as Record<string, unknown>;
+  const tlsValues: Record<string, unknown> = {};
+  if (tls.enabled === true) tlsValues.tls_enabled = true;
+  if (typeof tls.cert_sha256 === "string") tlsValues.tls_cert_sha256 = tls.cert_sha256;
+  const src: Record<string, unknown> = { ...cols, ...cfg, ...tlsValues, ...storedProviderValues(cfg) };
   // A redacted value is not a value: starting an edit from "[redacted]" would save the placeholder.
   for (const k of Object.keys(src)) if (src[k] === "[redacted]") delete src[k];
   return { values: initialValues(fields, src), timezone: rev?.source_timezone || "Africa/Cairo" };

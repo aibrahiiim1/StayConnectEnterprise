@@ -47,6 +47,7 @@ func (b *Base) CloudRoutes(off *OfflineBase) http.Handler {
 	r.With(su).Post("/customers/{id}/users", b.postCustomerUser)
 	r.With(su).Patch("/customers/{id}/users/{uid}", b.patchCustomerUser)
 	r.With(su).Delete("/customers/{id}/users/{uid}", b.deleteCustomerUser)
+	r.With(su).Post("/customers/{id}/users/{uid}/mfa-reset", b.customerUserMFAReset)
 
 	// Appliances.
 	r.Get("/appliances", b.listAppliances)
@@ -92,9 +93,14 @@ func (b *Base) CloudRoutes(off *OfflineBase) http.Handler {
 	tm.Patch("/team/{id}", b.patchTeam)
 	tm.Delete("/team/{id}", b.deleteTeam)
 	tm.Post("/team/{id}/password", b.teamPassword)
+	tm.Post("/team/{id}/mfa-reset", b.teamMFAReset)
+	// One user's data, Team member or customer user, for the platform to hand over (GDPR audit B5).
+	tm.Post("/users/{id}/data-export", b.userDataExport)
 	r.With(perm(auth.PermFleetView)).Get("/backup-health", b.BackupHealthHandler)
 	r.With(perm(auth.PermFleetView)).Get("/settings/security", b.getSecuritySettings)
 	tm.Patch("/settings/security", b.patchSecuritySettings)
+	r.With(perm(auth.PermFleetView)).Get("/settings/retention", b.getRetentionSettings)
+	tm.Patch("/settings/retention", b.patchRetentionSettings)
 
 	// Portal hostnames and certificates (portal_tls.go).
 	b.portalTLSRoutes(r)

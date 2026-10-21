@@ -69,6 +69,13 @@ func dbCtx(r *http.Request) (context.Context, context.CancelFunc) {
 // audit appends to the site-local audit_log. Best-effort: never fails the
 // calling request.
 func (s *server) audit(r *http.Request, action, targetType, targetID string, payload map[string]any) {
+	if err := s.auditErr(r, action, targetType, targetID, payload); err != nil {
+		slog.Warn("audit write failed", "action", action, "err", err)
+	}
+}
+
+// auditErr is audit for an action that must not happen unrecorded: the caller refuses when it fails.
+func (s *server) auditErr(r *http.Request, action, targetType, targetID string, payload map[string]any) error {
 	sess := sessFrom(r.Context())
 	actorID := ""
 	if sess != nil {
@@ -85,9 +92,7 @@ func (s *server) audit(r *http.Request, action, targetType, targetID string, pay
         VALUES (NULLIF($1,'')::uuid, 'operator', NULLIF($2,''), $3, NULLIF($4,''), NULLIF($5,''),
                 CASE WHEN $6 = '' THEN NULL ELSE $6::inet END, NULLIF($7,''), $8::jsonb)
     `, s.tenantID, actorID, action, targetType, targetID, clientIP(r), r.UserAgent(), string(raw))
-	if err != nil {
-		slog.Warn("audit write failed", "action", action, "err", err)
-	}
+	return err
 }
 
 func clientIP(r *http.Request) string {
@@ -116,8 +121,10 @@ type scdClient struct {
 }
 
 func newSCDClient(socket string) *scdClient {
+	// NO http.Client.Timeout: it caps the WHOLE call and cannot be extended by a request's own context, which silently turned every
+	// "long" path below into a 15-second one (found on PRE-LIVE: a manual backup, which scd completes in about 40 seconds, was
+	// reported to the operator as failed while it went on and finished). The default deadline is applied per call in call().
 	return &scdClient{http: &http.Client{
-		Timeout: 15 * time.Second,
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 				var d net.Dialer
@@ -131,15 +138,33 @@ func newSCDClient(socket string) *scdClient {
 // longSCDPaths are the privileged operations that legitimately take MINUTES rather than milliseconds: a
 // database dump and its verification. The shared 15s client deadline is right for every other call and was
 // killing these mid-flight -- the appliance reported "signal: killed" as though the dump were corrupt.
+// scdDefaultTimeout is the deadline of every scd call that is not in longSCDPaths.
+var scdDefaultTimeout = 15 * time.Second
+
 var longSCDPaths = map[string]time.Duration{
 	"/v1/backup/run":    20 * time.Minute,
 	"/v1/backup/verify": 25 * time.Minute,
+	// The status re-reads every stored backup against its checksum, and removing earlier backups does the same first.
+	"/v1/backup/status":         3 * time.Minute,
+	"/v1/backup/earlier/remove": 5 * time.Minute,
+	// The erasure ledger: a commit writes two copies and reads both back; recovery and a first copy can take longer.
+	"/v1/ledger/prepare":           60 * time.Second,
+	"/v1/ledger/commit":            2 * time.Minute,
+	"/v1/ledger/abort":             90 * time.Second,
+	"/v1/ledger/status":            40 * time.Second,
+	"/v1/ledger/destination":       4 * time.Minute,
+	"/v1/ledger/destination/probe": 45 * time.Second,
+	"/v1/ledger/recover":           6 * time.Minute,
 }
 
 func (c *scdClient) call(ctx context.Context, method, path string, body any) (int, []byte, error) {
-	if d, ok := longSCDPaths[path]; ok {
+	if d, ok := longSCDPaths[strings.SplitN(path, "?", 2)[0]]; ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), d)
+		defer cancel()
+	} else {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, scdDefaultTimeout)
 		defer cancel()
 	}
 	var rd io.Reader
@@ -284,7 +309,7 @@ func runSeedAdmin(args []string) error {
 	// A weak seeded password is usable exactly once: the first sign-in can only replace it (0119).
 	mustChange := *allowWeak || len(*password) < 10
 	if len(*password) < 10 {
-		slog.Warn("seeding a WEAK site-admin password via --allow-weak — it must be changed at first sign-in", "email", *email)
+		slog.Warn("seeding a WEAK site-admin password via --allow-weak — it must be changed at first sign-in")
 	}
 	c := loadCfg()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -331,7 +356,7 @@ func runSeedAdmin(args []string) error {
 		throttleKey(scopeAccount, *email)); err != nil {
 		slog.Warn("could not clear a sign-in lockout for the seeded account", "err", err)
 	}
-	slog.Info("seeded site admin", "email", *email, "id", id, "must_change_password", mustChange)
+	slog.Info("seeded site admin", "id", id, "must_change_password", mustChange) // the id, not the email: the journal is outside retention
 	return nil
 }
 
@@ -351,4 +376,47 @@ func writeAwaitingAssignment(w http.ResponseWriter, what string) {
 		"reason": "This appliance has not been assigned to a site yet, so there is no " + what +
 			" to show. Complete enrollment, claim and signed assignment first.",
 	})
+}
+
+// ----- reset-mfa ----------------------------------------------------------------------------------------------
+
+// runResetMFA removes one operator's authenticator from the appliance's own command line (0132, GDPR plan C10):
+// the break-glass for the last site administrator, when nobody is left to reset them in the console. Whoever can
+// run it is root on the appliance already. The operator sets up a new authenticator at their next sign-in; a
+// running edged ends their sessions at its next restart, or an administrator ends them by any password reset.
+func runResetMFA(args []string) error {
+	fs := flag.NewFlagSet("reset-mfa", flag.ExitOnError)
+	email := fs.String("email", "", "the operator's email / username")
+	reason := fs.String("reason", "", "why (4-500 characters; recorded in the audit log)")
+	_ = fs.Parse(args)
+	if strings.TrimSpace(*email) == "" || !validReason(strings.TrimSpace(*reason)) {
+		return fmt.Errorf("--email and --reason (4-500 characters) are required")
+	}
+	c := loadCfg()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	pool, err := pgxpool.New(ctx, c.DBURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	var id string
+	if err := pool.QueryRow(ctx, `SELECT id::text FROM operators WHERE lower(email) = lower($1)`, strings.TrimSpace(*email)).Scan(&id); err != nil {
+		return fmt.Errorf("no operator %q: %w", *email, err)
+	}
+	var removed bool
+	if err := pool.QueryRow(ctx, `SELECT public.operator_mfa_remove($1)`, id).Scan(&removed); err != nil {
+		return err
+	}
+	if _, err := pool.Exec(ctx, `SELECT public.operator_signin_throttle_clear('mfa', $1)`, throttleKey(scopeMFA, id)); err != nil {
+		slog.Warn("could not clear the code counter", "err", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO audit_log (tenant_id, actor_type, actor_id, action, target_type, target_id, payload)
+		VALUES (NULLIF($1,'')::uuid, 'system', 'edged reset-mfa', 'operator.mfa_reset', 'operator', $2,
+		        jsonb_build_object('reason', $3::text, 'had_authenticator', $4::boolean, 'via', 'command line'))`,
+		c.TenantID, id, strings.TrimSpace(*reason), removed); err != nil {
+		slog.Warn("reset-mfa: the audit entry could not be written", "err", err)
+	}
+	slog.Info("two-step sign-in reset; a new authenticator is set up at the next sign-in", "id", id, "had_authenticator", removed)
+	return nil
 }

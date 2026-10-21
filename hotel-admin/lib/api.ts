@@ -25,18 +25,53 @@ export class ApiError extends Error {
 // All edged resources live under /edge/v1. The Next proxy strips /api.
 export const EDGE_BASE = "/api/edge/v1";
 
+// BACKGROUND REQUESTS ARE NOT ACTIVITY. edged extends a session's idle limit on every request except those
+// carrying this header, so the console marks what it asks on its own -- polls, refresh timers, the whoami
+// check. Without it a screen that polls (dashboard, sessions, interfaces, ...) kept the session alive for ever
+// and the idle warning closed itself.
+export const BACKGROUND_HEADER = "X-OneGate-Background";
+
+let backgroundSpans = 0;
+
+/**
+ * inBackground runs `fn` -- a poll or timer callback -- with every GET it starts marked as background, including
+ * GETs started after an await inside it, until the promise `fn` returns settles. Only GETs: an operator's save
+ * that happens to land while a poll is in flight is still an action, and polls only read.
+ */
+export function inBackground<T>(fn: () => T): T {
+  backgroundSpans++;
+  let out: T;
+  try {
+    out = fn();
+  } catch (e) {
+    backgroundSpans--;
+    throw e;
+  }
+  if (out && typeof (out as any).then === "function") {
+    const end = () => { backgroundSpans--; };
+    (out as any).then(end, end);
+  } else {
+    backgroundSpans--;
+  }
+  return out;
+}
+
 async function request<T>(
   method: string,
   path: string,
   body?: any,
   init?: RequestInit
 ): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (method === "GET" && backgroundSpans > 0) headers[BACKGROUND_HEADER] = "1";
+  Object.assign(headers, (init?.headers as Record<string, string> | undefined) ?? {});
   const res = await fetch(`${EDGE_BASE}${path}`, {
     method,
-    headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
     cache: "no-store",
     ...init,
+    headers: Object.keys(headers).length ? headers : undefined,
   });
   const contentType = res.headers.get("content-type") ?? "";
   const payload = contentType.includes("application/json") ? await res.json() : await res.text();
@@ -682,6 +717,33 @@ export type EdgeOperator = {
   created_at: string;
   /** Their next sign-in can only set a new password (edged 0119). */
   must_change_password?: boolean;
+  /** An authenticator app is set up (edged 0132); without one, the next sign-in sets one up. */
+  two_step_enrolled?: boolean;
+};
+
+/** Admin Console session limits (edged /operators/session-policy, migration 0132). */
+export type SessionPolicy = {
+  idle_timeout_minutes: number;
+  max_session_hours: number;
+  config_version: number;
+  updated_at?: string | null;
+  updated_by?: string | null;
+};
+export type SessionPolicyBound = {
+  key: keyof Pick<SessionPolicy, "idle_timeout_minutes" | "max_session_hours">;
+  label: string; unit: string; min: number; max: number; default: number; explains: string;
+};
+
+/** How long a disabled staff account is kept before it is anonymised (edged /operators/account-retention, 0138). */
+export type AccountRetention = {
+  disabled_account_days: number;
+  config_version: number;
+  updated_at?: string | null;
+  updated_by?: string | null;
+};
+export type AccountRetentionBound = {
+  key: "disabled_account_days";
+  label: string; unit: string; min: number; max: number; default: number; explains: string;
 };
 
 /** Admin Console sign-in protection (edged /operators/signin-protection, migration 0119). */

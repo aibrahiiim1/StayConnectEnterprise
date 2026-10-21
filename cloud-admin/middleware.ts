@@ -15,7 +15,9 @@ export function middleware(req: NextRequest) {
     url.searchParams.set("next", pathname);
     return NextResponse.redirect(url);
   }
-  if (hasSession && isLogin) {
+  // reason=expired: the console found the sign-in ended, so the cookie (if the browser still has it) is stale and
+  // the sign-in page must show rather than bounce back into the app.
+  if (hasSession && isLogin && req.nextUrl.searchParams.get("reason") !== "expired") {
     const url = req.nextUrl.clone();
     url.pathname = "/overview";
     url.search = "";

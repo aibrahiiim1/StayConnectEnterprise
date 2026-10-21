@@ -965,6 +965,33 @@
       "authorization_evidence": "The Product Owner's 'Full Remediation Mission' of 2026-10-16, which authorised executing the corrected system audit's plan R0-R7 end to end and delegated decisions D-A to D-K to the agent; resolved by the agent within that delegation as recorded here.",
       "does_not_authorize": "Go-Live; merging any pull request without Product-Owner acceptance; deployment to any appliance other than PRE-LIVE.",
       "implementation": "Branch delivery/audit-remediation, recorded by T0237 (manifest docs/manifests/AuditRemediation-change-manifest.md)."
+    },
+    {
+      "decided_on": "2026-10-21",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-21",
+      "status": "ACTIVE",
+      "id": "D64",
+      "title": "THE GDPR PROGRAMME (2026-10-17 to 2026-10-21). Guest data is anonymised when the hotel's retention ends (settings, defaults and bounds approved: D-C1, D-C1a, D-C3); staff can export or erase one guest's data and answer a request through an assisted request and a request register; backups are encrypted to the hotel's own key holders (D-C5); Admin Console sign-in needs an authenticator code with idle and absolute session limits (D-C10); each sign-in records the privacy notice in force; system logs, staff notes and disabled staff accounts have retention settings; an erasure is committed to the erasure ledger in TWO places (the appliance and a secondary storage the hotel sets up, which is mandatory) before it is reported as done, and a restore verifies the ledger and reapplies it before the restored data is served (D-R8). Appliance migrations 0127-0149. The decisions are recorded with their reasons in docs/privacy/GDPR_REMEDIATION_PLAN.md; this entry makes them part of the register.",
+      "authorization_evidence": "The Product Owner's GDPR missions of 2026-10-17 to 2026-10-21: the remediation plan and its decisions (with 'if there are any questions just do the recommendations'), the Assisted Guest Data Request mission, the Complete GDPR Closure and Merge Readiness mission, the Backup, Erasure Ledger and Restore Closure mission, and the Final Backup Consolidation and Delivery mission of 2026-10-21, which authorised investigation, implementation, migrations, tests, documentation, commits, pushes, the pull request, the protected merge and deployment to PRE-LIVE.",
+      "does_not_authorize": "Go-Live or any official guest-production use; any claim of legal GDPR certification (this is engineering evidence, not legal advice); Central deployment; any appliance other than PRE-LIVE.",
+      "implementation": "Branch delivery/gdpr, PR #219, recorded by T0239 (manifest docs/manifests/GdprBackupConsolidation-change-manifest.md); documents docs/privacy/*.md, docs/BACKUP_AND_RESTORE.md."
+    },
+    {
+      "decided_on": "2026-10-21",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-21",
+      "status": "ACTIVE",
+      "id": "D65",
+      "title": "ONE BACKUP SYSTEM (2026-10-21). The legacy appliance backup mechanism (the nightly stayconnect-site-backup job and its plain pg_dump -Fc sets) is retired as a separate path; the encrypted engine in scd is the only one. Every backup is encrypted to the backup key holders as it is written (no plaintext fallback), proven restorable by loading the same stream into a scratch database, noted with its kind and reason, and rotated by COUNT only, in two pools (scheduled and manual: BACKUP_KEEP, default seven, range 1-30; before a restore, a migration or a deployment: SAFETY_BACKUP_KEEP, default three, range 2-20). SCHEDULED BACKUPS ARE OFF BY DEFAULT until an administrator switches them on in Hotel Admin (BACKUP_ENABLED, BACKUP_HOUR, BACKUP_EVERY_DAYS, BACKUP_KEEP, SAFETY_BACKUP_KEEP: audited settings behind a password step-up). What the schedule does not control and nothing may switch off: the pre-restore backup; the pre-change backup that scripts/edge-migrate.sh takes before it changes a live site (exit 4 without one); the financial guarantees now carried by the restore (proven quiesce of the financial writers, the management marker advanced before the swap through scd marker-advance, the hypertable assertion, the database-level grant carried across, the p4_record_supported_restore record that holds money movement); the dual Erasure Ledger; the rollback artefacts. The authorization model of a restore changes from a manifest signed at Central (the retired stayconnect-financial-restore.sh, which stays only to restore the earlier nightly sets by hand) to the password step-up, a digest-bound verified backup and the enforced financial recovery mode. Earlier backups (the nightly sets and un-noted dumps) are preserved, listed, never removed automatically, and removed only by an administrator with a password and the typed confirmation 'remove earlier backups' once a verified backup of the new kind exists. Supersedes the SITE_BACKUP_DAYS, SITE_BACKUP_KEEP, DB_BACKUP_DAYS, KEEP_DB (appliance) and DAILY_BACKUP_HOUR settings of D59 and of the 2026-10-21 daily backup (they are retired from the appliance; Central keeps KEEP_DB for its own dumps).",
+      "authorization_evidence": "The Product Owner's 'OneGate GDPR - Final Backup Consolidation and Delivery' mission of 2026-10-21: it approved retiring the legacy mechanism entirely, making the encrypted system the single supported solution, preserving every necessary financial recovery, rollback, configuration, security and disaster-recovery guarantee, scheduled backups off by default with seven kept when enabled, and authorised the directly related migrations, pull request, protected merge and PRE-LIVE deployment.",
+      "does_not_authorize": "Go-Live or any official guest-production use; Central deployment; removing any earlier backup or recovery material; any infrastructure change beyond PRE-LIVE; a legal GDPR claim.",
+      "implementation": "Branch delivery/gdpr, PR #219, recorded by T0239. scd backups.go, restore_financial.go, backup_earlier.go, backup_cli.go; edged ledger_admin.go and resources_backups.go; Hotel Admin scheduled-backups-card.tsx; scripts/edge-migrate.sh; deploy/scripts/install-service-units.sh (retires the nightly units); docs/BACKUP_AND_RESTORE.md.",
+      "supersedes_in_part": "D59 (the site-backup and database-backup retention settings)"
     }
   ]
 }

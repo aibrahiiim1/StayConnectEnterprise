@@ -73,6 +73,10 @@ type session struct {
 	DisplayName string
 	Roles       []string
 	Expires     time.Time
+	// CreatedAt and LastSeen are what the session limits are measured from (0132): LastSeen moves with each
+	// request that counts as activity, CreatedAt never does.
+	CreatedAt time.Time
+	LastSeen  time.Time
 	// MustChangePassword confines the session to changing the password (0119): requireAuth refuses every
 	// other route until the operator has set a password that meets the policy.
 	MustChangePassword bool
@@ -101,11 +105,22 @@ func newSessionStore(ttl time.Duration) *sessionStore {
 	return s
 }
 
+// sessionStoreCap is the store's own outer bound, the longest session the setting allows (24 hours, 0132).
+// The setting's idle and absolute limits are enforced by active(); this only bounds memory.
+const sessionStoreCap = 24 * time.Hour
+
 func (s *sessionStore) create(sess *session) string {
 	b := make([]byte, 32)
 	_, _ = rand.Read(b)
 	tok := base64.RawURLEncoding.EncodeToString(b)
-	sess.Expires = time.Now().Add(s.ttl)
+	now := time.Now()
+	sess.Expires = now.Add(s.ttl)
+	// A replacement session (after changing one's own password) keeps the original sign-in time, so changing
+	// the password does not extend the absolute limit.
+	if sess.CreatedAt.IsZero() {
+		sess.CreatedAt = now
+	}
+	sess.LastSeen = now
 	s.mu.Lock()
 	s.m[tok] = sess
 	s.mu.Unlock()
@@ -121,6 +136,23 @@ func (s *sessionStore) get(tok string) *session {
 		return nil
 	}
 	sess.Expires = time.Now().Add(s.ttl) // sliding
+	return sess
+}
+
+// active is the session the request carries if it is within the limits: not idle for longer than idle, not
+// older than maxAge. touch says whether this request counts as activity. A session past either limit is ended.
+func (s *sessionStore) active(tok string, idle, maxAge time.Duration, touch bool) *session {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.m[tok]
+	now := time.Now()
+	if !ok || now.After(sess.Expires) || now.Sub(sess.LastSeen) > idle || now.Sub(sess.CreatedAt) > maxAge {
+		delete(s.m, tok)
+		return nil
+	}
+	if touch {
+		sess.LastSeen = now
+	}
 	return sess
 }
 
@@ -256,6 +288,11 @@ var rolePerms = map[string]map[string]perm{
 		// DOWNLOADING the full database dump (decision D-B): the IT manager and site_admin only, behind the
 		// password step-up at the route. Every other role that reads backups sees the list and downloads nothing.
 		"backup-download": permWrite,
+		// GUEST DATA RIGHTS (Product-Owner decision D-C4): looking a guest up, exporting their data and erasing
+		// them. The IT manager and site_admin only, each export and erasure behind the password step-up and a
+		// reason. No other role holds this key at all: a desk role can see guests, but handing over or erasing
+		// everything held about one is a data-protection act, not a desk one.
+		"guest-data-rights": permWrite,
 		// Phase 6 (DARK): the per-appliance Guest Device Self-Service setting. WRITE belongs here for the
 		// same reason auth-methods does -- it decides which capabilities the property offers its guests,
 		// which is a configuration decision rather than a daily desk action. No new ROLE is introduced: the
@@ -266,7 +303,7 @@ var rolePerms = map[string]map[string]perm{
 		// Guest sign-in attempts. The IT manager owns the PMS integration, and "which guests cannot sign in,
 		// and why" is the integration's most direct symptom — including the credential comparison, which is
 		// what turns "room sign-in is broken" into "this property's PMS spells names differently".
-		"guest-signin-attempts": permRead, "guest-signin-credentials": permRead,
+		"guest-signin-attempts": permRead, "guest-signin-credentials": permWrite,
 		// The protection policy is a property-wide configuration decision, which is this role's own
 		// territory — the same reasoning that puts auth-methods and checkout-grace here. Releasing one
 		// device's restriction comes with it: whoever may set the threshold may certainly waive one instance
@@ -303,7 +340,7 @@ var rolePerms = map[string]map[string]perm{
 		// THE RECEPTION DESK, and the role this feature was asked for. They already hold the guest's room,
 		// stay and access credentials; the comparison panel is how they answer the guest standing in front
 		// of them instead of asking that guest to try again while somebody watches a log.
-		"guest-signin-attempts": permRead, "guest-signin-credentials": permRead,
+		"guest-signin-attempts": permRead, "guest-signin-credentials": permWrite,
 		// THE DESK RELEASES, AND DOES NOT RE-TUNE. A guest who has just locked themselves out is standing at
 		// reception now, so the desk must be able to end that one wait — and is the only place that can see
 		// the guest and judge it. Changing the property's thresholds is a different decision made once, by
@@ -352,7 +389,7 @@ var rolePerms = map[string]map[string]perm{
 		// cleared a device's temporary-internet windows went with the email code. code-reveal reads a LIVE code.
 		"code-requests": permRead,
 		// Same desk, same conversation with the guest, same need.
-		"guest-signin-attempts": permRead, "guest-signin-credentials": permRead,
+		"guest-signin-attempts": permRead, "guest-signin-credentials": permWrite,
 		"guest-signin-restrictions": permWrite, "guest-signin-protection": permRead,
 		"guest-accounts": permWrite, "sessions": permWrite, "usage": permRead,
 		"pms-stays": permRead, "pms-events": permRead, "operational-alerts": permWrite, "checkout-grace": permRead,
@@ -475,6 +512,9 @@ type ctxKey int
 
 const sessKey ctxKey = 1
 
+// sessPolicyKey carries the session limits requireAuth applied, for whoami to report the real end.
+var sessPolicyKey = struct{ name string }{"session-policy"}
+
 func (s *server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ck, err := r.Cookie(sessionCookie)
@@ -482,7 +522,11 @@ func (s *server) requireAuth(next http.Handler) http.Handler {
 			jsonErr(w, http.StatusUnauthorized, "unauthenticated", "login required")
 			return
 		}
-		sess := s.sessions.get(ck.Value)
+		// THE SESSION LIMITS (0132). The console's background whoami check is not activity: counting it would
+		// keep every open tab signed in for ever.
+		pol := s.sessionPolicyFor(r.Context())
+		touch := isActivity(r)
+		sess := s.sessions.active(ck.Value, pol.idle(), pol.max(), touch)
 		if sess == nil {
 			jsonErr(w, http.StatusUnauthorized, "unauthenticated", "session expired")
 			return
@@ -495,9 +539,27 @@ func (s *server) requireAuth(next http.Handler) http.Handler {
 			return
 		}
 		ctx := context.WithValue(r.Context(), sessKey, sess)
+		ctx = context.WithValue(ctx, sessPolicyKey, pol)
 		ctx = context.WithValue(ctx, reauthNoteKey, &reauthNote{})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// backgroundHeader marks a request the console made on its own -- a poll, a refresh timer, the whoami check --
+// rather than on an operator's action. Polling screens (dashboard, sessions, interfaces, ...) used to count as
+// activity, so an open tab was never signed out for idleness and the idle warning closed itself.
+const backgroundHeader = "X-OneGate-Background"
+
+// isActivity reports whether a request extends the session's idle limit. Background requests and whoami do
+// not; the idle warning's keepalive always does, whatever the console sent with it.
+func isActivity(r *http.Request) bool {
+	switch strings.TrimSuffix(r.URL.Path, "/") {
+	case "/edge/v1/auth/keepalive":
+		return true
+	case "/edge/v1/auth/whoami":
+		return false
+	}
+	return r.Header.Get(backgroundHeader) == ""
 }
 
 func sessFrom(ctx context.Context) *session {
@@ -564,17 +626,47 @@ func (s *server) loadRoles(ctx context.Context, operatorID string) ([]string, er
 	return out, rows.Err()
 }
 
+// sessionEnds is when the session ends if nothing else happens: the idle limit or the absolute one, whichever is
+// first.
+func sessionEnds(sess *session, pol sessionPolicy) time.Time {
+	ends := sess.LastSeen.Add(pol.idle())
+	if abs := sess.CreatedAt.Add(pol.max()); abs.Before(ends) {
+		ends = abs
+	}
+	return ends
+}
+
+// sessionPolicyFrom is the session limits requireAuth applied to this request, or the defaults.
+func sessionPolicyFrom(ctx context.Context) sessionPolicy {
+	if pol, ok := ctx.Value(sessPolicyKey).(sessionPolicy); ok {
+		return pol
+	}
+	return defaultSessionPolicy
+}
+
 func (s *server) whoami(w http.ResponseWriter, r *http.Request) {
 	sess := sessFrom(r.Context())
+	pol := sessionPolicyFrom(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{
-		"operator_id":  sess.OperatorID,
-		"email":        sess.Email,
-		"display_name": sess.DisplayName,
-		"roles":        sess.Roles,
-		"site_id":      s.siteID,
-		"expires_at":   sess.Expires.UTC(),
+		"operator_id":          sess.OperatorID,
+		"email":                sess.Email,
+		"display_name":         sess.DisplayName,
+		"roles":                sess.Roles,
+		"site_id":              s.siteID,
+		"expires_at":           sessionEnds(sess, pol).UTC(),
+		"idle_timeout_minutes": pol.IdleTimeoutMinutes,
 		// The console shows only the change-password form while this is true (0119).
 		"must_change_password": sess.MustChangePassword,
+	})
+}
+
+// keepalive: GET /edge/v1/auth/keepalive, the "Stay signed in" button of the console's idle warning (WCAG 2.2.1).
+// It does nothing itself: passing requireAuth is what counts as activity, which whoami deliberately is not. The
+// answer is the new end, so the console needs no second request to learn it. It cannot move the absolute limit.
+func (s *server) keepalive(w http.ResponseWriter, r *http.Request) {
+	sess := sessFrom(r.Context())
+	writeJSON(w, http.StatusOK, map[string]any{
+		"expires_at": sessionEnds(sess, sessionPolicyFrom(r.Context())).UTC(),
 	})
 }
 

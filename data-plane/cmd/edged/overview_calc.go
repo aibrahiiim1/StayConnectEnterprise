@@ -539,6 +539,9 @@ type attentionInput struct {
 	// PortalHTTPS is the portal_https check (portal_https_health.go), set only for a caller who may read
 	// portal-https. nil means not known or not permitted, and raises nothing.
 	PortalHTTPS *portalHTTPSCheck
+	// DefaultDBPassword: the database still accepts its default superuser password (db_default_password.go),
+	// set only for a caller who may read diagnostics.
+	DefaultDBPassword bool
 	// CardUnsellable: live packages sold by card that no client can actually pay by card (packageSaleIssues).
 	CardUnsellable []attentionPackage
 }
@@ -715,6 +718,9 @@ func deriveAttention(in attentionInput) []attentionItem {
 	}
 	if it, ok := portalHTTPSAttention(in.PortalHTTPS); ok {
 		add(it)
+	}
+	if in.DefaultDBPassword {
+		add(defaultDBPasswordAttention())
 	}
 	// Errors first, then warnings; stable within each, so the list does not reshuffle between polls.
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Severity == "err" && out[j].Severity != "err" })

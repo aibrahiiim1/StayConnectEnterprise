@@ -81,6 +81,13 @@ implementation of every row in the table above:
   keeps the expiry it was given, and points at the Release action for the case where that is not what the
   operator wants.
 
+The network pause (migration 0136) follows the same pattern next to it:
+
+* **Its settings.** *Many wrong room sign-ins on one network*: `network_max_failures` (30, 10–1000),
+  `network_window_seconds` (600, 60–3600) and `network_pause_seconds` (900, 60–3600). They are kept in
+  `iam_v2.site_guest_signin_network_policy`, with its own append-only change history.
+* **Changing them** needs a reason and the password, and is audited as `guest_signin_network_policy.update`.
+
 ## Existing settings that already follow it
 
 * Sign-in methods (`auth_methods`) — which methods the portal offers.
@@ -93,5 +100,13 @@ implementation of every row in the table above:
 * Portal branding, walled garden, notification and social providers.
 * Admin Console sign-in protection (`public.operator_signin_protection`, migration 0119) — wrong passwords per
   account and per address, their windows and the lockout; System → Operators → Sign-in protection.
+* Guest-data retention (`iam_v2.site_data_retention`, migrations 0127 and 0134) — seven periods after which
+  guest personal data is anonymised (PMS stay data, devices and sessions, inactive identities, expired one-time
+  records, audit-log details) or deleted (sign-in attempts; the appliance's system logs, 1-730 days, applied by
+  scd); defaults 30 / 365 / 365 / 7 / 730 / 30 / 14 days; reason + password, change log and run record;
+  Backups → Guest data kept for.
+* Admin Console session limits (`public.operator_session_policy`, migration 0132) — sign out after inactivity
+  (5-240 minutes, default 30) and the longest session (1-24 hours, default 12); reason + password, change log;
+  System → Operators → Session limits.
 
 When you add the next one, add it to this list.

@@ -287,3 +287,41 @@ func TestProviderMeta_RowFields(t *testing.T) {
 		t.Fatal("an unregistered kind must not be given registry metadata")
 	}
 }
+
+// GDPR plan C8: TLS on the FIAS link is stored only when switched on, with the fingerprint normalised, and a
+// fingerprint without TLS is refused rather than saved as a setting that does nothing.
+func TestProtelProviderConfig_TLS(t *testing.T) {
+	off, err := validateRevisionConfig(validRevisionReq())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, has := off["tls"]; has {
+		t.Fatalf("tls stored while off: %v", off["tls"])
+	}
+
+	pin := strings.Repeat("AB:", 31) + "AB"
+	in := validRevisionReq()
+	in.ProviderConfig = map[string]any{"tls_enabled": true, "tls_cert_sha256": pin}
+	if perr := applyFIASProviderConfig(in); perr != nil {
+		t.Fatal(perr)
+	}
+	on, err := validateRevisionConfig(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"enabled": true, "cert_sha256": strings.Repeat("ab", 32)}
+	if !reflect.DeepEqual(on["tls"], want) {
+		t.Fatalf("tls = %v, want %v", on["tls"], want)
+	}
+
+	bad := validRevisionReq()
+	bad.TLSCertSHA256 = pin
+	if _, err := validateRevisionConfig(bad); err == nil || !strings.Contains(err.Error(), "tls_enabled is off") {
+		t.Fatalf("a fingerprint without TLS was accepted: %v", err)
+	}
+	short := validRevisionReq()
+	short.ProviderConfig = map[string]any{"tls_enabled": true, "tls_cert_sha256": "abcd"}
+	if perr := applyFIASProviderConfig(short); perr == nil {
+		t.Fatal("a short fingerprint passed the catalogue pattern")
+	}
+}

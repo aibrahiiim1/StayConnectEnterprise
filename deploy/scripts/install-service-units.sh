@@ -297,8 +297,8 @@ done
 
 # ---- 3a. THE SHELL LIBRARIES THE HELPERS SOURCE ----------------------------
 #
-# A helper installed into $BIN loses its directory: deploy/scripts/stayconnect-site-backup.sh becomes
-# /opt/stayconnect/bin/stayconnect-site-backup, so anything it sources from "next to me" must be next to it
+# A helper installed into $BIN loses its directory: a helper such as deploy/scripts/stayconnect-backup-cleanup.sh becomes
+# /opt/stayconnect/bin/stayconnect-backup-cleanup, so anything it sources from "next to me" must be next to it
 # THERE. Nothing installed those, and the evidence is on the appliance: lib-hotel-admin-contract.sh is in
 # /opt/stayconnect/bin with no line in this repository putting it there. Someone copied it by hand, like the
 # service accounts below.
@@ -405,6 +405,22 @@ elif [ -d "$SRC/tmpfiles" ]; then
   systemd-tmpfiles --create >/dev/null 2>&1 || say "NOTE: systemd-tmpfiles --create reported a problem"
 fi
 
+# ---- 3d. JOURNALD: ARCHIVE DAILY, SO THE SYSTEM-LOG PERIOD CAN BE APPLIED ---
+#
+# scd vacuums the journal to the site's system-log period (GDPR plan F5). Vacuuming removes archived files only,
+# so journald is told to archive at least daily. Restarted only when the file changed.
+if [ "$SKIP_SYSTEMD" = "1" ]; then
+  say "SC_SKIP_SYSTEMD=1: not installing the journald retention drop-in"
+elif [ -f "$SRC/journald/stayconnect-retention.conf" ]; then
+  jd=/etc/systemd/journald.conf.d
+  if ! cmp -s "$SRC/journald/stayconnect-retention.conf" "$jd/stayconnect-retention.conf" 2>/dev/null; then
+    mkdir -p "$jd"
+    install -m 0644 "$SRC/journald/stayconnect-retention.conf" "$jd/stayconnect-retention.conf"       || die "cannot install $jd/stayconnect-retention.conf"
+    systemctl restart systemd-journald >/dev/null 2>&1 || say "NOTE: systemd-journald did not restart; the drop-in applies at the next boot"
+    say "updated journald.conf.d/stayconnect-retention.conf"
+  fi
+fi
+
 # ---- 4. units --------------------------------------------------------------
 changed=0
 for u in "$UNITSRC"/stayconnect-*.service "$UNITSRC"/stayconnect-*.timer; do
@@ -414,6 +430,36 @@ for u in "$UNITSRC"/stayconnect-*.service "$UNITSRC"/stayconnect-*.timer; do
   install -m 0644 "$u" "$UNITS/$b" || die "cannot install $UNITS/$b"
   say "updated $b"
   changed=1
+done
+
+# ---- 4b. RETIRED UNITS ARE STOPPED AND REMOVED (GDPR final mission: one backup system) --------------------
+#
+# The nightly site-backup job (stayconnect-site-backup.timer, which ran a second backup engine writing plain pg_dump sets) is retired:
+# the encrypted backup system in scd, configured in Hotel Admin, is the only one. An appliance upgraded from a release that shipped
+# the job still has the unit files and an ENABLED timer, and copying new units over the old would leave it running. So the retired
+# units are disabled and their files removed here, on every install (idempotent).
+#
+# WHAT IS PRESERVED: the backups the job wrote (/var/backups/stayconnect). They are earlier backups, kept until an administrator
+# removes them. Only the job -- code and schedule -- goes.
+RETIRED_UNITS="stayconnect-site-backup"
+for r in $RETIRED_UNITS; do
+  retired_any=0
+  for ext in timer service; do
+    [ -e "$UNITS/$r.$ext" ] || [ -L "$UNITS/$r.$ext" ] || continue
+    retired_any=1
+    if [ "$SKIP_SYSTEMD" != "1" ]; then
+      systemctl disable --now "$r.$ext" >/dev/null 2>&1 || true
+    fi
+    rm -f "$UNITS/$r.$ext" "$UNITS/timers.target.wants/$r.$ext"
+    say "retired $r.$ext (its earlier backups are kept)"
+    changed=1
+  done
+  if [ -e "$BIN/$r" ]; then
+    rm -f "$BIN/$r"
+    retired_any=1
+    say "removed the retired helper $BIN/$r"
+  fi
+  [ "$retired_any" = 1 ] || true
 done
 
 # ---- 5. reload -------------------------------------------------------------

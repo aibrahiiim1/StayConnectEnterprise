@@ -342,7 +342,13 @@ UNION ALL SELECT 'FUNCGRANT|'||n.nspname||'.'||p.proname||'|'||r.rolname
   CROSS JOIN pg_roles r WHERE n.nspname IN ('public','iam_v2') AND NOT r.rolsuper
     AND has_function_privilege(r.rolname, p.oid, 'EXECUTE')
 UNION ALL SELECT 'MEMBERSHIP|'||g.rolname||'|'||m.rolname
-  FROM pg_auth_members am JOIN pg_roles g ON g.oid=am.roleid JOIN pg_roles m ON m.oid=am.member;
+  FROM pg_auth_members am JOIN pg_roles g ON g.oid=am.roleid JOIN pg_roles m ON m.oid=am.member
+-- SEED ROWS: the reference data the migrations insert, compared by count so the factory-clean baseline cannot lose one (a
+-- schema-only dump does not carry data; scripts/sql/baseline-seed.sql and the generator put these back).
+UNION ALL SELECT 'SEEDROWS|iam_v2.ledger_meta|'||count(*) FROM iam_v2.ledger_meta
+UNION ALL SELECT 'SEEDROWS|iam_v2.erasure_ledger|'||count(*) FROM iam_v2.erasure_ledger
+UNION ALL SELECT 'SEEDROWS|iam_v2.retention_floor|'||count(*) FROM iam_v2.retention_floor
+UNION ALL SELECT 'SEEDROWS|iam_v2.scrub_registry|'||count(*) FROM iam_v2.scrub_registry;
 SQL
  psql_q -f /dev/stdin < "$OUT/catalog.sql" | sed '/^$/d' | sort > "$OUT/catalog.txt"
 note "catalog facts: $(wc -l < "$OUT/catalog.txt")"

@@ -100,7 +100,7 @@ to be turned on.
 
 ## 2. Deploy (dark)
 
-1. **Take a backup first, and record who is authorized right now.** Use the existing appliance backup path;
+1. **Take a backup first, and record who is authorized right now.** `scd backup-now --reason "phase 3 deployment"` (the one backup system);
    a Phase-3 deployment is not special, and the rollback in §5 assumes a restorable point exists.
 
    Capture the legacy authorization set *before* anything is deployed. This is the "before" half of the
@@ -391,9 +391,11 @@ bash scripts/edge-migrate.sh --down --only 0010_phase3_stay_resolution \
 The checksum is mandatory and binds the `.down.sql` file, exactly as it binds the `.up.sql` on an apply. The
 command prints the file it is about to run before running it.
 
-> **Take a backup first.** The runner does not take one and does not claim to have verified one — an
-> acknowledgement flag it could not check would be theatre rather than a guard. That makes the backup a
-> runbook step: see [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md).
+> **A backup comes first, and on a live site the runner takes it.** Before it changes a live site (a forward apply that will change
+> the database, and every `--down`) `scripts/edge-migrate.sh` runs `scd backup-now` -- encrypted, proven restorable, noted with the
+> reason -- and refuses (exit 4) to touch the database if it cannot. It is independent of whether scheduled backups are switched on and
+> has no flag to skip it. A migration applied by hand (public-schema migrations are, see [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md))
+> is not covered by the runner: run `scd backup-now --reason "<what is about to change>"` first, as the runbook step.
 
 The down script itself is sound: it drops every table, trigger and controlled function 0010 created and
 removes its ledger row, and the preflight asserts that coverage on every build, so a rollback cannot

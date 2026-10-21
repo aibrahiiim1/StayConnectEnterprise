@@ -46,6 +46,28 @@ var tenantOwnedTables = []string{
 	"tenant_effective_limits",
 }
 
+// guestRecordTables are the iam_v2 tables whose rows are a customer's GUEST RECORDS (reservations, accounts, identities,
+// devices, sign-in attempts, sessions). The purge below does not reach them: they are append-only, guarded, tied to
+// running enforcement, and a departed customer's financial rows in them are kept by law. Their presence under another
+// tenant is therefore detected and refused (GDPR final audit): serving guests next to the previous customer's guest
+// records, or purging everything around them, would both be wrong. See DATA_OWNERSHIP.md, "Moving an appliance to
+// another customer".
+var guestRecordTables = []string{
+	"iam_v2.stays", "iam_v2.guest_access_accounts", "iam_v2.guest_principals", "iam_v2.devices",
+	"iam_v2.sign_in_attempts", "iam_v2.sessions",
+}
+
+// foreignGuestRecords reports whether the site database holds guest records of a tenant other than the current one.
+func (s *server) foreignGuestRecords(ctx context.Context) (bool, error) {
+	q := "SELECT false"
+	for _, t := range guestRecordTables {
+		q += " OR EXISTS(SELECT 1 FROM " + t + " WHERE tenant_id <> $1)"
+	}
+	var foreign bool
+	err := s.db.QueryRow(ctx, q, s.tenID).Scan(&foreign)
+	return foreign, err
+}
+
 // hasForeignTenantData reports whether the site DB holds ANY tenant-owned row that
 // does not belong to the current tenant (compared by immutable UUID) — the signal
 // of a cross-tenant reassignment, a deleted-and-recreated Customer with a new
@@ -82,6 +104,15 @@ func (s *server) reconcileTenantOwnership(ctx context.Context) error {
 	foreign, err := s.hasForeignTenantData(ctx)
 	if err != nil {
 		return fmt.Errorf("detect foreign-tenant data: %w", err)
+	}
+	// ANOTHER CUSTOMER'S GUEST RECORDS ARE NEVER SERVED NEXT TO, AND THIS VERSION CAN NOT PURGE THEM. Held fail-closed with
+	// the reason, whether or not the other tenant tables hold anything: the appliance must be re-provisioned for its
+	// new customer (the guest records go with the installation), not reassigned.
+	if foreignGuests, err := s.foreignGuestRecords(ctx); err != nil {
+		return fmt.Errorf("detect another customer's guest records: %w", err)
+	} else if foreignGuests {
+		return fmt.Errorf("this appliance holds another customer's guest records, which a reassignment does not remove: " +
+			"it stays closed to guests until it is re-provisioned for its new customer (see DATA_OWNERSHIP.md, \"Moving an appliance to another customer\")")
 	}
 	if !foreign {
 		return nil // same-tenant steady state — preserve all tenant data
@@ -168,6 +199,19 @@ func (s *server) reconcileTenantOwnership(ctx context.Context) error {
 		purged["tenants"] = n
 	}
 
+	// THE ERASURE LEDGER AND ITS SECONDARY STORAGE BELONG TO THE CUSTOMER WHO IS LEAVING. The new customer starts a new ledger and
+	// sets up a storage of their own; the old setting (and its credentials) is forgotten, the old customer keeps their copy.
+	var hasReset bool
+	if err := tx.QueryRow(ctx, `SELECT to_regprocedure('public.ledger_reset()') IS NOT NULL`).Scan(&hasReset); err != nil {
+		return fmt.Errorf("check for the erasure ledger: %w", err)
+	}
+	if hasReset {
+		if _, err := tx.Exec(ctx, `SELECT public.ledger_reset()`); err != nil {
+			return fmt.Errorf("start a new erasure ledger: %w", err)
+		}
+		purged["erasure_ledger_reset"] = 1
+	}
+
 	// Controlled failure injection for acceptance testing: fail AFTER the deletes
 	// but BEFORE commit, so the deferred Rollback proves no partial purge is ever
 	// committed and the caller holds the appliance fail-closed. Off unless the env
@@ -194,6 +238,9 @@ func (s *server) reconcileTenantOwnership(ctx context.Context) error {
 		return fmt.Errorf("commit purge: %w", err)
 	}
 	slog.Warn("tenant-transition: secure purge complete", "current_tenant", s.tenID, "purged", purged)
+	if purged["erasure_ledger_reset"] > 0 {
+		s.ledgerForgetPrevious()
+	}
 
 	// Clear stale RUNTIME guest authorization: the kernel nftables set persists
 	// across an scd restart, so a device authorized under the previous tenant could

@@ -476,7 +476,7 @@ export default function ServicePlansPage() {
                                 Apply current settings to packages
                               </Button>
                             )}
-                            {writable && <Button size="sm" variant="ghost" onClick={() => startNew(p)}>Edit</Button>}
+                            {writable && <Button size="sm" variant="ghost" aria-label={`Edit ${p.name || p.code}`} onClick={() => startNew(p)}>Edit</Button>}
                           </TD>
                         </TR>
                       </Fragment>

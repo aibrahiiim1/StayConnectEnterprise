@@ -153,7 +153,7 @@ describe("Client accounts — Disable (decision D-A)", () => {
     const patch = (await import("@/lib/api")).api.patch as unknown as ReturnType<typeof vi.fn>;
     patch.mockResolvedValue({ ...LATE, enabled: false, packages_suspended: 1, disconnected_sessions: 1 });
     await renderPage();
-    await userEvent.click(within(row("late@example.com")).getByRole("button", { name: /^disable$/i }));
+    await userEvent.click(within(row("late@example.com")).getByRole("button", { name: /^disable\b/i }));
     const confirm = await topDialog(/password|disconnected/i);
     expect(within(confirm).getByText(/will be disconnected/i)).toBeTruthy();
     expect(within(confirm).getByText(/package is paused/i)).toBeTruthy();

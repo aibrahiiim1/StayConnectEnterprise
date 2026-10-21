@@ -26,3 +26,12 @@ export function safeNextPath(raw: string | null | undefined): string {
     return DEFAULT_AFTER_LOGIN;
   }
 }
+
+/**
+ * Where the console sends an operator whose session has ended: the sign-in page, told why (`reason=expired`, which
+ * it says politely) and where to return to. `path` is the page they were on; safeNextPath decides again, on the
+ * way back, whether it may be followed.
+ */
+export function loginAfterExpiry(path: string): string {
+  return `/login?next=${encodeURIComponent(safeNextPath(path))}&reason=expired`;
+}

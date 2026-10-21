@@ -41,7 +41,7 @@ synchronization transport is an **OPEN architecture decision** (see §7 and
 | `kea-dhcp4` / `unbound` | client-network DHCP/DNS | bound to 10.20.0.1 |
 | `nftables` | `inet stayconnect` ruleset | see §3 |
 | `stayconnect-caddy` | TLS for the Admin Console on the **mgmt IP only** | internal CA (`local_certs`) unless the site has real names |
-| backup agent (timer) | nightly `pg_dump` → `backup_records` | [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md) §1 |
+| backup system (in `scd`) | one encrypted engine: scheduled (off until switched on), manual, and before every restore, migration and deployment | [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md) §1 |
 | monitoring | scd/edged Prometheus endpoints, loopback | scraped locally; nothing is sent to Central as telemetry |
 | software updates | no on-appliance update agent | staged binary rollout via the deployment procedure |
 
@@ -145,7 +145,7 @@ locally) and fence manually.
 Pilot-verified on a modest VM: 2 vCPU / 4 GB / 40 GB serves a mid-size site
 (hundreds of concurrent devices; scd's nft/tc ops are O(1) per session).
 Postgres and accounting growth are bounded by license retention limits;
-nightly backups need headroom for one extra dump generation.
+backups (scheduled, if switched on, and the ones taken before a restore, a migration or a deployment) need headroom for the kept generations.
 
 ## 9. Phase 19 — Networking
 

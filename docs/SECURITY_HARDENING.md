@@ -59,6 +59,11 @@ Migrating an existing appliance (a deliberate operation, not done by any deploy)
 3. Anything that connects as the superuser over TCP must use it: on the appliance that is only `keybootstrap` at provisioning; service DSNs in `/etc/stayconnect/*.env` use their own roles. Check `grep -l 'stayconnect:stayconnect@' /etc/stayconnect/*.env` returns nothing.
 4. Export the file before any later `docker compose -f infra.yml up` so a recreated container is initialised consistently.
 
+Until it is done, Hotel Admin's Overview warns "The database still has its default password" to roles that can
+read diagnostics (GDPR audit 2026-10-19, C5). edged tries the default login once every six hours and clears the
+warning when it is refused (`cmd/edged/db_default_password.go`). Nothing changes the password automatically
+(Product-Owner decision, 2026-10-19).
+
 ### Caddy admin API (appliance, audit N-10)
 
 The Edge Caddyfile serves the admin API on `unix//run/caddy/admin.sock`, inside `/run/caddy` (0700

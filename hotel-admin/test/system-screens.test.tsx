@@ -278,8 +278,12 @@ describe("Operators", () => {
     expect(post).not.toHaveBeenCalled();
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText(/Give this role\?/)).toBeTruthy();
+    // B7: the administrator's own password confirms it.
+    expect(within(dialog).getByRole("button", { name: "Add role" })).toBeDisabled();
+    await userEvent.type(within(dialog).getByLabelText(/Your password/), "admin-pass-1");
     await userEvent.click(within(dialog).getByRole("button", { name: "Add role" }));
-    await waitFor(() => expect(post).toHaveBeenCalledWith("/operators/o2/roles", { role: "site_viewer" }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("/operators/o2/roles",
+      { role: "site_viewer", your_password: "admin-pass-1" }));
   });
 
   it("new operators default to Site viewer", async () => {

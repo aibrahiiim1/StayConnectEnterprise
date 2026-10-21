@@ -61,7 +61,7 @@ describe("Stays page", () => {
     expect(screen.getByText(/1 sharing/)).toBeTruthy();
     expect(screen.getByText(/Not allowed/)).toBeTruthy();
 
-    await userEvent.click(screen.getByRole("button", { name: "View" }));
+    await userEvent.click(screen.getByRole("button", { name: /^View\b/ }));
     expect(await screen.findByText("Byron, Ada")).toBeTruthy();
     expect(screen.getByText("Main guest")).toBeTruthy();
     // No folios any more: the stay shows room charge permission in words, with who decided it.
@@ -104,7 +104,7 @@ describe("Stays page — room charge on a stay", () => {
   async function openStay() {
     const { default: StaysPage } = await import("@/app/(app)/stays/page");
     render(<StaysPage />);
-    await userEvent.click(await screen.findByRole("button", { name: "View" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^View\b/ }));
     return await screen.findByRole("region", { name: "Room charge" });
   }
 

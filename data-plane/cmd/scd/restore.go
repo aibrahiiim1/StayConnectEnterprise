@@ -30,6 +30,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -95,18 +96,18 @@ func fileDigest(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func writeVerifiedMarker(name string, tables int) {
+func writeVerifiedMarker(name string, tables int) error {
 	full := filepath.Join(scdBackupDir, name)
 	fi, err := os.Stat(full)
 	if err != nil {
-		return
+		return fmt.Errorf("the backup could not be read to mark it verified: %w", err)
 	}
 	// NO DIGEST, NO MARKER. A marker that omitted it would be indistinguishable from a pre-digest one, and
 	// would be read as unverified anyway -- writing it would only mislead whoever read the file by hand.
 	sum, err := fileDigest(full)
 	if err != nil {
 		slog.Error("verification marker not written: the archive could not be digested", "backup", name, "err", err)
-		return
+		return fmt.Errorf("the backup could not be digested: %w", err)
 	}
 	b, _ := json.Marshal(verifiedRecord{
 		VerifiedAt: time.Now().UTC(), SizeBytes: fi.Size(), ModTime: fi.ModTime().UTC(),
@@ -115,7 +116,7 @@ func writeVerifiedMarker(name string, tables int) {
 	path := verifiedMarker(name)
 	if err := os.WriteFile(path, b, 0o640); err != nil {
 		slog.Error("verification marker not written", "backup", name, "err", err)
-		return
+		return fmt.Errorf("the verification marker could not be written: %w", err)
 	}
 	// HAND IT TO THE SERVICE GROUP, exactly as the dump itself is handed over.
 	//
@@ -129,6 +130,7 @@ func writeVerifiedMarker(name string, tables int) {
 			slog.Error("verification marker not handed to the service group", "backup", name, "err", err)
 		}
 	}
+	return nil
 }
 
 // readVerifiedMarker returns the record only if the archive on disk is still, byte for byte, the one that
@@ -235,6 +237,11 @@ func (s *server) lastRestore(w http.ResponseWriter, r *http.Request) {
 
 type restoreReq struct {
 	Name string `json:"name"`
+	// Identity is a backup key holder's private key, needed for an encrypted backup. It lives in memory for
+	// the length of the restore and is never stored or logged.
+	Identity string `json:"identity"`
+	// By is the operator who asked (edged fills it from the signed-in session); it is recorded with the restore.
+	By string `json:"by"`
 }
 
 type restoreStep struct {
@@ -274,6 +281,24 @@ func (s *server) backupRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// AN ENCRYPTED BACKUP NEEDS A KEY THAT OPENS IT, and that is checked now, before the safety dump and
+	// maintenance: a wrong key must cost the hotel nothing, not a closed appliance.
+	src, closer, err := openBackup(filepath.Join(scdBackupDir, in.Name), in.Identity)
+	if err != nil {
+		if msg, isKey := keyProblem(err); isKey {
+			httpErr(w, http.StatusBadRequest, msg)
+			return
+		}
+		if errors.Is(err, errNotSQLBackup) {
+			httpErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		httpErr(w, http.StatusInternalServerError, "the backup could not be opened: "+err.Error())
+		return
+	}
+	_, _ = io.ReadFull(src, make([]byte, 16))
+	closer.Close()
+
 	if !restoreInFlight.CompareAndSwap(false, true) {
 		httpErr(w, http.StatusConflict, "a restore is already running on this appliance")
 		return
@@ -304,13 +329,13 @@ func (s *server) backupRestore(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer cancel()
 		defer restoreInFlight.Store(false)
-		s.runRestore(ctx, in.Name, rec, started)
+		s.runRestore(ctx, in.Name, in.Identity, in.By, rec, started)
 	}()
 }
 
 // runRestore performs the restore. It reports only durably: by the time it finishes, the HTTP request that
 // asked for it is long gone and edged has been restarted.
-func (s *server) runRestore(ctx context.Context, name string, rec *verifiedRecord, started time.Time) {
+func (s *server) runRestore(ctx context.Context, name, identity, by string, rec *verifiedRecord, started time.Time) {
 	in := restoreReq{Name: name}
 	steps := []restoreStep{}
 	stamp := started.Format("20060102T150405Z")
@@ -364,12 +389,23 @@ func (s *server) runRestore(ctx context.Context, name string, rec *verifiedRecor
 	}
 	ok("privileges", fmt.Sprintf("%d ownership and access rules captured from the live database", len(privileges)))
 
+	// ---- 0b. every erasure the live database knows is durable outside it before anything is replaced ------------
+	if detail, good := s.restoreLedgerPrepare(ctx); !good {
+		fail("ledger_prepare", detail)
+		return
+	} else {
+		ok("ledger_prepare", detail)
+	}
+
 	// ---- 1. a safety dump of the CURRENT state, before anything is touched ------------------------------
-	safety, err := s.dumpTo(ctx, "db-safety-"+stamp+".sql.gz")
+	// THE SAME ENGINE AS EVERY OTHER BACKUP: encrypted, proven restorable, noted. The restoring key holder's key is a recipient too,
+	// so a replacement appliance with no registered holder yet is still protected. No plaintext fallback exists.
+	safetyMeta, err := s.takeBackup(ctx, backupOpts{Kind: kindPreRestore, Reason: "before restoring " + in.Name, By: by, Identity: identity})
 	if err != nil {
 		fail("safety_backup", "the safety backup failed, so the restore was not attempted: "+err.Error())
 		return
 	}
+	safety := safetyMeta.Name
 	ok("safety_backup", safety)
 
 	// ---- 2. stop serving --------------------------------------------------------------------------------
@@ -393,25 +429,77 @@ func (s *server) runRestore(ctx context.Context, name string, rec *verifiedRecor
 			"-tAc", "DROP DATABASE IF EXISTS "+staging+" WITH (FORCE)").CombinedOutput()
 	}
 
-	load := exec.CommandContext(ctx, "/bin/sh", "-c",
-		"gzip -dc "+shq(filepath.Join(scdBackupDir, in.Name))+" | docker exec -i "+pgContainer+
-			" psql -U "+pgUser+" -d "+staging+" -v ON_ERROR_STOP=1 -q")
-	if out, err := load.CombinedOutput(); err != nil {
+	if out, err := loadBackupInto(ctx, filepath.Join(scdBackupDir, in.Name), identity, staging); err != nil {
 		dropStaging()
 		// NOTHING WAS LOST. The live database was never opened.
-		fail("load", "the backup did not load, so nothing was replaced: "+firstProblem(string(out)))
+		detail := firstProblem(string(out))
+		if msg, isKey := keyProblem(err); isKey {
+			detail = msg
+		} else if len(out) == 0 {
+			detail = err.Error()
+		}
+		fail("load", "the backup did not load, so nothing was replaced: "+detail)
 		return
 	}
 	ok("load", fmt.Sprintf("the backup loaded into a staging database (%d tables when verified)", rec.Tables))
+
+	// ---- 3b. who may open this hotel's backups is decided now, not by the backup (backup_key_carry.go) ----
+	if carried, detail := keyRegisterStep(ctx, pgDatabase, staging); !carried {
+		dropStaging()
+		fail("key_holders", detail)
+		return
+	} else {
+		ok("key_holders", detail)
+	}
+
+	// ---- 3c. the erasure ledger is verified and applied to the STAGING database, before the swap -------------------
+	// Everything the hotel already told a guest was erased is erased again, and every request it had closed is closed again,
+	// in the restored data, BEFORE that data is the live data. One verified, complete copy of the ledger is enough
+	// (ledger_restore.go); if none can be trusted the restore stops here with nothing replaced.
+	if detail, good := s.carryLedgerDestination(ctx, staging); !good {
+		dropStaging()
+		fail("ledger_storage", detail)
+		return
+	} else {
+		ok("ledger_storage", detail)
+	}
+	if detail, good := s.restoreLedgerApply(ctx, staging, identity); !good {
+		dropStaging()
+		fail("ledger", detail)
+		return
+	} else {
+		ok("ledger", detail)
+	}
 
 	// ---- 4. the swap: rename aside, rename in ----------------------------------------------------------
 	//
 	// Connections must be gone first or the rename is refused. The dependent services are stopped rather
 	// than merely disconnected, because a service that reconnects during the swap would reopen the database
 	// being renamed.
-	for _, svc := range dependentServices {
-		_ = exec.CommandContext(ctx, "systemctl", "stop", svc).Run()
+	//
+	// FINANCIAL GUARANTEES (restore_financial.go): the quiesce is PROVEN, not assumed, and the management marker is advanced before
+	// anything is replaced. Both happen here, while the live database is still the live database.
+	markerGen, err := readMarkerGeneration()
+	if err != nil {
+		dropStaging()
+		fail("financial_marker", "the restore marker could not be read, so the restore was not attempted: "+err.Error())
+		return
 	}
+	nextGen := markerGen + 1
+	if err := proveQuiesced(ctx); err != nil {
+		dropStaging()
+		s.startDependents(ctx)
+		fail("quiesce", "the restore was not attempted and nothing was replaced: "+err.Error())
+		return
+	}
+	ok("quiesce", "every service that can write financial state was stopped and proven stopped")
+	if err := advanceMarker(ctx, nextGen, rec.SHA256); err != nil {
+		dropStaging()
+		s.startDependents(ctx)
+		fail("financial_marker", "the restore was not attempted and nothing was replaced: "+err.Error())
+		return
+	}
+	ok("financial_marker", fmt.Sprintf("the restore marker was advanced from generation %d to %d before the swap", markerGen, nextGen))
 	if out, err := admin("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '" +
 		pgDatabase + "' AND pid <> pg_backend_pid()"); err != nil {
 		slog.Warn("could not terminate all connections before swap", "detail", tailLine(string(out)))
@@ -495,6 +583,59 @@ func (s *server) runRestore(ctx context.Context, name string, rec *verifiedRecor
 	}
 	ok("integrity", detail)
 
+	// ---- 6-fin. financial recovery: hypertables registered, and the restore recorded so money movement is HELD -----------
+	// Both failures roll the swap back. The marker has already advanced, so the appliance comes up holding money movement in either
+	// case, which is the safe direction.
+	if hdetail, herr := assertHypertables(ctx, pgDatabase); herr != nil {
+		rollback("hypertables", herr.Error()+" Money movement stays held.")
+		return
+	} else {
+		ok("hypertables", hdetail)
+	}
+	var backupTaken time.Time
+	if b, rerr := os.ReadFile(metaPathFor(in.Name)); rerr == nil {
+		var bm backupMeta
+		if json.Unmarshal(b, &bm) == nil {
+			backupTaken = bm.TakenAt
+		}
+	}
+	if rerr := recordSupportedRestore(ctx, pgDatabase, s.tenID, s.siteID, nextGen, rec.SHA256, backupTaken, by); rerr != nil {
+		rollback("financial_recovery", rerr.Error()+" Money movement stays held.")
+		return
+	}
+	ok("financial_recovery", "the restore is recorded: the site is in financial recovery mode and no money moves until an operator has reconciled what was in flight")
+
+	// ---- 6a. the missing copies of the ledger are rebuilt and synchronised ------------------------------------------
+	// The restored database now holds the whole ledger. The primary copy on the appliance and the secondary storage are
+	// brought into step with it; an unreachable secondary does not undo the restore, it is reported and retried every hour.
+	if st := s.ledgerReconcileAfterRestore(ctx); st != "" {
+		steps = append(steps, restoreStep{Step: "ledger_synced", OK: false, Detail: st})
+	} else {
+		ok("ledger_synced", "both copies of the erasure ledger are in step with the restored database")
+	}
+
+	// ---- 6a2. retention is applied to the restored data NOW, not at the next hourly run --------------------------------
+	// A backup carries every record the hotel's retention periods had already anonymised since it was taken. The retention run
+	// (and the staff and note runs) put that right; running them before the appliance serves again means no expired identifier is
+	// visible for the hour it would otherwise take.
+	retentionDone := true
+	{
+		rctx, rcancel := context.WithTimeout(ctx, 30*time.Minute)
+		rerr := s.runDataRetentionComplete(rctx)
+		rcancel()
+		if rerr != nil {
+			// Not reported as done: the backlog (or a failing function) is still there, the hourly run goes on with it, and the
+			// operator is told that expired identifiers may still be visible until it finishes.
+			retentionDone = false
+			slog.Warn("retention could not be completed on the restored data", "err", rerr)
+			steps = append(steps, restoreStep{Step: "retention_reapplied", OK: false,
+				Detail: "the retention periods were NOT fully applied to the restored data before it was served (" + tailLine(rerr.Error()) +
+					"); the hourly run continues with the rest, and expired personal data may be visible until it finishes"})
+		} else {
+			ok("retention_reapplied", "the retention periods were applied to the restored data, to the end of the backlog, before it was served")
+		}
+	}
+
 	// ---- 6b. keep exactly ONE database aside -----------------------------------------------------------
 	//
 	// The database just replaced is kept so a restore can be undone, which is the point. But nothing removed
@@ -526,8 +667,11 @@ func (s *server) runRestore(ctx context.Context, name string, rec *verifiedRecor
 	s.startDependents(ctx)
 	ok("services", "the appliance is serving again")
 
-	s.finishRestore(in.Name, started, steps, true,
-		"restored from "+in.Name+"; the previous database is kept as "+aside)
+	summary := "restored from " + in.Name + "; the previous database is kept as " + aside
+	if !retentionDone {
+		summary += "; retention is still being applied to it (see the retention_reapplied step)"
+	}
+	s.finishRestore(in.Name, started, steps, true, summary)
 }
 
 // resetPool replaces scd's own database connections after the swap.

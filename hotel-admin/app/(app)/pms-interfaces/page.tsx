@@ -103,7 +103,7 @@ export default function PMSInterfacesPage() {
 
   // A SLOW POLL WHILE MOUNTED, FASTER WHILE ANY GUEST LIST IS LOADING.
   const anySyncing = Object.values(health).some(isSyncing);
-  usePoll(() => void load(), anySyncing ? 4000 : 20000);
+  usePoll(() => load(), anySyncing ? 4000 : 20000);
 
   const writable = canWrite("pms-interfaces", roles);
   const list = rows ?? [];

@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	redis "github.com/redis/go-redis/v9"
 
+	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
 	"github.com/stayconnect/enterprise/control-plane/internal/pki"
 	"github.com/stayconnect/enterprise/control-plane/internal/portaltls"
@@ -39,6 +40,10 @@ type Base struct {
 	// PortalTLS owns portal hostnames and certificates. nil only in tools and tests that never retire an
 	// appliance through the API; the lifecycle path's database half works without it.
 	PortalTLS *portaltls.Service
+
+	// MFA names an account's sign-in locks (auth.MFA.SigninName) so resetting a user's two-step sign-in can lift
+	// them too. nil works: the name then falls back to the plain hash ctrlapi also uses without the key.
+	MFA *auth.MFA
 }
 
 // issueAssignment signs + persists a new current assignment for the appliance (bumping its version).

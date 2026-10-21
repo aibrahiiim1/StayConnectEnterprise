@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FileUp, Server } from "lucide-react";
 import {
-  api, itemsOf, qs, type ApplianceRow, type Customer, type Items, type Overview, type Site,
+  api, itemsOf, qs, type ApplianceRow, type Customer, type Items, type Overview, type RequestOptions, type Site,
 } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -55,10 +55,10 @@ function Appliances() {
     connection: f.connection, license: f.license, q: f.q,
   });
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: RequestOptions) => {
     setRefreshing(true);
     try {
-      const r = await api.get<Items<ApplianceRow>>(`/cloud/v1/appliances${query}`);
+      const r = await api.get<Items<ApplianceRow>>(`/cloud/v1/appliances${query}`, opts);
       setRows(sortAppliances(itemsOf(r)));
       setErr(null);
     } catch (e) {
@@ -68,7 +68,7 @@ function Appliances() {
       setRefreshing(false);
     }
     // The chip counts come from the Overview, which already counts the whole (role-scoped) fleet.
-    api.get<Overview>("/cloud/v1/overview").then((o) => setCounts(o.appliances)).catch(() => {});
+    api.get<Overview>("/cloud/v1/overview", opts).then((o) => setCounts(o.appliances)).catch(() => {});
   }, [query]);
 
   useEffect(() => { void load(); }, [load]);

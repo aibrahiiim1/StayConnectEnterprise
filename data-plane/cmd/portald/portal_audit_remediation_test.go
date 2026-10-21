@@ -419,6 +419,7 @@ func TestWelcomeBackKeepsTheCredentialWhenTheRefusalIsAboutTheMoment(t *testing.
 			"/v1/sessions/authorize-resume": fixed(tc.code, `{"error":"x"}`),
 		})
 		r := auditReq(http.MethodPost, "/auth/resume", url.Values{})
+		r.TLS = &tls.ConnectionState{} // the remembered device is honoured over HTTPS only (B10)
 		r.AddCookie(&http.Cookie{Name: clientResumeCookie, Value: "client-tok"})
 		rec := serveAcct(h, r)
 		c := setCookie(rec, clientResumeCookie)

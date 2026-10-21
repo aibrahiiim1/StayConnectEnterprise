@@ -17,13 +17,14 @@ import { Badge } from "@/components/ui/badge";
 import { Field, Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
-import { SearchInput } from "@/components/ui/data";
+import { ResultsCount, SearchInput } from "@/components/ui/data";
 import { SkeletonRows } from "@/components/ui/misc";
 import { useToast } from "@/components/ui/toast";
 import { Smartphone, Settings2 } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
 import { DeviceDetailDialog } from "@/components/devices/device-detail";
 import { REASON_HINT, REASON_MAX_CHARS, reasonOk } from "@/lib/reason";
+import { useEditFocus } from "@/lib/use-edit-focus";
 
 // THREE STATES, NOT TWO. "Online" is signed in with a live Internet session. A device can be on the Wi-Fi --
 // holding a DHCP lease, sitting at the sign-in page -- without that, and used to read as "Offline".
@@ -115,6 +116,7 @@ export default function DevicesPage() {
           <Toolbar>
             <SearchInput value={q} onChange={setQ} delay={300} placeholder="Search MAC, address or account…" label="Search devices" />
           </Toolbar>
+          <ResultsCount count={rows?.length} noun="device" more={more} />
         </CardBody>
         <ErrorBanner err={err} />
         {rows === null ? (
@@ -165,7 +167,7 @@ export default function DevicesPage() {
                   <TD className="hidden text-sm md:table-cell">{holder(r)}</TD>
                   <TD className="hidden text-sm text-muted-foreground lg:table-cell">{r.last_seen ? formatRelative(r.last_seen) : "—"}</TD>
                   <TD className="text-end">
-                    {r.id && <Button size="sm" variant="ghost" onClick={() => setOpen(r.id)}><Settings2 /> Manage</Button>}
+                    {r.id && <Button size="sm" variant="ghost" aria-label={`Manage ${r.mac}`} onClick={() => setOpen(r.id)}><Settings2 /> Manage</Button>}
                   </TD>
                 </TR>
               ))}
@@ -193,6 +195,7 @@ function DeviceChangesCard({ canEdit }: { canEdit: boolean }) {
   const [reason, setReason] = useState("");
   const [password, setPassword] = useState("");
   const [editing, setEditing] = useState(false);
+  const { triggerRef, panelRef } = useEditFocus(editing);
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
 
@@ -232,13 +235,13 @@ function DeviceChangesCard({ canEdit }: { canEdit: boolean }) {
           <div className="flex items-center gap-2">
             <Badge tone="neutral">{value === null ? "—" : `${value} per day`}</Badge>
             {canEdit && !editing && (
-              <Button size="sm" variant="outline" onClick={() => { setDraft(String(value ?? 3)); setEditing(true); }}>Change</Button>
+              <Button ref={triggerRef} size="sm" variant="outline" onClick={() => { setDraft(String(value ?? 3)); setEditing(true); }}>Change</Button>
             )}
           </div>
         </div>
         <ErrorBanner err={err} />
         {editing && (
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div ref={panelRef} className="grid gap-3 sm:grid-cols-3">
             <Field label="Changes per day" hint="1 to 10">
               <Input type="number" min={1} max={10} value={draft} onChange={(e) => setDraft(e.target.value)} />
             </Field>

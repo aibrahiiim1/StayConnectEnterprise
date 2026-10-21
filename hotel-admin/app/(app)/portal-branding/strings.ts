@@ -11,6 +11,10 @@ export type Design = {
   welcome_text?: string;
   help_text?: string;
   terms_url?: string;
+  /** The hotel's privacy notice (GDPR Art. 13), plain text shown in place on the sign-in page. */
+  privacy_text?: string;
+  /** A link to the hotel's full privacy notice. */
+  privacy_url?: string;
   logo_url?: string;
   background_url?: string;
   brand_color?: string;
@@ -121,6 +125,9 @@ export const PORTAL_STRINGS: PortalString[] = [
   { group: "Email and SMS", key: "otp.sent.sms", english: "We texted a 6-digit code to", module: "sms_otp" },
   { group: "Email and SMS", key: "otp.sent.whatsapp", english: "We sent a 6-digit code on WhatsApp to", module: "whatsapp_otp" },
   { group: "Email and SMS", key: "otp.retry.sms", english: "Use a different number", module: ["sms_otp", "whatsapp_otp"] },
+  { group: "Email and SMS", key: "otp.valid", english: "The code is valid for {n} min.", module: ["sms_otp", "whatsapp_otp"] },
+  { group: "Email and SMS", key: "otp.resend", english: "Send a new code", module: ["sms_otp", "whatsapp_otp"] },
+  { group: "Email and SMS", key: "otp.resent", english: "We sent you a new code.", module: ["sms_otp", "whatsapp_otp"] },
 
   { group: "Email account", key: "acct.forgot.link", english: "Forgot password?", module: "email_otp" },
   { group: "Email account", key: "acct.create.link", english: "Create an account", module: "email_otp" },
@@ -158,6 +165,7 @@ export const PORTAL_STRINGS: PortalString[] = [
   { group: "Device info", key: "info.mac", english: "MAC address" },
   { group: "Device info", key: "info.help", english: "The site team may ask for these if you need help connecting." },
 
+  { group: "Messages", key: "link.newtab", english: "(opens in a new tab)" },
   { group: "Messages", key: "notice.nomethods", english: "There is no way to sign in on this network yet. Please contact the site team for assistance." },
   { group: "Messages", key: "notice.nopackages", english: "Internet access is not available here at the moment. You can still sign in, but there is nothing to connect you to yet — please let the site team know." },
   { group: "Messages", key: "err.generic", english: "We could not verify your stay. Please check your details or contact the site team for assistance.", module: "hospitality" },
@@ -305,6 +313,11 @@ export const PORTAL_STRINGS: PortalString[] = [
   { group: "Help and tips", key: "help.whatsapp", english: "Enter your WhatsApp phone number with the country code and tap Send code, then type the 6-digit code from the WhatsApp message.", module: "whatsapp_otp" },
   { group: "Help and tips", key: "help.fail", english: "Something not working? Please contact the site team for assistance." },
   { group: "Sign-in page", key: "brand.by", english: "Wi-Fi by" },
+  { group: "Privacy", key: "privacy.link", english: "How we use your data" },
+  { group: "Privacy", key: "privacy.url", english: "Privacy notice" },
+  { group: "Privacy", key: "privacy.default", english: "This Wi-Fi is provided by the hotel, which is responsible for your personal data on it. To give you internet access and keep the network secure, it records your device’s network addresses, when you connect and how much data you use, and what you sign in with. These records are deleted or made anonymous after a set time. Ask at reception for the hotel’s full privacy notice, or to see, correct or delete your data." },
+  { group: "Privacy", key: "privacy.remember", english: "If you tick “Remember this device”, a cookie keeps it remembered so you can reconnect with one tap. Signing out, or “Not you?”, forgets it.", module: ["email_otp", "sms_otp", "whatsapp_otp", "social_login"] },
+  { group: "Privacy", key: "remember.device", english: "Remember this device, so I can reconnect with one tap", module: ["email_otp", "sms_otp", "whatsapp_otp", "social_login"] },
   { group: "Email account: links in the emails", key: "acct.forgot.title", english: "Reset your password", module: "email_otp" },
   { group: "Email account: links in the emails", key: "acct.forgot.sent", english: "If an account exists for that email address, we've sent it a link to choose a new password. Open the link while connected to this Wi-Fi.", module: "email_otp" },
   { group: "Email account: links in the emails", key: "acct.verify.title", english: "Verify your email address", module: "email_otp" },

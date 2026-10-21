@@ -206,7 +206,9 @@ func (s *server) insertGuestNetwork(ctx context.Context, tx pgx.Tx, in guestNetw
 		in.GatewayIP, in.SubnetCIDR,
 		in.DHCPMode, in.DNSMode, dnsRaw, in.DomainName, in.LeaseDefault, in.LeaseMin,
 		in.LeaseMax, boolOr(in.CaptiveEnabled, true), boolOr(in.InternetEnabled, true), boolOr(in.NATEnabled, true),
-		boolOr(in.ClientIsolation, false), portalURL); err != nil {
+		// A new network with a captive portal isolates its clients unless told otherwise (GDPR audit 2026-10-19,
+		// A3): one guest must not reach another's device. A replacement carries its predecessor's value.
+		boolOr(in.ClientIsolation, boolOr(in.CaptiveEnabled, true)), portalURL); err != nil {
 		return createdNetwork{}, err
 	}
 	if err := insertPools(ctx, tx, newID, in.Pools); err != nil {

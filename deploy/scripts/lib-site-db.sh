@@ -4,7 +4,7 @@
 #
 # WHY THIS FILE EXISTS, AND IT IS NOT TIDINESS.
 #
-# stayconnect-site-backup.sh learned three things the hard way on a containerised appliance, each of which
+# the retired stayconnect-site-backup.sh learned three things the hard way on a containerised appliance, each of which
 # had already broken a real backup:
 #
 #	the CLIENT must be the server's own. PostgreSQL runs in the stayconnect-pg container at 16.3 and the

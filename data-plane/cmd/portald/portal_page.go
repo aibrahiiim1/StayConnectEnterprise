@@ -214,18 +214,24 @@ func brandFor(d map[string]any) guestBrand {
 	}
 	photo := str("hero_image_url") != "" || str("background_url") != ""
 	overlay := defaultOverlay
+	overlaySet := false
 	if o, ok := d["template_options"].(map[string]any); ok {
 		pick := func(k string) string { s, _ := o[k].(string); return s }
 		b.Density, b.Panel, b.HeroHeight, b.Surface = pick("density"), pick("panel_position"), pick("hero_height"), pick("surface")
 		if n, ok := number(o["overlay"]); ok && n >= 0 && n <= 90 {
 			overlay = n / 100
-			// White words over a photograph always get some darkening under them.
-			if photo && overlay < minPhotoOverlay {
-				overlay = minPhotoOverlay
-			}
-			set("--sc-overlay", fmt.Sprintf("%.2f", overlay))
+			overlaySet = true
 		}
 		set("--sc-heading-font", pick("heading_font"))
+	}
+	// White words over a photograph always get enough darkening under them to read -- the stylesheet's
+	// default included, which is below the floor.
+	if photo && overlay < minPhotoOverlay {
+		overlay = minPhotoOverlay
+		overlaySet = true
+	}
+	if overlaySet {
+		set("--sc-overlay", fmt.Sprintf("%.2f", overlay))
 	}
 	// The text colours the hotel's colours need (portal_colour.go), including --sc-ink, which is the hotel's
 	// text colour only when it reads on the card.
@@ -476,6 +482,9 @@ type landingView struct {
 	Help                                    string
 	HasExtras                               bool
 	Terms                                   template.URL // checked by ForGuests (CheckLinkURL)
+	// The hotel's privacy notice (GDPR Art. 13): its own text, shown in place, and/or a link to a full notice.
+	PrivacyText string
+	PrivacyURL  template.URL // checked by ForGuests (CheckLinkURL)
 	// The shipped wording for the script, from languages.go -- the words the sign-in page can show, in every
 	// language, so a guest switching language needs no round trip. The after-sign-in pages' words are
 	// rendered by those pages and are not repeated here.
@@ -579,6 +588,10 @@ func newLandingView(r *http.Request, d map[string]any, nonce, errMsg, ip, mac st
 	v.HasExtras = v.Help != "" || html != ""
 	if s, _ := d["terms_url"].(string); s != "" {
 		v.Terms = template.URL(s)
+	}
+	v.PrivacyText, _ = d["privacy_text"].(string)
+	if s, _ := d["privacy_url"].(string); s != "" {
+		v.PrivacyURL = template.URL(s)
 	}
 	if tr, ok := d["translations"].(map[string]any); ok && len(tr) > 0 {
 		v.HotelWords = jsData(tr)

@@ -26,6 +26,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/stayconnect/enterprise/data-plane/internal/reqlog"
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
 )
 
@@ -624,7 +625,8 @@ func (h *handler) routes() http.Handler {
 	// and drops the query.
 	// Handlers read r.URL, which is untouched.
 	r.Use(redactLoggedQuery)
-	r.Use(middleware.Logger)
+	// No path, query or client address in the request log (reqlog; GDPR audit 2026-10-19).
+	r.Use(reqlog.Middleware)
 	r.Use(middleware.Recoverer)
 	// The whole of a package acquisition fits (quote 5 s + confirm 5 s + activation 12 s), and a request that
 	// still runs out is answered with a page in words, not a blank 504 (timeout.go, audit P-20).
