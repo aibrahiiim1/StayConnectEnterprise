@@ -280,6 +280,7 @@ func (s *server) takeBackup(ctx context.Context, o backupOpts) (*backupMeta, err
 	}
 	writeVerifiedMarker(name, tables)
 	s.rotateBackups()
+	forgetStoredCheck()
 	slog.Info("backup complete and verified", "backup", name, "kind", o.Kind, "tables", tables, "ledger_entries", meta.LedgerSeq)
 	return meta, nil
 }
@@ -471,6 +472,9 @@ func (s *server) rotateBackups() int {
 		}
 		removed++
 	}
+	if removed > 0 {
+		forgetStoredCheck()
+	}
 	return removed
 }
 
@@ -507,6 +511,35 @@ func verifyStoredBackups() []backupProblem {
 		}
 	}
 	return out
+}
+
+// storedCheck remembers the last full re-read of the stored backups. Reading every kept file takes a while, so the status screen asks
+// for the cached answer (at most storedCheckAge old) and only the loop, which runs every quarter hour, and a change to the stored set
+// force a fresh one.
+var storedCheck struct {
+	mu    sync.Mutex
+	at    time.Time
+	probs []backupProblem
+}
+
+const storedCheckAge = 20 * time.Minute
+
+func storedBackupProblems(maxAge time.Duration) []backupProblem {
+	storedCheck.mu.Lock()
+	defer storedCheck.mu.Unlock()
+	if maxAge > 0 && !storedCheck.at.IsZero() && time.Since(storedCheck.at) < maxAge {
+		return append([]backupProblem(nil), storedCheck.probs...)
+	}
+	storedCheck.probs = verifyStoredBackups()
+	storedCheck.at = time.Now()
+	return append([]backupProblem(nil), storedCheck.probs...)
+}
+
+// forgetStoredCheck drops the cached answer: the stored set changed, so it no longer describes it.
+func forgetStoredCheck() {
+	storedCheck.mu.Lock()
+	storedCheck.at = time.Time{}
+	storedCheck.mu.Unlock()
 }
 
 // ---- the schedule ----------------------------------------------------------------------------------------------------------
@@ -588,7 +621,7 @@ func (s *server) runScheduledBackupIfDue(ctx context.Context) {
 	running := backupState.running
 	backupState.mu.Unlock()
 	// The stored backups are checked every pass, whatever the schedule says: corruption does not wait for a schedule.
-	if probs := verifyStoredBackups(); len(probs) > 0 {
+	if probs := storedBackupProblems(0); len(probs) > 0 {
 		slog.Error("backups that no longer match their notes", "problems", probs)
 	}
 	if running || recent || !scheduledBackupDue(set, time.Now(), newestRegularBackup()) {
@@ -631,7 +664,7 @@ func (s *server) backupStatus(w http.ResponseWriter, r *http.Request) {
 	if keys, err := s.backupRecipientKeys(r.Context()); err == nil && len(keys) > 0 {
 		keyHolders = true
 	}
-	probs := verifyStoredBackups()
+	probs := storedBackupProblems(storedCheckAge)
 	newestRegular := newestRegularBackup()
 	now := time.Now()
 

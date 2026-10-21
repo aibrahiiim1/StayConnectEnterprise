@@ -166,6 +166,7 @@ func removeEarlierBackups() (int, int64, error) {
 		removedSets++
 		removedBytes += set.SizeBytes
 	}
+	forgetStoredCheck()
 	return removedSets, removedBytes, nil
 }
 

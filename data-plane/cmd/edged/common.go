@@ -121,8 +121,10 @@ type scdClient struct {
 }
 
 func newSCDClient(socket string) *scdClient {
+	// NO http.Client.Timeout: it caps the WHOLE call and cannot be extended by a request's own context, which silently turned every
+	// "long" path below into a 15-second one (found on PRE-LIVE: a manual backup, which scd completes in about 40 seconds, was
+	// reported to the operator as failed while it went on and finished). The default deadline is applied per call in call().
 	return &scdClient{http: &http.Client{
-		Timeout: 15 * time.Second,
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 				var d net.Dialer
@@ -136,6 +138,9 @@ func newSCDClient(socket string) *scdClient {
 // longSCDPaths are the privileged operations that legitimately take MINUTES rather than milliseconds: a
 // database dump and its verification. The shared 15s client deadline is right for every other call and was
 // killing these mid-flight -- the appliance reported "signal: killed" as though the dump were corrupt.
+// scdDefaultTimeout is the deadline of every scd call that is not in longSCDPaths.
+var scdDefaultTimeout = 15 * time.Second
+
 var longSCDPaths = map[string]time.Duration{
 	"/v1/backup/run":    20 * time.Minute,
 	"/v1/backup/verify": 25 * time.Minute,
@@ -156,6 +161,10 @@ func (c *scdClient) call(ctx context.Context, method, path string, body any) (in
 	if d, ok := longSCDPaths[strings.SplitN(path, "?", 2)[0]]; ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), d)
+		defer cancel()
+	} else {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, scdDefaultTimeout)
 		defer cancel()
 	}
 	var rd io.Reader
