@@ -15,6 +15,8 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/stayconnect/enterprise/data-plane/internal/ledger"
 )
 
@@ -114,8 +116,14 @@ func (s *server) ledgerQuery(ctx context.Context, dest any, sql string, args ...
 		return err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // a no-op after Commit
-	if err := tx.QueryRow(ctx, sql, args...).Scan(dest); err != nil {
+	// The ledger's lock is also held by scd while it checks the copies against the secondary storage, which on a slow link takes
+	// seconds; this role's usual 5-second lock wait would turn an erasure that merely queued behind that check into a failure
+	// (found on PRE-LIVE with an SFTP server that took four seconds to answer). Waiting is safe: nothing has been changed yet.
+	if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '45s'`); err != nil {
 		return err
+	}
+	if err := tx.QueryRow(ctx, sql, args...).Scan(dest); err != nil {
+		return asLedgerBusy(err)
 	}
 	var raw []byte
 	if err := tx.QueryRow(ctx, `SELECT iam_v2.ledger_pending()::text`).Scan(&raw); err != nil {
@@ -144,6 +152,16 @@ func (s *server) ledgerQuery(ctx context.Context, dest any, sql string, args ...
 		return err
 	}
 	return nil
+}
+
+// asLedgerBusy turns "could not get the ledger lock in time" into a plain refusal the operator can act on; any other error is returned as it is.
+func asLedgerBusy(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "55P03" {
+		return &ledgerRefusal{http.StatusServiceUnavailable, "ledger_busy",
+			"The erasure ledger is busy (it is being checked against its secondary storage). Nothing was erased; try again in a moment."}
+	}
+	return err
 }
 
 // writeLedgerRefusal answers a ledger failure; false when err is anything else.
