@@ -17,6 +17,7 @@ package main
 // shown in the activity log only to holders of guest-data-rights.
 
 import (
+	"log/slog"
 	"context"
 	"errors"
 	"net/http"
@@ -284,6 +285,17 @@ func guestDataDBError(w http.ResponseWriter, err error, what string) {
 	case errors.As(err, &pgErr) && pgErr.Code == "22023":
 		jsonErr(w, http.StatusBadRequest, "invalid", pgErr.Message)
 	default:
+		// An unexpected failure is logged by class and message only (never a DETAIL line, which can carry values), so the next one
+		// is not a mystery behind a generic "the erasure failed".
+		if errors.As(err, &pgErr) {
+			slog.Warn("guest data request failed", "what", what, "sqlstate", pgErr.Code, "msg", pgErr.Message)
+		} else {
+			msg := err.Error()
+			if len(msg) > 200 {
+				msg = msg[:200]
+			}
+			slog.Warn("guest data request failed", "what", what, "err", msg)
+		}
 		jsonErr(w, http.StatusInternalServerError, "internal", what)
 	}
 }
