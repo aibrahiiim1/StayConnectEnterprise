@@ -91,6 +91,14 @@ docker exec "$C" pg_dump -U postgres -d stayconnect_site \
   --schema-only --no-owner --schema=public --schema=iam_v2 2>/dev/null \
   > "$OUT/.schema.tmp"
 
+echo "== seed rows the migrations insert (reference data, which a schema-only dump loses) =="
+# The registry of scrubbable columns (0147) is reference data: the same rows on every appliance, so it is dumped from the upgrade
+# path's end state. The per-appliance rows (the erasure ledger's identity and first entry, the retention floor) are NOT copied from
+# this database -- scripts/sql/baseline-seed.sql re-runs the migrations' own statements so each appliance mints its own.
+docker exec "$C" pg_dump -U postgres -d stayconnect_site --data-only --column-inserts --on-conflict-do-nothing   --no-owner -t iam_v2.scrub_registry 2>/dev/null | grep -E '^(INSERT INTO|  *ON CONFLICT)' > "$OUT/.seed.tmp" || true
+echo "  $(grep -c '^INSERT INTO' "$OUT/.seed.tmp") scrub_registry row(s)"
+[ -s "$OUT/.seed.tmp" ] || { echo "  FAIL: the upgrade path has no scrub_registry rows -- refusing to write a baseline without them"; exit 1; }
+
 {
   echo "-- FACTORY-CLEAN PRODUCTION BASELINE -- GENERATED, DO NOT HAND-EDIT."
   echo "--"
@@ -123,8 +131,14 @@ docker exec "$C" pg_dump -U postgres -d stayconnect_site \
   echo "-- TimescaleDB hypertable registration. A --schema-only dump does not carry it, and without this the"
   echo "-- tables exist, match every catalog comparison, and refuse every INSERT."
   cat "$OUT/.hyper.tmp"
+  echo ""
+  echo "-- Seed rows. The migrations insert these and a schema-only dump does not carry them; without them a new appliance has no"
+  echo "-- erasure ledger identity, no scrub registry and no retention floor (scripts/sql/baseline-seed.sql)."
+  cat "$OUT/.seed.tmp"
+  echo ""
+  cat "$ROOT/scripts/sql/baseline-seed.sql"
 } > "$OUT/0000_production_baseline.sql"
-rm -f "$OUT/.schema.tmp" "$OUT/.ext.tmp" "$OUT/.roles.tmp" "$OUT/.hyper.tmp"
+rm -f "$OUT/.schema.tmp" "$OUT/.ext.tmp" "$OUT/.roles.tmp" "$OUT/.hyper.tmp" "$OUT/.seed.tmp"
 docker rm -f "$C" >/dev/null 2>&1 || true
 
 echo "  wrote $OUT/0000_production_baseline.sql ($(wc -l < "$OUT/0000_production_baseline.sql") lines)"

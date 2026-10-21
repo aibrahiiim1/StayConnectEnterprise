@@ -32746,8 +32746,8 @@ GRANT SELECT,INSERT,UPDATE ON TABLE public.network_config_revisions TO svc_netd;
 -- Name: SEQUENCE network_config_revisions_seq_seq; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,USAGE ON SEQUENCE public.network_config_revisions_seq_seq TO svc_edged;
 GRANT SELECT,USAGE ON SEQUENCE public.network_config_revisions_seq_seq TO svc_netd;
+GRANT SELECT,USAGE ON SEQUENCE public.network_config_revisions_seq_seq TO svc_edged;
 
 
 --
@@ -33076,3 +33076,113 @@ GRANT SELECT,INSERT,DELETE ON TABLE public.walled_garden_rules TO svc_edged;
 -- tables exist, match every catalog comparison, and refuse every INSERT.
 SELECT public.create_hypertable('public.accounting_records', 'ts', chunk_time_interval => INTERVAL '1 day', if_not_exists => TRUE, migrate_data => TRUE);
 SELECT public.create_hypertable('public.audit_log', 'ts', chunk_time_interval => INTERVAL '7 days', if_not_exists => TRUE, migrate_data => TRUE);
+
+-- Seed rows. The migrations insert these and a schema-only dump does not carry them; without them a new appliance has no
+-- erasure ledger identity, no scrub registry and no retention floor (scripts/sql/baseline-seed.sql).
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.pms_case_resolutions', 'note', 'note', 'resolved_at', true, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.device_slot_actions', 'reason', 'note', 'acted_at', true, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.post_stay_profiles', 'revoke_reason', 'note', 'revoked_at', true, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.stay_posting_blocks', 'note', 'note', 'created_at', true, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.stay_posting_blocks', 'cleared_reason', 'note', 'cleared_at', true, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.vouchers', 'notes', 'note', 'created_at', true, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.guest_data_erasures', 'erase_reason', 'note', 'erased_at', true, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.device_slot_actions', 'detail', 'note', 'acted_at', false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.guest_device_actions', 'detail', 'note', 'acted_at', false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.entitlement_adjustments', 'reason', 'note', 'created_at', false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.guest_signin_restrictions', 'release_reason', 'note', 'released_at', false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.guest_signin_device_passes', 'reason', 'note', 'granted_at', false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.voucher_revocations', 'reason', 'note', 'revoked_at', false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.voucher_code_reveals', 'reason', 'note', 'revealed_at', false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.posting_review_actions', 'reason', 'note', 'created_at', false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.pms_answer_confirmations', 'reason', 'note', 'recorded_at', false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.pms_answer_confirmations', 'evidence', 'note', 'recorded_at', false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.pms_case_resolutions', 'evidence_ref', 'note', 'resolved_at', false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.financial_recovery_holds', 'resolution_note', 'note', 'resolved_at', false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.card_reversal_reviews', 'resolution_reason', 'note', 'resolved_at', false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.entitlement_transfers', 'reason', 'note', 'created_at', false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.pms_roster_reconciliation_runs', 'reason', 'note', 'run_at', false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.payment_transaction_events', 'detail', 'note', 'received_at', false, 'provider_message') ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.account_password_settings_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.accounting_retention_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.appliance_product_setting_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.assisted_guest_request_events', 'actor', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.assisted_guest_requests', 'created_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.assisted_guest_requests', 'closed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.card_reversal_reviews', 'resolved_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.client_group_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.data_retention_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.device_settings_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.device_slot_actions', 'operator_label', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.guest_data_erasures', 'erased_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.guest_network_replacements', 'created_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.guest_signin_device_passes', 'granted_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.guest_signin_network_pauses', 'ended_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.guest_signin_network_policy_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.guest_signin_protection_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.guest_signin_restrictions', 'released_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.otp_code_reveals', 'revealed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.payment_account_conversion', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.payment_account_conversion_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.payment_provider_account_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.payment_provider_secret_generations', 'created_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.pms_case_resolutions', 'resolved_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.pms_connection_settings_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.pms_reconciliation_settings_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.pms_review_expiry_settings_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.pms_room_inventory_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.pms_roster_reconciliation_runs', 'run_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.self_service_settings_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.site_account_password_settings', 'updated_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.site_accounting_retention', 'updated_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.site_card_payment_setting_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.site_data_retention', 'updated_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.site_device_settings', 'updated_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.site_module_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.site_payment_domain_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.site_self_service_settings', 'updated_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.site_walled_garden_settings', 'updated_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.verification_access_grants', 'cleared_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.voucher_code_reveals', 'operator_label', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.voucher_code_settings_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.walled_garden_settings_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('public.appliance_recovery_events', 'actor', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('public.backup_key_holder_events', 'actor', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('public.backup_key_holders', 'created_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('public.backup_key_holders', 'removed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('public.operator_account_retention', 'updated_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('public.operator_account_retention_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('public.operator_session_policy', 'updated_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('public.operator_session_policy_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('public.operator_signin_protection', 'updated_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('public.operator_signin_protection_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('public.portal_https_settings', 'updated_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('public.portal_https_settings_changes', 'changed_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('public.system_network_audit', 'actor', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.post_stay_profiles', 'pin_hash', 'secret', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.guest_data_request_register', 'created_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.scrub_registry (table_name, column_name, kind, ts_column, handled, jsonb_key) VALUES ('iam_v2.guest_data_request_register', 'answered_by', 'label', NULL, false, NULL) ON CONFLICT DO NOTHING;
+
+-- ROWS A NEW APPLIANCE NEEDS FROM ITS FIRST MINUTE, WHICH THE MIGRATIONS INSERT AND A SCHEMA-ONLY BASELINE LOSES.
+-- (Appended to data-plane/migrations/baseline/0000_production_baseline.sql by scripts/generate-production-baseline.sh; the semantic
+-- catalog compares the row count of each of these tables between the upgrade path and the baseline, so a seed a later migration adds
+-- and this file lacks is a failed gate, not a missing row on an appliance.)
+--
+-- Found when the Phase-5 gate, which builds from the baseline alone, met an erasure ledger with no identity: migration 0148 inserts the
+-- ledger's identity and its first entry, and a baseline built before those rows existed never had them.
+--
+-- These are the migration statements, unchanged, so each appliance mints its OWN ledger identity and first entry (nothing here is a
+-- value copied from another database). Idempotent.
+
+-- 0148: the erasure ledger's identity, and its first entry.
+INSERT INTO iam_v2.ledger_meta DEFAULT VALUES ON CONFLICT DO NOTHING;
+INSERT INTO iam_v2.erasure_ledger (seq, ledger_id, tenant_id, site_id, kind, at_us, body, prev_hash, hash, confirmed)
+SELECT 1, m.ledger_id, '00000000-0000-0000-0000-000000000000', '00000000-0000-0000-0000-000000000000', 'genesis',
+       t.us, '{"note": "ledger created"}', repeat('0', 64),
+       iam_v2.ledger_hash(m.ledger_id, 1, repeat('0', 64), 'genesis', '00000000-0000-0000-0000-000000000000',
+                          '00000000-0000-0000-0000-000000000000', t.us, '{"note": "ledger created"}'),
+       true
+  FROM iam_v2.ledger_meta m, (SELECT (extract(epoch from clock_timestamp()) * 1000000)::bigint AS us) t
+ WHERE NOT EXISTS (SELECT 1 FROM iam_v2.erasure_ledger);
+
+-- 0144: the floor for rows whose age is unknown. A new appliance has no row of unknown age, so the floor is the moment it is built.
+INSERT INTO iam_v2.retention_floor (id, since) VALUES (true, now()) ON CONFLICT (id) DO NOTHING;
