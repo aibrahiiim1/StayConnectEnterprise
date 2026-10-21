@@ -173,7 +173,7 @@ export default function RequestRegisterPage() {
           </CardHeader>
           <CardBody>
             <form className="grid gap-3" onSubmit={extend}>
-              <Field label="Why it needs longer"><Input autoFocus value={extReason} maxLength={500} onChange={(e) => setExtReason(e.target.value)} /></Field>
+              <Field label="Why it needs longer"><Input value={extReason} maxLength={500} onChange={(e) => setExtReason(e.target.value)} /></Field>
               <div className="flex gap-2">
                 <Button type="submit" variant="primary" disabled={busy || extReason.trim().length < 4}>Extend</Button>
                 <Button type="button" variant="outline" onClick={() => { setExtending(null); setExtReason(""); }}>Cancel</Button>
