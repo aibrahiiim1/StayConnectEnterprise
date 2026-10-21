@@ -385,3 +385,33 @@ func TestIntegration_Ledger_TheRuntimeRolesReachOnlyTheFunctions(t *testing.T) {
 		t.Errorf("an entry was left unconfirmed: %s", got)
 	}
 }
+
+// An SFTP server's password and the operator's step-up password both used to be called "password": the first was taken for the second
+// and never reached scd. The server's travels as sftp_password and arrives at scd as password; the operator's never does.
+func TestIntegration_LedgerAdmin_AnSFTPPasswordReachesScdAndTheOperatorsDoesNot(t *testing.T) {
+	f := newAPI(t, "site_admin")
+	scd, rec := fakeLedgerSCD(t)
+	f.app.scd = scd
+	body := map[string]any{"kind": "sftp", "host": "nas", "port": 22, "user": "ledger", "dir": "/ledger", "sftp_password": "SERVER-PW", "fingerprint": "SHA256:x"}
+	// a test needs no step-up and still carries the server's password
+	if st, out := f.do(t, "POST", "/backups/ledger/destination/test", body); st != 200 {
+		t.Fatalf("test = %d %v", st, out)
+	}
+	if c := rec.last("/v1/ledger/destination"); c == nil || c.Body["password"] != "SERVER-PW" || c.Body["test_only"] != true {
+		t.Fatalf("the test did not carry the server's password: %+v", c)
+	}
+	body["password"] = f.password
+	if st, out := f.do(t, "PUT", "/backups/ledger/destination", body); st != 200 {
+		t.Fatalf("save = %d %v", st, out)
+	}
+	c := rec.last("/v1/ledger/destination")
+	if c == nil || c.Body["password"] != "SERVER-PW" {
+		t.Fatalf("the saved destination did not carry the server's password: %+v", c)
+	}
+	if _, has := c.Body["sftp_password"]; has {
+		t.Errorf("the API-only name reached scd")
+	}
+	if c.Body["password"] == f.password {
+		t.Errorf("the operator's step-up password was forwarded as the server's")
+	}
+}

@@ -40,7 +40,7 @@ function payload(f: Form): Record<string, unknown> {
     case "dir": return { kind: "dir", path: f.path.trim() };
     case "sftp": return {
       kind: "sftp", host: f.host.trim(), port: Number(f.port) || 22, user: f.user.trim(), dir: f.dir.trim(),
-      password: f.password, private_key: f.private_key, fingerprint: f.fingerprint,
+      sftp_password: f.password, private_key: f.private_key, fingerprint: f.fingerprint,
     };
     default: return {
       kind: "s3", endpoint: f.endpoint.trim(), region: f.region.trim(), bucket: f.bucket.trim(), prefix: f.prefix.trim(),

@@ -57,6 +57,13 @@ func (s *server) readLedgerBody(w http.ResponseWriter, r *http.Request, needPass
 		s.reauthRefused(w, r, "password confirmation required")
 		return nil, false
 	}
+	// "password" is the operator's own step-up password; an SFTP server's password travels as "sftp_password" so the two cannot
+	// collide (found on PRE-LIVE: with one name, the server's password was taken for the step-up and never reached scd, so password
+	// authentication could not work at all). scd knows it as "password".
+	if v, ok := in["sftp_password"]; ok {
+		delete(in, "sftp_password")
+		in["password"] = v
+	}
 	return in, true
 }
 

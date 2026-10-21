@@ -94,6 +94,29 @@ describe("Ledger card", () => {
     await waitFor(() => expect((screen.getByRole("button", { name: /^save…$/i }) as HTMLButtonElement).disabled).toBe(false));
   });
 
+  it("sends an SFTP server's password under its own name, apart from the operator's step-up password", async () => {
+    ledger = { ...base, state: "not_configured", erasure_available: false, secondary: { ...base.secondary, configured: false, in_sync: false } };
+    post.mockResolvedValue({ fingerprint: "SHA256:abcdef" });
+    put.mockResolvedValue({ ok: true });
+    await renderCards();
+    fireEvent.change(await screen.findByLabelText("Kind of secondary storage"), { target: { value: "sftp" } });
+    fireEvent.change(screen.getByLabelText("Server"), { target: { value: "nas.hotel.example" } });
+    fireEvent.change(screen.getByLabelText("User name"), { target: { value: "ledger" } });
+    fireEvent.change(screen.getByLabelText("Folder on the server"), { target: { value: "/ledger" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "SERVER-PW" } });
+    fireEvent.click(screen.getByRole("button", { name: /check the server.s identity/i }));
+    fireEvent.click(await screen.findByRole("checkbox"));
+    await waitFor(() => expect((screen.getByRole("button", { name: /^save…$/i }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: /^save…$/i }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/password/i), { target: { value: "OPERATOR-PW" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /save and copy the ledger/i }));
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    const body = put.mock.calls[0][1];
+    expect(body.sftp_password).toBe("SERVER-PW");
+    expect(body.password).toBe("OPERATOR-PW");
+  });
+
   it("saves a folder with the password step-up, and sends no credentials in the clear elsewhere", async () => {
     ledger = { ...base, state: "not_configured", erasure_available: false, secondary: { ...base.secondary, configured: false, in_sync: false } };
     put.mockResolvedValue({ ok: true });
