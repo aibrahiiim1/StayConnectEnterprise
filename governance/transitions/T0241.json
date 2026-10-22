@@ -1,0 +1,49 @@
+{
+  "transition_id": "T0241",
+  "seq": 241,
+  "timestamp": "2026-10-22T09:44:41+03:00",
+  "timestamp_derivation": "Computed from the workstation clock when this receipt was written, after the deployment and live verification it records and before the commit that introduces it.",
+  "record_type": "RESTORE_RETENTION_FAILSAFE_DEPLOYED_TO_PRE_LIVE",
+  "authorisation": "D66 (2026-10-22) under the Product Owner's restore-safety mission and 'Final Authorization - Complete GDPR Mission', and the standing PRE-LIVE deployment decision. It did NOT authorise Go-Live, Central deployment or a destructive live restore.",
+  "delivery": {
+    "pull_request": 221,
+    "branch": "delivery/restore-retention-failsafe",
+    "base": "d432e43c0067d5dd114a7bf56867085b88133872",
+    "pr_state": "OPEN until the four gates pass and the protected merge; the merge is authorised by the mission"
+  },
+  "delivered": [
+    "Restore step 'retention': retention applied to the staging data to the end of the backlog before the swap, with the periods in force on the appliance carried in; a failing, timed-out or interrupted run replaces nothing.",
+    "A backup holding older retention rules than the ones in force is refused (fingerprint of the retention functions' definitions and the period tables, compared with the live database).",
+    "One restore deadline (2 h 15 min) containing the retention budget; scd backup-restore waits as long.",
+    "The orphan staging database of an interrupted restore is swept after six hours, regardless of a stale maintenance flag, only while the live database exists.",
+    "Three review findings fixed (rules compatibility, crash cleanup, deadline consistency)."
+  ],
+  "verified": {
+    "drill": "Restore drill against a real PostgreSQL with the real restore code and scd's runtime role: 16/16 PASS (the nine ledger and financial scenarios and seven new ones: period shortened after the backup, defaults, failing and interrupted retention replace nothing and the same restore then succeeds, pre-retention backup refused, older-rules backup refused, dead staging swept, stale maintenance flag does not keep it).",
+    "unit": "go vet and go test ./cmd/scd: the loop, the answer parser, the orphan rule, the deadline arithmetic.",
+    "live": "On PRE-LIVE: the retention loop run to its end on a scratch copy of the live database (1 s, 0 changes); the retention-rules fingerprint of a copy equals the live one and a changed function is detected as older rules; no staging or scratch database left. A destructive restore was NOT run (financial recovery mode); the drill covers it."
+  },
+  "deployment_provenance": "PRE-LIVE 172.21.60.25 read back on 2026-10-22 from the installed bytes: scd 92a60528 (sha256 b8f6ef5aad8d), edged, pmsd and portald 3e30b393 unchanged, netd and acctd dc32a52c unchanged, keybootstrap fa32e3df; all -tags=stayconnect_production, vcs.modified=false; DEPLOYED_BINARIES 6/6 OK. Admin Console release 20261021-130129 unchanged. Schema 0149 unchanged.",
+  "rollback": "scd.bak-pre-92a60528-20261022T064505Z in /opt/stayconnect/bin (then scd.bak-pre-3967b267-*, scd.bak-pre-3e30b393-*); deploy-bins.sh restores a service that does not come up. No database change.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0240."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "d432e43c0067d5dd114a7bf56867085b88133872",
+  "base_note": "Master after the merge of PR #220 (T0240).",
+  "head": "92a60528",
+  "head_note": "The last content commit of branch delivery/restore-retention-failsafe at the time of this receipt; governance commits follow it.",
+  "previous_delivery": "T0240",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
