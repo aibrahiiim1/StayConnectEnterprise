@@ -1,0 +1,4 @@
+commit c31f3ae6fc90071c71cddbb8a3e56b8f891a5fd7
+Date:   Thu Oct 22 10:55:45 2026 +0300
+
+    The change manifest names the T0242 delivery

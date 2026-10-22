@@ -1,0 +1,46 @@
+{
+  "transition_id": "T0242",
+  "seq": 242,
+  "timestamp": "2026-10-22T10:21:00+03:00",
+  "timestamp_derivation": "Computed from the workstation clock after GitHub merged PR #221 and after the merged master's scd was rebuilt, redeployed and read back on PRE-LIVE, and before the commit that introduces this receipt.",
+  "record_type": "RESTORE_RETENTION_FAILSAFE_MERGED_AND_REDEPLOYED_TO_PRE_LIVE",
+  "authorisation": "D66 (2026-10-22) under the Product Owner's restore-safety mission and 'Final Authorization - Complete GDPR Mission', which authorised FULL CHECK, governance, the protected merge and the PRE-LIVE redeployment; po-merge-authorization succeeded on the tested head. It did NOT authorise Go-Live, Central deployment or a destructive live restore.",
+  "merge": {
+    "pull_request": 221,
+    "merge_commit": "652548df4033f22d237dd164d3398a2b31c061a3",
+    "merged_at": "2026-10-22",
+    "parents": [
+      "d432e43c0067d5dd114a7bf56867085b88133872",
+      "16e04052b718"
+    ],
+    "tested_head": "16e04052b718",
+    "gates": "FULL CHECK on the tested head: Project Governance, Phase 3 Software, Phase 4 Financial Core and Phase 5 Post-Stay and Transfer all success.",
+    "tree": "The merge commit's tree is identical to the tree of the tested head (4e239d06f055)."
+  },
+  "review_findings": "Three Codex findings on the first head, all valid and fixed in 92a60528 before the gates ran, each answered and its thread resolved: the retention rules compatibility check (now a fingerprint of the definitions compared with the live database, because the migration ledger is empty on a factory-clean appliance), the orphan cleanup after a crash with a stale maintenance flag, and the restore deadline that did not contain the retention budget.",
+  "deployment_provenance": "PRE-LIVE 172.21.60.25 rebuilt from a clean clone of merged master and read back on 2026-10-22 from the installed bytes: scd 652548df (sha256 f41dd5f6eab7, tags=stayconnect_production, vcs.modified=false); edged, pmsd and portald 3e30b393 unchanged (their source is byte-identical in master); netd and acctd dc32a52c unchanged; keybootstrap fa32e3df unchanged; DEPLOYED_BINARIES 6/6 OK. Admin Console release 20261021-130129 unchanged. Schema 0149 unchanged. Services active, no warnings logged.",
+  "rollback": "scd.bak-pre-652548df-20261022T072030Z in /opt/stayconnect/bin is the previous binary, verified intact (sha256 b8f6ef5aad8d, identical to what was deployed from 92a60528, ELF, executable); then scd.bak-pre-92a60528-*, scd.bak-pre-3967b267-*. deploy-bins.sh restores a service that does not come up. No database change in this delivery.",
+  "cleanup": "No temporary artifacts remain on PRE-LIVE: no staging or scratch databases, no staged files. The workstation build outputs are removed.",
+  "not_verified": "A destructive restore on PRE-LIVE (it would put the site into financial recovery mode; the restore drill against a real PostgreSQL covers it, 16/16). Real phones on the guest Wi-Fi. Customer-specific key holder and secondary-storage setup are operational, not engineering.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0241."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "652548df4033f22d237dd164d3398a2b31c061a3",
+  "base_note": "Master after the merge of PR #221; this record's lineage is built on it.",
+  "head": "652548df",
+  "head_note": "No content commit: governance only. The merged delivery's last content commit is 92a60528.",
+  "previous_delivery": "T0241",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
