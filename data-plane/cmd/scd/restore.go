@@ -325,7 +325,7 @@ func (s *server) backupRestore(w http.ResponseWriter, r *http.Request) {
 
 	// Its own deadline and its own context. A restore outlives any client, and a caller giving up -- or a
 	// request whose context ends the moment this handler returns -- must not kill it halfway.
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), restoreOverallDeadline())
 	go func() {
 		defer cancel()
 		defer restoreInFlight.Store(false)
@@ -471,6 +471,17 @@ func (s *server) runRestore(ctx context.Context, name, identity, by string, rec 
 		ok("ledger", detail)
 	}
 
+	// ---- 3d. retention is applied to the staging data, to the end, with the periods in force HERE (restore_retention.go) -------------
+	// Not after the swap: a run that fails, times out or is interrupted must leave the live data exactly as it was, never a restored
+	// database that serves personal data its retention period has ended.
+	if detail, good := s.restoreRetention(ctx, staging); !good {
+		dropStaging()
+		fail("retention", detail)
+		return
+	} else {
+		ok("retention", detail)
+	}
+
 	// ---- 4. the swap: rename aside, rename in ----------------------------------------------------------
 	//
 	// Connections must be gone first or the rename is refused. The dependent services are stopped rather
@@ -614,26 +625,15 @@ func (s *server) runRestore(ctx context.Context, name, identity, by string, rec 
 		ok("ledger_synced", "both copies of the erasure ledger are in step with the restored database")
 	}
 
-	// ---- 6a2. retention is applied to the restored data NOW, not at the next hourly run --------------------------------
-	// A backup carries every record the hotel's retention periods had already anonymised since it was taken. The retention run
-	// (and the staff and note runs) put that right; running them before the appliance serves again means no expired identifier is
-	// visible for the hour it would otherwise take.
-	retentionDone := true
+	// ---- 6a2. the hourly run is made once more, straight away ------------------------------------------------------------------
+	// Retention was already applied to the staging data before the swap (step 3d). What can be left is the few minutes since then:
+	// records that crossed their cutoff meanwhile. This run takes them now rather than at the next hour; it cannot expose anything
+	// the staging run did not already deal with, so its failure is only reported.
 	{
-		rctx, rcancel := context.WithTimeout(ctx, 30*time.Minute)
-		rerr := s.runDataRetentionComplete(rctx)
+		rctx, rcancel := context.WithTimeout(ctx, 10*time.Minute)
+		s.runDataRetention(rctx)
 		rcancel()
-		if rerr != nil {
-			// Not reported as done: the backlog (or a failing function) is still there, the hourly run goes on with it, and the
-			// operator is told that expired identifiers may still be visible until it finishes.
-			retentionDone = false
-			slog.Warn("retention could not be completed on the restored data", "err", rerr)
-			steps = append(steps, restoreStep{Step: "retention_reapplied", OK: false,
-				Detail: "the retention periods were NOT fully applied to the restored data before it was served (" + tailLine(rerr.Error()) +
-					"); the hourly run continues with the rest, and expired personal data may be visible until it finishes"})
-		} else {
-			ok("retention_reapplied", "the retention periods were applied to the restored data, to the end of the backlog, before it was served")
-		}
+		ok("retention_reapplied", "the retention run was made once more on the live data, for whatever crossed its cutoff since the restored data was prepared")
 	}
 
 	// ---- 6b. keep exactly ONE database aside -----------------------------------------------------------
@@ -667,11 +667,8 @@ func (s *server) runRestore(ctx context.Context, name, identity, by string, rec 
 	s.startDependents(ctx)
 	ok("services", "the appliance is serving again")
 
-	summary := "restored from " + in.Name + "; the previous database is kept as " + aside
-	if !retentionDone {
-		summary += "; retention is still being applied to it (see the retention_reapplied step)"
-	}
-	s.finishRestore(in.Name, started, steps, true, summary)
+	s.finishRestore(in.Name, started, steps, true,
+		"restored from "+in.Name+"; the previous database is kept as "+aside)
 }
 
 // resetPool replaces scd's own database connections after the swap.

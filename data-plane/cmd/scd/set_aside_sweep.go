@@ -32,6 +32,25 @@ func asideExpired(name string, now time.Time, days int) bool {
 	return now.Sub(at) > time.Duration(days)*24*time.Hour
 }
 
+var reStaging = regexp.MustCompile(`^restore_(\d{8}t\d{6}z)$`)
+
+// stagingOrphanAfter is how long a restore's staging database may exist before it is called the remains of a restore that was
+// interrupted. A restore runs minutes (its longest step, retention, is bounded to an hour); six hours is a dead one.
+const stagingOrphanAfter = 6 * time.Hour
+
+// stagingOrphaned says whether a restore staging database is the remains of an interrupted restore. A name that is not exactly ours is never orphaned.
+func stagingOrphaned(name string, now time.Time) bool {
+	m := reStaging.FindStringSubmatch(name)
+	if m == nil {
+		return false
+	}
+	at, err := time.Parse("20060102t150405z", m[1])
+	if err != nil {
+		return false
+	}
+	return now.Sub(at) > stagingOrphanAfter
+}
+
 func setAsideDays() int {
 	for _, r := range readRetention() {
 		if r.Key == "SET_ASIDE_DAYS" {
@@ -44,27 +63,52 @@ func setAsideDays() int {
 	return 14
 }
 
+// sweepOrphanStaging removes the staging database of a restore that was interrupted -- a FULL COPY of the backup's personal data, no
+// retention applied, serving nobody. It does NOT wait for the maintenance flag to clear: a process killed mid-restore leaves that flag
+// behind too, and the staging copy must go all the same. It is safe at any time because (a) a running restore is bounded far below the
+// age at which a staging database is called dead (restoreOverallDeadline against stagingOrphanAfter), and (b) it is only done while the
+// live database exists: between the two renames of the swap the staging database IS the restored data, and nothing is removed then.
+// It returns the names still present that may belong to a running restore.
+func sweepOrphanStaging(ctx context.Context) (remaining []string, liveExists bool, state string) {
+	state, err := execPsql(ctx, "postgres", "SELECT datname FROM pg_database WHERE datname = '"+pgDatabase+`' OR datname LIKE 'restore\_%' OR datname LIKE '`+pgDatabase+`\_before\_%';`)
+	if err != nil {
+		return nil, false, ""
+	}
+	for _, n := range strings.Fields(state) {
+		if n == pgDatabase {
+			liveExists = true
+		}
+	}
+	for _, n := range strings.Fields(state) {
+		if !strings.HasPrefix(n, "restore_") {
+			continue
+		}
+		if liveExists && stagingOrphaned(n, time.Now().UTC()) {
+			if _, derr := execPsql(ctx, "postgres", "DROP DATABASE IF EXISTS "+n+" WITH (FORCE);"); derr == nil {
+				slog.Warn("the staging database of an interrupted restore was removed", "database", n)
+				continue
+			}
+			slog.Warn("the staging database of an interrupted restore could not be removed", "database", n)
+		}
+		remaining = append(remaining, n)
+	}
+	return remaining, liveExists, state
+}
+
 // sweepSetAside drops the set-aside databases that have expired. It returns how many were dropped.
 func (s *server) sweepSetAside(ctx context.Context) int {
+	remaining, live, state := sweepOrphanStaging(ctx)
 	if readMaintenance().Active {
 		return 0
 	}
 	// Only when the live database is where it should be and no restore has left a staging database: after a restore that
 	// failed half way, the set-aside database may be the only copy of the data, and no age makes it disposable.
-	state, err := execPsql(ctx, "postgres", "SELECT datname FROM pg_database WHERE datname = '"+pgDatabase+`' OR datname LIKE 'restore\_%' OR datname LIKE '`+pgDatabase+`\_before\_%';`)
-	if err != nil {
+	if state == "" {
 		return 0
 	}
-	names := strings.Fields(state)
-	live := false
-	for _, n := range names {
-		if n == pgDatabase {
-			live = true
-		}
-		if strings.HasPrefix(n, "restore_") {
-			slog.Warn("set-aside databases are kept: a restore staging database exists", "database", n)
-			return 0
-		}
+	if len(remaining) > 0 {
+		slog.Warn("set-aside databases are kept: a restore staging database exists", "database", remaining[0])
+		return 0
 	}
 	if !live {
 		slog.Error("set-aside databases are kept: the live database is missing", "database", pgDatabase)

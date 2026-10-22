@@ -249,7 +249,7 @@ func (d *drill) restore(name, identity string) map[string]any {
 	if err != nil {
 		d.t.Fatalf("marker: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), restoreOverallDeadline()) // the deadline the real handler gives a restore
 	defer cancel()
 	d.s.runRestore(ctx, name, identity, "drill", rec, time.Now().UTC())
 	b, err := os.ReadFile(restoreResultFile)

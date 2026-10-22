@@ -1,0 +1,4 @@
+commit 08603cad3eafe984eaa02183fdf41b0b9045a46c
+Date:   Thu Oct 22 09:46:54 2026 +0300
+
+    The change manifest names the restore retention fail-safe delivery

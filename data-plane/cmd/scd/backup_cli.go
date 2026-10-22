@@ -113,7 +113,7 @@ func backupRestoreMain(args []string) int {
 		return 1
 	}
 	fmt.Println("backup-restore: started; waiting for the recorded outcome")
-	for time.Since(started) < 50*time.Minute {
+	for time.Since(started) < restoreOverallDeadline()+5*time.Minute {
 		time.Sleep(5 * time.Second)
 		c, rb, err := scdCall(http.MethodGet, "/v1/backup/last-restore", nil, 30*time.Second)
 		if err != nil || c != http.StatusOK {

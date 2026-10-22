@@ -992,6 +992,20 @@
       "does_not_authorize": "Go-Live or any official guest-production use; Central deployment; removing any earlier backup or recovery material; any infrastructure change beyond PRE-LIVE; a legal GDPR claim.",
       "implementation": "Branch delivery/gdpr, PR #219, recorded by T0239. scd backups.go, restore_financial.go, backup_earlier.go, backup_cli.go; edged ledger_admin.go and resources_backups.go; Hotel Admin scheduled-backups-card.tsx; scripts/edge-migrate.sh; deploy/scripts/install-service-units.sh (retires the nightly units); docs/BACKUP_AND_RESTORE.md.",
       "supersedes_in_part": "D59 (the site-backup and database-backup retention settings)"
+    },
+    {
+      "id": "D66",
+      "decided_on": "2026-10-22",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-22",
+      "status": "ACTIVE",
+      "title": "A RESTORE CAN NEVER SERVE PERSONAL DATA PAST ITS RETENTION PERIOD (2026-10-22). Retention is applied to the STAGING data, to the end of the backlog, before the restored database can become live (restore step 'retention'); a run that fails, times out or is interrupted ends the restore with NOTHING replaced (live data, restore marker and staging all left clean) and the restore can be run again. The retention periods in force on this appliance, and the history of their changes, are carried into the staging data first, so a period shortened after the backup is not undone by it and a hotel on the defaults gets the defaults. A backup is accepted only when the retention rules it holds (the definitions of the retention, anonymisation, scrubbing and assisted-request functions and the shape of the period tables) are identical to those in force; the comparison is of definitions, not of a migration number, because the ledger is empty on a factory-clean appliance. The restore has one deadline of 2 h 15 min that contains the retention budget (45 min before, 60 retention, 30 after). The staging database an interrupted restore leaves behind (a full copy of personal data) is removed by the hourly sweep once it is six hours old, even when the crash left the maintenance flag set, and only while the live database exists. The post-swap retention run stays as one more pass for the minutes since. Changes no approved product behaviour: retention does what and when it did; only where the restore runs it and what it refuses to do without it.",
+      "authorization_evidence": "The Product Owner's missions of 2026-10-22: 'Resolve the remaining GDPR restore safety issue and complete the already-authorized delivery' (restoring an older backup must never expose personal data whose retention period has expired, even if retention fails, times out or is interrupted) and the 'Final Authorization - Complete GDPR Mission', which authorised the three Codex review findings' fixes, FULL CHECK, governance, the protected merge and the PRE-LIVE redeployment.",
+      "does_not_authorize": "Go-Live or any official guest-production use; Central deployment; a destructive live restore; a legal GDPR claim; any change to the backup architecture, the dual Erasure Ledger or the financial safeguards.",
+      "implementation": "Branch delivery/restore-retention-failsafe, PR #221, recorded by T0241. scd restore_retention.go, restore.go, set_aside_sweep.go, backup_cli.go; restore drill scenarios in restore_retention_integration_test.go; docs/BACKUP_AND_RESTORE.md (Retention and a restore).",
+      "supersedes_in_part": "D65 (the restore's retention step ran after the swap and could fail without stopping the restore)"
     }
   ]
 }
