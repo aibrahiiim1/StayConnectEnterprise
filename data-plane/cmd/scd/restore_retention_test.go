@@ -86,3 +86,39 @@ func TestStagingOrphaned(t *testing.T) {
 		}
 	}
 }
+
+func TestTheRestoreDeadlineContainsTheRetentionBudgetAndTheStepsAroundIt(t *testing.T) {
+	if got := restoreOverallDeadline(); got != restoreBeforeRetentionBudget+restoreRetentionDeadline+restoreAfterRetentionBudget {
+		t.Fatalf("overall deadline %s", got)
+	}
+	if restoreOverallDeadline() >= stagingOrphanAfter {
+		t.Fatalf("a running restore (%s) can outlive the age at which its staging database is called dead (%s)", restoreOverallDeadline(), stagingOrphanAfter)
+	}
+	// Full budget when the restore has all its time left.
+	ctx, cancel := context.WithTimeout(context.Background(), restoreOverallDeadline())
+	defer cancel()
+	c, cancel2, ok := retentionContext(ctx)
+	defer cancel2()
+	dl, _ := c.Deadline()
+	if !ok || time.Until(dl) < restoreRetentionDeadline-time.Minute {
+		t.Fatalf("retention was not given its %s budget: ok=%v left=%s", restoreRetentionDeadline, ok, time.Until(dl))
+	}
+	// The steps after it keep their time even when the earlier steps overran.
+	short, cancel3 := context.WithTimeout(context.Background(), restoreAfterRetentionBudget+10*time.Minute)
+	defer cancel3()
+	c2, cancel4, ok2 := retentionContext(short)
+	defer cancel4()
+	dl2, _ := c2.Deadline()
+	if !ok2 || time.Until(dl2) > 10*time.Minute+time.Second {
+		t.Fatalf("retention may eat the time the swap needs: ok=%v left=%s", ok2, time.Until(dl2))
+	}
+	// Nothing left to give: refused, not run.
+	none, cancel5 := context.WithTimeout(context.Background(), restoreAfterRetentionBudget)
+	defer cancel5()
+	if _, cancel6, ok3 := retentionContext(none); ok3 {
+		cancel6()
+		t.Fatal("retention was started with no time to spare")
+	} else {
+		cancel6()
+	}
+}

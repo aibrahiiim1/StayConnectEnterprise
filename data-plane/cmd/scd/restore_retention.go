@@ -31,6 +31,34 @@ var retentionGuestFns = []string{"iam_v2.run_data_retention", "public.run_data_r
 // is minutes) but not endless.
 var restoreRetentionDeadline = 60 * time.Minute
 
+// The restore as a whole has one deadline that CONTAINS the retention budget: the steps before it (safety backup, load, key holders,
+// ledger) keep their 45 minutes, retention keeps its own, and the steps after it (quiesce, swap, privileges, integrity, services) keep 30
+// more -- a deadline that ran out between the renames would be worse than no deadline.
+const (
+	restoreBeforeRetentionBudget = 45 * time.Minute
+	restoreAfterRetentionBudget  = 30 * time.Minute
+)
+
+func restoreOverallDeadline() time.Duration {
+	return restoreBeforeRetentionBudget + restoreRetentionDeadline + restoreAfterRetentionBudget
+}
+
+// retentionContext gives the step its own budget out of what the restore has left, and never so much that the steps after it have
+// less than restoreAfterRetentionBudget. enough=false means there is not enough time left to run it safely.
+func retentionContext(ctx context.Context) (context.Context, context.CancelFunc, bool) {
+	budget := restoreRetentionDeadline
+	if dl, has := ctx.Deadline(); has {
+		if left := time.Until(dl) - restoreAfterRetentionBudget; left < budget {
+			budget = left
+		}
+	}
+	if budget < time.Minute {
+		return ctx, func() {}, false
+	}
+	c, cancel := context.WithTimeout(ctx, budget)
+	return c, cancel, true
+}
+
 var uuidLiteral = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // retentionPolicyTables are the tables that hold the periods and the history of their changes. rows says how to select this site's rows.
@@ -118,6 +146,32 @@ func runRetentionToEnd(ctx context.Context, pass func(ctx context.Context, fn st
 	}
 }
 
+// retentionRulesFingerprint identifies the retention RULES a database holds: the definition of every function that decides what is
+// anonymised and how (the retention runs, the anonymisation they call, the scrubbing, the assisted-request expiry) and the shape of the
+// tables holding the periods. A backup whose schema is older still HAS functions of those names, but older implementations of them --
+// 0143's run_data_retention, for one, never anonymises a device with no first/last seen, which 0144 and 0147 fixed -- so restoring it
+// would serve identifiers the rules in force would have removed.
+//
+// The comparison is against the LIVE database, which is what is in force here, and not against a schema version: the migration ledger is
+// empty on an appliance built from the factory-clean baseline, so it cannot be the authority, and a definition-level comparison needs no
+// number to be kept up to date when the rules change.
+func retentionRulesFingerprint(ctx context.Context, db string) (string, error) {
+	out, err := execPsql(ctx, db, `SELECT md5(
+  coalesce((SELECT string_agg(pg_get_functiondef(p.oid), E'\n' ORDER BY n.nspname, p.proname, pg_get_function_identity_arguments(p.oid))
+              FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+             WHERE n.nspname IN ('iam_v2','public') AND p.prokind = 'f'
+               AND p.proname ~ '(retention|anonymis|^scrub_|expire_assisted)'), '')
+  || '#' ||
+  coalesce((SELECT string_agg(table_schema || '.' || table_name || '.' || column_name || ':' || data_type || ':' || is_nullable || ':' || coalesce(column_default, ''),
+                              E'\n' ORDER BY table_schema, table_name, ordinal_position)
+              FROM information_schema.columns
+             WHERE (table_schema, table_name) IN (('iam_v2','site_data_retention'), ('public','operator_account_retention'), ('iam_v2','retention_floor'))), ''))`)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // retentionFunctionsPresent says whether the staging database can run every retention function. A backup older than the retention
 // programme cannot: restoring it would put back data no retention was ever applied to, so it is refused (the schema must be brought forward
 // first, which is a deployment, not a restore from the screen).
@@ -187,15 +241,31 @@ func (s *server) restoreRetention(ctx context.Context, staging string) (detail s
 	if !uuidLiteral.MatchString(tenant) || !uuidLiteral.MatchString(site) {
 		return "this appliance's site identity is not known, so retention could not be applied to the restored data and nothing was replaced", false
 	}
-	ctx, cancel := context.WithTimeout(ctx, restoreRetentionDeadline)
+	ctx, cancel, enough := retentionContext(ctx)
 	defer cancel()
+	if !enough {
+		return "too little of the restore's time was left to apply retention safely, so nothing was replaced; the restore can be run again", false
+	}
 	present, err := retentionFunctionsPresent(ctx, staging)
 	if err != nil {
 		return "the restored data could not be examined for its retention functions, so nothing was replaced: " + err.Error(), false
 	}
 	if !present {
 		return "this backup predates data retention, so restoring it would bring back personal data that no retention period was ever applied to. " +
-			"Nothing was replaced. Restore a backup taken after the retention programme (migration 0149 or later), or bring the schema forward first.", false
+			"Nothing was replaced. Restore a backup taken after the retention programme, or bring the schema forward first.", false
+	}
+	liveRules, err := retentionRulesFingerprint(ctx, pgDatabase)
+	if err != nil {
+		return "the retention rules in force could not be read, so nothing was replaced: " + err.Error(), false
+	}
+	backupRules, err := retentionRulesFingerprint(ctx, staging)
+	if err != nil {
+		return "the retention rules in the restored data could not be read, so nothing was replaced: " + err.Error(), false
+	}
+	if liveRules != backupRules {
+		return "this backup holds older retention rules than the ones in force on this appliance (its retention functions differ), so restoring it would " +
+			"leave personal data the current rules remove. Nothing was replaced. Restore a backup taken since the appliance's schema was last brought " +
+			"forward; the pre-change backup of a deployment is restored by rolling that deployment back, not from the screen.", false
 	}
 	carried, err := carryRetentionPolicy(ctx, pgDatabase, staging, tenant, site)
 	if err != nil {

@@ -207,3 +207,51 @@ func TestDrill_AnInterruptedRestoresStagingDatabaseIsSweptWhenDead(t *testing.T)
 		t.Errorf("a staging database that may still be in use was removed: %s", got)
 	}
 }
+
+// A backup whose retention functions differ from the ones in force has older rules: refused, nothing replaced. (The drill's migration ledger
+// is empty, as on a factory-clean appliance, which is why the comparison is of definitions and not of a version number.)
+func TestDrill_ABackupWithOlderRetentionRulesIsRefused(t *testing.T) {
+	d := newDrill(t)
+	backup := d.takeBackup()
+	db := "restore_probe_rules"
+	d.stagingFromBackup(backup, db)
+	ctx := context.Background()
+	same, err := retentionRulesFingerprint(ctx, db)
+	live, err2 := retentionRulesFingerprint(ctx, pgDatabase)
+	if err != nil || err2 != nil || same != live || same == "" {
+		t.Fatalf("a backup of this very schema must carry the rules in force: %q vs %q (%v %v)", same, live, err, err2)
+	}
+	// make one retention function differ, as an older implementation would
+	if _, err := execPsql(ctx, db, `ALTER FUNCTION iam_v2.run_staff_note_retention(uuid,uuid,integer) SET search_path TO 'iam_v2'`); err != nil {
+		t.Fatal(err)
+	}
+	detail, ok := d.s.restoreRetention(ctx, db)
+	if ok || !strings.Contains(detail, "older retention rules") || !strings.Contains(detail, "Nothing was replaced") {
+		t.Fatalf("an older-rules backup was accepted: %v %q", ok, detail)
+	}
+}
+
+// A process killed mid-restore leaves the maintenance flag behind as well: the dead staging copy is removed regardless, and what may still
+// be a running restore is kept.
+func TestDrill_AStaleMaintenanceFlagDoesNotKeepADeadStagingCopy(t *testing.T) {
+	d := newDrill(t)
+	ctx := context.Background()
+	dead := "restore_" + strings.ToLower(time.Now().UTC().Add(-8*time.Hour).Format("20060102T150405Z"))
+	if _, err := execPsql(ctx, "postgres", "CREATE DATABASE "+dead); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = execPsql(context.Background(), "postgres", "DROP DATABASE IF EXISTS "+dead+" WITH (FORCE)")
+	})
+	if err := maintenanceOn("restore", "x"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(maintenanceOff)
+	d.s.sweepSetAside(ctx)
+	if got := d.stagingDatabases(); strings.Contains(got, dead) {
+		t.Errorf("the maintenance flag kept the dead staging copy of personal data: %s", got)
+	}
+	if !readMaintenance().Active {
+		t.Errorf("the sweep cleared the maintenance flag, which it must never do")
+	}
+}

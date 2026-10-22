@@ -127,13 +127,28 @@ and both are enforced **before the restored data can be live** (step *retention*
    secondary storage setting are. A hotel that shortened a period after the backup was taken keeps the shorter period; a hotel with no period
    set (the defaults apply) gets the defaults, not whatever the backup held.
 2. **Retention runs to the end on the staging data.** Every retention function (guest data, the public-schema tables, staff notes, staff
-   accounts and addresses) is run in batches until one whole pass changes nothing. **Any failure, a timeout (60 minutes) or an interruption ends
+   accounts and addresses) is run in batches until one whole pass changes nothing. **Any failure, a timeout or an interruption ends
    the restore with nothing replaced**: the live database is exactly as it was, the restore marker has not moved, and the staging copy is dropped.
    The restore can simply be run again. The hourly run once more on the live data afterwards only covers the minutes since.
 
-A backup that **predates the retention functions** (taken before migration 0147/0149) is refused with nothing replaced: restoring it would bring
-back personal data no retention period was ever applied to. If the process is killed mid-restore, the staging database it leaves (a full copy of
-personal data) is removed by the hourly sweep once it is older than six hours.
+**Deadlines.** The restore as a whole has one deadline (45 minutes for the steps before retention, 60 for retention itself, 30 for the steps
+after it: `restoreOverallDeadline`, 2 h 15 min). Retention is given its own 60 minutes out of what is left but never so much that the swap and
+the steps after it have less than their 30; if too little is left the restore stops with nothing replaced. `scd backup-restore` waits that
+long plus five minutes.
+
+**Older retention rules.** A backup is refused, with nothing replaced, unless the retention rules it holds are the ones in force on this
+appliance: the definitions of every function that decides what is anonymised (the retention runs, the anonymisation they call, the
+scrubbing, the assisted-request expiry) and the shape of the tables holding the periods are fingerprinted in the backup and in the live
+database and must be identical (`retentionRulesFingerprint`). A backup from migrations 0143-0146 *has* functions of the same names but
+older implementations that would leave identifiers the current rules remove. The comparison is of definitions, not of a version number,
+because the migration ledger is empty on an appliance built from the factory-clean baseline. The pre-change backup of a deployment that
+changed the retention rules is therefore restored by rolling that deployment back (binaries and `.down` migrations), not from the screen.
+A backup that predates the retention programme altogether is refused the same way.
+
+**After a crash.** If `scd` is killed mid-restore, the staging database it leaves (a full copy of personal data) is removed by the hourly
+sweep once it is six hours old (a running restore cannot reach that age) -- **even though the crash also leaves the maintenance flag set**, which
+the sweep never clears -- and only while the live database exists: between the two renames of the swap the staging database *is* the restored
+data and nothing is removed.
 
 After a restore, client internet access runs normally and **money movement is held** until an operator reconciles every item that was in
 flight when the backup was taken (Hotel Admin → Financial recovery). Nothing is replayed automatically.

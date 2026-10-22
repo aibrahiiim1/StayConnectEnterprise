@@ -325,7 +325,7 @@ func (s *server) backupRestore(w http.ResponseWriter, r *http.Request) {
 
 	// Its own deadline and its own context. A restore outlives any client, and a caller giving up -- or a
 	// request whose context ends the moment this handler returns -- must not kill it halfway.
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), restoreOverallDeadline())
 	go func() {
 		defer cancel()
 		defer restoreInFlight.Store(false)

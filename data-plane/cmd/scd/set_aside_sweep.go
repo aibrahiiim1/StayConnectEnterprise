@@ -63,40 +63,51 @@ func setAsideDays() int {
 	return 14
 }
 
-// sweepSetAside drops the set-aside databases that have expired. It returns how many were dropped.
-func (s *server) sweepSetAside(ctx context.Context) int {
-	if readMaintenance().Active {
-		return 0
-	}
-	// Only when the live database is where it should be and no restore has left a staging database: after a restore that
-	// failed half way, the set-aside database may be the only copy of the data, and no age makes it disposable.
+// sweepOrphanStaging removes the staging database of a restore that was interrupted -- a FULL COPY of the backup's personal data, no
+// retention applied, serving nobody. It does NOT wait for the maintenance flag to clear: a process killed mid-restore leaves that flag
+// behind too, and the staging copy must go all the same. It is safe at any time because (a) a running restore is bounded far below the
+// age at which a staging database is called dead (restoreOverallDeadline against stagingOrphanAfter), and (b) it is only done while the
+// live database exists: between the two renames of the swap the staging database IS the restored data, and nothing is removed then.
+// It returns the names still present that may belong to a running restore.
+func sweepOrphanStaging(ctx context.Context) (remaining []string, liveExists bool, state string) {
 	state, err := execPsql(ctx, "postgres", "SELECT datname FROM pg_database WHERE datname = '"+pgDatabase+`' OR datname LIKE 'restore\_%' OR datname LIKE '`+pgDatabase+`\_before\_%';`)
 	if err != nil {
-		return 0
+		return nil, false, ""
 	}
-	names := strings.Fields(state)
-	live, staging := false, ""
-	for _, n := range names {
+	for _, n := range strings.Fields(state) {
 		if n == pgDatabase {
-			live = true
+			liveExists = true
 		}
+	}
+	for _, n := range strings.Fields(state) {
 		if !strings.HasPrefix(n, "restore_") {
 			continue
 		}
-		// A restore that was interrupted (power, a kill, a crash) leaves its staging database: a FULL COPY of the backup's personal
-		// data that no retention was ever applied to, serving nobody and never cleaned. Once it is plainly dead it is dropped; the live
-		// database was never touched by it. A younger one is a restore that may still be running.
-		if stagingOrphaned(n, time.Now().UTC()) {
+		if liveExists && stagingOrphaned(n, time.Now().UTC()) {
 			if _, derr := execPsql(ctx, "postgres", "DROP DATABASE IF EXISTS "+n+" WITH (FORCE);"); derr == nil {
 				slog.Warn("the staging database of an interrupted restore was removed", "database", n)
 				continue
 			}
 			slog.Warn("the staging database of an interrupted restore could not be removed", "database", n)
 		}
-		staging = n
+		remaining = append(remaining, n)
 	}
-	if staging != "" {
-		slog.Warn("set-aside databases are kept: a restore staging database exists", "database", staging)
+	return remaining, liveExists, state
+}
+
+// sweepSetAside drops the set-aside databases that have expired. It returns how many were dropped.
+func (s *server) sweepSetAside(ctx context.Context) int {
+	remaining, live, state := sweepOrphanStaging(ctx)
+	if readMaintenance().Active {
+		return 0
+	}
+	// Only when the live database is where it should be and no restore has left a staging database: after a restore that
+	// failed half way, the set-aside database may be the only copy of the data, and no age makes it disposable.
+	if state == "" {
+		return 0
+	}
+	if len(remaining) > 0 {
+		slog.Warn("set-aside databases are kept: a restore staging database exists", "database", remaining[0])
 		return 0
 	}
 	if !live {
