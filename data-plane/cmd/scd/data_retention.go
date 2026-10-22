@@ -92,24 +92,6 @@ func errorsFrom(msgs []string) []error {
 	return out
 }
 
-// runDataRetentionComplete is the run a RESTORE needs: it works the backlog off to the end (bounded only by ctx) and says whether it
-// got there, because a restored backup can hold more expired rows than one hourly tick is meant to take and the restore must not
-// report retention as reapplied while expired identifiers are still there to be served.
-func (s *server) runDataRetentionComplete(ctx context.Context) error {
-	if s.db == nil || s.tenID == "" || s.siteID == "" {
-		return nil
-	}
-	complete, err := s.retentionPasses(ctx, 0)
-	s.runStaffRetention(ctx)
-	if err != nil {
-		return err
-	}
-	if !complete {
-		return errors.New("the retention run did not reach the end of its backlog")
-	}
-	return nil
-}
-
 // runStaffRetention anonymises staff accounts disabled for longer than the appliance's setting and clears staff
 // addresses older than the activity-log period (migration 0138, GDPR audit B4). One call: it is bounded itself.
 func (s *server) runStaffRetention(ctx context.Context) {

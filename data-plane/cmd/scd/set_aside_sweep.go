@@ -32,6 +32,25 @@ func asideExpired(name string, now time.Time, days int) bool {
 	return now.Sub(at) > time.Duration(days)*24*time.Hour
 }
 
+var reStaging = regexp.MustCompile(`^restore_(\d{8}t\d{6}z)$`)
+
+// stagingOrphanAfter is how long a restore's staging database may exist before it is called the remains of a restore that was
+// interrupted. A restore runs minutes (its longest step, retention, is bounded to an hour); six hours is a dead one.
+const stagingOrphanAfter = 6 * time.Hour
+
+// stagingOrphaned says whether a restore staging database is the remains of an interrupted restore. A name that is not exactly ours is never orphaned.
+func stagingOrphaned(name string, now time.Time) bool {
+	m := reStaging.FindStringSubmatch(name)
+	if m == nil {
+		return false
+	}
+	at, err := time.Parse("20060102t150405z", m[1])
+	if err != nil {
+		return false
+	}
+	return now.Sub(at) > stagingOrphanAfter
+}
+
 func setAsideDays() int {
 	for _, r := range readRetention() {
 		if r.Key == "SET_ASIDE_DAYS" {
@@ -56,15 +75,29 @@ func (s *server) sweepSetAside(ctx context.Context) int {
 		return 0
 	}
 	names := strings.Fields(state)
-	live := false
+	live, staging := false, ""
 	for _, n := range names {
 		if n == pgDatabase {
 			live = true
 		}
-		if strings.HasPrefix(n, "restore_") {
-			slog.Warn("set-aside databases are kept: a restore staging database exists", "database", n)
-			return 0
+		if !strings.HasPrefix(n, "restore_") {
+			continue
 		}
+		// A restore that was interrupted (power, a kill, a crash) leaves its staging database: a FULL COPY of the backup's personal
+		// data that no retention was ever applied to, serving nobody and never cleaned. Once it is plainly dead it is dropped; the live
+		// database was never touched by it. A younger one is a restore that may still be running.
+		if stagingOrphaned(n, time.Now().UTC()) {
+			if _, derr := execPsql(ctx, "postgres", "DROP DATABASE IF EXISTS "+n+" WITH (FORCE);"); derr == nil {
+				slog.Warn("the staging database of an interrupted restore was removed", "database", n)
+				continue
+			}
+			slog.Warn("the staging database of an interrupted restore could not be removed", "database", n)
+		}
+		staging = n
+	}
+	if staging != "" {
+		slog.Warn("set-aside databases are kept: a restore staging database exists", "database", staging)
+		return 0
 	}
 	if !live {
 		slog.Error("set-aside databases are kept: the live database is missing", "database", pgDatabase)

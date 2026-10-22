@@ -103,7 +103,8 @@ services are proven stopped**:
 2. **ledger_prepare** -- every erasure the live database knows is made durable outside it.
 3. **safety_backup** -- a `pre-restore` backup of the current state (same engine, encrypted, proven restorable).
 4. **maintenance**, **load** (into a staging database), **key_holders**, **ledger_storage**, **ledger** (the Erasure Ledger is applied to
-   the *staging* data -- see below).
+   the *staging* data -- see below), **retention** (the retention periods in force on this appliance are applied to the *staging* data, to the
+   end of the backlog -- see *Retention and a restore* below).
 5. **quiesce** -- every service that can write financial state (`edged`, `pmsd`, `acctd`, `portald`) is stopped and then **proven stopped**
    (`systemctl is-active`); one that is still running, or whose state cannot be read, aborts the restore with nothing replaced.
 6. **financial_marker** -- the management marker `/etc/stayconnect/financial-restore-generation.json` is advanced **before** the swap
@@ -114,7 +115,25 @@ services are proven stopped**:
 9. **integrity**, then **hypertables** (TimescaleDB's hypertables must be *registered*, not merely shaped: an unregistered one refuses every
    write) and **financial_recovery** (`iam_v2.p4_record_supported_restore`: the site enters `FINANCIAL_RECOVERY_MODE`). A failure of any of
    these renames the original database back.
-10. **ledger_synced**, **retention_reapplied**, **housekeeping**, **services**.
+10. **ledger_synced**, **retention_reapplied** (one more run on the live data, for whatever crossed its cutoff in the minutes since the staging run), **housekeeping**, **services**.
+
+### Retention and a restore
+
+A restored backup is older than the hotel's retention periods allow, and the periods themselves live in the database. Two rules make that safe,
+and both are enforced **before the restored data can be live** (step *retention*, `restore_retention.go`):
+
+1. **The periods in force on this appliance win.** The retention settings (`iam_v2.site_data_retention`, `public.operator_account_retention`)
+   and the history of their changes are carried from the live database into the staging data, exactly as the backup key holders and the
+   secondary storage setting are. A hotel that shortened a period after the backup was taken keeps the shorter period; a hotel with no period
+   set (the defaults apply) gets the defaults, not whatever the backup held.
+2. **Retention runs to the end on the staging data.** Every retention function (guest data, the public-schema tables, staff notes, staff
+   accounts and addresses) is run in batches until one whole pass changes nothing. **Any failure, a timeout (60 minutes) or an interruption ends
+   the restore with nothing replaced**: the live database is exactly as it was, the restore marker has not moved, and the staging copy is dropped.
+   The restore can simply be run again. The hourly run once more on the live data afterwards only covers the minutes since.
+
+A backup that **predates the retention functions** (taken before migration 0147/0149) is refused with nothing replaced: restoring it would bring
+back personal data no retention period was ever applied to. If the process is killed mid-restore, the staging database it leaves (a full copy of
+personal data) is removed by the hourly sweep once it is older than six hours.
 
 After a restore, client internet access runs normally and **money movement is held** until an operator reconciles every item that was in
 flight when the backup was taken (Hotel Admin → Financial recovery). Nothing is replayed automatically.
