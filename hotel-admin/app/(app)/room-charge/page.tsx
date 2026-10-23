@@ -88,7 +88,7 @@ export default function RoomChargePage() {
       icon={<BedDouble />}
       eyebrow="Hotel"
       title="Room charge"
-      description="Approve a PMS interface for room charge, so a verified guest can charge an Internet package to their room."
+      description="Approve a PMS interface so verified guests can charge an Internet package to their room."
       help={
         <>
           <HelpSection title="What approval records">

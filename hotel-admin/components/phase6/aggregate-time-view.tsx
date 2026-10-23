@@ -4,7 +4,7 @@
 // Omit guest identity because operators need only package and device time totals here.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Hourglass, Timer, Wifi } from "lucide-react";
+import { Hourglass, Timer, Wifi, Ban } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import { PageHeader, PageShell, StatCard } from "@/components/ui/page";
@@ -106,7 +106,7 @@ export function AggregateTimeView() {
         <div className="grid gap-4 sm:grid-cols-3">
           <StatCard label="Budgets in use" value={counts.active.toLocaleString()} icon={<Timer />} tone="primary" />
           <StatCard label="Devices connected on them" value={counts.devices.toLocaleString()} icon={<Wifi />} />
-          <StatCard label="Ended" value={counts.ended.toLocaleString()} hint="Time used up, end date reached, or validity over" />
+          <StatCard icon={<Ban />} label="Ended" value={counts.ended.toLocaleString()} hint="Time used up, end date reached, or validity over" />
         </div>
       )}
 

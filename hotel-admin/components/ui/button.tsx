@@ -28,8 +28,8 @@ const buttonVariants = cva(
       size: {
         // Coarse pointers get a 44px touch target.
         xs: "h-7 px-2 text-xs [&_svg]:size-3.5 pointer-coarse:min-h-11",
-        sm: "h-8 px-3 text-[0.8125rem] font-semibold [&_svg]:size-4 pointer-coarse:min-h-11",
-        md: "h-9 px-3.5 text-[0.8125rem] font-semibold [&_svg]:size-4 pointer-coarse:min-h-11",
+        sm: "h-8 px-3 text-label [&_svg]:size-4 pointer-coarse:min-h-11",
+        md: "h-9 px-3.5 text-label [&_svg]:size-4 pointer-coarse:min-h-11",
         lg: "h-11 px-5 text-sm font-semibold [&_svg]:size-4",
         icon: "h-9 w-9 p-0 [&_svg]:size-4 pointer-coarse:size-11",
         "icon-sm": "h-8 w-8 p-0 [&_svg]:size-4 pointer-coarse:size-11",

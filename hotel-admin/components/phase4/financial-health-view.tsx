@@ -3,7 +3,7 @@
 // This diagnostic omits guest and transaction identifiers; details stay behind audited Manual review.
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, CircleCheck, HeartPulse, Hourglass, RefreshCw, Settings2, Wallet } from "lucide-react";
+import { AlertTriangle, CircleCheck, HeartPulse, Hourglass, RefreshCw, Settings2, Wallet, ClipboardCheck, Clock, FilePlus, HelpCircle, ListOrdered, PauseCircle, Send, XCircle } from "lucide-react";
 import { api, FinancialHealth, surfaceUnavailableMessage } from "@/lib/api";
 import { Card, CardBody } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -179,17 +179,17 @@ export function FinancialHealthView() {
             title="PMS posting"
             description="Internet charges posted to a guest's room bill in the property management system."
           >
-            <StatCard label="Queued" value={health.outbox_queued} />
-            <StatCard label="In flight" value={health.outbox_in_flight} />
-            <StatCard label="Held (recovery)" value={health.outbox_held_recovery} tone={flag(health.outbox_held_recovery, "warn")} />
+            <StatCard icon={<ListOrdered />} label="Queued" value={health.outbox_queued} />
+            <StatCard icon={<Send />} label="In flight" value={health.outbox_in_flight} />
+            <StatCard icon={<PauseCircle />} label="Held (recovery)" value={health.outbox_held_recovery} tone={flag(health.outbox_held_recovery, "warn")} />
             <StatCard label="Oldest waiting" value={ageText(health.outbox_oldest_age_seconds)} icon={<Hourglass />} />
-            <StatCard
+            <StatCard icon={<HelpCircle />}
               label="Unknown outcomes"
               value={health.postings_unknown}
               hint="Never retried automatically"
               tone={flag(health.postings_unknown, "err")}
             />
-            <StatCard
+            <StatCard icon={<ClipboardCheck />}
               label="Review queue"
               value={health.review_queue_open}
               tone={flag(health.review_queue_open, "warn")}
@@ -200,23 +200,23 @@ export function FinancialHealthView() {
           </Rail>
 
           <Rail title="Online payment" description="Payments a guest makes on the portal, and how each one settled.">
-            <StatCard label="Created" value={health.payments_created} />
-            <StatCard label="Pending" value={health.payments_pending} />
-            <StatCard
+            <StatCard icon={<FilePlus />} label="Created" value={health.payments_created} />
+            <StatCard icon={<Clock />} label="Pending" value={health.payments_pending} />
+            <StatCard icon={<HelpCircle />}
               label="Unknown outcomes"
               value={health.payments_unknown}
               hint="Never retried automatically"
               tone={flag(health.payments_unknown, "err")}
             />
             <StatCard label="Oldest in flight" value={ageText(health.payments_oldest_age_seconds)} icon={<Hourglass />} />
-            <StatCard label="Payments waiting" value={health.settlements_required} href="/financial-settlements" />
-            <StatCard label="Payments in progress" value={health.settlements_in_progress} />
-            <StatCard
+            <StatCard icon={<Clock />} label="Payments waiting" value={health.settlements_required} href="/financial-settlements" />
+            <StatCard icon={<RefreshCw />} label="Payments in progress" value={health.settlements_in_progress} />
+            <StatCard icon={<ClipboardCheck />}
               label="Payments to review"
               value={health.settlements_manual_review}
               tone={flag(health.settlements_manual_review, "warn")}
             />
-            <StatCard label="Payments failed" value={health.settlements_failed} tone={flag(health.settlements_failed, "err")} />
+            <StatCard icon={<XCircle />} label="Payments failed" value={health.settlements_failed} tone={flag(health.settlements_failed, "err")} />
           </Rail>
 
           <Rail title="Configuration" columns={2}>

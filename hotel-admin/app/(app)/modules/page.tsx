@@ -101,7 +101,7 @@ export default function ModulesPage() {
       icon={<Blocks />}
       eyebrow="System"
       title="Modules"
-      description="What the licence authorises for this site, what is switched on here, and why anything is not in use."
+      description="What the licence allows here, what is switched on, and why anything is not in use."
       help={
         <>
           <HelpSection title="Four separate questions">

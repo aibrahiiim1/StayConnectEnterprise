@@ -29,7 +29,7 @@ import { DList, Metric, SkeletonRows } from "@/components/ui/misc";
 import { Pagination, ResultsCount, SearchInput } from "@/components/ui/data";
 import { formatDate, formatRelative } from "@/lib/utils";
 import { speedPair } from "@/lib/session-words";
-import { Hotel, Wifi, LogIn, LogOut, Ban, Undo2, Star, BedDouble } from "lucide-react";
+import { Hotel, Wifi, LogIn, LogOut, Ban, Undo2, Star, BedDouble, Monitor } from "lucide-react";
 
 const STATUS_LABELS: Record<string, string> = {
   IN_HOUSE: "In house",
@@ -222,7 +222,7 @@ export default function StaysPage() {
             </Explain>
           }
         />
-        <StatCard
+        <StatCard icon={<Monitor />}
           label="Devices online"
           value={rows ? summary.online.toLocaleString() : "—"}
           href="/sessions"

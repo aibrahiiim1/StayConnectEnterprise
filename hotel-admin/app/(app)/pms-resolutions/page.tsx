@@ -19,7 +19,7 @@ import { SplitBar } from "@/components/ui/chart";
 import { MonoId, SkeletonRows, Meter } from "@/components/ui/misc";
 import { LiveStatus, refreshingClass } from "@/components/ui/patterns";
 import { cn, formatDate, formatRelative } from "@/lib/utils";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, CheckCircle2, Network, XCircle } from "lucide-react";
 
 // An unknown code falls through to a de-underscored label rather than being hidden, so it is still countable.
 const OUTCOMES: Record<string, { label: string; meaning: string; fix?: string; tone: "ok" | "warn" | "err" }> = {
@@ -190,19 +190,19 @@ export default function PMSResolutionsPage() {
               list.total !== null && list.total > summary.total ? `figures below cover the latest ${summary.total.toLocaleString()}` : "",
             ].filter(Boolean).join(" · ") || undefined}
           />
-          <StatCard
+          <StatCard icon={<CheckCircle2 />}
             label="Let online"
             value={summary.verified.toLocaleString()}
             tone="ok"
             hint={`${Math.round((summary.verified / summary.total) * 100)}% of attempts`}
           />
-          <StatCard
+          <StatCard icon={<XCircle />}
             label="Refused"
             value={failed.toLocaleString()}
             tone={failed > 0 ? "warn" : "default"}
             hint={failed > 0 ? "See why below" : "Everyone who tried got in"}
           />
-          <StatCard
+          <StatCard icon={<Network />}
             label="Networks involved"
             value={summary.networks.length.toLocaleString()}
             hint="Wi-Fi networks these attempts came from"

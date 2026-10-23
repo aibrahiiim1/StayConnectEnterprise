@@ -25,7 +25,7 @@ import { ConnectionCard, ProviderTile, providerLabel } from "./connection-card";
 import { ConnectionSheet, type SheetTab } from "./connection-sheet";
 import { AddConnectionWizard } from "./add-connection-wizard";
 import { HelpList, HelpSection } from "@/components/help";
-import { ChevronDown, ChevronRight, Hotel, Plus, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronRight, Hotel, Plus, RefreshCw, BedDouble, Clock } from "lucide-react";
 import { usePoll } from "@/lib/use-poll";
 
 type Filter = "all" | "attention" | "working";
@@ -197,13 +197,13 @@ export default function PMSInterfacesPage() {
             hint={`${live.length} set up${inactive.length ? ` · ${inactive.length} inactive or not configured` : ""}`}
           />
           <RoomSignInStat signIn={signIn} activeCount={active.length} ready={ready} />
-          <StatCard
+          <StatCard icon={<BedDouble />}
             label="Guests in house"
             value={inHouse.toLocaleString()}
             hint={anySyncing ? "A guest list is loading now" : "Mirrored from the PMS"}
             tone={anySyncing ? "info" : "default"}
           />
-          <StatCard
+          <StatCard icon={<Clock />}
             label="Last heard from a PMS"
             value={
               heard

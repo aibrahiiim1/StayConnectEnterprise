@@ -12,7 +12,7 @@ export default function ApplianceAndLicencePage() {
         icon={<ServerCog />}
         eyebrow="System"
         title="Appliance & licence"
-        description="Whether this appliance is activated, what its licence allows, and whether OneGate Central is reachable."
+        description="Activation, what the licence allows, and whether OneGate Central is reachable."
         help={
           <>
             <HelpSection title="Activation">

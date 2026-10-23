@@ -21,7 +21,7 @@ import { DList } from "@/components/ui/misc";
 import { Pagination, SearchInput } from "@/components/ui/data";
 import { LiveStatus, refreshingClass } from "@/components/ui/patterns";
 import { cn, formatRelative, formatDate } from "@/lib/utils";
-import { Inbox, Send } from "lucide-react";
+import { Inbox, Send, AlertTriangle, CheckCircle2, Unlink } from "lucide-react";
 import { useOperatorRoles } from "@/lib/whoami-context";
 import { canWrite } from "@/lib/roles";
 import { DECISION_WORDS, ReviewDecisionActions, ReviewExpirySettingCard } from "@/components/phase3/review-decisions";
@@ -189,14 +189,14 @@ export default function StayEventsPage() {
                 : "Nothing has arrived. Check the PMS connection."
           }
         />
-        <StatCard label="Applied" value={sum ? counts.applied.toLocaleString() : "—"} tone="ok" hint="Guest list updated" />
-        <StatCard
+        <StatCard icon={<CheckCircle2 />} label="Applied" value={sum ? counts.applied.toLocaleString() : "—"} tone="ok" hint="Guest list updated" />
+        <StatCard icon={<AlertTriangle />}
           label="Needs a decision"
           value={sum ? counts.review.toLocaleString() : "—"}
           tone={counts.review > 0 ? "warn" : "default"}
           hint="Stopped rather than guessed"
         />
-        <StatCard
+        <StatCard icon={<Unlink />}
           label="Not matched to a stay"
           value={sum ? counts.unmatched.toLocaleString() : "—"}
           tone={counts.unmatched > 0 ? "warn" : "default"}

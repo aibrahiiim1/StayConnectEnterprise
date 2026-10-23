@@ -12,7 +12,7 @@ import { useOperatorRoles } from "@/lib/whoami-context";
 import { canWrite } from "@/lib/roles";
 import { useToast } from "@/components/ui/toast";
 import Link from "next/link";
-import { ShieldCheck, Building2, AlertTriangle, BookMarked, ListChecks, History } from "lucide-react";
+import { ShieldCheck, Building2, AlertTriangle, BookMarked, ListChecks, History, BedDouble, Hotel } from "lucide-react";
 import { api, RosterReconciliationState, ReconcileRunRecord, ReconcileRun } from "@/lib/api";
 import { cn, formatDate } from "@/lib/utils";
 import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
@@ -247,8 +247,8 @@ export default function RosterReconciliationPage() {
           tone={p ? (complete ? "ok" : "warn") : "default"}
           hint={complete ? "The sweep covered the site" : "Incomplete — the run will refuse"}
         />
-        <StatCard label="Occupied per the PMS" value={p?.roster_size ?? "—"} hint={`Guest-list refresh #${state?.generation ?? "—"}`} />
-        <StatCard label="In house per this appliance" value={p?.mirror_in_house ?? "—"} />
+        <StatCard icon={<BedDouble />} label="Occupied per the PMS" value={p?.roster_size ?? "—"} hint={`Guest-list refresh #${state?.generation ?? "—"}`} />
+        <StatCard icon={<Hotel />} label="In house per this appliance" value={p?.mirror_in_house ?? "—"} />
         <StatCard
           icon={<ShieldCheck />}
           label="Held back — PMS spoke since"

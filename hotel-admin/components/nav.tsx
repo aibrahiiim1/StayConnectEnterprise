@@ -298,7 +298,7 @@ export function Nav({
               aria-keyshortcuts="Control+K Meta+K"
               title="Find a screen (Ctrl+K)"
               className={cn(
-                "h-9 w-full rounded-md border border-sidebar-border bg-sidebar-accent/70 pl-8 pr-8 text-[0.8125rem] pointer-coarse:pr-11",
+                "h-9 w-full rounded-md border border-sidebar-border bg-sidebar-accent/70 pl-8 pr-8 text-xs pointer-coarse:pr-11",
                 "text-sidebar-foreground placeholder:text-sidebar-muted",
                 "focus:border-sidebar-active focus:outline-none focus:ring-2 focus:ring-sidebar-active/30",
               )}
@@ -381,7 +381,7 @@ export function Nav({
                       aria-current={active ? "page" : undefined}
                       // Keep real hidden text so collapsed links retain the same accessible name.
                       className={cn(
-                        "group relative flex items-center rounded-md text-[0.8125rem] transition-colors duration-press",
+                        "group relative flex items-center rounded-md text-xs transition-colors duration-press",
                         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
                         collapsed ? "h-10 justify-center px-0" : "min-h-9 gap-2.5 px-2.5 py-1.5",
                         active

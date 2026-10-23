@@ -197,7 +197,7 @@ export default function ClientGroupsPage() {
         icon={<UsersRound />}
         eyebrow="Client access"
         title="Client groups"
-        description="Who a client is — employees, partners, VIPs — decided from a verified identity, so a package can be offered to some clients and not others."
+        description="Who a client is (staff, partners, VIPs), from a verified identity, so packages can target them."
         help={
           <>
             <HelpSection title="What a group is">
