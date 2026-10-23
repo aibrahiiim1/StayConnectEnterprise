@@ -205,7 +205,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
             <div className="min-w-0 space-y-1">
               <Badge tone="ok" dot>Not in recovery</Badge>
               <p className="text-sm text-muted-foreground">
-                Financial execution is running normally. Epoch {status.Epoch}.
+                Financial execution is running normally.
               </p>
             </div>
           </CardBody>

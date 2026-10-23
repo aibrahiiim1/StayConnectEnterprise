@@ -143,7 +143,7 @@ export default function PortalHTTPSPage() {
   const domainProblem = domainInput.trim() ? looksLikePortalDomain(domainInput) : null;
 
   return (
-    <PageShell width="narrow">
+    <PageShell>
       <PageHeader
         icon={<ShieldCheck />}
         eyebrow="Networking"

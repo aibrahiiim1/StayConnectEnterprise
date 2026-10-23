@@ -29,7 +29,7 @@ import { DList, Metric, SkeletonRows } from "@/components/ui/misc";
 import { Pagination, ResultsCount, SearchInput } from "@/components/ui/data";
 import { formatDate, formatRelative } from "@/lib/utils";
 import { speedPair } from "@/lib/session-words";
-import { Hotel, Wifi, LogIn, LogOut, Ban, Undo2, Star } from "lucide-react";
+import { Hotel, Wifi, LogIn, LogOut, Ban, Undo2, Star, BedDouble } from "lucide-react";
 
 const STATUS_LABELS: Record<string, string> = {
   IN_HOUSE: "In house",
@@ -166,6 +166,7 @@ export default function StaysPage() {
       <PageHeader
         eyebrow="Hotel"
         title="Stays"
+        icon={<BedDouble />}
         description="Who the PMS reports in the building, and the internet each room has."
         help={
           <>
@@ -250,8 +251,8 @@ export default function StaysPage() {
           <Toolbar>
             <SearchInput
               label="Search stays"
-              placeholder="Room, guest, reservation, travel agent or package…"
-              className="w-full max-w-xs"
+              placeholder="Room, guest, reservation, agent or package…"
+              className="w-full sm:w-96"
               value={q}
               onChange={setQ}
               delay={300}

@@ -262,7 +262,7 @@ export function PackagesCard({ snap }: { snap: OverviewSnapshot | null }) {
   const p = snap?.packages;
   const t = snap?.traffic;
   return (
-    <BlockCard title="Packages in use" description="What clients are on right now, and what was given out." href="/internet-packages" linkLabel="Packages">
+    <BlockCard title="Packages in use" description="Packages given out and still valid, online or not, and what was given out in this range." href="/internet-packages" linkLabel="Packages">
       {!snap || !p ? (
         <Skeleton className="h-48" />
       ) : !p.available ? (
@@ -270,7 +270,7 @@ export function PackagesCard({ snap }: { snap: OverviewSnapshot | null }) {
       ) : (
         <div className="space-y-5">
           <section className="space-y-2">
-            <h3 className="text-xs font-medium text-muted-foreground">Active now</h3>
+            <h3 className="text-xs font-medium text-muted-foreground">Still valid</h3>
             {p.active_now.length === 0 ? (
               <EmptyState className="py-6" icon={<Package />} title="No active packages" hint="No client currently holds an internet package." />
             ) : (
@@ -708,7 +708,7 @@ export function ServicesGrid({ snap }: { snap: OverviewSnapshot | null }) {
           <li key={s.name} className="flex min-w-0 items-center justify-between gap-2 rounded-md border border-border px-3 py-2">
             <div className="flex min-w-0 items-center gap-2">
               <StatusDot tone={st.tone} />
-              <span className="truncate text-sm">{s.label}</span>
+              <span className="min-w-0 text-sm leading-snug [overflow-wrap:anywhere]">{s.label}</span>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
               {s.failures_in_range > 0 && (

@@ -180,23 +180,25 @@ export default function StayEventsPage() {
           label="Last message"
           value={<span className="text-lg">{newest ? formatRelative(newest) : "—"}</span>}
           icon={<Send />}
-          tone={newest ? "ok" : "warn"}
+          tone={!sum ? "default" : newest ? "ok" : "warn"}
           hint={
-            newest
-              ? "The connection is carrying traffic."
-              : "Nothing has arrived. Check the PMS connection."
+            !sum
+              ? undefined
+              : newest
+                ? "The connection is carrying traffic."
+                : "Nothing has arrived. Check the PMS connection."
           }
         />
-        <StatCard label="Applied" value={counts.applied.toLocaleString()} tone="ok" hint="Guest list updated" />
+        <StatCard label="Applied" value={sum ? counts.applied.toLocaleString() : "—"} tone="ok" hint="Guest list updated" />
         <StatCard
           label="Needs a decision"
-          value={counts.review.toLocaleString()}
+          value={sum ? counts.review.toLocaleString() : "—"}
           tone={counts.review > 0 ? "warn" : "default"}
           hint="Stopped rather than guessed"
         />
         <StatCard
           label="Not matched to a stay"
-          value={counts.unmatched.toLocaleString()}
+          value={sum ? counts.unmatched.toLocaleString() : "—"}
           tone={counts.unmatched > 0 ? "warn" : "default"}
           explain={
             <Explain>

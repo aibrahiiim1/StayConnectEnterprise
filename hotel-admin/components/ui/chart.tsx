@@ -39,7 +39,7 @@ export function ColumnChart({
   const peak = Math.max(0, ...totals);
   const allZero = peak <= 0;
 
-  const ceiling = allZero ? 1 : niceCeiling(peak);
+  const ceiling = allZero ? 1 : Math.max(2, niceCeiling(peak));
   const fmtAxis = formatAxis ?? formatValue;
 
   return (
@@ -52,7 +52,7 @@ export function ColumnChart({
           {[1, 0.5, 0].map((f) => (
             <div key={f} className="flex items-center gap-2">
               <span className="w-12 shrink-0 text-right text-2xs tabular text-muted-foreground">
-                {fmtAxis(Math.round(ceiling * f))}
+                {allZero && f > 0 ? "" : fmtAxis(Math.round(ceiling * f))}
               </span>
               <span className="h-px flex-1 bg-border" />
             </div>
@@ -359,7 +359,7 @@ export function AreaChart({
         <div className="flex w-12 shrink-0 flex-col justify-between text-right" style={{ height }}>
           {[1, 0.5, 0].map((f) => (
             <span key={f} className="text-2xs leading-none tabular text-muted-foreground">
-              {fmtAxis(ceiling * f)}
+              {allZero && f > 0 ? "" : fmtAxis(ceiling * f)}
             </span>
           ))}
         </div>

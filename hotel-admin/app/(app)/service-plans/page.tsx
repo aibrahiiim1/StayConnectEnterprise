@@ -373,9 +373,9 @@ export default function ServicePlansPage() {
                 value={chip}
                 onChange={setChip}
                 options={[
-                  { value: "all", label: "All", count: stats.all },
-                  { value: "used", label: "In use", count: stats.used, tone: "ok" },
-                  { value: "unused", label: "Not used", count: stats.unused },
+                  { value: "all", label: "All", count: rows ? stats.all : undefined },
+                  { value: "used", label: "In use", count: rows ? stats.used : undefined, tone: "ok" },
+                  { value: "unused", label: "Not used", count: rows ? stats.unused : undefined },
                 ]}
               />
               <SearchInput value={q} onChange={setQ} placeholder="Search plans" label="Search plans by name or code" />

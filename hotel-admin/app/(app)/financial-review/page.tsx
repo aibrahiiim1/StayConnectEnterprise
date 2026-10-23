@@ -9,6 +9,7 @@ import { api, ApiError } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
 import { ManualReviewView } from "@/components/phase4/manual-review-view";
 import { CardCasesCard } from "@/components/phase4/card-cases";
+import { PageShell } from "@/components/ui/page";
 
 export default function FinancialReviewPage() {
   const [roles, setRoles] = useState<string[] | null>(null);
@@ -27,14 +28,14 @@ export default function FinancialReviewPage() {
   return (
     <>
       {reviewMounted !== false && <ManualReviewView canAct={canAct} />}
-      <div className="mx-auto w-full max-w-7xl px-4 pb-8 sm:px-6">
+      <PageShell className="mt-5">
         {reviewMounted === false && (
-          <p className="pt-6 text-sm text-muted-foreground" data-testid="review-not-mounted">
+          <p className="text-sm text-muted-foreground" data-testid="review-not-mounted">
             Room-charge review is not switched on at this appliance. Card disputes and chargebacks are decided below.
           </p>
         )}
         <CardCasesCard canAct={canAct} />
-      </div>
+      </PageShell>
     </>
   );
 }

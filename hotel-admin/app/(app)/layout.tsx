@@ -76,7 +76,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pageLabel = here.label
     ?? OFF_MENU_SCREENS.find((i) => pathname === i.href || pathname.startsWith(i.href + "/"))?.label;
   useEffect(() => {
-    document.title = pageLabel ? `${pageLabel} · ${APP_TITLE}` : APP_TITLE;
+    const wanted = pageLabel ? `${pageLabel} · ${APP_TITLE}` : APP_TITLE;
+    const apply = () => { if (document.title !== wanted) document.title = wanted; };
+    apply();
+    // Next streams the root metadata <title> after hydration, which would otherwise overwrite this one.
+    const observer = new MutationObserver(apply);
+    observer.observe(document.head, { childList: true, subtree: true, characterData: true });
+    return () => observer.disconnect();
   }, [pageLabel]);
 
   // A request edged counts as activity and answers the new session end.

@@ -240,7 +240,7 @@ export default function SessionsPage() {
               onChange={setQuery}
               placeholder={rooms ? "Room, name, username, IP or MAC…" : "Name, username, IP or MAC…"}
               label="Search sessions"
-              className="sm:max-w-xs"
+              className="sm:w-80"
               delay={300}
             />
             <div className="flex items-end gap-2">

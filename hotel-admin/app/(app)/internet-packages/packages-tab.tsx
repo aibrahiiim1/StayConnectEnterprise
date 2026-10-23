@@ -341,9 +341,9 @@ export function PackagesTab({
           hint={rows ? `${counts.all} package${counts.all === 1 ? "" : "s"} in total` : undefined} />
         <StatCard label="Disabled" value={rows ? counts.disabled : "—"} icon={<Ban />}
           hint="Kept with their history, not offered" />
-        <StatCard label="Clients on a package now" value={activeNow ?? "—"} icon={<Users />} tone="info"
-          hint={activeNow === null ? "Could not be counted right now" : "Across every package"} />
-        <StatCard label="Service plans" value={plans.length} icon={<Gauge />} href="/service-plans"
+        <StatCard label="Packages still valid" value={activeNow ?? "—"} icon={<Users />} tone="info"
+          hint={!rows ? undefined : activeNow === null ? "Could not be counted right now" : "Given out and not yet ended, online or not"} />
+        <StatCard label="Service plans" value={rows ? plans.length : "—"} icon={<Gauge />} href="/service-plans"
           hint="The speed and allowances packages hand out" />
       </div>
 
@@ -369,9 +369,9 @@ export function PackagesTab({
               value={chip}
               onChange={setChip}
               options={[
-                { value: "all", label: "All", count: counts.all },
-                { value: "active", label: "Active", count: counts.active, tone: "ok" },
-                { value: "disabled", label: "Disabled", count: counts.disabled },
+                { value: "all", label: "All", count: rows ? counts.all : undefined },
+                { value: "active", label: "Active", count: rows ? counts.active : undefined, tone: "ok" },
+                { value: "disabled", label: "Disabled", count: rows ? counts.disabled : undefined },
               ]}
             />
             <SearchInput value={q} onChange={setQ} placeholder="Search packages" label="Search packages by name or code" />
@@ -391,7 +391,7 @@ export function PackagesTab({
             <Table>
               <THead><TR>
                 <TH>Package</TH><TH>Status</TH><TH>Price</TH><TH>Speed</TH><TH>Data</TH><TH>Time</TH>
-                <TH>Devices</TH><TH>Clients now</TH><TH><span className="sr-only">Actions</span></TH>
+                <TH>Devices</TH><TH>Still valid</TH><TH><span className="sr-only">Actions</span></TH>
               </TR></THead>
               <TBody>
                 {shown.map((p) => (
@@ -473,7 +473,7 @@ export function PackagesTab({
                     { label: "Price", value: priceText(p.price_minor, p.currency, p.currency_exponent) },
                     { label: "Download", value: formatSpeed(p.down_kbps) },
                     { label: "Data", value: formatData(p.data_quota_bytes) },
-                    { label: "Clients now", value: activeBy ? (activeBy[p.package_id] ?? 0) : "—" },
+                    { label: "Still valid", value: activeBy ? (activeBy[p.package_id] ?? 0) : "—" },
                   ]} />
 
                   {/* Saving keeps the pinned plan revision (decideSave, on purpose: a rename must not apply an

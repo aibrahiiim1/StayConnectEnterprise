@@ -158,8 +158,8 @@ export function ActivityTab({ guard, setErr }: TabProps) {
       <ErrorBanner err={loadErr} />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Clients on a package now" value={s ? s.active_now.toLocaleString() : "—"} icon={<Users />} tone="ok"
-          hint="Right now, across every package" />
+        <StatCard label="Packages still valid" value={s ? s.active_now.toLocaleString() : "—"} icon={<Users />} tone="ok"
+          hint="Given out and not yet ended, online or not" />
         <StatCard label="Access started in this period" value={s ? s.started_in_range.toLocaleString() : "—"}
           icon={<PackageCheck />} tone="primary"
           hint={s ? `${s.in_range.toLocaleString()} in use at some point in the period` : undefined} />

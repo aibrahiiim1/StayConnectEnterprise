@@ -124,7 +124,7 @@ function AllowanceCell({ consumed, quota }: { consumed?: number | null; quota?: 
   if (pct === null) return <span className="text-sm text-muted-foreground">No limit</span>;
   return (
     <Meter
-      className="min-w-32"
+      className="min-w-56"
       value={Math.min(pct, 100)}
       max={100}
       label={pct >= 100 ? "Allowance used up" : undefined}
@@ -355,14 +355,19 @@ export default function UsageExplorerPage() {
                                 </div>
                               </>
                             ) : (
-                              <div className="text-muted-foreground">
-                                {r.last_activity ? `Last connected ${formatDate(r.last_activity)}` : "No session in this period"}
-                              </div>
+                              r.last_activity ? (
+                                <>
+                                  <div className="text-muted-foreground">Last connected</div>
+                                  <div className="whitespace-nowrap text-caption text-muted-foreground">{formatDate(r.last_activity)}</div>
+                                </>
+                              ) : (
+                                <div className="text-muted-foreground">No session in this period</div>
+                              )
                             )}
                           </TD>
-                          <TD className="hidden text-end tabular sm:table-cell">{formatBytes(r.totals.bytes_down)}</TD>
-                          <TD className="hidden text-end tabular sm:table-cell">{formatBytes(r.totals.bytes_up)}</TD>
-                          <TD className="text-end font-medium tabular">{formatBytes(r.totals.bytes_total)}</TD>
+                          <TD className="hidden whitespace-nowrap text-end tabular sm:table-cell">{formatBytes(r.totals.bytes_down)}</TD>
+                          <TD className="hidden whitespace-nowrap text-end tabular sm:table-cell">{formatBytes(r.totals.bytes_up)}</TD>
+                          <TD className="whitespace-nowrap text-end font-medium tabular">{formatBytes(r.totals.bytes_total)}</TD>
                           <TD className="hidden lg:table-cell">
                             <AllowanceCell consumed={r.consumed_bytes} quota={r.quota_bytes} />
                           </TD>

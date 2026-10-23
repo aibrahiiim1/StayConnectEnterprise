@@ -20,7 +20,7 @@ import { DialogForm, ConfirmDialog } from "@/components/ui/dialog";
 import { Explain } from "@/components/ui/tooltip";
 import { SkeletonRows } from "@/components/ui/misc";
 import { canWrite } from "@/lib/roles";
-import { Router, Network } from "lucide-react";
+import { Router, Network, Route } from "lucide-react";
 
 type Unmapped = { guest_network_id: string; guest_network_name?: string };
 
@@ -105,6 +105,7 @@ export default function PMSRoutingPage() {
       <PageHeader
         eyebrow="Hotel"
         title="PMS routing"
+        icon={<Route />}
         description="Which PMS connection each client network's room sign-ins are checked against."
         help={
           <>

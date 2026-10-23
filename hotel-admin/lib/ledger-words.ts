@@ -59,7 +59,7 @@ export function ledgerHeadline(s: LedgerStatus | null): Headline {
     case "ok":
       return { tone: "ok", title: "Both copies are in step", detail: "Every erasure is written to the appliance and to the secondary storage before it is reported as done." };
     case "not_configured":
-      return { tone: "err", title: "Set up the secondary storage", detail: "It is required. Until it is set up, erasure requests are refused, because an erasure must be recorded in two independent places." };
+      return { tone: "err", title: "Set up the secondary storage", detail: "The erasure ledger needs a secondary storage location. Until one is set up, erasure requests are refused, because an erasure must be recorded in two independent places." };
     case "recovery_needed":
       return { tone: "err", title: "Recovery needed", detail: s.message || "The secondary storage holds erasures this appliance does not have. Recover them before any new erasure." };
     case "blocked":

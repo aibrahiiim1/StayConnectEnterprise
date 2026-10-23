@@ -94,7 +94,7 @@ export default function DhcpPage() {
         description="Client devices holding an address now, and fixed reservations."
         help={
           <>
-            <HelpSection title="Active leases">
+            <HelpSection title="Leases">
               <p>
                 Every client device that has been handed an address by the appliance&rsquo;s DHCP server, with the time its
                 lease runs out. Leases appear once clients connect.
@@ -129,7 +129,7 @@ export default function DhcpPage() {
         <Toolbar className="items-center">
           <TabsList className="border-b-0">
             <TabsTrigger value="leases">
-              Active leases {leaseList.total !== null && <Badge tone="neutral">{leaseList.total}</Badge>}
+              Leases {leaseList.total !== null && <Badge tone="neutral">{leaseList.total}</Badge>}
             </TabsTrigger>
             <TabsTrigger value="reservations">
               Reservations {resList.total !== null && <Badge tone="neutral">{resList.total}</Badge>}

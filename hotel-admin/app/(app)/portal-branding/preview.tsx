@@ -236,8 +236,10 @@ export function PortalFrame({
 }: {
   srcDoc: string; width: number; height: number; scale: number; title: string; interactive?: boolean;
 }) {
+  const [loaded, setLoaded] = useState(false);
   return (
-    <div style={{ height: height * scale, width: width * scale, overflow: "hidden" }}>
+    <div className="relative" style={{ height: height * scale, width: width * scale, overflow: "hidden" }}>
+      {!loaded && <Skeleton className="absolute inset-0 h-full w-full rounded-none" />}
       <iframe
         title={title}
         srcDoc={srcDoc}
@@ -245,6 +247,7 @@ export function PortalFrame({
         tabIndex={interactive ? undefined : -1}
         aria-hidden={interactive ? undefined : true}
         loading={interactive ? undefined : "lazy"}
+        onLoad={() => setLoaded(true)}
         style={{
           width, height, border: 0, transform: `scale(${scale})`, transformOrigin: "top left",
           pointerEvents: interactive ? undefined : "none",

@@ -83,7 +83,7 @@ export function OneGateLockup({
       </span>
       <div
         className={cn(
-          "min-w-0 truncate text-nano uppercase tracking-[0.12em]",
+          "min-w-0 text-nano uppercase leading-tight tracking-[0.12em]",
           inverse ? "text-sidebar-muted" : "text-muted-foreground",
         )}
       >

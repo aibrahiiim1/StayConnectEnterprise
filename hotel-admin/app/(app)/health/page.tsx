@@ -309,7 +309,7 @@ export default function HealthPage() {
                   <TH className="hidden lg:table-cell">Restarts</TH>
                   <TH className="hidden lg:table-cell">Backoff / next</TH>
                   <TH className="hidden md:table-cell">Last failure</TH>
-                  <TH className="hidden sm:table-cell">Uptime</TH>
+                  <TH className="hidden sm:table-cell">Last healthy check</TH>
                   <TH className="text-end"><span className="sr-only">Actions</span></TH>
                 </TR>
               </THead>
@@ -358,7 +358,7 @@ export default function HealthPage() {
                         : "—"}
                     </TD>
                     <TD className="hidden text-xs text-muted-foreground sm:table-cell">
-                      {s.state === "healthy" ? ago(s.last_healthy_at).replace(" ago", "") : (s.last_recovery_at ? "recovered " + ago(s.last_recovery_at) : "—")}
+                      {s.state === "healthy" ? ago(s.last_healthy_at) : (s.last_recovery_at ? "recovered " + ago(s.last_recovery_at) : "—")}
                     </TD>
                     <TD className="text-end">
                       <div className="flex flex-wrap justify-end gap-1">
