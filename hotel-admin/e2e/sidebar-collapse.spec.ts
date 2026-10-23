@@ -31,7 +31,7 @@ test.beforeEach(async ({ page }) => {
 
 test("expanded is the first-time default, and the control names the action it performs", async ({ page }) => {
   await page.goto("/dashboard");
-  await expect(page.getByRole("link", { name: "Internet packages" })).toBeVisible();
+  await expect(desktopAside(page).getByRole("link", { name: "Overview" })).toBeVisible();
   await expect(desktopAside(page).getByText("Hotel", { exact: true })).toBeVisible();
 
   const btn = collapseBtn(page);
@@ -44,6 +44,8 @@ test("collapsing hides labels and headings, keeps every destination, and flips t
   await page.goto("/dashboard");
   // Wait for whoami to replace the skeleton before counting sidebar links.
   await expect(collapseBtn(page)).toBeVisible();
+  const closed = desktopAside(page).locator('h2 > button[aria-expanded="false"]');
+  while (await closed.count()) await closed.first().click();
   const before = await desktopAside(page).getByRole("link").count();
 
   await collapseBtn(page).click();
@@ -185,6 +187,7 @@ test("mobile keeps the labelled drawer and never shows the desktop rail", async 
 
   await page.getByRole("button", { name: "Open navigation" }).click();
   const drawer = page.getByLabel("Navigation", { exact: true });
+  await drawer.getByRole("button", { name: "Hotel" }).click();
   await expect(drawer.getByRole("link", { name: "Duplicate sources" })).toBeVisible();
   await expect(drawer.getByText("Hotel", { exact: true })).toBeVisible();
 });
@@ -196,5 +199,7 @@ test("a stored collapse does not leak into the mobile drawer", async ({ page }) 
   await page.setViewportSize(MOBILE);
   await page.goto("/dashboard");
   await page.getByRole("button", { name: "Open navigation" }).click();
-  await expect(page.getByRole("link", { name: "Grace Period" })).toBeVisible();
+  const drawer = page.getByLabel("Navigation", { exact: true });
+  await drawer.getByRole("button", { name: "Hotel" }).click();
+  await expect(drawer.getByRole("link", { name: "Grace Period" })).toBeVisible();
 });

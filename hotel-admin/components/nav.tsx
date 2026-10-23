@@ -13,7 +13,7 @@ import {
   PanelLeftClose, PanelLeftOpen, ClipboardCheck, Ticket,
   DoorOpen, DoorClosed, BedDouble, Plug, Route, Inbox, ShieldCheck, UserX, Layers, ArrowLeftRight, HeartPulse, Receipt,
   LifeBuoy, Globe, AtSign, MessageSquare, Stethoscope, Bell, Hourglass, CalendarClock, ChartColumn,
-  CreditCard, BedSingle, Blocks, UsersRound, UserSearch,
+  CreditCard, BedSingle, Blocks, UsersRound, UserSearch, ChevronRight,
 } from "lucide-react";
 import { BySemantics, OneGateLockup } from "@/components/brand";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -151,6 +151,21 @@ export function Nav({
   const focusFilterAfterExpand = useRef(false);
 
   const activeHref = useMemo(() => activeNavHref(path), [path]);
+  const activeSection = activeHref ? NAV_SECTION_OF[activeHref] : undefined;
+  const [openSections, setOpenSections] = useState<Set<string>>(
+    () => new Set(activeSection ? [activeSection] : []),
+  );
+  useEffect(() => {
+    setOpenSections(new Set(activeSection ? [activeSection] : []));
+  }, [activeSection]);
+  const toggleSection = (title: string) =>
+    setOpenSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(title)) next.delete(title);
+      else next.add(title);
+      return next;
+    });
+  const filtering = query.trim().length > 0;
   // Prefix heading IDs because desktop and mobile Nav instances coexist.
   const navId = useId();
   const sectionId = (title: string) => `${navId}-section-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
@@ -316,8 +331,11 @@ export function Nav({
             Nothing matches “{query}”.
           </p>
         ) : (
-          visibleSections.map((sec) => (
-            <div key={sec.title} className="mb-3 last:mb-0">
+          visibleSections.map((sec) => {
+            const open = collapsed || filtering || openSections.has(sec.title);
+            const listId = `${sectionId(sec.title)}-list`;
+            return (
+            <div key={sec.title} className={cn(collapsed ? "mb-3 last:mb-0" : "mb-0.5")}>
               {collapsed ? (
                 // Keep hidden heading text for assistive technology when the rail collapses.
                 <>
@@ -325,15 +343,34 @@ export function Nav({
                   <h2 id={sectionId(sec.title)} className="sr-only">{sec.title}</h2>
                 </>
               ) : (
-                // Real headings let screen-reader users navigate groups.
-                <h2
-                  id={sectionId(sec.title)}
-                  className="px-2.5 pb-1.5 pt-2 text-nano font-normal uppercase tracking-[0.12em] text-sidebar-muted"
-                >
-                  {sec.title}
+                <h2 id={sectionId(sec.title)}>
+                  <button
+                    type="button"
+                    onClick={() => toggleSection(sec.title)}
+                    disabled={filtering}
+                    aria-expanded={open}
+                    aria-controls={listId}
+                    className={cn(
+                      "group flex min-h-8 w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left pointer-coarse:min-h-11",
+                      "text-nano font-normal uppercase tracking-[0.12em] text-sidebar-muted transition-colors",
+                      "hover:text-sidebar-foreground disabled:cursor-default disabled:hover:text-sidebar-muted",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
+                    )}
+                  >
+                    <span className="flex-1 truncate">{sec.title}</span>
+                    {!filtering && (
+                      <ChevronRight
+                        className={cn(
+                          "size-3.5 shrink-0 transition-transform duration-base ease-onegate motion-reduce:transition-none",
+                          open ? "rotate-90" : "rtl:rotate-180",
+                        )}
+                        aria-hidden
+                      />
+                    )}
+                  </button>
                 </h2>
               )}
-              <ul className="space-y-0.5" aria-labelledby={sectionId(sec.title)}>
+              <ul id={listId} hidden={!open} className={cn("space-y-0.5", !collapsed && "pb-2")} aria-labelledby={sectionId(sec.title)}>
                 {sec.items.map((it) => {
                   const active = it.href === activeHref;
                   const Icon = it.icon;
@@ -383,7 +420,8 @@ export function Nav({
                 })}
               </ul>
             </div>
-          ))
+            );
+          })
         )}
       </nav>
 
