@@ -20,7 +20,7 @@ export function cn(...inputs: ClassValue[]) {
 export function formatBytes(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return "0 B";
   const units = ["B", "KB", "MB", "GB", "TB", "PB"];
-  const i = Math.min(units.length - 1, Math.floor(Math.log10(n) / 3));
+  const i = Math.max(0, Math.min(units.length - 1, Math.floor(Math.log10(n) / 3)));
   const v = n / Math.pow(1000, i);
   return `${v.toFixed(v >= 100 || i === 0 ? 0 : v >= 10 ? 1 : 2)} ${units[i]}`;
 }

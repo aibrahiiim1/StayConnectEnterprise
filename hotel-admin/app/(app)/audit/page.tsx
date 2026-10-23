@@ -211,7 +211,7 @@ export default function ActivityPage() {
             value={text}
             onChange={setText}
             label="Search the activity trail"
-            placeholder="Search — what happened, who, an address, an id"
+            placeholder="What happened, who, an address or an ID"
             className="sm:w-96"
             delay={300}
           />

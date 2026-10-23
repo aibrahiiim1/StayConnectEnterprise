@@ -297,13 +297,13 @@ export default function NetworkPage() {
             <THead>
               <TR>
                 <TH>Name</TH>
-                <TH className="hidden lg:table-cell">SSID label</TH>
+                <TH className="hidden 2xl:table-cell">SSID label</TH>
                 <TH>Type</TH>
-                <TH className="hidden xl:table-cell">Parent interface</TH>
+                <TH className="hidden 2xl:table-cell">Parent interface</TH>
                 <TH className="hidden md:table-cell">Gateway</TH>
                 <TH className="hidden lg:table-cell">Subnet</TH>
                 <TH className="hidden md:table-cell">DHCP</TH>
-                <TH className="hidden xl:table-cell">Pool</TH>
+                <TH className="hidden 2xl:table-cell">Pool</TH>
                 <TH className="hidden sm:table-cell">Portal</TH>
                 <TH>Status</TH>
                 <TH className="text-end">Clients</TH>
@@ -313,21 +313,21 @@ export default function NetworkPage() {
             <TBody>
               {rows.map((n) => (
                 <TR key={n.id}>
-                  <TD className="min-w-40">
+                  <TD className="min-w-48">
                     <Link href={`/network/${n.id}`} className="font-medium text-foreground hover:text-primary hover:underline">
                       {n.name}
                     </Link>
                     {n.description && <div className="text-caption text-muted-foreground">{n.description}</div>}
                   </TD>
-                  <TD className="hidden text-muted-foreground lg:table-cell">{n.ssid_label || "—"}</TD>
+                  <TD className="hidden text-muted-foreground 2xl:table-cell">{n.ssid_label || "—"}</TD>
                   <TD>
                     <Badge tone={n.network_type === "vlan" ? "info" : "default"}>{networkTypeLabel(n)}</Badge>
                   </TD>
-                  <TD className="hidden font-mono text-xs xl:table-cell">{n.parent_interface}</TD>
+                  <TD className="hidden font-mono text-xs 2xl:table-cell">{n.parent_interface}</TD>
                   <TD className="hidden font-mono text-xs md:table-cell">{n.gateway_ip}</TD>
                   <TD className="hidden font-mono text-xs lg:table-cell">{n.subnet_cidr}</TD>
                   <TD className="hidden md:table-cell"><DhcpModeBadge mode={n.dhcp_mode} /></TD>
-                  <TD className="hidden font-mono text-xs text-muted-foreground xl:table-cell">{poolSummary(n)}</TD>
+                  <TD className="hidden font-mono text-xs text-muted-foreground 2xl:table-cell">{poolSummary(n)}</TD>
                   <TD className="hidden sm:table-cell">
                     {n.captive_portal_enabled ? <Badge tone="info">Sign-in page</Badge> : <Badge tone="warn">No sign-in page · no internet</Badge>}
                   </TD>

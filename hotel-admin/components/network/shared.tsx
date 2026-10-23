@@ -26,10 +26,12 @@ export const REVISION_STATE: Record<string, { label: string; tone: "ok" | "warn"
   rolled_back: { label: "Rolled back", tone: "err" },
   failed: { label: "Failed", tone: "err" },
   superseded: { label: "Superseded", tone: "default" },
+  validated: { label: "Validated", tone: "default" },
 };
 
 export function RevisionStateBadge({ state }: { state: string }) {
-  const s = REVISION_STATE[state] ?? { label: state.replace(/_/g, " "), tone: "default" as const };
+  const words = state.replace(/_/g, " ");
+  const s = REVISION_STATE[state] ?? { label: words.charAt(0).toUpperCase() + words.slice(1), tone: "default" as const };
   return <Badge tone={s.tone} dot={state === "pending_confirmation"}>{s.label}</Badge>;
 }
 

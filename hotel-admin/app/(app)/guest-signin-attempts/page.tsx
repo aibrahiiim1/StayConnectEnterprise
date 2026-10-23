@@ -263,8 +263,8 @@ export default function GuestSignInAttemptsPage() {
         <CardBody className="border-b border-border py-3">
           <Toolbar className="justify-start">
             <SearchInput value={query} onChange={setQuery}
-              placeholder="Room, network, device or correlation id…"
-              label="Search the attempts" className="sm:max-w-xs" delay={300} />
+              placeholder="Room, network, device or ID…"
+              label="Search the attempts" className="sm:w-80" delay={300} />
             <Input value={room} onChange={(e) => setRoom(e.target.value)} placeholder="Room"
               aria-label="Filter by room number" className="h-9 w-28" inputMode="numeric" />
             <Select value={result} onChange={(e) => setResult(e.target.value)}

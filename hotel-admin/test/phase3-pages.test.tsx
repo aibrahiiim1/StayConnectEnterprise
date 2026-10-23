@@ -256,7 +256,7 @@ describe("Operational alerts page", () => {
     });
     const { OperationalAlertsView: AlertsPage } = await import("@/components/phase3/operational-alerts-view");
     render(<AlertsPage canAct={false} />);
-    await screen.findByText(/emergency grace used/);
+    await screen.findByText(/emergency grace used/i);
     expect(screen.queryByRole("button", { name: /Acknowledge alert/ })).toBeNull();
   });
 });

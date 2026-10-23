@@ -110,7 +110,7 @@ export default function CertificatePage() {
   }
 
   return (
-    <PageShell width="narrow">
+    <PageShell>
       <PageHeader
         icon={<Lock />}
         eyebrow="Networking"

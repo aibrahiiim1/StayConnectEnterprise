@@ -20,13 +20,13 @@ export type AuditCategory =
   | "Internet offering"
   | "Hotel"
   | "Networks"
-  | "Licence & cloud"
+  | "Licence & certificates"
   | "Backups"
   | "Diagnostics";
 
 export const AUDIT_CATEGORIES: AuditCategory[] = [
   "Sign-in & access", "Client data", "Client Portal", "Internet offering", "Hotel",
-  "Networks", "Licence & cloud", "Backups", "Diagnostics",
+  "Networks", "Licence & certificates", "Backups", "Diagnostics",
 ];
 
 /** Keep Hotel history filter available after its module license expires. */
@@ -151,14 +151,14 @@ const WORDS: Record<string, AuditWords> = {
   },
 
   "license.permissive_attempt_blocked": {
-    title: "Blocked an attempt to run without a licence", category: "Licence & cloud", severity: "security",
+    title: "Blocked an attempt to run without a licence", category: "Licence & certificates", severity: "security",
     note: "This appliance refused to run in unlicensed mode and kept enforcement on. Recorded every time it starts while the misconfiguration is present.",
   },
-  "cloud.refresh_license": { title: "Refreshed the licence from OneGate", category: "Licence & cloud", severity: "notice" },
-  "cloud.test_connection": { title: "Tested the OneGate connection", category: "Licence & cloud", severity: "notice" },
-  "renewal_started": { title: "Certificate renewal started", category: "Licence & cloud", severity: "notice" },
-  "renewal_succeeded": { title: "Certificate renewed", category: "Licence & cloud", severity: "notice" },
-  "hotel_admin_cert.check": { title: "Checked the Admin Console certificate", category: "Licence & cloud", severity: "notice" },
+  "cloud.refresh_license": { title: "Refreshed the licence from OneGate", category: "Licence & certificates", severity: "notice" },
+  "cloud.test_connection": { title: "Tested the OneGate connection", category: "Licence & certificates", severity: "notice" },
+  "renewal_started": { title: "Certificate renewal started", category: "Licence & certificates", severity: "notice" },
+  "renewal_succeeded": { title: "Certificate renewed", category: "Licence & certificates", severity: "notice" },
+  "hotel_admin_cert.check": { title: "Checked the Admin Console certificate", category: "Licence & certificates", severity: "notice" },
 
   "backup.created": { title: "Created a backup", category: "Backups", severity: "change" },
   "backup.verified": { title: "Verified a backup", category: "Backups", severity: "notice" },
@@ -207,7 +207,7 @@ function categoryFromPrefix(action: string): AuditCategory {
       return "Hotel";
     case "network": return "Networks";
     case "license": case "cloud": case "renewal_started": case "renewal_succeeded": case "hotel_admin_cert":
-      return "Licence & cloud";
+      return "Licence & certificates";
     case "backup": return "Backups";
     case "guest_data": return "Client data";
     case "health": return "Diagnostics";

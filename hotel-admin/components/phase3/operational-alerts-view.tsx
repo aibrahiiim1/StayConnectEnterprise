@@ -148,7 +148,7 @@ export function OperationalAlertsView({
               {rows.map((a) => (
                 <TR key={a.audit_id}>
                   <TD>
-                    <div className="font-medium">{words(a.alert_code)}</div>
+                    <div className="font-medium">{sentence(a.alert_code)}</div>
                     <div className="text-caption text-muted-foreground sm:hidden">
                       Raised {formatRelative(a.created_at)}
                     </div>
@@ -158,7 +158,7 @@ export function OperationalAlertsView({
                   </TD>
                   <TD className="hidden md:table-cell">{sentence(a.trigger)}</TD>
                   <TD className="hidden lg:table-cell">{sentence(a.reason_code)}</TD>
-                  <TD className="hidden sm:table-cell">
+                  <TD className="hidden whitespace-nowrap sm:table-cell">
                     <span title={formatDate(a.boundary_at)}>{formatRelative(a.boundary_at)}</span>
                     {a.boundary_clock_suspect && (
                       <>
@@ -167,12 +167,12 @@ export function OperationalAlertsView({
                       </>
                     )}
                   </TD>
-                  <TD className="hidden sm:table-cell">
+                  <TD className="hidden whitespace-nowrap sm:table-cell">
                     <span title={formatDate(a.created_at)}>{formatRelative(a.created_at)}</span>
                   </TD>
                   {canAct && (
                     <TD className="text-end">
-                      <span className="inline-flex flex-wrap justify-end gap-2">
+                      <span className="inline-flex justify-end gap-2 whitespace-nowrap">
                         {a.state === "OPEN" && (
                           <Button
                             size="sm"
