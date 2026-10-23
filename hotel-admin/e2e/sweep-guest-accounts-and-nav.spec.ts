@@ -53,6 +53,8 @@ test("the sidebar scrolls independently and the window does not scroll", async (
   // Wait for the permanent desktop column after whoami replaces the skeleton.
   const navEl = page.locator("aside nav").first();
   await navEl.waitFor({ state: "visible" });
+  const closed = navEl.locator('h2 > button[aria-expanded="false"]');
+  while (await closed.count()) await closed.first().click();
   const m = await navEl.evaluate((nav) => ({
     navScrollable: nav.scrollHeight > nav.clientHeight + 1,
     windowScrollable: document.documentElement.scrollHeight > window.innerHeight + 1,
